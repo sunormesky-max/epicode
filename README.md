@@ -284,6 +284,14 @@ sudo systemctl enable --now epicode-guard
 
 ---
 
+## Contributing
+
+We welcome contributions! Please see:
+
+- [Contributing Guide](CONTRIBUTING.md) — development setup, code style, PR guidelines
+- [Security Policy](SECURITY.md) — how to report vulnerabilities
+- [Discussions](https://github.com/sunormesky-max/epicode/discussions) — ask questions, share ideas
+
 ## License
 
 本项目采用 [AGPL-3.0](LICENSE) 许可证。
