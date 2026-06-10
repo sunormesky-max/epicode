@@ -1,0 +1,14 @@
+.git
+.github
+.vscode
+.claude
+target
+data
+*.env
+.env*
+*.md
+ARCHITECTURE_CONTEXT.md
+test_data_scheduler
+sdk
+admin
+docs

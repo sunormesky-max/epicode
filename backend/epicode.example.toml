@@ -1,0 +1,12 @@
+[server]
+port = 3456
+
+[auth]
+jwt_secret = "CHANGE_ME_TO_A_STRONG_SECRET"
+jwt_expiry_hours = 24
+
+[auth.users]
+admin = { password = "CHANGE_ME_STRONG_PASSWORD" }
+
+[storage]
+data_dir = "data"

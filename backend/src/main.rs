@@ -1,0 +1,146 @@
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+use axum::Router;
+use axum::routing::{get, post};
+use axum::middleware;
+use axum::response::IntoResponse;
+use tokio::net::TcpListener;
+use tower_http::cors::{Any, CorsLayer};
+use tower_http::trace::TraceLayer;
+
+use epicode::api::routes;
+use epicode::engine::Engine;
+use epicode::engine::security::SecurityResult;
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
+    tracing::info!("Epicode v14.1 — 大卫 启动中...");
+
+    let mut engine = Engine::new();
+    engine.start();
+
+    let cognitive_status = if engine.cognitive.enabled() {
+        "CONNECTED"
+    } else {
+        "DISABLED (set DEEPSEEK_API_KEY)"
+    };
+
+    let security_status = if engine.guard.config.enabled {
+        "ENABLED"
+    } else {
+        "DISABLED"
+    };
+
+    tracing::info!("Engine fired. Energy: {:.1}, Brain: {}, Security: {}",
+        engine.energy.available(),
+        cognitive_status,
+        security_status,
+    );
+
+    let state = Arc::new(engine);
+
+    let security_fn = |axum::extract::State(engine): axum::extract::State<Arc<Engine>>,
+                        headers: axum::http::HeaderMap,
+                        request: axum::extract::Request,
+                        next: axum::middleware::Next| async move {
+        let guard = engine.guard.clone();
+        let path = request.uri().path().to_string();
+        let method = request.method().clone().to_string();
+        let action = format!("{} {}", method, path);
+
+        if path == "/" || path == "/dashboard" || path.starts_with("/health") {
+            return next.run(request).await;
+        }
+
+        let api_key = headers
+            .get("X-API-Key")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+
+        match guard.full_check(api_key, &action) {
+            Ok(_client_id) => next.run(request).await,
+            Err((result, _detail)) => {
+                let status = match result {
+                    SecurityResult::DeniedAuth => axum::http::StatusCode::UNAUTHORIZED,
+                    SecurityResult::DeniedRateLimit => axum::http::StatusCode::TOO_MANY_REQUESTS,
+                    SecurityResult::DeniedValidation => axum::http::StatusCode::BAD_REQUEST,
+                    SecurityResult::DeniedConstitution => axum::http::StatusCode::FORBIDDEN,
+                    SecurityResult::DeniedEnergy => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    SecurityResult::Allowed => axum::http::StatusCode::OK,
+                };
+                (status, axum::Json(serde_json::json!({
+                    "success": false,
+                    "error": format!("{:?}", result),
+                    "action": action,
+                }))).into_response()
+            }
+        }
+    };
+
+    let app = Router::new()
+        .route("/", get(routes::dashboard))
+        .route("/dashboard", get(routes::dashboard))
+        .route("/health", get(routes::health))
+        .route("/constitution", get(routes::constitution))
+        .route("/sse", get(routes::sse_stream))
+        .route("/config", get(routes::get_config).post(routes::update_config))
+        .route("/security/stats", get(routes::security_stats))
+        .route("/security/audit", get(routes::security_audit))
+        .route("/remember", post(routes::remember))
+        .route("/ask", post(routes::ask))
+        .route("/nodes", post(routes::create_node))
+        .route("/nodes", get(routes::list_nodes))
+        .route("/nodes/:id", get(routes::get_node))
+        .route("/search", post(routes::search))
+        .route("/recall", post(routes::recall))
+        .route("/pulse", post(routes::send_pulse))
+        .route("/stats", get(routes::stats))
+        .route("/identity", get(routes::get_identity).post(routes::confirm_identity))
+        .route("/knowledge", post(routes::knowledge_relations))
+        .route("/concepts", get(routes::concepts))
+        .route("/dream", post(routes::dream_cycle))
+        .route("/reasoning/analogies", post(routes::reasoning_analogies))
+        .route("/reasoning/patterns", get(routes::reasoning_patterns))
+        .route("/mcp", post(routes::mcp))
+        .route("/timeline", get(routes::timeline))
+        .route("/backups", get(routes::list_backups))
+        .layer(middleware::from_fn_with_state(state.clone(), security_fn))
+        .layer(CorsLayer::new()
+            .allow_origin("http://127.0.0.1:9110".parse::<axum::http::HeaderValue>().unwrap())
+            .allow_methods(Any)
+            .allow_headers(Any))
+        .layer(TraceLayer::new_for_http())
+        .with_state(state.clone());
+
+    let addr: SocketAddr = "127.0.0.1:9110".parse().unwrap();
+    let listener = match TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("FATAL: failed to bind {}: {}", addr, e);
+            std::process::exit(1);
+        }
+    };
+    tracing::info!("Listening on {}", addr);
+
+    if let Err(e) = axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            tokio::signal::ctrl_c().await.ok();
+            tracing::info!("Ctrl+C received — shutting down...");
+        })
+        .await
+    {
+        tracing::error!("Server error: {}", e);
+    }
+
+    tracing::info!("Server stopped — performing final save...");
+    state.final_save();
+    tracing::info!("大卫已安全停机。再见。");
+}

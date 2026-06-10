@@ -1,0 +1,8 @@
+{
+  "name": "tetramem-sdk",
+  "version": "14.1.1",
+  "main": "src/tetramem.ts",
+  "description": "TypeScript SDK for Epicode API",
+  "keywords": ["tetramem", "memory", "ai", "sdk"],
+  "license": "MIT"
+}
