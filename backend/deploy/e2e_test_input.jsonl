@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"e2e","version":"1.0"}}}
+{"jsonrpc":"2.0","id":2,"method":"notifications/initialized","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"Server deployment test - encryption enabled with AES-256-GCM","labels":["deployment","test","encrypted"]}}}
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memory_search","arguments":{"query":"encryption deployment","limit":3}}}
+{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"space_stats","arguments":{}}}

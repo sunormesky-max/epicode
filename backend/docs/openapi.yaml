@@ -1,0 +1,575 @@
+openapi: 3.1.0
+info:
+  title: Epicode Cloud API
+  description: Semantic memory service with ONNX 768-dim vector search, hybrid BM25 retrieval, multi-tenant isolation, and LLM-powered Q&A
+  version: 1.0.0
+  contact:
+    name: Epicode Support
+    email: sunormesky@gmail.com
+    url: https://epicode.cn
+
+servers:
+  - url: https://epicode.cn/api
+    description: Production
+  - url: http://localhost:9111
+    description: Development
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Auth
+    description: Registration, login, and authentication
+  - name: Memory
+    description: Write, search, and recall semantic memories
+  - name: Q&A
+    description: Ask questions based on your memories
+  - name: Knowledge Graph
+    description: Explore relations between memories
+  - name: Ingestion
+    description: Bulk ingest and digest content
+  - name: Admin
+    description: User management (requires admin key)
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  version: { type: string, example: "1.0.0-cloud" }
+                  success: { type: boolean, example: true }
+
+  /register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      description: |
+        Register using a one-time invite code (X-Invite-Code header).
+        Invite codes are single-use and rotate after each registration.
+        Admins can also register users directly using X-Admin-Key header.
+      security: []
+      parameters:
+        - name: X-Invite-Code
+          in: header
+          required: false
+          schema: { type: string }
+          description: "One-time invite code (obtained from an existing user's /v1/stats)"
+        - name: X-Admin-Key
+          in: header
+          required: false
+          schema: { type: string }
+          description: "Admin key (alternative to invite code, for admin use only)"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, password]
+              properties:
+                user_id:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                  pattern: "^[a-zA-Z0-9_-]+$"
+                  example: alice
+                password:
+                  type: string
+                  minLength: 6
+                  maxLength: 128
+                  description: "User password (min 6 characters)"
+                plan:
+                  type: string
+                  enum: [free, pro, enterprise]
+                  default: free
+      responses:
+        "200":
+          description: User registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  user_id: { type: string }
+                  api_key: { type: string, description: "Use this as X-API-Key for all other endpoints" }
+                  plan: { type: string }
+                  max_memories: { type: integer }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/login:
+    post:
+      tags: [Auth]
+      summary: Login with username and password
+      description: Returns the user's API key for subsequent requests
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, password]
+              properties:
+                user_id:
+                  type: string
+                  example: alice
+                password:
+                  type: string
+                  format: password
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  api_key: { type: string, description: "Use as X-API-Key" }
+                  user_id: { type: string }
+                  plan: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/remember:
+    post:
+      tags: [Memory]
+      summary: Store a new memory
+      description: Auto-classifies content and creates a semantic memory with 768-dim ONNX embedding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  minLength: 1
+                  maxLength: 10000
+                  description: The memory content to store
+                  example: "Epicode uses ONNX 768-dim multilingual-e5-base embeddings"
+      responses:
+        "200":
+          description: Memory stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  id: { type: integer, description: "Unique memory ID" }
+                  labels: { type: array, items: { type: string }, description: "Auto-classified tags" }
+
+  /v1/search:
+    post:
+      tags: [Memory]
+      summary: Semantic search across memories
+      description: Hybrid search combining vector similarity (0.7 weight) and BM25 text matching (0.3 weight)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+                  example: "how does vector search work"
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 200
+                  default: 20
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  total: { type: integer }
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        content: { type: string }
+                        labels: { type: array, items: { type: string } }
+                        similarity: { type: number, description: "Combined score (0-1)" }
+
+  /v1/recall:
+    post:
+      tags: [Memory]
+      summary: Deep memory recall with associations
+      description: Retrieves memories with emotional context, associations, and grouped by labels
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+                depth:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  default: 2
+      responses:
+        "200":
+          description: Recall result with associations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  query: { type: string }
+                  seed_count: { type: integer }
+                  total_fragments: { type: integer }
+                  associated_count: { type: integer }
+                  emotion:
+                    type: object
+                    properties:
+                      pleasure: { type: number }
+                      arousal: { type: number }
+                      dominance: { type: number }
+                  memory_file:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: object
+
+  /v1/ask:
+    post:
+      tags: [Q&A]
+      summary: Ask a question about your memories
+      description: Uses DeepSeek LLM to generate an answer based on relevant memories
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+                  example: "What security measures were implemented?"
+                depth:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  default: 2
+      responses:
+        "200":
+          description: Answer generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  question: { type: string }
+                  answer: { type: string, description: "LLM-generated answer" }
+                  memory_count: { type: integer, description: "Number of memories used" }
+                  memories:
+                    type: array
+                    items:
+                      type: object
+
+  /v1/nodes:
+    post:
+      tags: [Memory]
+      summary: Create a memory node with metadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  minLength: 1
+                  maxLength: 10000
+                labels:
+                  type: array
+                  items: { type: string }
+                  maxItems: 10
+                  description: "Optional pre-assigned labels"
+                timestamp:
+                  type: integer
+                  description: "Unix timestamp (defaults to now)"
+      responses:
+        "200":
+          description: Node created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  id: { type: integer }
+
+  /v1/nodes/{id}:
+    get:
+      tags: [Memory]
+      summary: Get a single memory by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Memory found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  id: { type: integer }
+                  content: { type: string }
+                  labels: { type: array, items: { type: string } }
+        "404":
+          description: Not found
+
+  /v1/knowledge:
+    post:
+      tags: [Knowledge Graph]
+      summary: Get knowledge graph relations for a memory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: integer, description: "Memory ID" }
+      responses:
+        "200":
+          description: Relations found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  id: { type: integer }
+                  relations: { type: integer }
+                  details:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        target_id: { type: integer }
+                        relation: { type: string }
+                        strength: { type: number }
+
+  /v1/stats:
+    get:
+      tags: [System]
+      summary: Get user statistics
+      description: Returns memory counts, energy, clusters. Admin users also see the current invite code.
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  user_id: { type: string }
+                  plan: { type: string }
+                  memories_used: { type: integer }
+                  max_memories: { type: integer }
+                  tetra_count: { type: integer }
+                  energy: { type: number }
+                  clusters: { type: integer }
+                  invite_code: { type: string, description: "Current invite code (only visible to admin users)" }
+
+  /v1/timeline:
+    get:
+      tags: [Memory]
+      summary: Get memories in chronological order (last 200)
+      responses:
+        "200":
+          description: Timeline events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  total: { type: integer }
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        content: { type: string }
+                        labels: { type: array, items: { type: string } }
+                        timestamp: { type: integer }
+
+  /v1/digest:
+    post:
+      tags: [Ingestion]
+      summary: Ingest and digest content (text, files)
+      description: |
+        Supports plain text and file uploads (.txt, .md, .json, .csv).
+        Content is automatically chunked with UTF-8 safe splitting, classified, and stored as memories.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  description: "Text content or file data (as JSON string for files)"
+                source:
+                  type: string
+                  description: "Source identifier (e.g. filename or URL)"
+      responses:
+        "200":
+          description: Content digested
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  chunks: { type: integer, description: "Number of chunks created" }
+                  memories_created: { type: integer }
+
+  /mcp:
+    post:
+      tags: [System]
+      summary: MCP JSON-RPC endpoint
+      description: |
+        Model Context Protocol endpoint for AI agent integration.
+        Supports 17 tools: memory_create, memory_search, memory_recall, memory_get,
+        memory_list, ctx_load, ctx_save, pattern_learn, pattern_recall, session_summary,
+        space_stats, knowledge_relations, concept_list, bug_memory, decision_record,
+        context_observe, dream_cycle.
+        Authentication via X-API-Key header.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jsonrpc: { type: string, example: "2.0" }
+                id: { type: integer }
+                method: { type: string, example: "tools/call" }
+                params: { type: object }
+      responses:
+        "200":
+          description: JSON-RPC response
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: List all users
+      security:
+        - AdminKeyAuth: []
+      responses:
+        "200":
+          description: User list
+
+  /admin/stats:
+    get:
+      tags: [Admin]
+      summary: System-wide statistics
+      security:
+        - AdminKeyAuth: []
+      responses:
+        "200":
+          description: System stats
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: "User API key (tm-...), obtained via /register or /v1/login"
+    AdminKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Admin-Key
+      description: "Admin key (set via TETRAMEM_ADMIN_KEY env var)"
+    InviteCodeAuth:
+      type: apiKey
+      in: header
+      name: X-Invite-Code
+      description: "One-time invite code, rotated after each use"
+
+  responses:
+    BadRequest:
+      description: Invalid input
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: false }
+              error: { type: string }
+    Forbidden:
+      description: Forbidden (invalid/expired invite code or missing admin key)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: false }
+              error: { type: string }
+    Unauthorized:
+      description: Invalid API key
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: false }
+              error: { type: string, example: "invalid API key" }

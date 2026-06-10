@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"notifications/initialized","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"space_stats","arguments":{}}}
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memory_search","arguments":{"query":"persistence test","limit":5}}}

@@ -1,0 +1,30 @@
+services:
+  tetramem:
+    build:
+      context: .
+      dockerfile: Dockerfile.cloud
+    container_name: tetramem-v14
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9110:9110"
+    environment:
+      - TETRAMEM_ADMIN_KEY=${TETRAMEM_ADMIN_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - RUST_LOG=info
+    volumes:
+      - tetramem_data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:noexec
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 2G
+
+volumes:
+  tetramem_data:

@@ -1,0 +1,17 @@
+[Unit]
+Description=Epicode Guard - Auto Defense Daemon
+After=network.target firewalld.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/epicode-guard daemon
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=epicode-guard
+
+[Install]
+WantedBy=multi-user.target
