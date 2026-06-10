@@ -1,0 +1,58 @@
+[package]
+name = "epicode"
+version = "1.0.0"
+edition = "2021"
+description = "Epicode — AI Memory System with Knowledge Graph"
+license = "AGPL-3.0-or-later"
+authors = ["sunormesky-max <sunormesky@gmail.com>"]
+repository = "https://github.com/sunormesky-max/epicode"
+rust-version = "1.85"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "io-util"] }
+dashmap = "6"
+axum = { version = "0.7", features = ["macros"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rand = "0.8"
+chrono = "0.4"
+ureq = { version = "2", features = ["json"] }
+rusqlite = { version = "0.31", features = ["bundled", "blob"] }
+futures = "0.3"
+tokio-stream = "0.1"
+ort = { version = "2.0.0-rc.9", features = ["ndarray"] }
+tokenizers = "0.21"
+ndarray = "0.16"
+parking_lot = "0.12"
+aes-gcm = "0.10"
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+zeroize = { version = "1", features = ["derive"] }
+
+[profile.release]
+strip = true
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+opt-level = 3
+
+[[bin]]
+name = "epicode-mcp"
+path = "src/bin/mcp_server.rs"
+
+[[bin]]
+name = "epicode-bench"
+path = "src/bin/bench_real.rs"
+
+[[bin]]
+name = "epicode-migrate"
+path = "src/bin/migrate_embeddings.rs"
+
+[[bin]]
+name = "epicode-cloud"
+path = "src/bin/cloud.rs"

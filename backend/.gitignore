@@ -1,0 +1,9 @@
+/target/
+/Cargo.lock
+/data/
+/backups/
+*.tmp
+.env
+*.onnx
+models_768/
+test_data_scheduler/

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Epicode Admin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0a0a0f;color:#e0e0e0;min-height:100vh}
+.header{background:linear-gradient(135deg,#1a1a2e,#16213e);padding:20px 32px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #2a2a4a}
+.header h1{font-size:22px;font-weight:600;background:linear-gradient(90deg,#64b5f6,#ba68c8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.header .status{font-size:13px;color:#888}
+.login-wrap{display:flex;justify-content:center;align-items:center;min-height:calc(100vh - 70px)}
+.login-box{background:#1a1a2e;border:1px solid #2a2a4a;border-radius:12px;padding:40px;width:380px}
+.login-box h2{text-align:center;margin-bottom:24px;font-size:18px}
+.login-box input{width:100%;padding:12px 16px;background:#12121f;border:1px solid #2a2a4a;border-radius:8px;color:#e0e0e0;font-size:14px;margin-bottom:16px;outline:none}
+.login-box input:focus{border-color:#64b5f6}
+.login-box button{width:100%;padding:12px;background:linear-gradient(135deg,#1565c0,#7b1fa2);border:none;border-radius:8px;color:#fff;font-size:15px;cursor:pointer;font-weight:500}
+.login-box button:hover{opacity:0.9}
+.dashboard{display:none;padding:24px 32px;max-width:1200px;margin:0 auto}
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:32px}
+.stat-card{background:#1a1a2e;border:1px solid #2a2a4a;border-radius:10px;padding:20px}
+.stat-card .label{font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px}
+.stat-card .value{font-size:28px;font-weight:700;background:linear-gradient(90deg,#64b5f6,#ba68c8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.section{margin-bottom:32px}
+.section h3{font-size:16px;margin-bottom:16px;color:#bbb;display:flex;align-items:center;gap:8px}
+.btn{padding:8px 16px;border:1px solid #2a2a4a;border-radius:6px;background:#1a1a2e;color:#e0e0e0;cursor:pointer;font-size:13px}
+.btn:hover{border-color:#64b5f6}
+.btn-primary{background:linear-gradient(135deg,#1565c0,#7b1fa2);border:none;color:#fff}
+.btn-danger{border-color:#c62828;color:#ef5350}
+.btn-danger:hover{background:#c62828;color:#fff}
+table{width:100%;border-collapse:collapse;background:#1a1a2e;border-radius:10px;overflow:hidden}
+th{text-align:left;padding:12px 16px;background:#12121f;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #2a2a4a}
+td{padding:12px 16px;border-bottom:1px solid #1f1f35;font-size:14px}
+tr:hover td{background:#1f1f35}
+.badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+.badge-free{background:#1b5e20;color:#69f0ae}
+.badge-pro{background:#e65100;color:#ffab40}
+.badge-enterprise{background:#4a148c;color:#ce93d8}
+.key{font-family:monospace;font-size:12px;color:#64b5f6;cursor:pointer;position:relative}
+.key:hover::after{content:"Click to copy";position:absolute;left:0;top:-22px;background:#333;padding:2px 8px;border-radius:4px;font-size:10px;color:#ccc}
+.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:100;justify-content:center;align-items:center}
+.modal{background:#1a1a2e;border:1px solid #2a2a4a;border-radius:12px;padding:32px;width:420px}
+.modal h3{margin-bottom:20px}
+.modal label{display:block;font-size:13px;color:#888;margin-bottom:6px;margin-top:14px}
+.modal input,.modal select{width:100%;padding:10px 14px;background:#12121f;border:1px solid #2a2a4a;border-radius:6px;color:#e0e0e0;font-size:14px;outline:none}
+.modal input:focus,.modal select:focus{border-color:#64b5f6}
+.modal .actions{display:flex;gap:12px;margin-top:24px;justify-content:flex-end}
+.toast{position:fixed;bottom:24px;right:24px;background:#1b5e20;color:#69f0ae;padding:12px 20px;border-radius:8px;font-size:14px;display:none;z-index:200}
+.empty{text-align:center;padding:40px;color:#555;font-size:14px}
+.refresh-spin{animation:spin 1s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media(max-width:768px){.stats-grid{grid-template-columns:repeat(2,1fr)}.dashboard{padding:16px}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Epicode Admin</h1>
+  <div class="status" id="connStatus">Not connected</div>
+</div>
+
+<div class="login-wrap" id="loginWrap">
+  <div class="login-box">
+    <h2>Admin Login</h2>
+    <input type="password" id="adminKeyInput" placeholder="Enter Admin Key" autocomplete="off">
+    <input type="text" id="baseUrlInput" placeholder="API Base URL" value="https://epicode.cn/api">
+    <button onclick="doLogin()">Connect</button>
+  </div>
+</div>
+
+<div class="dashboard" id="dashboard">
+  <div class="stats-grid" id="statsGrid">
+    <div class="stat-card"><div class="label">Total Users</div><div class="value" id="statUsers">-</div></div>
+    <div class="stat-card"><div class="label">Active Engines</div><div class="value" id="statEngines">-</div></div>
+    <div class="stat-card"><div class="label">System Status</div><div class="value" id="statHealth">-</div></div>
+    <div class="stat-card"><div class="label">Version</div><div class="value" id="statVersion">-</div></div>
+  </div>
+
+  <div class="section">
+    <h3>Users <button class="btn btn-primary" onclick="showRegisterModal()" style="margin-left:auto">+ Register User</button></h3>
+    <table>
+      <thead><tr><th>User ID</th><th>Plan</th><th>Memories</th><th>API Key</th><th>Created</th><th>Actions</th></tr></thead>
+      <tbody id="usersTable"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="modal-overlay" id="registerModal">
+  <div class="modal">
+    <h3>Register New User</h3>
+    <label>User ID</label>
+    <input id="regUserId" placeholder="e.g. alice">
+    <label>Plan</label>
+    <select id="regPlan"><option value="free">Free (1,000 memories)</option><option value="pro">Pro (10,000 memories)</option><option value="enterprise">Enterprise (100,000 memories)</option></select>
+    <div class="actions">
+      <button class="btn" onclick="hideRegisterModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="doRegister()">Register</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let BASE = '';
+let ADMIN_KEY = '';
+
+function api(method, path, body) {
+  const opts = { method, headers: { 'X-Admin-Key': ADMIN_KEY, 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  return fetch(BASE + path, opts).then(r => r.json()).then(d => {
+    if (d.success === false) throw new Error(d.error || 'Unknown error');
+    return d;
+  });
+}
+
+function toast(msg, isError) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.background = isError ? '#c62828' : '#1b5e20';
+  el.style.color = isError ? '#ef5350' : '#69f0ae';
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 3000);
+}
+
+function doLogin() {
+  ADMIN_KEY = document.getElementById('adminKeyInput').value;
+  BASE = document.getElementById('baseUrlInput').value.replace(/\/+$/, '');
+  if (!ADMIN_KEY) return toast('Enter admin key', true);
+  api('GET', '/health').then(d => {
+    document.getElementById('statHealth').textContent = d.status;
+    document.getElementById('statVersion').textContent = d.version;
+    document.getElementById('connStatus').textContent = 'Connected to ' + BASE;
+    document.getElementById('loginWrap').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'block';
+    loadStats();
+    loadUsers();
+  }).catch(e => toast('Connection failed: ' + e.message, true));
+}
+
+async function loadStats() {
+  try {
+    const d = await api('GET', '/admin/stats');
+    document.getElementById('statUsers').textContent = d.total_users;
+    document.getElementById('statEngines').textContent = d.active_engines;
+  } catch(e) { toast(e.message, true); }
+}
+
+async function loadUsers() {
+  try {
+    const d = await api('GET', '/admin/users/list');
+    const tbody = document.getElementById('usersTable');
+    if (!d.users || d.users.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">No users registered</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.users.map(u => {
+      const planClass = u.plan === 'Pro' ? 'pro' : u.plan === 'Enterprise' ? 'enterprise' : 'free';
+      const date = new Date(u.created_at * 1000).toLocaleDateString();
+      const keyMasked = u.api_key.substring(0, 8) + '...' + u.api_key.substring(u.api_key.length - 4);
+      return `<tr>
+        <td><strong>${u.user_id}</strong></td>
+        <td><span class="badge badge-${planClass}">${u.plan || 'Free'}</span></td>
+        <td>${u.memories_used} / ${u.max_memories}</td>
+        <td><span class="key" onclick="copyKey('${u.api_key}')" title="${u.api_key}">${keyMasked}</span></td>
+        <td>${date}</td>
+        <td><button class="btn btn-danger" onclick="doResetKey('${u.user_id}')">Reset Key</button></td>
+      </tr>`;
+    }).join('');
+  } catch(e) { toast(e.message, true); }
+}
+
+function copyKey(key) {
+  navigator.clipboard.writeText(key);
+  toast('API key copied');
+}
+
+async function doResetKey(userId) {
+  if (!confirm('Reset API key for ' + userId + '? The old key will stop working.')) return;
+  try {
+    const d = await api('POST', '/admin/users/' + userId + '/reset-key');
+    toast('New key: ' + d.new_api_key);
+    navigator.clipboard.writeText(d.new_api_key);
+    loadUsers();
+  } catch(e) { toast(e.message, true); }
+}
+
+function showRegisterModal() { document.getElementById('registerModal').style.display = 'flex'; }
+function hideRegisterModal() { document.getElementById('registerModal').style.display = 'none'; }
+
+async function doRegister() {
+  const userId = document.getElementById('regUserId').value.trim();
+  const plan = document.getElementById('regPlan').value;
+  if (!userId) return toast('Enter user ID', true);
+  if (!/^[a-zA-Z0-9_-]+$/.test(userId)) return toast('User ID: alphanumeric, dash, underscore only', true);
+  try {
+    const d = await api('POST', '/register', { user_id: userId, plan });
+    toast('Created! Key: ' + d.api_key);
+    navigator.clipboard.writeText(d.api_key);
+    hideRegisterModal();
+    document.getElementById('regUserId').value = '';
+    loadStats();
+    loadUsers();
+  } catch(e) { toast(e.message, true); }
+}
+
+document.getElementById('adminKeyInput').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+</script>
+</body>
+</html>

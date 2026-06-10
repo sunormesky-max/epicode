@@ -1,0 +1,12 @@
+[build]
+rustflags = ["-C", "target-feature=-crt-static"]
+
+[profile.test]
+lto = "off"
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=-crt-static"]
+
+[target.x86_64-pc-windows-msvc.env]
+CXXFLAGS = "/MD"
+CFLAGS = "/MD"
