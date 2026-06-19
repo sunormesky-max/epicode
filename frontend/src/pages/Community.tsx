@@ -3,8 +3,8 @@ import { motion } from 'framer-motion';
 import Layout from '@/components/Layout';
 import { exploreSkills, type CommunitySkill } from '@/lib/api';
 import {
-  Users, Search, Brain, Clock, Tag, Star,
-  ChevronDown, ChevronUp, Filter
+  Users, Search, Brain, Clock, Tag,
+  ChevronDown, ChevronUp
 } from 'lucide-react';
 
 const CATEGORY_COLORS: Record<string, string> = {

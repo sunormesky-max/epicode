@@ -6,7 +6,6 @@ import { Users, Plus, Trash2, Shield, Brain, Crown, AlertTriangle, BarChart3, Us
 export default function DashboardSubAccounts() {
   const [accounts, setAccounts] = useState<SubAccount[]>([]);
   const [myStats, setMyStats] = useState<StatsData | null>(null);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isSubAccount, setIsSubAccount] = useState(false);
@@ -30,7 +29,6 @@ export default function DashboardSubAccounts() {
         const accs = await getSubAccounts();
         if (!mounted) return;
         setAccounts(accs);
-        setTotal(accs.length);
       } catch (e: any) {
         if (mounted) setError(e.message);
       }

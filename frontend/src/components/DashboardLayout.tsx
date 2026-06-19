@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router';
-import { useI18nContext } from '@/i18n/I18nContext';
-import { clearAuth, getApiKey, isAuthenticated, getStats } from '@/lib/api';
+import { clearAuth, getApiKey, getStats } from '@/lib/api';
 import PageBackground from './PageBackground';
 import {
   LayoutDashboard, Brain, GitBranch, Wrench, Users,
@@ -11,7 +10,6 @@ import {
 const SIDEBAR_W = 260;
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { t } = useI18nContext();
   const location = useLocation();
   const path = location.pathname;
   const [copied, setCopied] = useState(false);

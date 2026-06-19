@@ -1,7 +1,7 @@
 ﻿import { useEffect, useRef, useState } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { getGraphExport, getGraphAnalysis } from '@/lib/api';
-import { Search, ZoomIn, ZoomOut, RotateCcw, ChevronRight, X, ExternalLink } from 'lucide-react'
+import { Search, ZoomIn, ZoomOut, RotateCcw, X } from 'lucide-react'
 ;
 
 const COLORS = ['#a855f7', '#d946ef', '#6366f1', '#ec4899', '#34d399', '#f59e0b', '#60a5fa', '#f87171', '#a3e635', '#22d3ee', '#fb923c', '#818cf8'];
@@ -101,13 +101,12 @@ export default function DashboardGraph() {
     if (!nodes.length) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const context = canvas.getContext('2d')!;
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = W * dpr;
     canvas.height = H * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     let frame = 0;
     const maxFrames = 300;
@@ -155,7 +154,7 @@ export default function DashboardGraph() {
     }
 
     function draw() {
-      ctx.clearRect(0, 0, W, H);
+      context.clearRect(0, 0, W, H);
 
       const ns = nodesRef.current;
       const es = edgesRef.current;
@@ -164,9 +163,9 @@ export default function DashboardGraph() {
       const sq = searchQRef.current;
       const sc = selectedClusterRef.current;
 
-      ctx.save();
-      ctx.translate(o.x, o.y);
-      ctx.scale(z, z);
+      context.save();
+      context.translate(o.x, o.y);
+      context.scale(z, z);
 
       const sqLower = sq ? sq.toLowerCase() : '';
       const visibleSet = sq
@@ -176,7 +175,7 @@ export default function DashboardGraph() {
           ).map(n => n.idx))
         : null;
 
-      ctx.globalAlpha = 0.15;
+      context.globalAlpha = 0.15;
       for (const [si, ti] of es) {
         if (visibleSet && !visibleSet.has(si) && !visibleSet.has(ti)) continue;
         if (sc !== null) {
@@ -184,35 +183,35 @@ export default function DashboardGraph() {
           if (a.cluster !== sc && b.cluster !== sc) continue;
         }
         const a = ns[si], b = ns[ti];
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.strokeStyle = '#a855f7';
-        ctx.lineWidth = 0.3;
-        ctx.stroke();
+        context.beginPath();
+        context.moveTo(a.x, a.y);
+        context.lineTo(b.x, b.y);
+        context.strokeStyle = '#a855f7';
+        context.lineWidth = 0.3;
+        context.stroke();
       }
 
-      ctx.globalAlpha = 1;
+      context.globalAlpha = 1;
       for (const n of ns) {
         const dimmed = (visibleSet && !visibleSet.has(n.idx)) || (sc !== null && n.cluster !== sc);
-        ctx.globalAlpha = dimmed ? 0.12 : 1;
+        context.globalAlpha = dimmed ? 0.12 : 1;
         const ci = clusterColors.get(n.id) ?? -1;
         const color = ci >= 0 ? COLORS[ci % COLORS.length] : '#6b7280';
 
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-        ctx.fillStyle = color + 'cc';
-        ctx.fill();
+        context.beginPath();
+        context.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+        context.fillStyle = color + 'cc';
+        context.fill();
 
         if (!dimmed) {
-          ctx.beginPath();
-          ctx.arc(n.x, n.y, n.r * 0.3, 0, Math.PI * 2);
-          ctx.fillStyle = 'rgba(255,255,255,0.6)';
-          ctx.fill();
+          context.beginPath();
+          context.arc(n.x, n.y, n.r * 0.3, 0, Math.PI * 2);
+          context.fillStyle = 'rgba(255,255,255,0.6)';
+          context.fill();
         }
       }
-      ctx.globalAlpha = 1;
-      ctx.restore();
+      context.globalAlpha = 1;
+      context.restore();
     }
 
     function loop() {

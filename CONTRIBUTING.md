@@ -1,126 +1,76 @@
 # Contributing to Epicode
 
-Thank you for your interest in contributing to Epicode! This guide will help you get started.
+Thanks for helping improve Epicode. This repository aims to be a normal, healthy open-source project: changes should be small, testable, documented, and reviewable.
 
-## Quick Links
+## Before you start
 
-- [Report a Bug](https://github.com/sunormesky-max/epicode/issues/new?template=bug_report.md)
-- [Request a Feature](https://github.com/sunormesky-max/epicode/issues/new?template=feature_request.md)
-- [Ask a Question](https://github.com/sunormesky-max/epicode/discussions)
-- [Security Vulnerability](SECURITY.md)
+- Read the [README](README.md), [Security Policy](SECURITY.md), and [Code of Conduct](CODE_OF_CONDUCT.md).
+- Search existing [issues](https://github.com/sunormesky-max/epicode/issues) and [discussions](https://github.com/sunormesky-max/epicode/discussions) before opening a new one.
+- Prefer one PR per focused fix or feature.
 
-## Development Setup
+## Development setup
 
 ### Prerequisites
 
 - Rust 1.85+
-- Node.js 18+ (for frontend)
-- SQLite3
-- ONNX model files (see `backend/deploy/deploy.sh` for download URLs)
+- Node.js 20+
+- SQLite
 
 ### Backend
 
 ```bash
 cd backend
-cargo build
-cargo test --lib
+cargo fmt --all
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
 ```
 
 ### Frontend
 
 ```bash
 cd frontend
-npm install
-npm run dev
+npm ci
+npm run check
+npm run lint
+npm run test
+npm run build
 ```
 
-## How to Contribute
+## Pull request workflow
 
-### 1. Fork and Clone
+1. Fork the repository and create a branch.
+2. Make the smallest change that solves the problem.
+3. Add or update tests when behavior changes.
+4. Update docs if the user-facing behavior changes.
+5. Fill out the pull request template.
 
-```bash
-git clone https://github.com/YOUR_USERNAME/epicode.git
-cd epicode
-```
+## Code style
 
-### 2. Create a Branch
+- Rust: `cargo fmt` and `cargo clippy`
+- TypeScript: existing ESLint/Prettier rules
+- Do not add secrets, credentials, or placeholder backdoors
+- Keep public APIs and docs aligned
 
-```bash
-git checkout -b feature/your-feature-name
-```
+## Reporting issues
 
-### 3. Make Your Changes
+When filing a bug, include:
 
-- Follow existing code style and conventions
-- Add tests for new functionality
-- Update documentation if needed
+- version or commit
+- environment
+- exact steps to reproduce
+- expected vs actual behavior
+- logs or screenshots if helpful
 
-### 4. Commit
+For feature requests, include:
 
-Use clear, descriptive commit messages:
+- the problem you want to solve
+- your proposed solution
+- any alternatives you considered
 
-```
-feat: add batch delete API endpoint
-fix: resolve memory leak in WebSocket handler
-docs: update API reference for search endpoint
-```
+## Security reports
 
-### 5. Push and Create PR
-
-```bash
-git push origin feature/your-feature-name
-```
-
-Then open a Pull Request against the `main` branch.
-
-## Pull Request Guidelines
-
-- **One PR per feature/fix** — keep changes focused
-- **Describe what and why** — explain the motivation, not just the implementation
-- **Include tests** — new code should be tested
-- **Keep diffs small** — easier to review, faster to merge
-- **Update docs** — if you change behavior, update relevant documentation
-
-## Code Style
-
-### Rust (Backend)
-
-- Follow `cargo fmt` and `cargo clippy` recommendations
-- Use `Result<T, String>` for error handling in business logic
-- Add `#[cfg(test)]` modules for unit tests
-- Document public APIs with `///` doc comments
-
-### TypeScript (Frontend)
-
-- Follow existing ESLint configuration
-- Use functional components with hooks
-- Keep components small and focused
-- Use `useMemo` for expensive computations
-
-## Reporting Issues
-
-### Bug Reports
-
-Please include:
-
-1. Epicode version
-2. Operating system
-3. Steps to reproduce
-4. Expected vs actual behavior
-5. Relevant logs
-
-### Feature Requests
-
-Please describe:
-
-1. The problem you're trying to solve
-2. Your proposed solution
-3. Any alternatives you've considered
+Report vulnerabilities privately through [Security Advisories](SECURITY.md).
 
 ## License
 
-By contributing to Epicode, you agree that your contributions will be licensed under the [AGPL-3.0-or-later](LICENSE) license.
-
-## Questions?
-
-Open a [Discussion](https://github.com/sunormesky-max/epicode/discussions) for general questions, ideas, or feedback.
+By contributing, you agree that your changes will be licensed under [MIT](LICENSE).

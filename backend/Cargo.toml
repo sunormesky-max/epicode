@@ -2,10 +2,13 @@
 name = "epicode"
 version = "1.0.0"
 edition = "2021"
-description = "Epicode — AI Memory System with Knowledge Graph"
-license = "AGPL-3.0-or-later"
+description = "Epicode — AI Memory Operating System with MCP and SMRP"
+license = "MIT"
 authors = ["sunormesky-max"]
 repository = "https://github.com/sunormesky-max/epicode"
+homepage = "https://epicode.cn"
+documentation = "https://epicode.cn/#/docs"
+readme = "../README.md"
 rust-version = "1.85"
 
 [dependencies]
