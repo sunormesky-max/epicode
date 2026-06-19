@@ -9,12 +9,26 @@ pub enum EngineEvent {
     TetrahedronCreated(TetraId),
     TetrahedronMoved(TetraId, Point3),
     TetrahedronRemoved(TetraId),
-    PulseSent { origin: TetraId, ttl: u32 },
-    EnergyLow { remaining: f64 },
+    PulseSent {
+        origin: TetraId,
+        ttl: u32,
+    },
+    EnergyLow {
+        remaining: f64,
+    },
     DecisionTick,
-    ClusterSplit { from: u64, groups: Vec<Vec<TetraId>> },
-    ClusterMerged { a: u64, b: u64, result: u64 },
-    AutoPulse { count: u32 },
+    ClusterSplit {
+        from: u64,
+        groups: Vec<Vec<TetraId>>,
+    },
+    ClusterMerged {
+        a: u64,
+        b: u64,
+        result: u64,
+    },
+    AutoPulse {
+        count: u32,
+    },
     Shutdown,
 }
 

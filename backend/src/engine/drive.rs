@@ -10,7 +10,12 @@ pub enum Drive {
 
 impl Drive {
     pub fn all() -> &'static [Drive] {
-        &[Drive::Curiosity, Drive::Coherence, Drive::Efficiency, Drive::Vitality]
+        &[
+            Drive::Curiosity,
+            Drive::Coherence,
+            Drive::Efficiency,
+            Drive::Vitality,
+        ]
     }
 
     pub fn label(&self) -> &'static str {

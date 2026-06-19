@@ -86,7 +86,12 @@ impl CategoryClassifier {
         result
     }
 
-    fn llm_classify(&self, content: &str, labels: &[String], existing: &[String]) -> ClassifyResult {
+    fn llm_classify(
+        &self,
+        content: &str,
+        labels: &[String],
+        existing: &[String],
+    ) -> ClassifyResult {
         let existing_str = if existing.is_empty() {
             "none".to_string()
         } else {
@@ -123,40 +128,90 @@ impl CategoryClassifier {
             Err(_) => fallback_classify(labels),
         }
     }
-
 }
 
 fn fallback_classify(labels: &[String]) -> ClassifyResult {
     let label_set: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
-    let category = if label_set.iter().any(|l| ["physics", "quantum", "mechanics", "relativity", "thermodynamics"].contains(l)) {
+    let category = if label_set.iter().any(|l| {
+        [
+            "physics",
+            "quantum",
+            "mechanics",
+            "relativity",
+            "thermodynamics",
+        ]
+        .contains(l)
+    }) {
         "science.physics".to_string()
-    } else if label_set.iter().any(|l| ["biology", "genetics", "dna", "evolution"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["biology", "genetics", "dna", "evolution"].contains(l))
+    {
         "science.biology".to_string()
-    } else if label_set.iter().any(|l| ["astronomy", "planet", "solar", "space"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["astronomy", "planet", "solar", "space"].contains(l))
+    {
         "science.astronomy".to_string()
-    } else if label_set.iter().any(|l| ["git", "programming", "python", "rust", "coding", "version"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["git", "programming", "python", "rust", "coding", "version"].contains(l))
+    {
         "tech.programming".to_string()
-    } else if label_set.iter().any(|l| ["network", "tcp", "protocol", "http"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["network", "tcp", "protocol", "http"].contains(l))
+    {
         "tech.networking".to_string()
-    } else if label_set.iter().any(|l| ["crypto", "bitcoin", "blockchain"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["crypto", "bitcoin", "blockchain"].contains(l))
+    {
         "tech.cryptocurrency".to_string()
-    } else if label_set.iter().any(|l| ["coffee", "food", "cooking", "nutrition", "diet"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["coffee", "food", "cooking", "nutrition", "diet"].contains(l))
+    {
         "life.food".to_string()
-    } else if label_set.iter().any(|l| ["music", "mozart", "art", "composition"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["music", "mozart", "art", "composition"].contains(l))
+    {
         "culture.music".to_string()
-    } else if label_set.iter().any(|l| ["geography", "mountain", "volcano", "trench", "ocean"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["geography", "mountain", "volcano", "trench", "ocean"].contains(l))
+    {
         "geo.geography".to_string()
-    } else if label_set.iter().any(|l| ["battery", "energy", "electronics", "device"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["battery", "energy", "electronics", "device"].contains(l))
+    {
         "tech.electronics".to_string()
-    } else if label_set.iter().any(|l| ["bee", "animal", "insect", "nature"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["bee", "animal", "insect", "nature"].contains(l))
+    {
         "nature.animal".to_string()
-    } else if label_set.iter().any(|l| ["weather", "rain", "climate"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["weather", "rain", "climate"].contains(l))
+    {
         "geo.weather".to_string()
-    } else if label_set.iter().any(|l| ["memory", "learning", "ai", "embedding"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["memory", "learning", "ai", "embedding"].contains(l))
+    {
         "ai.systems".to_string()
-    } else if label_set.iter().any(|l| ["identity", "constitution", "core"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["identity", "constitution", "core"].contains(l))
+    {
         "core.identity".to_string()
-    } else if label_set.iter().any(|l| ["security", "safety", "auth"].contains(l)) {
+    } else if label_set
+        .iter()
+        .any(|l| ["security", "safety", "auth"].contains(l))
+    {
         "core.security".to_string()
     } else {
         "general.misc".to_string()

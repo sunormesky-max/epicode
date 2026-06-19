@@ -48,7 +48,11 @@ pub struct Space {
 const GRID_CELL: f64 = 1.0;
 
 fn grid_key(p: &Point3) -> (i64, i64, i64) {
-    ((p.x / GRID_CELL).floor() as i64, (p.y / GRID_CELL).floor() as i64, (p.z / GRID_CELL).floor() as i64)
+    (
+        (p.x / GRID_CELL).floor() as i64,
+        (p.y / GRID_CELL).floor() as i64,
+        (p.z / GRID_CELL).floor() as i64,
+    )
 }
 
 fn nearby_keys(key: (i64, i64, i64)) -> Vec<(i64, i64, i64)> {
@@ -82,7 +86,11 @@ impl Space {
 
     // ── Tetrahedron CRUD ──
 
-    pub fn add_tetrahedron(&self, tetra: &Tetrahedron, positions: &[Point3; 4]) -> Result<TetraId, String> {
+    pub fn add_tetrahedron(
+        &self,
+        tetra: &Tetrahedron,
+        positions: &[Point3; 4],
+    ) -> Result<TetraId, String> {
         if !Tetrahedron::validate_shape(positions) {
             return Err("tetrahedron is not regular".into());
         }
@@ -93,7 +101,11 @@ impl Space {
         Ok(id)
     }
 
-    pub fn add_tetrahedron_with_id(&self, tetra: &Tetrahedron, positions: &[Point3; 4]) -> Result<TetraId, String> {
+    pub fn add_tetrahedron_with_id(
+        &self,
+        tetra: &Tetrahedron,
+        positions: &[Point3; 4],
+    ) -> Result<TetraId, String> {
         if !Tetrahedron::validate_shape(positions) {
             return Err("tetrahedron is not regular".into());
         }
@@ -108,7 +120,12 @@ impl Space {
         Ok(tetra.id)
     }
 
-    fn insert_tetra(inner: &mut SpaceInner, tetra: &Tetrahedron, id: TetraId, positions: &[Point3; 4]) -> Result<(), String> {
+    fn insert_tetra(
+        inner: &mut SpaceInner,
+        tetra: &Tetrahedron,
+        id: TetraId,
+        positions: &[Point3; 4],
+    ) -> Result<(), String> {
         let mut vertex_ids = [0u64; 4];
         for i in 0..4 {
             let pos = &positions[i];
@@ -125,7 +142,9 @@ impl Space {
                         }
                     }
                 }
-                if found.is_some() { break; }
+                if found.is_some() {
+                    break;
+                }
             }
             let vid = match found {
                 Some(vid) => {
@@ -148,7 +167,11 @@ impl Space {
 
         let merged_count = vertex_ids.iter().collect::<HashSet<_>>().len();
         if merged_count < 4 {
-            tracing::info!("[Space] tetra {} shares {} vertices with existing tetrahedra", id, 4 - merged_count);
+            tracing::info!(
+                "[Space] tetra {} shares {} vertices with existing tetrahedra",
+                id,
+                4 - merged_count
+            );
         }
 
         let mut insert_tetra = tetra.clone();
@@ -180,7 +203,9 @@ impl Space {
 
     pub fn remove_tetrahedron(&self, id: TetraId) -> Result<Tetrahedron, String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.remove(&id)
+        let tetra = inner
+            .tetrahedrons
+            .remove(&id)
             .ok_or_else(|| format!("tetrahedron {} not found", id))?;
 
         for &vid in &tetra.vertex_ids {
@@ -229,42 +254,64 @@ impl Space {
 
     pub fn update_mass(&self, id: TetraId, delta: f64) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.mass = (tetra.mass + delta).clamp(0.1, 100.0);
         Ok(())
     }
 
     pub fn update_aliases(&self, id: TetraId, aliases: Vec<String>) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.data.aliases = aliases;
         Ok(())
     }
 
-    pub fn update_payload(&self, id: TetraId, payload: crate::domain::tetra::MemoryPayload) -> Result<(), String> {
+    pub fn update_payload(
+        &self,
+        id: TetraId,
+        payload: crate::domain::tetra::MemoryPayload,
+    ) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.data = payload;
         Ok(())
     }
 
     pub fn update_labels(&self, id: TetraId, labels: Vec<String>) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.data.labels = labels;
         Ok(())
     }
 
     pub fn update_enforced(&self, id: TetraId, enforced: bool) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.data.enforced = enforced;
         Ok(())
     }
 
     pub fn update_vertex_ids(&self, id: TetraId, vertex_ids: [VertexId; 4]) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.vertex_ids = vertex_ids;
         Ok(())
     }
@@ -282,11 +329,23 @@ impl Space {
     }
 
     pub fn max_tetra_id(&self) -> u64 {
-        self.inner.read().tetrahedrons.keys().max().copied().unwrap_or(0)
+        self.inner
+            .read()
+            .tetrahedrons
+            .keys()
+            .max()
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn max_vertex_id(&self) -> u64 {
-        self.inner.read().vertices.keys().max().copied().unwrap_or(0)
+        self.inner
+            .read()
+            .vertices
+            .keys()
+            .max()
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn restore_counters(&self) {
@@ -317,14 +376,24 @@ impl Space {
         self.inner.read().cylinder.port_count()
     }
 
-    pub fn zone_for_layer(&self, layer: super::cylinder::CylinderLayer) -> super::cylinder::LayerZone {
+    pub fn zone_for_layer(
+        &self,
+        layer: super::cylinder::CylinderLayer,
+    ) -> super::cylinder::LayerZone {
         self.inner.read().cylinder.zone_for_layer(layer).clone()
     }
 
-    pub fn assign_cylinder_port(&self, layer: super::cylinder::CylinderLayer, tetra_id: TetraId) -> Option<(VertexId, super::vertex::Point3)> {
+    pub fn assign_cylinder_port(
+        &self,
+        layer: super::cylinder::CylinderLayer,
+        tetra_id: TetraId,
+    ) -> Option<(VertexId, super::vertex::Point3)> {
         let mut inner = self.inner.write();
         let port_vid = inner.cylinder.assign_port(layer, tetra_id)?;
-        let pos = inner.cylinder.port_position(port_vid).unwrap_or(super::vertex::Point3::zero());
+        let pos = inner
+            .cylinder
+            .port_position(port_vid)
+            .unwrap_or(super::vertex::Point3::zero());
         Some((port_vid, pos))
     }
 
@@ -333,7 +402,10 @@ impl Space {
     }
 
     pub fn reassign_cylinder_port(&self, old_tetra_id: TetraId, new_tetra_id: TetraId) -> bool {
-        self.inner.write().cylinder.reassign_port(old_tetra_id, new_tetra_id)
+        self.inner
+            .write()
+            .cylinder
+            .reassign_port(old_tetra_id, new_tetra_id)
     }
 
     pub fn free_port_count(&self, layer: super::cylinder::CylinderLayer) -> usize {
@@ -352,12 +424,30 @@ impl Space {
         self.inner.read().cylinder.health_check(&[])
     }
 
-    pub fn confirm_identity(&self, name: String, mission: String, author: String, extra: std::collections::HashMap<String, String>) {
-        self.inner.write().cylinder.confirm_identity(name, mission, author, extra);
+    pub fn confirm_identity(
+        &self,
+        name: String,
+        mission: String,
+        author: String,
+        extra: std::collections::HashMap<String, String>,
+    ) {
+        self.inner
+            .write()
+            .cylinder
+            .confirm_identity(name, mission, author, extra);
     }
 
-    pub fn update_identity(&self, name: Option<String>, mission: Option<String>, author: Option<String>, extra: Option<std::collections::HashMap<String, String>>) {
-        self.inner.write().cylinder.update_identity(name, mission, author, extra);
+    pub fn update_identity(
+        &self,
+        name: Option<String>,
+        mission: Option<String>,
+        author: Option<String>,
+        extra: Option<std::collections::HashMap<String, String>>,
+    ) {
+        self.inner
+            .write()
+            .cylinder
+            .update_identity(name, mission, author, extra);
     }
 
     pub fn pending_identity(&self) -> super::cylinder::PendingIdentity {
@@ -403,7 +493,9 @@ impl Space {
         let mut results = Vec::new();
 
         while let Some((current, dist)) = queue.pop_front() {
-            if dist >= max_hops { continue; }
+            if dist >= max_hops {
+                continue;
+            }
             let tetra = match inner.tetrahedrons.get(&current) {
                 Some(t) => t,
                 None => continue,
@@ -448,7 +540,9 @@ impl Space {
     /// All under one write lock — no TOCTOU window.
     pub fn relocate_tetrahedron(&self, id: TetraId, new_core: Point3) -> Result<TetraId, String> {
         let mut inner = self.inner.write();
-        let removed = inner.tetrahedrons.remove(&id)
+        let removed = inner
+            .tetrahedrons
+            .remove(&id)
             .ok_or_else(|| format!("tetrahedron {} not found", id))?;
 
         for &vid in &removed.vertex_ids {
@@ -502,12 +596,15 @@ impl Space {
     pub fn find_shared_vertices(&self, a: TetraId, b: TetraId) -> Vec<VertexId> {
         let inner = self.inner.read();
         let ta = match inner.tetrahedrons.get(&a) {
-            Some(t) => t, None => return vec![],
+            Some(t) => t,
+            None => return vec![],
         };
         let tb = match inner.tetrahedrons.get(&b) {
-            Some(t) => t, None => return vec![],
+            Some(t) => t,
+            None => return vec![],
         };
-        ta.vertex_ids.iter()
+        ta.vertex_ids
+            .iter()
             .filter(|vid| tb.vertex_ids.contains(vid))
             .copied()
             .collect()
@@ -521,8 +618,11 @@ impl Space {
             if inner.tetrahedrons.is_empty() {
                 return vec![];
             }
-            let tv: HashMap<TetraId, [VertexId; 4]> = inner.tetrahedrons.iter()
-                .map(|(&id, t)| (id, t.vertex_ids)).collect();
+            let tv: HashMap<TetraId, [VertexId; 4]> = inner
+                .tetrahedrons
+                .iter()
+                .map(|(&id, t)| (id, t.vertex_ids))
+                .collect();
             (tv, inner.vertex_to_tetras.clone())
         };
 
@@ -554,7 +654,9 @@ impl Space {
                 }
             }
 
-            clusters.push(Cluster { tetra_ids: cluster_ids });
+            clusters.push(Cluster {
+                tetra_ids: cluster_ids,
+            });
         }
 
         for c in &mut clusters {
@@ -569,8 +671,10 @@ impl Space {
 
     pub fn edge_share_count(&self, v1: VertexId, v2: VertexId) -> usize {
         let key = ordered_pair(v1, v2);
-        self.inner.read()
-            .edge_table.get(&key)
+        self.inner
+            .read()
+            .edge_table
+            .get(&key)
             .map(|e| e.shared_by.len())
             .unwrap_or(0)
     }
@@ -578,7 +682,10 @@ impl Space {
     // ── Nearest Neighbor (naive, O(n)) ──
 
     pub fn nearest_tetrahedron_to(&self, point: Point3) -> Option<(TetraId, f64)> {
-        self.inner.read().tetrahedrons.iter()
+        self.inner
+            .read()
+            .tetrahedrons
+            .iter()
             .map(|(id, t)| (*id, t.core.distance_to(&point)))
             .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
     }
@@ -586,13 +693,17 @@ impl Space {
 
 /// Return a consistent ordered pair (min, max) for edge keys.
 fn ordered_pair(a: VertexId, b: VertexId) -> (VertexId, VertexId) {
-    if a < b { (a, b) } else { (b, a) }
+    if a < b {
+        (a, b)
+    } else {
+        (b, a)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::tetra::MemoryPayload;
+    use super::*;
 
     fn make_tetra(id: TetraId, center: Point3) -> (Tetrahedron, [Point3; 4]) {
         let positions = Tetrahedron::compute_vertices(center);
@@ -758,7 +869,11 @@ mod tests {
         let _a = space.add_tetrahedron(&t1, &p1).unwrap();
         let b = space.add_tetrahedron(&t2, &p2).unwrap();
 
-        assert_eq!(space.find_clusters().len(), 1, "should be 1 cluster before remove+readd");
+        assert_eq!(
+            space.find_clusters().len(),
+            1,
+            "should be 1 cluster before remove+readd"
+        );
 
         let vertices_before = space.vertex_count();
 
@@ -769,8 +884,17 @@ mod tests {
         let _new_b = space.add_tetrahedron(&moved, &positions).unwrap();
 
         let clusters_after = space.find_clusters();
-        assert_eq!(clusters_after.len(), 1, "should still be 1 cluster after remove+readd at same position, got {}", clusters_after.len());
-        assert_eq!(space.vertex_count(), vertices_before, "vertex count should be preserved");
+        assert_eq!(
+            clusters_after.len(),
+            1,
+            "should still be 1 cluster after remove+readd at same position, got {}",
+            clusters_after.len()
+        );
+        assert_eq!(
+            space.vertex_count(),
+            vertices_before,
+            "vertex count should be preserved"
+        );
     }
 
     #[test]
@@ -784,7 +908,11 @@ mod tests {
             ids.push(id);
         }
 
-        assert_eq!(space.find_clusters().len(), 1, "10 tetras in a chain should be 1 cluster");
+        assert_eq!(
+            space.find_clusters().len(),
+            1,
+            "10 tetras in a chain should be 1 cluster"
+        );
 
         let vertices_before = space.vertex_count();
 
@@ -801,10 +929,19 @@ mod tests {
             ids = new_ids;
 
             let clusters = space.find_clusters();
-            assert_eq!(clusters.len(), 1, "should still be 1 cluster after remove+readd round, got {}", clusters.len());
+            assert_eq!(
+                clusters.len(),
+                1,
+                "should still be 1 cluster after remove+readd round, got {}",
+                clusters.len()
+            );
         }
 
-        assert_eq!(space.vertex_count(), vertices_before, "vertex count should be preserved");
+        assert_eq!(
+            space.vertex_count(),
+            vertices_before,
+            "vertex count should be preserved"
+        );
     }
 
     #[test]

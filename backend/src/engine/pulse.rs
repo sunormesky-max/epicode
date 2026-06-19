@@ -1,10 +1,10 @@
-﻿use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use crate::domain::pulse::{Pulse, PulseResult};
 use crate::domain::space::Space;
 use crate::domain::tetra::TetraId;
-use crate::engine::vector::VectorLayer;
 use crate::engine::knowledge::KnowledgeGraph;
+use crate::engine::vector::VectorLayer;
 
 #[derive(Debug, Clone, Copy)]
 pub enum PulseType {
@@ -28,8 +28,7 @@ impl PulseEngine {
         let snapshot: HashMap<TetraId, &crate::domain::tetra::Tetrahedron> =
             all.iter().map(|t| (t.id, t)).collect();
 
-        let origin_tetra = snapshot.get(&origin)
-            .ok_or("origin not found")?;
+        let origin_tetra = snapshot.get(&origin).ok_or("origin not found")?;
 
         let mut current_id = origin;
         let origin_labels: Vec<String> = origin_tetra.data.labels.clone();
@@ -57,9 +56,7 @@ impl PulseEngine {
 
         let layer_height = space.cylinder_height() / 4.0;
 
-        let current_layer = |z: f64| -> usize {
-            (z.max(0.0) / layer_height).floor() as usize
-        };
+        let current_layer = |z: f64| -> usize { (z.max(0.0) / layer_height).floor() as usize };
 
         for _step in 0..ttl as usize {
             let mut candidates: Vec<(TetraId, f64)> = Vec::new();
@@ -74,12 +71,23 @@ impl PulseEngine {
             let neighbor_ids = space.neighbors_of(current_id);
 
             for &nid in &neighbor_ids {
-                if visited_set.contains(&nid) { continue; }
+                if visited_set.contains(&nid) {
+                    continue;
+                }
                 if let Some(nt) = snapshot.get(&nid) {
-                    let sim = VectorLayer::best_similarity(&current_embedding, &current_labels, &nt.data.embedding, &nt.data.labels);
+                    let sim = VectorLayer::best_similarity(
+                        &current_embedding,
+                        &current_labels,
+                        &nt.data.embedding,
+                        &nt.data.labels,
+                    );
                     if sim >= 0.01 {
                         let neighbor_layer = current_layer(nt.core.z);
-                        let layer_mult = if neighbor_layer == cur_layer { 1.2 } else { 0.4 };
+                        let layer_mult = if neighbor_layer == cur_layer {
+                            1.2
+                        } else {
+                            0.4
+                        };
                         candidates.push((nid, sim * layer_mult));
                     }
                 }
@@ -88,7 +96,12 @@ impl PulseEngine {
             for (target_id, _, strength) in kg.query_relations(current_id) {
                 if !visited_set.contains(&target_id) {
                     if let Some(nt) = snapshot.get(&target_id) {
-                        let sim = VectorLayer::best_similarity(&current_embedding, &current_labels, &nt.data.embedding, &nt.data.labels);
+                        let sim = VectorLayer::best_similarity(
+                            &current_embedding,
+                            &current_labels,
+                            &nt.data.embedding,
+                            &nt.data.labels,
+                        );
                         let target_layer = current_layer(nt.core.z);
                         let layer_mult = if target_layer == cur_layer { 1.0 } else { 0.5 };
                         candidates.push((target_id, (sim * layer_mult).max(strength * 0.6)));
@@ -100,10 +113,19 @@ impl PulseEngine {
                 let bfs_neighbors = space.bfs_neighbors(current_id, 3);
                 let mut best_fallback: Option<(TetraId, f64)> = None;
                 for (nid, hops) in &bfs_neighbors {
-                    if visited_set.contains(nid) { continue; }
+                    if visited_set.contains(nid) {
+                        continue;
+                    }
                     if let Some(nt) = snapshot.get(nid) {
-                        let sim = VectorLayer::best_similarity(&current_embedding, &current_labels, &nt.data.embedding, &nt.data.labels);
-                        if sim < 0.01 { continue; }
+                        let sim = VectorLayer::best_similarity(
+                            &current_embedding,
+                            &current_labels,
+                            &nt.data.embedding,
+                            &nt.data.labels,
+                        );
+                        if sim < 0.01 {
+                            continue;
+                        }
                         let hop_decay = 1.0 / (*hops as f64).max(1.0);
                         let score = sim * hop_decay;
                         match &best_fallback {
@@ -115,9 +137,18 @@ impl PulseEngine {
                 }
                 if best_fallback.is_none() {
                     for t in &all {
-                        if visited_set.contains(&t.id) { continue; }
-                        let sim = VectorLayer::best_similarity(&current_embedding, &current_labels, &t.data.embedding, &t.data.labels);
-                        if sim < 0.01 { continue; }
+                        if visited_set.contains(&t.id) {
+                            continue;
+                        }
+                        let sim = VectorLayer::best_similarity(
+                            &current_embedding,
+                            &current_labels,
+                            &t.data.embedding,
+                            &t.data.labels,
+                        );
+                        if sim < 0.01 {
+                            continue;
+                        }
                         let score = sim * 0.5;
                         match &best_fallback {
                             None => best_fallback = Some((t.id, score)),
@@ -152,8 +183,12 @@ impl PulseEngine {
                     collected_hashes.push(next_t.data.content_hash);
                 }
 
-                kg.add_relation(current_id, *next_id,
-                    crate::engine::knowledge::RelationType::Related, *score);
+                kg.add_relation(
+                    current_id,
+                    *next_id,
+                    crate::engine::knowledge::RelationType::Related,
+                    *score,
+                );
 
                 mass_updates.push((*next_id, 0.02 * score));
 
@@ -162,7 +197,9 @@ impl PulseEngine {
                 break;
             }
 
-            if !stepped { break; }
+            if !stepped {
+                break;
+            }
         }
 
         if boost > 0.0 {
@@ -171,8 +208,18 @@ impl PulseEngine {
                     let a = visited[i];
                     let b = visited[j];
                     if let (Some(ta), Some(tb)) = (snapshot.get(&a), snapshot.get(&b)) {
-                        let sim = VectorLayer::best_similarity(&ta.data.embedding, &ta.data.labels, &tb.data.embedding, &tb.data.labels);
-                        kg.add_relation(a, b, crate::engine::knowledge::RelationType::SimilarTo, (sim + boost).min(1.0));
+                        let sim = VectorLayer::best_similarity(
+                            &ta.data.embedding,
+                            &ta.data.labels,
+                            &tb.data.embedding,
+                            &tb.data.labels,
+                        );
+                        kg.add_relation(
+                            a,
+                            b,
+                            crate::engine::knowledge::RelationType::SimilarTo,
+                            (sim + boost).min(1.0),
+                        );
                     }
                 }
             }
@@ -227,8 +274,22 @@ mod tests {
             let core = Point3::new(i as f64 * 1.0, 0.0, 0.0);
             let pos = Tetrahedron::compute_vertices(core);
             let t = Tetrahedron {
-                id: 0, vertex_ids: [0; 4], core,
-                data: MemoryPayload { content: text.to_string(), content_hash: i as u64, labels: labels.clone(), timestamp: 0, aliases: vec![], embedding: vec![], importance: 1.0, enforced: false, rationale: None, access_count: 0, memory_type: None },
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: MemoryPayload {
+                    content: text.to_string(),
+                    content_hash: i as u64,
+                    labels: labels.clone(),
+                    timestamp: 0,
+                    aliases: vec![],
+                    embedding: vec![],
+                    importance: 1.0,
+                    enforced: false,
+                    rationale: None,
+                    access_count: 0,
+                    memory_type: None,
+                },
                 mass: 1.0,
             };
             space.add_tetrahedron(&t, &pos).unwrap();
@@ -240,21 +301,27 @@ mod tests {
     #[test]
     fn reinforcing_pulse_strengthens_relations() {
         let (space, kg) = setup();
-        let r = PulseEngine::send(&space, &kg, PulseType::Reinforcing { boost: 0.3 }, 0, 3).unwrap();
-        assert!(r.data.visited_tetras.len() >= 1, "pulse should visit at least origin");
+        let r =
+            PulseEngine::send(&space, &kg, PulseType::Reinforcing { boost: 0.3 }, 0, 3).unwrap();
+        assert!(
+            r.data.visited_tetras.len() >= 1,
+            "pulse should visit at least origin"
+        );
     }
 
     #[test]
     fn exploratory_pulse_finds_weak_signals() {
         let (space, kg) = setup();
-        let r = PulseEngine::send(&space, &kg, PulseType::Exploratory { curiosity: 0.5 }, 0, 3).unwrap();
+        let r = PulseEngine::send(&space, &kg, PulseType::Exploratory { curiosity: 0.5 }, 0, 3)
+            .unwrap();
         assert!(r.data.visited_tetras.len() >= 1);
     }
 
     #[test]
     fn cascade_pulse_branches() {
         let (space, kg) = setup();
-        let r = PulseEngine::send(&space, &kg, PulseType::Cascade { branch_limit: 2 }, 0, 5).unwrap();
+        let r =
+            PulseEngine::send(&space, &kg, PulseType::Cascade { branch_limit: 2 }, 0, 5).unwrap();
         assert!(r.data.visited_tetras.len() >= 1);
     }
 }
