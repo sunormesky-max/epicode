@@ -25,25 +25,32 @@ const fn canonical_offsets() -> [Point3; 4] {
     let half = 0.5;
     let z = 0.3535533905932738;
     [
-        Point3 { x: half, y: 0.0,  z: -z },
-        Point3 { x: -half, y: 0.0, z: -z },
-        Point3 { x: 0.0,  y: half, z:  z },
-        Point3 { x: 0.0,  y: -half, z:  z },
+        Point3 {
+            x: half,
+            y: 0.0,
+            z: -z,
+        },
+        Point3 {
+            x: -half,
+            y: 0.0,
+            z: -z,
+        },
+        Point3 {
+            x: 0.0,
+            y: half,
+            z: z,
+        },
+        Point3 {
+            x: 0.0,
+            y: -half,
+            z: z,
+        },
     ]
 }
 
-const EDGES: [(usize, usize); EDGE_COUNT] = [
-    (0, 1), (0, 2), (0, 3),
-    (1, 2), (1, 3),
-    (2, 3),
-];
+const EDGES: [(usize, usize); EDGE_COUNT] = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
 
-const FACES: [[usize; 3]; FACE_COUNT] = [
-    [0, 2, 1],
-    [0, 1, 3],
-    [0, 3, 2],
-    [1, 2, 3],
-];
+const FACES: [[usize; 3]; FACE_COUNT] = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]];
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MemoryPayload {
@@ -102,10 +109,26 @@ impl Tetrahedron {
     pub fn compute_vertices(center: Point3) -> [Point3; VERTEX_COUNT] {
         let offsets = canonical_offsets();
         [
-            Point3::new(center.x + offsets[0].x, center.y + offsets[0].y, center.z + offsets[0].z),
-            Point3::new(center.x + offsets[1].x, center.y + offsets[1].y, center.z + offsets[1].z),
-            Point3::new(center.x + offsets[2].x, center.y + offsets[2].y, center.z + offsets[2].z),
-            Point3::new(center.x + offsets[3].x, center.y + offsets[3].y, center.z + offsets[3].z),
+            Point3::new(
+                center.x + offsets[0].x,
+                center.y + offsets[0].y,
+                center.z + offsets[0].z,
+            ),
+            Point3::new(
+                center.x + offsets[1].x,
+                center.y + offsets[1].y,
+                center.z + offsets[1].z,
+            ),
+            Point3::new(
+                center.x + offsets[2].x,
+                center.y + offsets[2].y,
+                center.z + offsets[2].z,
+            ),
+            Point3::new(
+                center.x + offsets[3].x,
+                center.y + offsets[3].y,
+                center.z + offsets[3].z,
+            ),
         ]
     }
 
@@ -134,9 +157,7 @@ impl Tetrahedron {
 
     /// Verify that the computed centroid matches the core point.
     pub fn verify_core(positions: &[Point3; VERTEX_COUNT], core: Point3) -> bool {
-        let refs: [&Point3; 4] = [
-            &positions[0], &positions[1], &positions[2], &positions[3],
-        ];
+        let refs: [&Point3; 4] = [&positions[0], &positions[1], &positions[2], &positions[3]];
         Point3::centroid(&refs).distance_to(&core) < SHAPE_EPSILON
     }
 
@@ -164,8 +185,14 @@ mod tests {
         let pos = positions(Point3::zero());
         for &(i, j) in Tetrahedron::edges() {
             let d = pos[i].distance_to(&pos[j]);
-            assert!((d - EDGE_LENGTH).abs() < 1e-10,
-                "edge ({},{}) = {}, expected {}", i, j, d, EDGE_LENGTH);
+            assert!(
+                (d - EDGE_LENGTH).abs() < 1e-10,
+                "edge ({},{}) = {}, expected {}",
+                i,
+                j,
+                d,
+                EDGE_LENGTH
+            );
         }
     }
 
@@ -193,8 +220,12 @@ mod tests {
         let pos = positions(Point3::zero());
         for p in &pos {
             let d = p.distance_to(&Point3::zero());
-            assert!((d - expected).abs() < 1e-10,
-                "vertex-center dist = {}, expected {}", d, expected);
+            assert!(
+                (d - expected).abs() < 1e-10,
+                "vertex-center dist = {}, expected {}",
+                d,
+                expected
+            );
         }
     }
 

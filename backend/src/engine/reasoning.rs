@@ -1,8 +1,8 @@
-﻿use std::collections::HashMap;
 use crate::domain::space::Space;
 use crate::domain::tetra::TetraId;
 use crate::engine::knowledge::KnowledgeGraph;
 use crate::engine::vector::VectorLayer;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Analogy {
@@ -28,9 +28,8 @@ impl ReasoningEngine {
         }
 
         let mut analogies = Vec::new();
-        let labels: HashMap<TetraId, &Vec<String>> = tetras.iter()
-            .map(|t| (t.id, &t.data.labels))
-            .collect();
+        let labels: HashMap<TetraId, &Vec<String>> =
+            tetras.iter().map(|t| (t.id, &t.data.labels)).collect();
 
         let max_pairs = 50usize;
         let mut pair_sims: Vec<(usize, usize, f64)> = Vec::new();
@@ -53,7 +52,9 @@ impl ReasoningEngine {
                 use rand::Rng;
                 let i = rng.gen_range(0..tetras.len());
                 let j = rng.gen_range(0..tetras.len());
-                if i >= j { continue; }
+                if i >= j {
+                    continue;
+                }
                 let sim = VectorLayer::label_jaccard(
                     labels.get(&tetras[i].id).unwrap_or(&&vec![]),
                     labels.get(&tetras[j].id).unwrap_or(&&vec![]),
@@ -68,22 +69,34 @@ impl ReasoningEngine {
 
         for (pi, &(i, j, sim_ab)) in pair_sims.iter().enumerate() {
             for (pk, &(k, l, sim_cd)) in pair_sims.iter().enumerate() {
-                if pk <= pi { continue; }
-                if k == i || k == j || l == i || l == j { continue; }
+                if pk <= pi {
+                    continue;
+                }
+                if k == i || k == j || l == i || l == j {
+                    continue;
+                }
                 let rel_sim = 1.0 - (sim_ab - sim_cd).abs();
                 if rel_sim > min_confidence {
                     analogies.push(Analogy {
-                        source_a: tetras[i].id, source_b: tetras[j].id,
-                        target_a: tetras[k].id, target_b: tetras[l].id,
+                        source_a: tetras[i].id,
+                        source_b: tetras[j].id,
+                        target_a: tetras[k].id,
+                        target_b: tetras[l].id,
                         confidence: rel_sim,
                         relation: "SimilarTo".into(),
                     });
                 }
             }
-            if analogies.len() >= 10 { break; }
+            if analogies.len() >= 10 {
+                break;
+            }
         }
 
-        analogies.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        analogies.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         analogies.truncate(10);
         analogies
     }
@@ -98,9 +111,7 @@ impl ReasoningEngine {
             patterns.push(format!("{} clusters, avg size={:.1}", clusters.len(), avg));
         }
 
-        let orphans = clusters.iter()
-            .filter(|c| c.tetra_ids.len() == 1)
-            .count();
+        let orphans = clusters.iter().filter(|c| c.tetra_ids.len() == 1).count();
         if orphans > 0 {
             patterns.push(format!("{} orphan tetras detected", orphans));
         }
@@ -142,8 +153,22 @@ mod tests {
             let core = Point3::zero();
             let pos = Tetrahedron::compute_vertices(core);
             let t = Tetrahedron {
-                id: 0, vertex_ids: [0; 4], core,
-                data: crate::domain::tetra::MemoryPayload { content: text.to_string(), content_hash: 0, labels: labels.clone(), timestamp: 0, aliases: vec![], embedding: vec![], importance: 1.0, enforced: false, rationale: None, access_count: 0, memory_type: None },
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: crate::domain::tetra::MemoryPayload {
+                    content: text.to_string(),
+                    content_hash: 0,
+                    labels: labels.clone(),
+                    timestamp: 0,
+                    aliases: vec![],
+                    embedding: vec![],
+                    importance: 1.0,
+                    enforced: false,
+                    rationale: None,
+                    access_count: 0,
+                    memory_type: None,
+                },
                 mass: 1.0,
             };
             space.add_tetrahedron(&t, &pos).unwrap();
@@ -160,8 +185,11 @@ mod tests {
             let core = Point3::new(i as f64 * 10.0, 0.0, 0.0);
             let pos = Tetrahedron::compute_vertices(core);
             let t = Tetrahedron {
-                id: 0, vertex_ids: [0; 4], core,
-                data: Default::default(), mass: 1.0,
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: Default::default(),
+                mass: 1.0,
             };
             space.add_tetrahedron(&t, &pos).unwrap();
         }

@@ -37,8 +37,6 @@ const DECAY_INTERVAL_SECS: u64 = 300;
 const DECAY_AMOUNT: u32 = 2;
 const FILE_CHECK_INTERVAL_SECS: u64 = 300;
 
-const HONEYPOT_PORTS: &[u16] = &[];
-
 fn get_honeypot_ports() -> Vec<u16> {
     std::env::var("GUARD_HONEYPOT_PORTS")
         .unwrap_or_default()
@@ -194,9 +192,9 @@ impl GuardState {
 
     fn save(&self) {
         if let Ok(data) = serde_json::to_string_pretty(self) {
-            let _ = fs::create_dir_all(
-                std::path::Path::new(STATE_FILE).parent().unwrap(),
-            );
+            if let Some(parent) = std::path::Path::new(STATE_FILE).parent() {
+                let _ = fs::create_dir_all(parent);
+            }
             let _ = fs::write(STATE_FILE, data);
         }
     }
@@ -319,16 +317,25 @@ fn epicode_remember(content: &str, labels: &[&str]) {
         .join(",");
     let body = format!(
         r#"{{"content":"{}","labels":[{}]}}"#,
-        content.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', " ").replace('\r', ""),
+        content
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', " ")
+            .replace('\r', ""),
         labels_str
     );
     let success = Command::new("curl")
         .args(&[
-            "-s", "-X", "POST",
+            "-s",
+            "-X",
+            "POST",
             &format!("{}/v1/remember", EPICODE_API),
-            "-H", &format!("X-API-Key: {}", get_epicode_key()),
-            "-H", "Content-Type: application/json",
-            "-d", &body,
+            "-H",
+            &format!("X-API-Key: {}", get_epicode_key()),
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            &body,
         ])
         .output()
         .map(|o| {
@@ -355,9 +362,7 @@ fn epicode_remember_ban(ip: &str, entry: &IpEntry, timeout: u64) {
         "Security ban: IP {} | type={} | score={} | ssh_fails={} | web_attacks={} | honeypot={} | duration={}h | source=epicode-guard-v{}",
         ip, attack_type, entry.score, entry.ssh_fails, entry.web_attacks, entry.honeypot_hits, timeout / 3600, VERSION
     );
-    let labels = &[
-        "security", "auto-banned", attack_type, "guard-memory",
-    ];
+    let labels = &["security", "auto-banned", attack_type, "guard-memory"];
     epicode_remember(&content, labels);
 }
 
@@ -366,9 +371,7 @@ fn epicode_remember_honeypot(ip: &str, port: u16) {
         "Honeypot capture: IP {} connected to decoy port {} | instant ban | source=epicode-guard-v{}",
         ip, port, VERSION
     );
-    let labels = &[
-        "security", "honeypot", "decoy", "guard-memory",
-    ];
+    let labels = &["security", "honeypot", "decoy", "guard-memory"];
     epicode_remember(&content, labels);
 }
 
@@ -380,7 +383,11 @@ fn log_msg(msg: &str) {
     let ts = Local::now().format("%Y-%m-%d %H:%M:%S");
     let line = format!("[{}] {}", ts, msg);
     println!("{}", line);
-    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(LOG_FILE) {
+    if let Ok(mut f) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(LOG_FILE)
+    {
         let _ = writeln!(f, "{}", line);
     }
 }
@@ -394,21 +401,21 @@ fn is_whitelisted(ip: &str) -> bool {
 }
 
 fn run_cmd(cmd: &str, args: &[&str]) -> bool {
-    Command::new(cmd).args(args).output().map(|o| o.status.success()).unwrap_or(false)
-}
-
-fn run_cmd_output(cmd: &str, args: &[&str]) -> Option<String> {
     Command::new(cmd)
         .args(args)
         .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                Some(String::from_utf8_lossy(&o.stdout).to_string())
-            } else {
-                None
-            }
-        })
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn run_cmd_output(cmd: &str, args: &[&str]) -> Option<String> {
+    Command::new(cmd).args(args).output().ok().and_then(|o| {
+        if o.status.success() {
+            Some(String::from_utf8_lossy(&o.stdout).to_string())
+        } else {
+            None
+        }
+    })
 }
 
 fn nft_init() {
@@ -417,12 +424,34 @@ fn nft_init() {
         .args(&["delete", "table", "inet", NFT_TABLE])
         .output();
     run_cmd("nft", &["add", "table", "inet", NFT_TABLE]);
-    run_cmd("nft", &["add", "set", "inet", NFT_TABLE, NFT_SET,
-        "{ type ipv4_addr; flags timeout; }"]);
-    run_cmd("nft", &["add", "chain", "inet", NFT_TABLE, "input",
-        "{ type filter hook input priority 0; policy accept; }"]);
-    run_cmd("nft", &["add", "rule", "inet", NFT_TABLE, "input",
-        "ip", "saddr", "@ban", "drop"]);
+    run_cmd(
+        "nft",
+        &[
+            "add",
+            "set",
+            "inet",
+            NFT_TABLE,
+            NFT_SET,
+            "{ type ipv4_addr; flags timeout; }",
+        ],
+    );
+    run_cmd(
+        "nft",
+        &[
+            "add",
+            "chain",
+            "inet",
+            NFT_TABLE,
+            "input",
+            "{ type filter hook input priority 0; policy accept; }",
+        ],
+    );
+    run_cmd(
+        "nft",
+        &[
+            "add", "rule", "inet", NFT_TABLE, "input", "ip", "saddr", "@ban", "drop",
+        ],
+    );
     log_msg("nft firewall initialized (independent of firewalld)");
 }
 
@@ -434,12 +463,18 @@ fn nft_ban(ip: &str, timeout_secs: u64) {
         format!("{}s", timeout_secs)
     };
     let element = format!("{{ {} timeout {} }}", ip, timeout_str);
-    run_cmd("nft", &["add", "element", "inet", NFT_TABLE, NFT_SET, &element]);
+    run_cmd(
+        "nft",
+        &["add", "element", "inet", NFT_TABLE, NFT_SET, &element],
+    );
 }
 
 fn nft_unban(ip: &str) {
     let element = format!("{{ {} }}", ip);
-    run_cmd("nft", &["delete", "element", "inet", NFT_TABLE, NFT_SET, &element]);
+    run_cmd(
+        "nft",
+        &["delete", "element", "inet", NFT_TABLE, NFT_SET, &element],
+    );
 }
 
 fn nft_list_banned() -> Vec<String> {
@@ -451,7 +486,12 @@ fn nft_list_banned() -> Vec<String> {
                 let trimmed = line.trim();
                 if trimmed.starts_with("elements = {") || trimmed.contains("timeout") {
                     for part in trimmed.split(',') {
-                        let token = part.split_whitespace().next().unwrap_or("").trim_end_matches('{').trim();
+                        let token = part
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("")
+                            .trim_end_matches('{')
+                            .trim();
                         if token.parse::<IpAddr>().is_ok() && !is_whitelisted(token) {
                             ips.push(token.to_string());
                         }
@@ -475,13 +515,18 @@ fn migrate_v1_rules() {
         let mut count = 0u32;
         for line in rules.lines() {
             let trimmed = line.trim();
-            if trimmed.contains("rule family=\"ipv4\" source address=\"") && trimmed.ends_with("\" drop") {
+            if trimmed.contains("rule family=\"ipv4\" source address=\"")
+                && trimmed.ends_with("\" drop")
+            {
                 run_cmd("firewall-cmd", &["--remove-rich-rule", trimmed]);
                 count += 1;
             }
         }
         if count > 0 {
-            log_msg(&format!("Migrated: removed {} old firewall-cmd rules", count));
+            log_msg(&format!(
+                "Migrated: removed {} old firewall-cmd rules",
+                count
+            ));
         }
     }
 }
@@ -500,8 +545,8 @@ fn start_honeypot(tx: &mpsc::Sender<String>) {
         let tx = tx.clone();
         let _ = thread::Builder::new()
             .name(format!("honeypot-{}", port))
-            .spawn(move || {
-                match std::net::TcpListener::bind(("0.0.0.0", port)) {
+            .spawn(
+                move || match std::net::TcpListener::bind(("0.0.0.0", port)) {
                     Ok(listener) => {
                         listener.set_nonblocking(true).ok();
                         loop {
@@ -526,8 +571,8 @@ fn start_honeypot(tx: &mpsc::Sender<String>) {
                             log_msg(&format!("Honeypot port {} bind failed: {}", port, e));
                         }
                     }
-                }
-            });
+                },
+            );
     }
 }
 
@@ -572,7 +617,10 @@ fn tail_log(path: &str, offset: &mut u64) -> Vec<String> {
 }
 
 fn analyze_ssh(line: &str) -> Option<String> {
-    if !line.contains("Failed password") && !line.contains("Invalid user") && !line.contains("authentication failure") {
+    if !line.contains("Failed password")
+        && !line.contains("Invalid user")
+        && !line.contains("authentication failure")
+    {
         return None;
     }
     let from_pos = line.rfind(" from ")?;
@@ -613,9 +661,8 @@ fn is_attack_request(path: &str) -> bool {
 }
 
 fn hash_file(path: &str) -> Option<String> {
-    run_cmd_output("sha256sum", &[path]).and_then(|out| {
-        out.split_whitespace().next().map(|s| s.to_string())
-    })
+    run_cmd_output("sha256sum", &[path])
+        .and_then(|out| out.split_whitespace().next().map(|s| s.to_string()))
 }
 
 fn check_file_integrity(state: &mut GuardState) {
@@ -629,10 +676,7 @@ fn check_file_integrity(state: &mut GuardState) {
             state.file_hashes.insert(path.to_string(), current);
         } else if let Some(previous) = state.file_hashes.get(path) {
             if &current != previous {
-                log_msg(&format!(
-                    "FILE INTEGRITY ALERT: {} changed!",
-                    path
-                ));
+                log_msg(&format!("FILE INTEGRITY ALERT: {} changed!", path));
                 state.file_hashes.insert(path.to_string(), current);
             }
         } else {
@@ -652,9 +696,12 @@ fn check_unexpected_ports() -> Vec<u16> {
                     if let Some(port_str) = local.rsplit(':').next() {
                         if let Ok(port) = port_str.parse::<u16>() {
                             let honeypot = get_honeypot_ports();
-                            let is_ok = EXPECTED_PORTS.contains(&port) || port == 9111 || honeypot.contains(&port);
+                            let is_ok = EXPECTED_PORTS.contains(&port)
+                                || port == 9111
+                                || honeypot.contains(&port);
                             if !is_ok {
-                                let is_local = local.starts_with("127.0.0.1") || local.starts_with("[::1]");
+                                let is_local =
+                                    local.starts_with("127.0.0.1") || local.starts_with("[::1]");
                                 if !is_local {
                                     ports.push(port);
                                 }
@@ -687,7 +734,10 @@ fn check_connection_flood() -> Vec<(String, usize)> {
             }
         }
     }
-    counts.into_iter().filter(|(_, c)| *c > FLOOD_THRESHOLD).collect()
+    counts
+        .into_iter()
+        .filter(|(_, c)| *c > FLOOD_THRESHOLD)
+        .collect()
 }
 
 fn run_daemon() {
@@ -774,7 +824,10 @@ fn run_daemon() {
         if cycle % 30 == 0 {
             let unexpected = check_unexpected_ports();
             if !unexpected.is_empty() && unexpected != state.last_ports {
-                log_msg(&format!("PORT ALERT: unexpected listening: {:?}", unexpected));
+                log_msg(&format!(
+                    "PORT ALERT: unexpected listening: {:?}",
+                    unexpected
+                ));
             }
             state.last_ports = unexpected;
         }
@@ -784,7 +837,10 @@ fn run_daemon() {
             for (ip, count) in &floods {
                 let entry = state.ips.entry(ip.clone()).or_default();
                 if entry.banned_until == 0 {
-                    log_msg(&format!("FLOOD: {} has {} concurrent connections", ip, count));
+                    log_msg(&format!(
+                        "FLOOD: {} has {} concurrent connections",
+                        ip, count
+                    ));
                     state.record(ip, 5, "flood", now);
                 }
             }
@@ -823,7 +879,12 @@ fn cmd_status() {
 
     let uptime = if state.start_time > 0 {
         let secs = now - state.start_time;
-        format!("{}d {}h {}m", secs / 86400, (secs % 86400) / 3600, (secs % 3600) / 60)
+        format!(
+            "{}d {}h {}m",
+            secs / 86400,
+            (secs % 86400) / 3600,
+            (secs % 3600) / 60
+        )
     } else {
         "unknown".to_string()
     };
@@ -836,14 +897,24 @@ fn cmd_status() {
     println!("Honeypot Hits:     {}", state.total_honeypot);
     println!();
 
-    let active: Vec<_> = state.ips.iter().filter(|(_, e)| e.banned_until > now).collect();
+    let active: Vec<_> = state
+        .ips
+        .iter()
+        .filter(|(_, e)| e.banned_until > now)
+        .collect();
     if !active.is_empty() {
         println!("--- Active Bans (top 20 by score) ---");
         let mut sorted = active;
         sorted.sort_by(|a, b| b.1.score.cmp(&a.1.score));
         for (ip, entry) in sorted.iter().take(20) {
             let remain = (entry.banned_until - now) / 60;
-            let tags = if entry.honeypot_hits > 0 { "HONEYPOT" } else if entry.web_attacks > 0 { "WEB" } else { "SSH" };
+            let tags = if entry.honeypot_hits > 0 {
+                "HONEYPOT"
+            } else if entry.web_attacks > 0 {
+                "WEB"
+            } else {
+                "SSH"
+            };
             println!(
                 "  {:<18} score={:<4} {} remain={}m",
                 ip, entry.score, tags, remain
@@ -881,7 +952,11 @@ fn cmd_ban(ip: &str) {
     entry.score = BAN_THRESHOLD;
     state.total_bans += 1;
     state.save();
-    log_msg(&format!("Manual ban: {} for {}h", ip, BAN_TIMEOUT_SECS / 3600));
+    log_msg(&format!(
+        "Manual ban: {} for {}h",
+        ip,
+        BAN_TIMEOUT_SECS / 3600
+    ));
     println!("Banned {} for {} hours", ip, BAN_TIMEOUT_SECS / 3600);
 }
 
@@ -921,7 +996,14 @@ fn cmd_check() {
     state.save();
     println!();
     let unexpected = check_unexpected_ports();
-    println!("Unexpected ports: {}", if unexpected.is_empty() { "none".to_string() } else { format!("{:?}", unexpected) });
+    println!(
+        "Unexpected ports: {}",
+        if unexpected.is_empty() {
+            "none".to_string()
+        } else {
+            format!("{:?}", unexpected)
+        }
+    );
     let floods = check_connection_flood();
     if floods.is_empty() {
         println!("Connection flood: none");

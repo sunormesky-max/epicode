@@ -13,7 +13,9 @@ pub struct SecurityContext {
 
 impl SecurityContext {
     pub fn anonymous() -> Self {
-        Self { client_id: "anonymous".to_string() }
+        Self {
+            client_id: "anonymous".to_string(),
+        }
     }
 }
 
@@ -48,11 +50,15 @@ pub async fn security_layer(
                 SecurityResult::DeniedEnergy => StatusCode::SERVICE_UNAVAILABLE,
                 SecurityResult::Allowed => StatusCode::OK,
             };
-            (status, axum::Json(serde_json::json!({
-                "success": false,
-                "error": format!("{:?}", result),
-                "action": action,
-            }))).into_response()
+            (
+                status,
+                axum::Json(serde_json::json!({
+                    "success": false,
+                    "error": format!("{:?}", result),
+                    "action": action,
+                })),
+            )
+                .into_response()
         }
     }
 }

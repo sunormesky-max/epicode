@@ -1,6 +1,6 @@
+use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use parking_lot::Mutex;
 
 use crate::domain::space::Space;
 use crate::domain::tetra::{MemoryPayload, TetraId};
@@ -45,7 +45,10 @@ impl SearchEngineState {
         *self.df_cache.lock() = None;
     }
 
-    fn get_or_build_df(&self, tetras: &[crate::domain::tetra::Tetrahedron]) -> (HashMap<String, usize>, usize, f64) {
+    fn get_or_build_df(
+        &self,
+        tetras: &[crate::domain::tetra::Tetrahedron],
+    ) -> (HashMap<String, usize>, usize, f64) {
         let mut cache = self.df_cache.lock();
         if let Some(ref c) = *cache {
             if c.tetra_count == tetras.len() {
@@ -100,28 +103,58 @@ pub fn tokenize(text: &str) -> Vec<String> {
 
     for ch in lower.chars() {
         if ch.is_whitespace() {
-            if !word_buf.is_empty() { tokens.push(word_buf.clone()); word_buf.clear(); }
-            if !cjk_buf.is_empty() { flush_cjk(&cjk_buf, &mut tokens); cjk_buf.clear(); }
+            if !word_buf.is_empty() {
+                tokens.push(word_buf.clone());
+                word_buf.clear();
+            }
+            if !cjk_buf.is_empty() {
+                flush_cjk(&cjk_buf, &mut tokens);
+                cjk_buf.clear();
+            }
         } else if is_cjk(ch) {
-            if !word_buf.is_empty() { tokens.push(word_buf.clone()); word_buf.clear(); }
+            if !word_buf.is_empty() {
+                tokens.push(word_buf.clone());
+                word_buf.clear();
+            }
             cjk_buf.push(ch);
-        } else if ch.is_alphanumeric() || ch == '-' || ch == '_' || ch == '.' || ch == '/' || ch == ':' {
-            if !cjk_buf.is_empty() { flush_cjk(&cjk_buf, &mut tokens); cjk_buf.clear(); }
+        } else if ch.is_alphanumeric()
+            || ch == '-'
+            || ch == '_'
+            || ch == '.'
+            || ch == '/'
+            || ch == ':'
+        {
+            if !cjk_buf.is_empty() {
+                flush_cjk(&cjk_buf, &mut tokens);
+                cjk_buf.clear();
+            }
             word_buf.push(ch);
         } else {
-            if !word_buf.is_empty() { tokens.push(word_buf.clone()); word_buf.clear(); }
-            if !cjk_buf.is_empty() { flush_cjk(&cjk_buf, &mut tokens); cjk_buf.clear(); }
+            if !word_buf.is_empty() {
+                tokens.push(word_buf.clone());
+                word_buf.clear();
+            }
+            if !cjk_buf.is_empty() {
+                flush_cjk(&cjk_buf, &mut tokens);
+                cjk_buf.clear();
+            }
         }
     }
-    if !word_buf.is_empty() { tokens.push(word_buf); }
-    if !cjk_buf.is_empty() { flush_cjk(&cjk_buf, &mut tokens); }
+    if !word_buf.is_empty() {
+        tokens.push(word_buf);
+    }
+    if !cjk_buf.is_empty() {
+        flush_cjk(&cjk_buf, &mut tokens);
+    }
 
     tokens
 }
 
 fn flush_cjk(buf: &str, tokens: &mut Vec<String>) {
     let chars: Vec<char> = buf.chars().collect();
-    if chars.is_empty() { return; }
+    if chars.is_empty() {
+        return;
+    }
     if chars.len() == 1 {
         tokens.push(chars[0].to_string());
         return;
@@ -145,7 +178,10 @@ pub fn search(
         match ctx.cognitive.translate_and_expand(query) {
             Ok((en, _translated)) => en,
             Err(e) => {
-                tracing::debug!("[Gateway] translate_and_expand failed: {}, using raw query", e);
+                tracing::debug!(
+                    "[Gateway] translate_and_expand failed: {}, using raw query",
+                    e
+                );
                 query.to_string()
             }
         }
@@ -169,10 +205,22 @@ pub fn search(
     let access_counts = ctx.state.access_counts.lock();
     let mut scored: Vec<(TetraId, f64, f64, MemoryPayload)> = if !hnsw_candidates.is_empty() {
         let candidate_set: HashSet<u64> = hnsw_candidates.iter().map(|(id, _)| *id).collect();
-        all_tetras.into_iter()
+        all_tetras
+            .into_iter()
             .filter(|t| candidate_set.contains(&t.id))
             .filter(|t| passes_filters(t, filters))
-            .map(|t| score_tetra(&t, &query_embedding, &search_query, avg_dl, doc_count, df_map_ref, false, &access_counts))
+            .map(|t| {
+                score_tetra(
+                    &t,
+                    &query_embedding,
+                    &search_query,
+                    avg_dl,
+                    doc_count,
+                    df_map_ref,
+                    false,
+                    &access_counts,
+                )
+            })
             .collect()
     } else {
         let label_idx = ctx.label_index.lock();
@@ -180,13 +228,20 @@ pub fn search(
         let mut candidate_ids: HashSet<u64> = HashSet::new();
         for tok in &query_tokens {
             if let Some(ids) = label_idx.get(tok) {
-                for &id in ids { candidate_ids.insert(id); }
+                for &id in ids {
+                    candidate_ids.insert(id);
+                }
             }
         }
         for (label, ids) in label_idx.iter() {
             let label_lower = label.to_lowercase();
-            if query_tokens.iter().any(|w| label_lower.contains(w.as_str())) {
-                for &id in ids { candidate_ids.insert(id); }
+            if query_tokens
+                .iter()
+                .any(|w| label_lower.contains(w.as_str()))
+            {
+                for &id in ids {
+                    candidate_ids.insert(id);
+                }
             }
         }
         drop(label_idx);
@@ -194,12 +249,28 @@ pub fn search(
         if candidate_ids.is_empty() {
             let cap = 2000;
             candidate_ids = all_tetras.iter().take(cap).map(|t| t.id).collect();
-            tracing::warn!("[Search] no label candidates, using first {} of {} tetras as fallback", cap, all_tetras.len());
+            tracing::warn!(
+                "[Search] no label candidates, using first {} of {} tetras as fallback",
+                cap,
+                all_tetras.len()
+            );
         }
-        all_tetras.into_iter()
+        all_tetras
+            .into_iter()
             .filter(|t| candidate_ids.contains(&t.id))
             .filter(|t| passes_filters(t, filters))
-            .map(|t| score_tetra(&t, &query_embedding, &search_query, avg_dl, doc_count, df_map_ref, true, &access_counts))
+            .map(|t| {
+                score_tetra(
+                    &t,
+                    &query_embedding,
+                    &search_query,
+                    avg_dl,
+                    doc_count,
+                    df_map_ref,
+                    true,
+                    &access_counts,
+                )
+            })
             .collect()
     };
     drop(access_counts);
@@ -210,7 +281,8 @@ pub fn search(
     let need_rerank = best_sim < 0.35 && ctx.cognitive.enabled() && scored.len() > 1;
     if need_rerank {
         let rerank_n = scored.len().min(10);
-        let cand_text: Vec<String> = scored.iter()
+        let cand_text: Vec<String> = scored
+            .iter()
             .take(rerank_n)
             .enumerate()
             .map(|(i, (_id, sim, _mass, payload))| {
@@ -222,7 +294,10 @@ pub fn search(
                     let a: Vec<String> = payload.aliases.iter().take(3).cloned().collect();
                     format!(" [{}]", a.join("; "))
                 };
-                format!("[{}] [{}] sim={:.3}{} {}", i, labels, sim, alias_str, preview)
+                format!(
+                    "[{}] [{}] sim={:.3}{} {}",
+                    i, labels, sim, alias_str, preview
+                )
             })
             .collect();
         let cand_joined = cand_text.join("\n");
@@ -252,7 +327,11 @@ pub fn search(
         if *sim > 0.25 {
             ctx.state.search_hits.fetch_add(1, AtomicOrdering::Relaxed);
             for label in &payload.labels {
-                *ctx.state.search_top_labels.lock().entry(label.clone()).or_insert(0) += 1;
+                *ctx.state
+                    .search_top_labels
+                    .lock()
+                    .entry(label.clone())
+                    .or_insert(0) += 1;
             }
             *ctx.state.access_counts.lock().entry(*id).or_insert(0) += 1;
         }
@@ -273,29 +352,49 @@ fn passes_filters(t: &crate::domain::tetra::Tetrahedron, filters: Option<&Search
     if let Some(ref labels) = f.labels {
         if !labels.is_empty() {
             let has_any = labels.iter().any(|l| t.data.labels.contains(l));
-            if !has_any { return false; }
+            if !has_any {
+                return false;
+            }
         }
     }
     if let Some(min) = f.min_importance {
-        if t.data.importance < min { return false; }
+        if t.data.importance < min {
+            return false;
+        }
     }
     if let Some(max) = f.max_importance {
-        if t.data.importance > max { return false; }
+        if t.data.importance > max {
+            return false;
+        }
     }
     if let Some(since) = f.since_ts {
-        if t.data.timestamp < since { return false; }
+        if t.data.timestamp < since {
+            return false;
+        }
     }
     if let Some(until) = f.until_ts {
-        if t.data.timestamp > until { return false; }
+        if t.data.timestamp > until {
+            return false;
+        }
     }
     if let Some(ref project) = f.project {
-        let has_project = t.data.labels.iter().any(|l| l == project || l.starts_with(&format!("project:{}", project)));
-        if !has_project { return false; }
+        let has_project = t
+            .data
+            .labels
+            .iter()
+            .any(|l| l == project || l.starts_with(&format!("project:{}", project)));
+        if !has_project {
+            return false;
+        }
     }
     true
 }
 
-fn compute_query_embedding(text: &str, vector: Option<&crate::engine::vector::VectorLayer>, embedding: &EmbeddingService) -> Option<Vec<f64>> {
+fn compute_query_embedding(
+    text: &str,
+    vector: Option<&crate::engine::vector::VectorLayer>,
+    embedding: &EmbeddingService,
+) -> Option<Vec<f64>> {
     if let Some(vl) = vector {
         match vl.embed(text) {
             Ok(emb) => return Some(emb),
@@ -332,7 +431,8 @@ fn keyword_score(query: &str, payload: &MemoryPayload) -> f64 {
     let content_lower = payload.content.to_lowercase();
     let alias_text = payload.aliases.join(" ").to_lowercase();
     let searchable = format!("{} {}", content_lower, alias_text);
-    let matched = query_tokens.iter()
+    let matched = query_tokens
+        .iter()
         .filter(|w| searchable.contains(w.as_str()))
         .count();
     matched as f64 / query_tokens.len() as f64
@@ -344,7 +444,8 @@ fn compute_label_boost(query: &str, labels: &[String]) -> f64 {
         return 0.0;
     }
     let label_text = labels.join(" ").to_lowercase();
-    let label_match = query_tokens.iter()
+    let label_match = query_tokens
+        .iter()
         .filter(|w| label_text.contains(w.as_str()))
         .count();
     label_match as f64 / query_tokens.len() as f64
@@ -352,20 +453,32 @@ fn compute_label_boost(query: &str, labels: &[String]) -> f64 {
 
 fn compute_entity_boost(query: &str, labels: &[String]) -> f64 {
     let query_tokens = tokenize(query);
-    if query_tokens.is_empty() { return 0.0; }
+    if query_tokens.is_empty() {
+        return 0.0;
+    }
     let entity_labels: Vec<&String> = labels.iter().filter(|l| l.starts_with("entity:")).collect();
-    if entity_labels.is_empty() { return 0.0; }
-    let entity_text = entity_labels.iter()
+    if entity_labels.is_empty() {
+        return 0.0;
+    }
+    let entity_text = entity_labels
+        .iter()
         .map(|l| l.trim_start_matches("entity:").to_lowercase())
         .collect::<Vec<_>>()
         .join(" ");
-    let matched = query_tokens.iter()
+    let matched = query_tokens
+        .iter()
         .filter(|w| entity_text.contains(w.as_str()))
         .count();
     matched as f64 / query_tokens.len() as f64
 }
 
-fn bm25_score(query: &str, payload: &MemoryPayload, avg_dl: f64, doc_count: usize, df_map: &std::collections::HashMap<String, usize>) -> f64 {
+fn bm25_score(
+    query: &str,
+    payload: &MemoryPayload,
+    avg_dl: f64,
+    doc_count: usize,
+    df_map: &std::collections::HashMap<String, usize>,
+) -> f64 {
     let query_tokens = tokenize(query);
     if query_tokens.is_empty() {
         return 0.0;
@@ -385,7 +498,9 @@ fn bm25_score(query: &str, payload: &MemoryPayload, avg_dl: f64, doc_count: usiz
     let mut score = 0.0;
     for term in &query_tokens {
         let tf = doc_tokens.iter().filter(|t| **t == *term).count() as f64;
-        if tf == 0.0 { continue; }
+        if tf == 0.0 {
+            continue;
+        }
         let df = *df_map.get(term).unwrap_or(&1) as f64;
         let idf = ((n - df + 0.5) / (df + 0.5) + 1.0).ln();
         let tf_norm = (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * dl / avg_dl));
@@ -394,7 +509,9 @@ fn bm25_score(query: &str, payload: &MemoryPayload, avg_dl: f64, doc_count: usiz
     score
 }
 
-fn build_df_map(tetras: &[crate::domain::tetra::Tetrahedron]) -> (HashMap<String, usize>, usize, f64) {
+fn build_df_map(
+    tetras: &[crate::domain::tetra::Tetrahedron],
+) -> (HashMap<String, usize>, usize, f64) {
     let mut df: HashMap<String, usize> = HashMap::new();
     let mut total_dl: f64 = 0.0;
     let doc_count = tetras.len();
@@ -412,14 +529,23 @@ fn build_df_map(tetras: &[crate::domain::tetra::Tetrahedron]) -> (HashMap<String
             }
         }
     }
-    let avg_dl = if doc_count > 0 { total_dl / doc_count as f64 } else { 1.0 };
+    let avg_dl = if doc_count > 0 {
+        total_dl / doc_count as f64
+    } else {
+        1.0
+    };
     (df, doc_count, avg_dl.max(1.0))
 }
 
 fn is_noise_label(labels: &[String]) -> bool {
     labels.iter().any(|l| {
         let lower = l.to_lowercase();
-        lower == "test" || lower == "testing" || lower == "junk" || lower == "scratch" || lower == "tmp" || lower == "temp"
+        lower == "test"
+            || lower == "testing"
+            || lower == "junk"
+            || lower == "scratch"
+            || lower == "tmp"
+            || lower == "temp"
     })
 }
 
@@ -429,7 +555,14 @@ fn is_noise_content(content: &str) -> bool {
     if trimmed.len() < 10 {
         return true;
     }
-    let noise_phrases = ["test", "testing 123", "hello world", "测试中文", "测试内容", "test content"];
+    let noise_phrases = [
+        "test",
+        "testing 123",
+        "hello world",
+        "测试中文",
+        "测试内容",
+        "test content",
+    ];
     for phrase in &noise_phrases {
         if lower == *phrase || trimmed.eq_ignore_ascii_case(phrase) {
             return true;
@@ -482,20 +615,41 @@ fn score_tetra(
     let importance = t.data.importance.max(0.1);
     let access_count = *access_counts.get(&t.id).unwrap_or(&0) as f64;
     let access_boost = 1.0 + (access_count / (access_count + 5.0)) * 0.3;
-    let raw = (hybrid + label_boost * 0.15 + entity_boost * 0.20) * recency * importance * access_boost;
-    let penalty = if t.data.labels.iter().any(|l| l.starts_with("meta-")) { 0.5 } else { 1.0 };
-    let noise_penalty = if is_noise_label(&t.data.labels) || is_noise_content(&t.data.content) { 0.3 } else { 1.0 };
-    let mass_boost = if raw > 0.3 { 1.0 + (t.mass - 1.0).max(0.0) * 0.1 } else { 1.0 };
+    let raw =
+        (hybrid + label_boost * 0.15 + entity_boost * 0.20) * recency * importance * access_boost;
+    let penalty = if t.data.labels.iter().any(|l| l.starts_with("meta-")) {
+        0.5
+    } else {
+        1.0
+    };
+    let noise_penalty = if is_noise_label(&t.data.labels) || is_noise_content(&t.data.content) {
+        0.3
+    } else {
+        1.0
+    };
+    let mass_boost = if raw > 0.3 {
+        1.0 + (t.mass - 1.0).max(0.0) * 0.1
+    } else {
+        1.0
+    };
     let final_sim = (raw * penalty * noise_penalty * mass_boost).min(1.0);
     (t.id, final_sim, t.mass, t.data.clone())
 }
 
 fn has_exact_keyword_match(query: &str, payload: &MemoryPayload) -> bool {
     let query_tokens = tokenize(query);
-    if query_tokens.is_empty() { return false; }
+    if query_tokens.is_empty() {
+        return false;
+    }
     let content_lower = payload.content.to_lowercase();
-    let all_text = format!("{} {} {}", content_lower, payload.aliases.join(" ").to_lowercase(), payload.labels.join(" ").to_lowercase());
-    let match_count = query_tokens.iter()
+    let all_text = format!(
+        "{} {} {}",
+        content_lower,
+        payload.aliases.join(" ").to_lowercase(),
+        payload.labels.join(" ").to_lowercase()
+    );
+    let match_count = query_tokens
+        .iter()
         .filter(|t| all_text.contains(t.as_str()))
         .count();
     match_count as f64 / query_tokens.len() as f64 > 0.5

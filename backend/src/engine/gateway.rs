@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::sync::atomic::Ordering as AtomicOrdering;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use crate::domain::space::Space;
@@ -15,7 +15,7 @@ use super::energy::{EnergyCenter, CREATE_COST, PULSE_COST};
 use super::hnsw::HnswIndex;
 use super::index_manager::IndexManager;
 use super::knowledge::KnowledgeGraph;
-use super::search_engine::{SearchEngineState, SearchCtx};
+use super::search_engine::{SearchCtx, SearchEngineState};
 use super::vector::{VectorLayer, EMBEDDING_DIM};
 
 pub struct GatewayCenter {
@@ -59,7 +59,14 @@ impl GatewayCenter {
             }
         }
         Self {
-            space, energy, cognitive, classifier, embedding, vector, tx, knowledge,
+            space,
+            energy,
+            cognitive,
+            classifier,
+            embedding,
+            vector,
+            tx,
+            knowledge,
             search: SearchEngineState::new(hnsw),
             index: IndexManager::new(label_idx, chash_idx),
         }
@@ -101,7 +108,12 @@ impl GatewayCenter {
         self.create_memory_with_time(content, labels, 0)
     }
 
-    pub fn create_memory_with_time(&self, content: &str, labels: Vec<String>, timestamp: i64) -> Result<TetraId, String> {
+    pub fn create_memory_with_time(
+        &self,
+        content: &str,
+        labels: Vec<String>,
+        timestamp: i64,
+    ) -> Result<TetraId, String> {
         if !self.energy.consume(CREATE_COST) {
             return Err("insufficient energy".into());
         }
@@ -112,7 +124,10 @@ impl GatewayCenter {
             if let Some(existing_id) = self.index.check_content_hash(content_hash) {
                 if let Some(t) = self.space.get_tetrahedron(existing_id) {
                     if t.data.content == content {
-                        tracing::info!("duplicate detected (hash index), returning existing tetra {}", t.id);
+                        tracing::info!(
+                            "duplicate detected (hash index), returning existing tetra {}",
+                            t.id
+                        );
                         self.energy.replenish(CREATE_COST);
                         return Ok(t.id);
                     }
@@ -120,20 +135,44 @@ impl GatewayCenter {
             }
         }
 
-        let ts = if timestamp > 0 { timestamp } else { chrono::Utc::now().timestamp() };
+        let ts = if timestamp > 0 {
+            timestamp
+        } else {
+            chrono::Utc::now().timestamp()
+        };
 
         let layer = crate::domain::cylinder::CylinderLayer::from_labels(&labels);
         let (core, has_port) = self.find_best_placement(&labels, layer);
 
         let embedding = self.compute_embedding(content);
-        tracing::info!("[Gateway] embedding result: {} dims (vector={}, embed_svc={})", 
-            embedding.len(), self.vector.is_some(), self.embedding.enabled());
+        tracing::info!(
+            "[Gateway] embedding result: {} dims (vector={}, embed_svc={})",
+            embedding.len(),
+            self.vector.is_some(),
+            self.embedding.enabled()
+        );
 
         let importance = Self::compute_importance(content, &labels);
         let positions = crate::domain::tetra::Tetrahedron::compute_vertices(core);
-        let data = MemoryPayload { content: content.to_string(), content_hash, labels, timestamp: ts, aliases: vec![], embedding, importance, enforced: false, rationale: None, access_count: 0, memory_type: None };
+        let data = MemoryPayload {
+            content: content.to_string(),
+            content_hash,
+            labels,
+            timestamp: ts,
+            aliases: vec![],
+            embedding,
+            importance,
+            enforced: false,
+            rationale: None,
+            access_count: 0,
+            memory_type: None,
+        };
         let tetra = crate::domain::tetra::Tetrahedron {
-            id: 0, vertex_ids: [0; 4], core, data, mass: 1.0,
+            id: 0,
+            vertex_ids: [0; 4],
+            core,
+            data,
+            mass: 1.0,
         };
 
         match self.space.add_tetrahedron(&tetra, &positions) {
@@ -149,8 +188,13 @@ impl GatewayCenter {
                         }
                     }
                 }
-                self.knowledge.auto_link_one(id, &self.space, &self.index.label_index.lock());
-                let created_labels = self.space.get_tetrahedron(id).map(|t| t.data.labels.clone()).unwrap_or_default();
+                self.knowledge
+                    .auto_link_one(id, &self.space, &self.index.label_index.lock());
+                let created_labels = self
+                    .space
+                    .get_tetrahedron(id)
+                    .map(|t| t.data.labels.clone())
+                    .unwrap_or_default();
                 self.index.insert_labels(id, &created_labels);
                 self.index.insert_content_hash(content_hash, id);
                 {
@@ -158,13 +202,22 @@ impl GatewayCenter {
                     let c = content.to_string();
                     let l = created_labels;
                     let spawned = loop {
-                        let current = classifier.thread_count.load(std::sync::atomic::Ordering::Acquire);
-                        if current >= 4 { break false; }
-                        if classifier.thread_count.compare_exchange_weak(
-                            current, current + 1,
-                            std::sync::atomic::Ordering::AcqRel,
-                            std::sync::atomic::Ordering::Acquire,
-                        ).is_ok() {
+                        let current = classifier
+                            .thread_count
+                            .load(std::sync::atomic::Ordering::Acquire);
+                        if current >= 4 {
+                            break false;
+                        }
+                        if classifier
+                            .thread_count
+                            .compare_exchange_weak(
+                                current,
+                                current + 1,
+                                std::sync::atomic::Ordering::AcqRel,
+                                std::sync::atomic::Ordering::Acquire,
+                            )
+                            .is_ok()
+                        {
                             break true;
                         }
                     };
@@ -173,7 +226,9 @@ impl GatewayCenter {
                             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                 let _ = classifier.classify(&c, &l);
                             }));
-                            classifier.thread_count.fetch_sub(1, std::sync::atomic::Ordering::Release);
+                            classifier
+                                .thread_count
+                                .fetch_sub(1, std::sync::atomic::Ordering::Release);
                         });
                     }
                 }
@@ -199,12 +254,41 @@ impl GatewayCenter {
         let lower = content.to_lowercase();
 
         let high_value_keywords = [
-            "架构", "architecture", "决策", "decision", "关键", "critical",
-            "重要", "important", "核心", "core", "设计", "design",
-            "安全", "security", "部署", "deploy", "production", "生产",
-            "数据库", "database", "密钥", "secret", "密钥", "key",
-            "约束", "constraint", "不能改", "陷阱", "坑", "pitfall",
-            "血的教训", "lesson", "bug", "修复", "fix",
+            "架构",
+            "architecture",
+            "决策",
+            "decision",
+            "关键",
+            "critical",
+            "重要",
+            "important",
+            "核心",
+            "core",
+            "设计",
+            "design",
+            "安全",
+            "security",
+            "部署",
+            "deploy",
+            "production",
+            "生产",
+            "数据库",
+            "database",
+            "密钥",
+            "secret",
+            "密钥",
+            "key",
+            "约束",
+            "constraint",
+            "不能改",
+            "陷阱",
+            "坑",
+            "pitfall",
+            "血的教训",
+            "lesson",
+            "bug",
+            "修复",
+            "fix",
         ];
         for kw in &high_value_keywords {
             if lower.contains(kw) {
@@ -213,8 +297,17 @@ impl GatewayCenter {
         }
 
         let low_value_keywords = [
-            "测试", "test", "tmp", "临时", "scratch", "实验", "experiment",
-            "随便", "hello world", "测试内容", "testing 123",
+            "测试",
+            "test",
+            "tmp",
+            "临时",
+            "scratch",
+            "实验",
+            "experiment",
+            "随便",
+            "hello world",
+            "测试内容",
+            "testing 123",
         ];
         for kw in &low_value_keywords {
             if lower.contains(kw) {
@@ -223,8 +316,13 @@ impl GatewayCenter {
         }
 
         let high_value_labels = [
-            "decision", "architecture", "security", "critical", "project-context",
-            "deployment", "configuration",
+            "decision",
+            "architecture",
+            "security",
+            "critical",
+            "project-context",
+            "deployment",
+            "configuration",
         ];
         for label in labels {
             let label_lower = label.to_lowercase();
@@ -259,7 +357,11 @@ impl GatewayCenter {
         score.clamp(0.1, 3.0)
     }
 
-    fn find_best_placement(&self, labels: &[String], layer: crate::domain::cylinder::CylinderLayer) -> (Point3, bool) {
+    fn find_best_placement(
+        &self,
+        labels: &[String],
+        layer: crate::domain::cylinder::CylinderLayer,
+    ) -> (Point3, bool) {
         if let Some(pos) = self.index.get_cached_placement(labels) {
             return (pos, false);
         }
@@ -267,7 +369,8 @@ impl GatewayCenter {
         let tetras = self.space.all_tetrahedrons();
         let zone = self.space.zone_for_layer(layer);
 
-        let in_layer: Vec<crate::domain::tetra::Tetrahedron> = tetras.iter()
+        let in_layer: Vec<crate::domain::tetra::Tetrahedron> = tetras
+            .iter()
             .filter(|t| zone.contains_z(t.core.z))
             .cloned()
             .collect();
@@ -292,7 +395,11 @@ impl GatewayCenter {
         (result, port_opt.is_some())
     }
 
-    fn find_anchor_by_labels(&self, labels: &[String], tetras: &[crate::domain::tetra::Tetrahedron]) -> Point3 {
+    fn find_anchor_by_labels(
+        &self,
+        labels: &[String],
+        tetras: &[crate::domain::tetra::Tetrahedron],
+    ) -> Point3 {
         let label_idx = self.index.label_index.lock();
         let mut score_map: HashMap<TetraId, usize> = HashMap::new();
         for label in labels {
@@ -318,7 +425,11 @@ impl GatewayCenter {
         Point3::zero()
     }
 
-    fn find_adjacent_position(&self, anchor: Point3, _tetras: &[crate::domain::tetra::Tetrahedron]) -> Point3 {
+    fn find_adjacent_position(
+        &self,
+        anchor: Point3,
+        _tetras: &[crate::domain::tetra::Tetrahedron],
+    ) -> Point3 {
         let anchor_verts = crate::domain::tetra::Tetrahedron::compute_vertices(anchor);
 
         let mut best_pos = None;
@@ -365,11 +476,20 @@ impl GatewayCenter {
         }
     }
 
-    pub fn search(&self, query: &str, k: usize) -> Result<Vec<(TetraId, f64, f64, MemoryPayload)>, String> {
+    pub fn search(
+        &self,
+        query: &str,
+        k: usize,
+    ) -> Result<Vec<(TetraId, f64, f64, MemoryPayload)>, String> {
         self.search_filtered(query, k, None)
     }
 
-    pub fn search_filtered(&self, query: &str, k: usize, filters: Option<&super::search_engine::SearchFilters>) -> Result<Vec<(TetraId, f64, f64, MemoryPayload)>, String> {
+    pub fn search_filtered(
+        &self,
+        query: &str,
+        k: usize,
+        filters: Option<&super::search_engine::SearchFilters>,
+    ) -> Result<Vec<(TetraId, f64, f64, MemoryPayload)>, String> {
         let ctx = SearchCtx {
             state: &self.search,
             space: &self.space,
@@ -381,48 +501,84 @@ impl GatewayCenter {
         super::search_engine::search(&ctx, query, k, self.vector.as_deref(), filters)
     }
 
-    pub fn expand_from_seeds(&self, seed_results: &[(TetraId, f64, f64, MemoryPayload)], depth: usize) -> Vec<(TetraId, f64, Vec<String>, String, i64)> {
+    pub fn expand_from_seeds(
+        &self,
+        seed_results: &[(TetraId, f64, f64, MemoryPayload)],
+        depth: usize,
+    ) -> Vec<(TetraId, f64, Vec<String>, String, i64)> {
         let mut collected: HashMap<u64, (f64, Vec<String>, String, i64)> = HashMap::new();
         for (id, sim, _mass, payload) in seed_results {
-            collected.insert(*id, (*sim, payload.labels.clone(), payload.content.clone(), payload.timestamp));
+            collected.insert(
+                *id,
+                (
+                    *sim,
+                    payload.labels.clone(),
+                    payload.content.clone(),
+                    payload.timestamp,
+                ),
+            );
         }
 
-        let mut frontier: Vec<(u64, usize, f64)> = seed_results.iter()
+        let mut frontier: Vec<(u64, usize, f64)> = seed_results
+            .iter()
             .map(|(id, sim, _, _)| (*id, 0, *sim))
             .collect();
         let mut visited: HashSet<u64> = seed_results.iter().map(|(id, _, _, _)| *id).collect();
 
         while let Some((current_id, d, inherited_sim)) = frontier.pop() {
-            if d >= depth { continue; }
+            if d >= depth {
+                continue;
+            }
             for (target_id, _rel_type, strength) in self.get_relations(current_id) {
-                if visited.contains(&target_id) { continue; }
+                if visited.contains(&target_id) {
+                    continue;
+                }
                 visited.insert(target_id);
                 if let Some(payload) = self.get_node(target_id) {
                     let assoc = inherited_sim.max(strength);
-                    collected.insert(target_id, (0.0, payload.labels, payload.content, payload.timestamp));
+                    collected.insert(
+                        target_id,
+                        (0.0, payload.labels, payload.content, payload.timestamp),
+                    );
                     frontier.push((target_id, d + 1, assoc));
                 }
             }
         }
 
-        collected.into_iter()
+        collected
+            .into_iter()
             .map(|(id, (ds, ls, c, ts))| (id, ds, ls, c, ts))
             .collect()
     }
 
-    pub fn expand_from_seeds_with_clusters(&self, seed_results: &[(TetraId, f64, f64, MemoryPayload)], depth: usize) -> Vec<(TetraId, f64, f64, Vec<String>, String, i64)> {
+    pub fn expand_from_seeds_with_clusters(
+        &self,
+        seed_results: &[(TetraId, f64, f64, MemoryPayload)],
+        depth: usize,
+    ) -> Vec<(TetraId, f64, f64, Vec<String>, String, i64)> {
         let mut collected: HashMap<u64, (f64, Vec<String>, String, i64, f64)> = HashMap::new();
         for (id, sim, _mass, payload) in seed_results {
-            collected.insert(*id, (*sim, payload.labels.clone(), payload.content.clone(), payload.timestamp, 0.0));
+            collected.insert(
+                *id,
+                (
+                    *sim,
+                    payload.labels.clone(),
+                    payload.content.clone(),
+                    payload.timestamp,
+                    0.0,
+                ),
+            );
         }
 
-        let mut frontier: Vec<(u64, usize, f64)> = seed_results.iter()
+        let mut frontier: Vec<(u64, usize, f64)> = seed_results
+            .iter()
             .map(|(id, sim, _, _)| (*id, 0, *sim))
             .collect();
         let mut visited: HashSet<u64> = seed_results.iter().map(|(id, _, _, _)| *id).collect();
 
         let clusters = self.space.find_clusters();
-        let cluster_map: HashMap<u64, usize> = clusters.iter()
+        let cluster_map: HashMap<u64, usize> = clusters
+            .iter()
             .enumerate()
             .flat_map(|(ci, c)| c.tetra_ids.iter().map(move |&id| (id, ci)))
             .collect();
@@ -430,20 +586,35 @@ impl GatewayCenter {
         let max_expand = 30;
         let mut expanded = 0;
         while let Some((current_id, d, inherited_sim)) = frontier.pop() {
-            if expanded >= max_expand { break; }
-            if d >= depth { continue; }
+            if expanded >= max_expand {
+                break;
+            }
+            if d >= depth {
+                continue;
+            }
             for (target_id, _rel_type, strength) in self.get_relations(current_id) {
                 if visited.contains(&target_id) {
                     if let Some(entry) = collected.get_mut(&target_id) {
                         let new_assoc = inherited_sim.max(strength);
-                        if new_assoc > entry.4 { entry.4 = new_assoc; }
+                        if new_assoc > entry.4 {
+                            entry.4 = new_assoc;
+                        }
                     }
                     continue;
                 }
                 visited.insert(target_id);
                 if let Some(payload) = self.get_node(target_id) {
                     let assoc = inherited_sim.max(strength);
-                    collected.insert(target_id, (0.0, payload.labels, payload.content, payload.timestamp, assoc));
+                    collected.insert(
+                        target_id,
+                        (
+                            0.0,
+                            payload.labels,
+                            payload.content,
+                            payload.timestamp,
+                            assoc,
+                        ),
+                    );
                     frontier.push((target_id, d + 1, assoc));
                     expanded += 1;
                 }
@@ -465,19 +636,24 @@ impl GatewayCenter {
                 }
             }
         }
-        collected.into_iter()
+        collected
+            .into_iter()
             .map(|(id, (ds, ls, c, ts, a))| (id, ds, a, ls, c, ts))
             .collect()
     }
 
     pub fn get_relations(&self, id: TetraId) -> Vec<(TetraId, String, f64)> {
-        self.knowledge.query_relations(id).into_iter()
+        self.knowledge
+            .query_relations(id)
+            .into_iter()
             .map(|(tid, rt, s)| (tid, format!("{}", rt), s))
             .collect()
     }
 
     pub fn get_concepts(&self) -> Vec<(String, usize)> {
-        self.knowledge.get_concepts().into_iter()
+        self.knowledge
+            .get_concepts()
+            .into_iter()
             .map(|c| (c.label, c.member_count as usize))
             .collect()
     }
@@ -506,14 +682,20 @@ impl GatewayCenter {
         self.space.get_tetrahedron(id).map(|t| t.data)
     }
 
-    pub fn pulse(&self, origin: TetraId, ttl: u32) -> Result<crate::domain::pulse::PulseResult, String> {
+    pub fn pulse(
+        &self,
+        origin: TetraId,
+        ttl: u32,
+    ) -> Result<crate::domain::pulse::PulseResult, String> {
         if !self.energy.consume(PULSE_COST) {
             return Err("insufficient energy".into());
         }
         let result = super::pulse::PulseEngine::send(
-            &self.space, &self.knowledge,
+            &self.space,
+            &self.knowledge,
             super::pulse::PulseType::Neural { temperature: 0.8 },
-            origin, ttl,
+            origin,
+            ttl,
         )?;
         let _ = self.tx.send(EngineEvent::PulseSent { origin, ttl });
         Ok(result)
@@ -530,7 +712,8 @@ impl GatewayCenter {
 
     pub fn load_context(&self, limit: usize) -> Vec<(TetraId, f64, String, Vec<String>)> {
         let tetras = self.space.all_tetrahedrons();
-        let mut scored: Vec<(TetraId, f64, String, Vec<String>)> = tetras.into_iter()
+        let mut scored: Vec<(TetraId, f64, String, Vec<String>)> = tetras
+            .into_iter()
             .filter(|t| t.data.importance >= 0.3)
             .filter(|t| !t.data.labels.iter().any(|l| l == "junk"))
             .map(|t| {
@@ -576,7 +759,10 @@ impl GatewayCenter {
     }
 
     pub fn list_recent(&self, offset: usize, limit: usize) -> Vec<(TetraId, MemoryPayload)> {
-        let mut all: Vec<(TetraId, MemoryPayload)> = self.space.all_tetrahedrons().into_iter()
+        let mut all: Vec<(TetraId, MemoryPayload)> = self
+            .space
+            .all_tetrahedrons()
+            .into_iter()
             .map(|t| (t.id, t.data))
             .collect();
         all.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
@@ -585,7 +771,8 @@ impl GatewayCenter {
 
     pub fn list_projects(&self) -> Vec<(String, usize)> {
         let label_idx = self.index.label_index.lock();
-        let mut projects: Vec<(String, usize)> = label_idx.iter()
+        let mut projects: Vec<(String, usize)> = label_idx
+            .iter()
             .filter(|(label, _)| label.starts_with("project:"))
             .map(|(label, ids)| (label.clone(), ids.len()))
             .collect();
@@ -598,7 +785,11 @@ impl GatewayCenter {
         let hits = self.search.search_hits.load(AtomicOrdering::Relaxed);
         let miss_queries = self.search.search_miss_queries.lock().clone();
         let top_labels: Vec<(String, u32)> = {
-            let mut v: Vec<_> = self.search.search_top_labels.lock().iter()
+            let mut v: Vec<_> = self
+                .search
+                .search_top_labels
+                .lock()
+                .iter()
                 .map(|(k, &v)| (k.clone(), v))
                 .collect();
             v.sort_by(|a, b| b.1.cmp(&a.1));
@@ -606,18 +797,30 @@ impl GatewayCenter {
             v
         };
         let hot_memories: Vec<(TetraId, u32)> = {
-            let mut v: Vec<_> = self.search.access_counts.lock().iter()
+            let mut v: Vec<_> = self
+                .search
+                .access_counts
+                .lock()
+                .iter()
                 .map(|(&k, &v)| (k, v))
                 .collect();
             v.sort_by(|a, b| b.1.cmp(&a.1));
             v.truncate(10);
             v
         };
-        SearchMetrics { total, hits, miss_queries, top_labels, hot_memories }
+        SearchMetrics {
+            total,
+            hits,
+            miss_queries,
+            top_labels,
+            hot_memories,
+        }
     }
 
     pub fn list_nodes(&self) -> Vec<(TetraId, MemoryPayload)> {
-        self.space.all_tetrahedrons().into_iter()
+        self.space
+            .all_tetrahedrons()
+            .into_iter()
             .map(|t| (t.id, t.data))
             .collect()
     }

@@ -33,7 +33,11 @@ impl ActionOutcome {
         let energy_cost = (self.pre_energy - self.post_energy).max(0.01);
         self.effectiveness = match self.action {
             ActionType::Fission => {
-                if self.pre_entropy > 0.3 { entropy_delta / energy_cost.sqrt() } else { 0.0 }
+                if self.pre_entropy > 0.3 {
+                    entropy_delta / energy_cost.sqrt()
+                } else {
+                    0.0
+                }
             }
             ActionType::Dream => {
                 let cluster_improvement = if self.pre_cluster_count > 0 {
@@ -47,10 +51,18 @@ impl ActionOutcome {
             ActionType::Pulse => entropy_delta.max(0.0) * 0.5,
             ActionType::Merge => {
                 let similarity_preserved = self.post_entropy <= self.pre_entropy * 1.1;
-                if similarity_preserved { 0.7 } else { 0.2 }
+                if similarity_preserved {
+                    0.7
+                } else {
+                    0.2
+                }
             }
             ActionType::Evict => {
-                if self.post_tetra_count < self.pre_tetra_count { 0.6 } else { 0.1 }
+                if self.post_tetra_count < self.pre_tetra_count {
+                    0.6
+                } else {
+                    0.1
+                }
             }
             ActionType::Link => 0.5,
         };
@@ -67,8 +79,12 @@ impl OutcomeTracker {
     pub fn new() -> Self {
         let mut avg_effectiveness = std::collections::HashMap::new();
         for a in [
-            ActionType::Pulse, ActionType::Fission, ActionType::Merge,
-            ActionType::Dream, ActionType::Link, ActionType::Evict,
+            ActionType::Pulse,
+            ActionType::Fission,
+            ActionType::Merge,
+            ActionType::Dream,
+            ActionType::Link,
+            ActionType::Evict,
         ] {
             avg_effectiveness.insert(a, 0.5);
         }
