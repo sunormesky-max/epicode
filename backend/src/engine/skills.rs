@@ -160,7 +160,12 @@ impl SkillEngine {
             .collect()
     }
 
-    pub fn update(&self, id: u64, skill_md: Option<String>, version: Option<String>) -> Result<Skill, String> {
+    pub fn update(
+        &self,
+        id: u64,
+        skill_md: Option<String>,
+        version: Option<String>,
+    ) -> Result<Skill, String> {
         let mut skills = self.skills.lock().unwrap();
         let skill = skills.get_mut(&id).ok_or("skill not found")?;
         if let Some(md) = skill_md {
@@ -196,10 +201,17 @@ impl SkillEngine {
     pub fn fork(&self, source: &Skill, new_owner: String) -> Skill {
         {
             let skills = self.skills.lock().unwrap();
-            if let Some(existing) = skills.values().find(|s| s.evolved_from == Some(source.id) && s.owner == new_owner) {
+            if let Some(existing) = skills
+                .values()
+                .find(|s| s.evolved_from == Some(source.id) && s.owner == new_owner)
+            {
                 let dup = existing.clone();
                 drop(skills);
-                tracing::info!("[SkillEngine] fork dedup: '{}' already forked as id={}", dup.name, dup.id);
+                tracing::info!(
+                    "[SkillEngine] fork dedup: '{}' already forked as id={}",
+                    dup.name,
+                    dup.id
+                );
                 return dup;
             }
         }
@@ -229,7 +241,12 @@ impl SkillEngine {
         skills.insert(id, forked.clone());
         drop(skills);
         self.persist();
-        tracing::info!("[SkillEngine] forked skill '{}' (id={}) from id={}", forked.name, id, source.id);
+        tracing::info!(
+            "[SkillEngine] forked skill '{}' (id={}) from id={}",
+            forked.name,
+            id,
+            source.id
+        );
         forked
     }
 
@@ -290,7 +307,11 @@ impl SkillEngine {
         let submitted = skill.clone();
         drop(skills);
         self.persist();
-        tracing::info!("[SkillEngine] skill '{}' (id={}) submitted for review", submitted.name, id);
+        tracing::info!(
+            "[SkillEngine] skill '{}' (id={}) submitted for review",
+            submitted.name,
+            id
+        );
         Ok(submitted)
     }
 
@@ -310,7 +331,11 @@ impl SkillEngine {
         let approved = skill.clone();
         drop(skills);
         self.persist();
-        tracing::info!("[SkillEngine] skill '{}' (id={}) approved and published", approved.name, id);
+        tracing::info!(
+            "[SkillEngine] skill '{}' (id={}) approved and published",
+            approved.name,
+            id
+        );
         Ok(approved)
     }
 
@@ -329,7 +354,12 @@ impl SkillEngine {
         let rejected = skill.clone();
         drop(skills);
         self.persist();
-        tracing::info!("[SkillEngine] skill '{}' (id={}) rejected: {}", rejected.name, id, reason);
+        tracing::info!(
+            "[SkillEngine] skill '{}' (id={}) rejected: {}",
+            rejected.name,
+            id,
+            reason
+        );
         Ok(rejected)
     }
 
@@ -365,7 +395,8 @@ impl SkillEngine {
 
     pub fn review_pending(&self) -> Vec<Skill> {
         let skills = self.skills.lock().unwrap();
-        skills.values()
+        skills
+            .values()
             .filter(|s| s.review_status == ReviewStatus::PendingReview)
             .cloned()
             .collect()
@@ -411,10 +442,7 @@ impl SkillEngine {
                     .iter()
                     .filter(|w| name_lower.contains(*w))
                     .count() as f64;
-                let md_match = query_words
-                    .iter()
-                    .filter(|w| md_lower.contains(*w))
-                    .count() as f64;
+                let md_match = query_words.iter().filter(|w| md_lower.contains(*w)).count() as f64;
                 let usage_bonus = (s.usage_count as f64).ln_1p() * 0.1;
                 let success_bonus = s.success_rate * 0.2;
                 let score = name_match * 2.0 + md_match * 1.0 + usage_bonus + success_bonus;
@@ -424,7 +452,10 @@ impl SkillEngine {
             .collect();
 
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        scored.into_iter().take(limit).map(|(_, s)| s.clone()).collect()
+        scored
+            .into_iter()
+            .take(limit)
+            .map(|(_, s)| s.clone())
+            .collect()
     }
-
 }

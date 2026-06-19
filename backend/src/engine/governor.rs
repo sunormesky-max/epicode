@@ -25,7 +25,6 @@ impl LifecycleGovernor {
     const ARCHIVE_AGE_DAYS: i64 = 30;
     const IMPORTANCE_DECAY_RATE: f64 = 0.98;
     const MIN_IMPORTANCE: f64 = 0.3;
-    const CONTRADICTION_SIM_THRESHOLD: f64 = 0.65; // used by contradiction detection
 
     pub fn evaluate(space: &Space, knowledge: &KnowledgeGraph) -> GovernorResult {
         let tetras = space.all_tetrahedrons();
@@ -104,9 +103,23 @@ impl LifecycleGovernor {
         // Contradiction detection
         let mut contradictions = Vec::new();
         let negation_indicators = [
-            "不是", "不能", "错误", "修正", "已修正", "fix", "fixed",
-            "wrong", "incorrect", "不再", "改为", "instead of", "替代",
-            "deprecated", "废弃", "移除", "removed",
+            "不是",
+            "不能",
+            "错误",
+            "修正",
+            "已修正",
+            "fix",
+            "fixed",
+            "wrong",
+            "incorrect",
+            "不再",
+            "改为",
+            "instead of",
+            "替代",
+            "deprecated",
+            "废弃",
+            "移除",
+            "removed",
         ];
 
         for i in 0..tetras.len().min(80) {
@@ -114,14 +127,24 @@ impl LifecycleGovernor {
                 let ci = &tetras[i].data;
                 let cj = &tetras[j].data;
 
-                if ci.content.len() < 30 || cj.content.len() < 30 { continue; }
-                if ci.enforced || cj.enforced { continue; }
+                if ci.content.len() < 30 || cj.content.len() < 30 {
+                    continue;
+                }
+                if ci.enforced || cj.enforced {
+                    continue;
+                }
 
                 let topic_overlap = Self::content_overlap(&ci.content, &cj.content);
-                if topic_overlap < 0.08 { continue; }
+                if topic_overlap < 0.08 {
+                    continue;
+                }
 
-                let i_has_negation = negation_indicators.iter().any(|w| ci.content.to_lowercase().contains(w));
-                let j_has_negation = negation_indicators.iter().any(|w| cj.content.to_lowercase().contains(w));
+                let i_has_negation = negation_indicators
+                    .iter()
+                    .any(|w| ci.content.to_lowercase().contains(w));
+                let j_has_negation = negation_indicators
+                    .iter()
+                    .any(|w| cj.content.to_lowercase().contains(w));
 
                 if (i_has_negation || j_has_negation) && !(i_has_negation && j_has_negation) {
                     contradictions.push((tetras[i].id, tetras[j].id, topic_overlap));
@@ -130,9 +153,17 @@ impl LifecycleGovernor {
         }
 
         if !contradictions.is_empty() {
-            tracing::info!("[Governor] found {} contradiction pairs", contradictions.len());
+            tracing::info!(
+                "[Governor] found {} contradiction pairs",
+                contradictions.len()
+            );
             for &(a, b, sim) in &contradictions {
-                let _ = knowledge.add_relation(a, b, crate::engine::knowledge::RelationType::Contradicts, sim);
+                let _ = knowledge.add_relation(
+                    a,
+                    b,
+                    crate::engine::knowledge::RelationType::Contradicts,
+                    sim,
+                );
             }
         }
 
@@ -164,13 +195,23 @@ impl LifecycleGovernor {
         (base + access_bonus) * recency_factor
     }
 
-    fn apply_decay(_space: &Space, id: u64, data: &MemoryPayload, age_days: i64) -> Option<MemoryPayload> {
+    fn apply_decay(
+        _space: &Space,
+        id: u64,
+        data: &MemoryPayload,
+        age_days: i64,
+    ) -> Option<MemoryPayload> {
         let decayed = Self::effective_importance(data, age_days);
         if (data.importance - decayed).abs() > 0.05 {
             let mut updated = data.clone();
             updated.importance = decayed.max(0.1);
-            tracing::info!("[Governor] decayed #{}: importance {:.2} -> {:.2} (age={}d)",
-                id, data.importance, updated.importance, age_days);
+            tracing::info!(
+                "[Governor] decayed #{}: importance {:.2} -> {:.2} (age={}d)",
+                id,
+                data.importance,
+                updated.importance,
+                age_days
+            );
             Some(updated)
         } else {
             None
@@ -188,10 +229,12 @@ impl LifecycleGovernor {
     fn content_overlap(a: &str, b: &str) -> f64 {
         let lower_a = a.to_lowercase();
         let lower_b = b.to_lowercase();
-        let set_a: std::collections::HashSet<&str> = lower_a.split(|c: char| !c.is_alphanumeric() && c != '-')
+        let set_a: std::collections::HashSet<&str> = lower_a
+            .split(|c: char| !c.is_alphanumeric() && c != '-')
             .filter(|w| w.len() >= 2)
             .collect();
-        let set_b: std::collections::HashSet<&str> = lower_b.split(|c: char| !c.is_alphanumeric() && c != '-')
+        let set_b: std::collections::HashSet<&str> = lower_b
+            .split(|c: char| !c.is_alphanumeric() && c != '-')
             .filter(|w| w.len() >= 2)
             .collect();
         if set_a.is_empty() || set_b.is_empty() {
@@ -199,7 +242,9 @@ impl LifecycleGovernor {
         }
         let intersection = set_a.intersection(&set_b).count();
         let union = set_a.union(&set_b).count();
-        if union == 0 { return 0.0; }
+        if union == 0 {
+            return 0.0;
+        }
         intersection as f64 / union as f64
     }
 
@@ -209,9 +254,13 @@ impl LifecycleGovernor {
         let mut merged_ids: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
         for i in 0..tetras.len() {
-            if merged_ids.contains(&tetras[i].id) { continue; }
+            if merged_ids.contains(&tetras[i].id) {
+                continue;
+            }
             for j in (i + 1)..tetras.len() {
-                if merged_ids.contains(&tetras[j].id) { continue; }
+                if merged_ids.contains(&tetras[j].id) {
+                    continue;
+                }
 
                 let ci = &tetras[i].data.content;
                 let cj = &tetras[j].data.content;
@@ -255,7 +304,11 @@ impl LifecycleGovernor {
                 let _ = space.update_payload(candidate.keep_id, data);
             }
             let _ = space.remove_tetrahedron(candidate.remove_id);
-            tracing::info!("[Governor] merged #{} into #{}", candidate.remove_id, candidate.keep_id);
+            tracing::info!(
+                "[Governor] merged #{} into #{}",
+                candidate.remove_id,
+                candidate.keep_id
+            );
             merged_count += 1;
         }
         merged_count
@@ -277,7 +330,7 @@ impl LifecycleGovernor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::tetra::{Tetrahedron, MemoryPayload};
+    use crate::domain::tetra::{MemoryPayload, Tetrahedron};
     use crate::domain::vertex::Point3;
 
     fn make_tetra(space: &Space, content: &str, importance: f64, access_count: u32) {
@@ -296,7 +349,13 @@ mod tests {
             access_count,
             memory_type: None,
         };
-        let t = Tetrahedron { id: 0, vertex_ids: [0; 4], core, data, mass: 1.0 };
+        let t = Tetrahedron {
+            id: 0,
+            vertex_ids: [0; 4],
+            core,
+            data,
+            mass: 1.0,
+        };
         let _ = space.add_tetrahedron(&t, &pos);
     }
 
@@ -338,9 +397,17 @@ mod tests {
     #[test]
     fn effective_importance_decay() {
         let payload = MemoryPayload {
-            content: "test".to_string(), content_hash: 0, labels: vec![],
-            timestamp: 0, aliases: vec![], embedding: vec![], importance: 2.0,
-            enforced: false, rationale: None, access_count: 0, memory_type: None,
+            content: "test".to_string(),
+            content_hash: 0,
+            labels: vec![],
+            timestamp: 0,
+            aliases: vec![],
+            embedding: vec![],
+            importance: 2.0,
+            enforced: false,
+            rationale: None,
+            access_count: 0,
+            memory_type: None,
         };
         let young = LifecycleGovernor::effective_importance(&payload, 1);
         let old = LifecycleGovernor::effective_importance(&payload, 100);
@@ -352,15 +419,15 @@ mod tests {
         let space = Space::new();
         let a = "Use firewalld for all port blocking and firewall rules on the server";
         let b = "Fix: removed firewalld 改为 use nft instead, firewalld causes nftables crash";
-        let overlap = LifecycleGovernor::content_overlap(a, b);
-        eprintln!("DEBUG overlap: {}", overlap);
         make_tetra(&space, a, 2.0, 0);
         make_tetra(&space, b, 2.0, 0);
 
         let kg = KnowledgeGraph::new();
         let result = LifecycleGovernor::evaluate(&space, &kg);
-        eprintln!("DEBUG contradictions: {:?}", result.contradictions);
-        assert!(!result.contradictions.is_empty(), "should detect contradiction between firewalld vs nft, overlap={}", overlap);
+        assert!(
+            !result.contradictions.is_empty(),
+            "should detect contradiction between firewalld vs nft"
+        );
     }
 
     #[test]
@@ -371,23 +438,45 @@ mod tests {
         make_tetra(&space, &content, 1.0, 0);
 
         let candidates = LifecycleGovernor::find_merge_candidates(&space);
-        assert!(!candidates.is_empty(), "should find exact duplicate merge candidates");
+        assert!(
+            !candidates.is_empty(),
+            "should find exact duplicate merge candidates"
+        );
     }
 
     #[test]
     fn effective_importance_access_bonus() {
         let no_access = MemoryPayload {
-            content: "test".to_string(), content_hash: 0, labels: vec![],
-            timestamp: 0, aliases: vec![], embedding: vec![], importance: 1.0,
-            enforced: false, rationale: None, access_count: 0, memory_type: None,
+            content: "test".to_string(),
+            content_hash: 0,
+            labels: vec![],
+            timestamp: 0,
+            aliases: vec![],
+            embedding: vec![],
+            importance: 1.0,
+            enforced: false,
+            rationale: None,
+            access_count: 0,
+            memory_type: None,
         };
         let frequent = MemoryPayload {
-            content: "test".to_string(), content_hash: 0, labels: vec![],
-            timestamp: 0, aliases: vec![], embedding: vec![], importance: 1.0,
-            enforced: false, rationale: None, access_count: 10, memory_type: None,
+            content: "test".to_string(),
+            content_hash: 0,
+            labels: vec![],
+            timestamp: 0,
+            aliases: vec![],
+            embedding: vec![],
+            importance: 1.0,
+            enforced: false,
+            rationale: None,
+            access_count: 10,
+            memory_type: None,
         };
         let imp_no = LifecycleGovernor::effective_importance(&no_access, 10);
         let imp_freq = LifecycleGovernor::effective_importance(&frequent, 10);
-        assert!(imp_freq > imp_no, "frequently accessed memory should have higher effective importance");
+        assert!(
+            imp_freq > imp_no,
+            "frequently accessed memory should have higher effective importance"
+        );
     }
 }

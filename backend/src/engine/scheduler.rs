@@ -1,24 +1,24 @@
-use std::collections::{VecDeque, HashMap, HashSet};
+use parking_lot::Mutex as ParkMutex;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
-use parking_lot::Mutex as ParkMutex;
 
 use crate::domain::space::Space;
 use crate::domain::tetra::{MemoryPayload, TetraId, Tetrahedron};
 use crate::domain::vertex::Point3;
 
+use super::adaptive::AdaptiveParams;
 use super::bus::{EngineEvent, EventSender};
 use super::cognitive::{CognitiveEngine, SchedulerAction, SystemState};
 use super::dream::DreamEngine;
+use super::drive::DriveEngine;
 use super::dynamics;
 use super::energy::EnergyCenter;
 use super::knowledge::KnowledgeGraph;
+use super::outcome::{ActionOutcome, ActionType, OutcomeTracker};
 use super::security::SecurityGuard;
-use super::drive::DriveEngine;
-use super::outcome::{ActionType, ActionOutcome, OutcomeTracker};
-use super::adaptive::AdaptiveParams;
 
 struct CognitiveThought {
     tick: u64,
@@ -27,7 +27,11 @@ struct CognitiveThought {
 
 #[derive(Debug, Clone)]
 pub enum ScheduledTask {
-    CreateTetra { core: Point3, data: MemoryPayload, mass: f64 },
+    CreateTetra {
+        core: Point3,
+        data: MemoryPayload,
+        mass: f64,
+    },
     RemoveTetra(TetraId),
 }
 
@@ -81,7 +85,22 @@ impl SchedulerCenter {
         tick_interval_ms: u64,
         max_energy: f64,
     ) -> Self {
-        Self::with_security(space, energy, knowledge, cognitive, gateway, tx, _rx, tick_interval_ms, max_energy, Arc::new(SecurityGuard::from_env()), Arc::new(super::storage::StorageManager::new(std::path::Path::new("data")).expect("storage init failed")))
+        Self::with_security(
+            space,
+            energy,
+            knowledge,
+            cognitive,
+            gateway,
+            tx,
+            _rx,
+            tick_interval_ms,
+            max_energy,
+            Arc::new(SecurityGuard::from_env()),
+            Arc::new(
+                super::storage::StorageManager::new(std::path::Path::new("data"))
+                    .expect("storage init failed"),
+            ),
+        )
     }
 
     pub fn with_security(
@@ -140,21 +159,34 @@ impl SchedulerCenter {
         let energy = self.energy.available();
         let tetras = self.space.all_tetrahedrons();
         let clusters = self.space.find_clusters();
-        let labels_map: HashMap<u64, Vec<String>> = tetras.iter()
+        let labels_map: HashMap<u64, Vec<String>> = tetras
+            .iter()
             .map(|t| (t.id, t.data.labels.clone()))
             .collect();
-        let core_map: HashMap<u64, Point3> = tetras.iter()
-            .map(|t| (t.id, t.core))
-            .collect();
-        TickSnapshot { tick, energy, tetras, clusters, labels_map, core_map }
+        let core_map: HashMap<u64, Point3> = tetras.iter().map(|t| (t.id, t.core)).collect();
+        TickSnapshot {
+            tick,
+            energy,
+            tetras,
+            clusters,
+            labels_map,
+            core_map,
+        }
     }
 
-    pub fn api_create_memory(&self, content: &str, mut labels: Vec<String>) -> Result<TetraId, String> {
-        self.security.validate_content(content)
+    pub fn api_create_memory(
+        &self,
+        content: &str,
+        mut labels: Vec<String>,
+    ) -> Result<TetraId, String> {
+        self.security
+            .validate_content(content)
             .map_err(|_| "content validation failed".to_string())?;
-        self.security.validate_labels(&labels)
+        self.security
+            .validate_labels(&labels)
             .map_err(|_| "labels validation failed".to_string())?;
-        self.security.check_constitution_create(!content.is_empty())
+        self.security
+            .check_constitution_create(!content.is_empty())
             .map_err(|r| format!("constitution violation: {:?}", r))?;
 
         let intake = super::intake::MemoryIntake::process(content, &mut labels);
@@ -170,7 +202,8 @@ impl SchedulerCenter {
         if let Ok(similar) = self.gateway.search(content, 3) {
             for (sid, sim, _bm25, payload) in &similar {
                 if *sim > 0.85 && payload.content.len() > 20 {
-                    let text_sim = super::intake::MemoryIntake::text_similarity(content, &payload.content);
+                    let text_sim =
+                        super::intake::MemoryIntake::text_similarity(content, &payload.content);
                     let threshold = if content.len() < 30 { 0.80 } else { 0.55 };
                     if text_sim > threshold {
                         tracing::info!("[Intake] semantic dedup: new content ≈ #{} (vec_sim={:.2} text_sim={:.2} threshold={:.2}), returning existing",
@@ -193,7 +226,12 @@ impl SchedulerCenter {
                     let _ = self.space.update_payload(id, data);
                 }
                 for &cid in &conflict_ids {
-                    let _ = self.knowledge.add_relation(id, cid, super::knowledge::RelationType::Contradicts, 0.8);
+                    let _ = self.knowledge.add_relation(
+                        id,
+                        cid,
+                        super::knowledge::RelationType::Contradicts,
+                        0.8,
+                    );
                     tracing::info!("[Intake] contradiction link: #{} contradicts #{}", id, cid);
                 }
                 self.persist_tetra(id);
@@ -215,10 +253,17 @@ impl SchedulerCenter {
         Ok(id)
     }
 
-    pub fn api_create_memory_with_time(&self, content: &str, mut labels: Vec<String>, timestamp: i64) -> Result<TetraId, String> {
-        self.security.validate_content(content)
+    pub fn api_create_memory_with_time(
+        &self,
+        content: &str,
+        mut labels: Vec<String>,
+        timestamp: i64,
+    ) -> Result<TetraId, String> {
+        self.security
+            .validate_content(content)
             .map_err(|_| "content validation failed".to_string())?;
-        self.security.validate_labels(&labels)
+        self.security
+            .validate_labels(&labels)
             .map_err(|_| "labels validation failed".to_string())?;
 
         let intake = super::intake::MemoryIntake::process(content, &mut labels);
@@ -234,17 +279,24 @@ impl SchedulerCenter {
         if let Ok(similar) = self.gateway.search(content, 3) {
             for (sid, sim, _bm25, payload) in &similar {
                 if *sim > 0.85 && payload.content.len() > 20 {
-                    let text_sim = super::intake::MemoryIntake::text_similarity(content, &payload.content);
+                    let text_sim =
+                        super::intake::MemoryIntake::text_similarity(content, &payload.content);
                     if text_sim > 0.55 {
-                        tracing::info!("[Intake] semantic dedup(history): ≈ #{} (vec={:.2} text={:.2})",
-                            sid, sim, text_sim);
+                        tracing::info!(
+                            "[Intake] semantic dedup(history): ≈ #{} (vec={:.2} text={:.2})",
+                            sid,
+                            sim,
+                            text_sim
+                        );
                         return Ok(*sid);
                     }
                 }
             }
         }
 
-        let id = self.gateway.create_memory_with_time(content, labels, timestamp)?;
+        let id = self
+            .gateway
+            .create_memory_with_time(content, labels, timestamp)?;
 
         if let Some(tetra) = self.space.get_tetrahedron(id) {
             let mut data = tetra.data.clone();
@@ -256,7 +308,12 @@ impl SchedulerCenter {
 
         if !intake.conflict_ids.is_empty() {
             for &cid in &intake.conflict_ids {
-                let _ = self.knowledge.add_relation(id, cid, super::knowledge::RelationType::Contradicts, 0.8);
+                let _ = self.knowledge.add_relation(
+                    id,
+                    cid,
+                    super::knowledge::RelationType::Contradicts,
+                    0.8,
+                );
             }
         }
 
@@ -265,10 +322,13 @@ impl SchedulerCenter {
     }
 
     pub fn api_remember(&self, content: &str) -> Result<(TetraId, Vec<String>), String> {
-        self.security.validate_content(content)
+        self.security
+            .validate_content(content)
             .map_err(|_| "content validation failed".to_string())?;
         let labels = if self.cognitive.enabled() {
-            self.cognitive.classify_content(content).unwrap_or_else(|_| vec!["general".to_string()])
+            self.cognitive
+                .classify_content(content)
+                .unwrap_or_else(|_| vec!["general".to_string()])
         } else {
             vec!["general".to_string()]
         };
@@ -277,12 +337,22 @@ impl SchedulerCenter {
         Ok((id, labels))
     }
 
-    pub fn api_search(&self, query: &str, limit: usize) -> Result<Vec<(TetraId, f64, f64, MemoryPayload)>, String> {
+    pub fn api_search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(TetraId, f64, f64, MemoryPayload)>, String> {
         self.api_search_filtered(query, limit, None)
     }
 
-    pub fn api_search_filtered(&self, query: &str, limit: usize, filters: Option<&super::search_engine::SearchFilters>) -> Result<Vec<(TetraId, f64, f64, MemoryPayload)>, String> {
-        self.security.validate_query(query)
+    pub fn api_search_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        filters: Option<&super::search_engine::SearchFilters>,
+    ) -> Result<Vec<(TetraId, f64, f64, MemoryPayload)>, String> {
+        self.security
+            .validate_query(query)
             .map_err(|_| "query validation failed".to_string())?;
         let intent = super::retrieval::RetrievalEngine::parse_intent(query);
 
@@ -292,7 +362,9 @@ impl SchedulerCenter {
             format!("{} {}", query, intent.expanded_terms.join(" "))
         };
 
-        let mut results = self.gateway.search_filtered(&expanded_query, limit * 3, filters)?;
+        let mut results = self
+            .gateway
+            .search_filtered(&expanded_query, limit * 3, filters)?;
         super::retrieval::RetrievalEngine::rerank(&mut results, &intent, limit * 2);
 
         let clusters = self.space.find_clusters();
@@ -305,7 +377,8 @@ impl SchedulerCenter {
                 for &tid in &cluster.tetra_ids {
                     if let Some(t) = self.space.get_tetrahedron(tid) {
                         let content_lower = t.data.content.to_lowercase();
-                        let matches = query_tokens.iter()
+                        let matches = query_tokens
+                            .iter()
                             .filter(|w| content_lower.contains(w.as_str()))
                             .count();
                         score += matches as f64 * t.data.importance;
@@ -316,7 +389,13 @@ impl SchedulerCenter {
                     best_cluster_id = Some(ci);
                 }
             }
-            best_cluster_id.map(|ci| clusters[ci].tetra_ids.iter().copied().collect::<std::collections::HashSet<u64>>())
+            best_cluster_id.map(|ci| {
+                clusters[ci]
+                    .tetra_ids
+                    .iter()
+                    .copied()
+                    .collect::<std::collections::HashSet<u64>>()
+            })
         } else {
             None
         };
@@ -337,7 +416,11 @@ impl SchedulerCenter {
             if payload.access_count > 5 {
                 *sim += 0.04;
             }
-            if payload.labels.iter().any(|l| l == "outdated" || l == "superseded") {
+            if payload
+                .labels
+                .iter()
+                .any(|l| l == "outdated" || l == "superseded")
+            {
                 *sim -= 0.3;
             }
         }
@@ -345,7 +428,11 @@ impl SchedulerCenter {
 
         results.retain(|(id, sim, _bm25, payload)| {
             if payload.importance < 0.1 && payload.content.len() < 15 {
-                tracing::info!("[Search] filtered low-quality id={} (importance={:.2})", id, payload.importance);
+                tracing::info!(
+                    "[Search] filtered low-quality id={} (importance={:.2})",
+                    id,
+                    payload.importance
+                );
                 false
             } else if *sim < 0.0 {
                 false
@@ -382,7 +469,11 @@ impl SchedulerCenter {
         all
     }
 
-    pub fn api_list_by_labels(&self, labels: &[&str], limit: usize) -> Vec<(TetraId, MemoryPayload)> {
+    pub fn api_list_by_labels(
+        &self,
+        labels: &[&str],
+        limit: usize,
+    ) -> Vec<(TetraId, MemoryPayload)> {
         self.gateway.list_by_labels(labels, limit)
     }
 
@@ -395,23 +486,44 @@ impl SchedulerCenter {
     }
 
     pub fn api_load_context(&self, limit: usize) -> Vec<(TetraId, f64, String, Vec<String>)> {
-        let session = self.gateway.list_by_labels(&["session-summary", "session"], 3);
+        let session = self
+            .gateway
+            .list_by_labels(&["session-summary", "session"], 3);
         let decisions = self.gateway.list_by_labels(&["decision"], 10);
         let patterns = self.gateway.list_by_labels(&["pattern"], 6);
         let identity = self.gateway.list_by_labels(&["identity", "system"], 2);
-        let project = self.gateway.list_by_labels(&["project-context", "architecture"], 2);
+        let project = self
+            .gateway
+            .list_by_labels(&["project-context", "architecture"], 2);
         let bugs = self.gateway.list_by_labels(&["bug"], 5);
         let enforced = self.gateway.get_enforced_patterns();
 
         let mut all_memories: Vec<(u64, MemoryPayload)> = Vec::new();
-        for (id, p) in &session { all_memories.push((*id, p.clone())); }
-        for (id, p) in &decisions { all_memories.push((*id, p.clone())); }
-        for (id, p) in &patterns { all_memories.push((*id, p.clone())); }
-        for (id, p) in &identity { all_memories.push((*id, p.clone())); }
-        for (id, p) in &project { all_memories.push((*id, p.clone())); }
-        for (id, p) in &bugs { all_memories.push((*id, p.clone())); }
+        for (id, p) in &session {
+            all_memories.push((*id, p.clone()));
+        }
+        for (id, p) in &decisions {
+            all_memories.push((*id, p.clone()));
+        }
+        for (id, p) in &patterns {
+            all_memories.push((*id, p.clone()));
+        }
+        for (id, p) in &identity {
+            all_memories.push((*id, p.clone()));
+        }
+        for (id, p) in &project {
+            all_memories.push((*id, p.clone()));
+        }
+        for (id, p) in &bugs {
+            all_memories.push((*id, p.clone()));
+        }
 
-        let narrative = super::assembler::ContextAssembler::assemble(&all_memories, &enforced, limit, "general");
+        let narrative = super::assembler::ContextAssembler::assemble(
+            &all_memories,
+            &enforced,
+            limit,
+            "general",
+        );
 
         let mut result = Vec::new();
         result.push((0u64, 1.0, narrative, vec!["assembled-context".to_string()]));
@@ -435,7 +547,10 @@ impl SchedulerCenter {
     }
 
     pub fn api_graph_stats(&self) -> (usize, usize) {
-        (self.gateway.relation_count_kg(), self.gateway.concept_count_kg())
+        (
+            self.gateway.relation_count_kg(),
+            self.gateway.concept_count_kg(),
+        )
     }
 
     pub fn api_export_graph(&self) -> super::knowledge::GraphExport {
@@ -446,7 +561,11 @@ impl SchedulerCenter {
         self.gateway.decay_relations()
     }
 
-    pub fn api_pulse(&self, origin: TetraId, ttl: u32) -> Result<crate::domain::pulse::PulseResult, String> {
+    pub fn api_pulse(
+        &self,
+        origin: TetraId,
+        ttl: u32,
+    ) -> Result<crate::domain::pulse::PulseResult, String> {
         self.gateway.pulse(origin, ttl)
     }
 
@@ -456,18 +575,28 @@ impl SchedulerCenter {
     }
 
     pub fn api_dream(&self) -> Result<String, String> {
-        self.security.check_energy(self.energy.available(), 15.0)
+        self.security
+            .check_energy(self.energy.available(), 15.0)
             .map_err(|_| "insufficient energy (need 15.0)".to_string())?;
-        let report = super::dream::DreamEngine::cycle(
-            &self.space, 0.3, 5,
-        );
-        for &id in report.evicted_ids.iter().chain(report.merged_remove_ids.iter()) {
+        let report = super::dream::DreamEngine::cycle(&self.space, 0.3, 5);
+        for &id in report
+            .evicted_ids
+            .iter()
+            .chain(report.merged_remove_ids.iter())
+        {
             self.purge_tetra(id);
         }
-        let access_counts: std::collections::HashMap<u64, u32> = self.gateway.search_metrics().hot_memories.into_iter().collect();
-        let importance_updated = super::dream::DreamEngine::recompute_importance(&self.space, &access_counts);
+        let access_counts: std::collections::HashMap<u64, u32> = self
+            .gateway
+            .search_metrics()
+            .hot_memories
+            .into_iter()
+            .collect();
+        let importance_updated =
+            super::dream::DreamEngine::recompute_importance(&self.space, &access_counts);
         let tetras = self.space.all_tetrahedrons();
-        let label_data: Vec<(TetraId, Vec<String>)> = tetras.iter()
+        let label_data: Vec<(TetraId, Vec<String>)> = tetras
+            .iter()
             .map(|t| (t.id, t.data.labels.clone()))
             .collect();
         self.knowledge.update_concepts(&label_data);
@@ -478,24 +607,39 @@ impl SchedulerCenter {
         let all_mems = self.gateway.list_nodes();
         let avg_imp = if !all_mems.is_empty() {
             all_mems.iter().map(|(_, p)| p.importance).sum::<f64>() / all_mems.len() as f64
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         let enforced = self.gateway.get_enforced_patterns().len();
         let _ = self.storage.save_health_snapshot(
-            stats.tetra_count as i64, stats.clusters as i64,
-            feedback_mems.len() as i64, avg_imp, enforced as i64,
+            stats.tetra_count as i64,
+            stats.clusters as i64,
+            feedback_mems.len() as i64,
+            avg_imp,
+            enforced as i64,
         );
 
         let mut insights = report.insights;
         insights.sort_by(|a, b| {
             let score = |s: &str| -> f64 {
                 let mut v = 0.0f64;
-                if s.contains("merged") || s.contains("consolidated") { v += 3.0; }
-                if s.contains("evicted") || s.contains("junk") { v += 2.0; }
-                if s.contains("cluster") { v += 1.5; }
-                if s.contains("similar pairs") { v += 1.0; }
+                if s.contains("merged") || s.contains("consolidated") {
+                    v += 3.0;
+                }
+                if s.contains("evicted") || s.contains("junk") {
+                    v += 2.0;
+                }
+                if s.contains("cluster") {
+                    v += 1.5;
+                }
+                if s.contains("similar pairs") {
+                    v += 1.0;
+                }
                 v
             };
-            score(b).partial_cmp(&score(a)).unwrap_or(std::cmp::Ordering::Equal)
+            score(b)
+                .partial_cmp(&score(a))
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         insights.truncate(20);
         Ok(format!("consolidated: {}, connections_formed: {}, merged: {}, evicted: {}, importance_updated: {}, insights: {:?}",
@@ -503,32 +647,54 @@ impl SchedulerCenter {
     }
 
     pub fn api_recall(&self, query: &str, depth: usize) -> Result<serde_json::Value, String> {
-        self.security.validate_query(query)
+        self.security
+            .validate_query(query)
             .map_err(|_| "query validation failed".to_string())?;
         let seed_results = self.gateway.search(query, 20)?;
         if seed_results.is_empty() {
-            return Ok(serde_json::json!({"query": query, "memory_file": serde_json::Value::Null, "seed_count": 0, "associated_count": 0}));
+            return Ok(
+                serde_json::json!({"query": query, "memory_file": serde_json::Value::Null, "seed_count": 0, "associated_count": 0}),
+            );
         }
 
-        let all_items = self.gateway.expand_from_seeds_with_clusters(&seed_results, depth);
+        let all_items = self
+            .gateway
+            .expand_from_seeds_with_clusters(&seed_results, depth);
 
         let mut sorted_items = all_items;
-        sorted_items.sort_by(|a, b| b.1.max(b.2).partial_cmp(&a.1.max(a.2)).unwrap_or(std::cmp::Ordering::Equal));
+        sorted_items.sort_by(|a, b| {
+            b.1.max(b.2)
+                .partial_cmp(&a.1.max(a.2))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         sorted_items.truncate(40);
 
         let seed_count = sorted_items.iter().filter(|x| x.1 > 0.0).count();
         let assoc_count = sorted_items.len() - seed_count;
 
-        let mut section_best: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
-        let mut memory_sections: std::collections::HashMap<String, Vec<serde_json::Value>> = std::collections::HashMap::new();
+        let mut section_best: std::collections::HashMap<String, f64> =
+            std::collections::HashMap::new();
+        let mut memory_sections: std::collections::HashMap<String, Vec<serde_json::Value>> =
+            std::collections::HashMap::new();
         for (id, ds, asim, labels, content, ts) in &sorted_items {
-            let pl = labels.first().cloned().unwrap_or_else(|| "general".to_string());
+            let pl = labels
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "general".to_string());
             let score = ds.max(*asim);
-            section_best.entry(pl.clone()).and_modify(|s| { if score > *s { *s = score; } }).or_insert(score);
+            section_best
+                .entry(pl.clone())
+                .and_modify(|s| {
+                    if score > *s {
+                        *s = score;
+                    }
+                })
+                .or_insert(score);
             memory_sections.entry(pl).or_default().push(serde_json::json!({"id": id, "content": content, "labels": labels, "relevance": [ds, asim], "timestamp": ts}));
         }
 
-        let mut section_order: Vec<(f64, String)> = section_best.into_iter().map(|(k, v)| (v, k)).collect();
+        let mut section_order: Vec<(f64, String)> =
+            section_best.into_iter().map(|(k, v)| (v, k)).collect();
         section_order.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         let mut ordered_sections = serde_json::Map::new();
         for (_, label) in section_order {
@@ -537,7 +703,11 @@ impl SchedulerCenter {
             }
         }
 
-        let text_refs: Vec<&str> = sorted_items.iter().take(10).map(|(_, _, _, _, c, _)| c.as_str()).collect();
+        let text_refs: Vec<&str> = sorted_items
+            .iter()
+            .take(10)
+            .map(|(_, _, _, _, c, _)| c.as_str())
+            .collect();
         let emotion = super::emotion::EmotionState::analyze_texts(&text_refs);
 
         Ok(serde_json::json!({
@@ -551,7 +721,8 @@ impl SchedulerCenter {
     }
 
     pub fn api_ask(&self, question: &str, depth: usize) -> Result<serde_json::Value, String> {
-        self.security.validate_query(question)
+        self.security
+            .validate_query(question)
             .map_err(|_| "question validation failed".to_string())?;
         let seed_results = self.gateway.search(question, 20)?;
 
@@ -566,29 +737,47 @@ impl SchedulerCenter {
 
         let all_items = self.gateway.expand_from_seeds(&seed_results, depth);
 
-        let mut sorted_items: Vec<(u64, f64, f64)> = all_items.iter()
+        let mut sorted_items: Vec<(u64, f64, f64)> = all_items
+            .iter()
             .map(|(id, direct, _ls, _c, _ts)| (*id, *direct, 0.0f64))
             .collect();
 
-        let mut item_data: std::collections::HashMap<u64, (Vec<String>, String)> = std::collections::HashMap::new();
+        let mut item_data: std::collections::HashMap<u64, (Vec<String>, String)> =
+            std::collections::HashMap::new();
         for (id, _, labels, content, _) in &all_items {
-            item_data.entry(*id).or_insert_with(|| (labels.clone(), content.clone()));
+            item_data
+                .entry(*id)
+                .or_insert_with(|| (labels.clone(), content.clone()));
         }
 
-        sorted_items.sort_by(|a, b| b.1.max(b.2).partial_cmp(&a.1.max(a.2)).unwrap_or(std::cmp::Ordering::Equal));
+        sorted_items.sort_by(|a, b| {
+            b.1.max(b.2)
+                .partial_cmp(&a.1.max(a.2))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         sorted_items.truncate(30);
 
-        let mem_texts: Vec<String> = sorted_items.iter()
+        let mem_texts: Vec<String> = sorted_items
+            .iter()
             .filter(|(_, direct, assoc)| direct.max(*assoc) > 0.1)
-            .filter_map(|(id, _, _)| item_data.get(id).map(|(labels, c)| {
-                let label_str = labels.iter().take(2).cloned().collect::<Vec<_>>().join(",");
-                format!("[#{}] [{}] {}", id, label_str, c.chars().take(300).collect::<String>())
-            }))
+            .filter_map(|(id, _, _)| {
+                item_data.get(id).map(|(labels, c)| {
+                    let label_str = labels.iter().take(2).cloned().collect::<Vec<_>>().join(",");
+                    format!(
+                        "[#{}] [{}] {}",
+                        id,
+                        label_str,
+                        c.chars().take(300).collect::<String>()
+                    )
+                })
+            })
             .collect();
         let memories_summary = mem_texts.join("\n\n");
 
         let answer = if self.cognitive.enabled() && !memories_summary.is_empty() {
-            self.cognitive.answer_from_memories(question, &memories_summary).unwrap_or(memories_summary.clone())
+            self.cognitive
+                .answer_from_memories(question, &memories_summary)
+                .unwrap_or(memories_summary.clone())
         } else {
             memories_summary
         };
@@ -611,7 +800,9 @@ impl SchedulerCenter {
 
     pub fn api_reason_analogies(&self, min_confidence: f64) -> Vec<serde_json::Value> {
         let analogies = super::reasoning::ReasoningEngine::find_analogies(
-            &self.space, &self.knowledge, min_confidence,
+            &self.space,
+            &self.knowledge,
+            min_confidence,
         );
         analogies.iter().take(5).map(|a| serde_json::json!({
             "a": a.source_a, "b": a.source_b, "c": a.target_a, "d": a.target_b, "confidence": a.confidence
@@ -663,9 +854,7 @@ impl SchedulerCenter {
         let tetra_cluster_map: HashMap<u64, usize> = clusters
             .iter()
             .enumerate()
-            .flat_map(|(ci, cluster)| {
-                cluster.tetra_ids.iter().map(move |&tid| (tid, ci))
-            })
+            .flat_map(|(ci, cluster)| cluster.tetra_ids.iter().map(move |&tid| (tid, ci)))
             .collect();
 
         let cluster_states: Vec<super::cognitive::ClusterState> = clusters
@@ -685,7 +874,9 @@ impl SchedulerCenter {
 
                 let entropy = dynamics::compute_entropy_from_labels(&cluster.tetra_ids, labels_map);
 
-                let positions: Vec<Point3> = cluster.tetra_ids.iter()
+                let positions: Vec<Point3> = cluster
+                    .tetra_ids
+                    .iter()
                     .filter_map(|id| core_map.get(id).copied())
                     .collect();
                 let centroid = if positions.is_empty() {
@@ -711,25 +902,40 @@ impl SchedulerCenter {
             })
             .collect();
 
-        let memories: Vec<super::cognitive::MemoryInfo> = tetras.iter().take(30).map(|t| {
-            let ci = tetra_cluster_map.get(&t.id).copied().unwrap_or(999);
-            super::cognitive::MemoryInfo {
-                id: t.id,
-                content_preview: t.data.content.chars().take(50).collect(),
-                labels: t.data.labels.clone(),
-                cluster_index: ci,
-                mass: t.mass,
-            }
-        }).collect();
+        let memories: Vec<super::cognitive::MemoryInfo> = tetras
+            .iter()
+            .take(30)
+            .map(|t| {
+                let ci = tetra_cluster_map.get(&t.id).copied().unwrap_or(999);
+                super::cognitive::MemoryInfo {
+                    id: t.id,
+                    content_preview: t.data.content.chars().take(50).collect(),
+                    labels: t.data.labels.clone(),
+                    cluster_index: ci,
+                    mass: t.mass,
+                }
+            })
+            .collect();
 
         let recent = self.recent_events.lock().clone();
         let decision_history = self.decision_history.lock().clone();
 
-        let avg_mass = if tetras.is_empty() { 1.0 } else { tetras.iter().map(|t| t.mass).sum::<f64>() / tetras.len() as f64 };
+        let avg_mass = if tetras.is_empty() {
+            1.0
+        } else {
+            tetras.iter().map(|t| t.mass).sum::<f64>() / tetras.len() as f64
+        };
         let max_mass = tetras.iter().map(|t| t.mass).fold(1.0, f64::max);
 
-        let avg_entropy = if cluster_states.is_empty() { 0.0 } else { cluster_states.iter().map(|c| c.entropy).sum::<f64>() / cluster_states.len() as f64 };
-        let max_entropy = cluster_states.iter().map(|c| c.entropy).fold(0.0_f64, f64::max);
+        let avg_entropy = if cluster_states.is_empty() {
+            0.0
+        } else {
+            cluster_states.iter().map(|c| c.entropy).sum::<f64>() / cluster_states.len() as f64
+        };
+        let max_entropy = cluster_states
+            .iter()
+            .map(|c| c.entropy)
+            .fold(0.0_f64, f64::max);
 
         let prev_snapshot = self.prev_snapshot.lock().clone();
 
@@ -755,7 +961,11 @@ impl SchedulerCenter {
                 total_tetras: ka.total_tetras,
                 total_relations: ka.total_relations,
                 orphan_count: ka.orphan_count,
-                orphan_ratio: if ka.total_tetras > 0 { ka.orphan_count as f64 / ka.total_tetras as f64 } else { 0.0 },
+                orphan_ratio: if ka.total_tetras > 0 {
+                    ka.orphan_count as f64 / ka.total_tetras as f64
+                } else {
+                    0.0
+                },
                 largest_component: ka.largest_component,
                 disconnected_components: ka.disconnected_components,
                 avg_degree: ka.avg_degree,
@@ -809,9 +1019,7 @@ impl SchedulerCenter {
                     "reinforcing" => super::pulse::PulseType::Reinforcing { boost: 0.3 },
                     "exploratory" => super::pulse::PulseType::Exploratory { curiosity: 0.4 },
                     "cascade" => super::pulse::PulseType::Cascade { branch_limit: 3 },
-                    _ => super::pulse::PulseType::Neural {
-                        temperature: 0.8,
-                    },
+                    _ => super::pulse::PulseType::Neural { temperature: 0.8 },
                 };
                 match super::pulse::PulseEngine::send(
                     &self.space,
@@ -843,11 +1051,17 @@ impl SchedulerCenter {
                     tracing::debug!("[LLM] fuse: skipped (same cluster {})", cluster_a);
                     return;
                 }
-                let bridge_count = self.space.all_tetrahedrons().iter()
+                let bridge_count = self
+                    .space
+                    .all_tetrahedrons()
+                    .iter()
                     .filter(|t| t.data.labels.iter().any(|l| l == "bridge"))
                     .count();
                 if bridge_count >= 5 {
-                    tracing::info!("[LLM] fuse: skipped (bridge limit reached: {})", bridge_count);
+                    tracing::info!(
+                        "[LLM] fuse: skipped (bridge limit reached: {})",
+                        bridge_count
+                    );
                     return;
                 }
                 let clusters = self.space.find_clusters();
@@ -866,9 +1080,15 @@ impl SchedulerCenter {
                     }
                 };
 
-                let label_sim = super::auto_pipeline::compute_cluster_label_similarity(ca, cb, &self.space);
+                let label_sim =
+                    super::auto_pipeline::compute_cluster_label_similarity(ca, cb, &self.space);
                 if label_sim < 0.3 {
-                    tracing::info!("[LLM] fuse {}+{} → BLOCKED (label_sim={:.3} < 0.3)", cluster_a, cluster_b, label_sim);
+                    tracing::info!(
+                        "[LLM] fuse {}+{} → BLOCKED (label_sim={:.3} < 0.3)",
+                        cluster_a,
+                        cluster_b,
+                        label_sim
+                    );
                     return;
                 }
                 if !self.energy.consume(8.0) {
@@ -876,7 +1096,10 @@ impl SchedulerCenter {
                     return;
                 }
 
-                let bridge_content = format!("[bridge] cluster {} + cluster {} (label_sim={:.3})", cluster_a, cluster_b, label_sim);
+                let bridge_content = format!(
+                    "[bridge] cluster {} + cluster {} (label_sim={:.3})",
+                    cluster_a, cluster_b, label_sim
+                );
                 let ca_centroid = self.cluster_core_centroid(ca);
                 let cb_centroid = self.cluster_core_centroid(cb);
                 let bridge_core = Point3::new(
@@ -898,7 +1121,13 @@ impl SchedulerCenter {
                     access_count: 0,
                     memory_type: Some("bridge".to_string()),
                 };
-                let tetra = Tetrahedron { id: 0, vertex_ids: [0; 4], core: bridge_core, data, mass: 1.0 };
+                let tetra = Tetrahedron {
+                    id: 0,
+                    vertex_ids: [0; 4],
+                    core: bridge_core,
+                    data,
+                    mass: 1.0,
+                };
                 match self.space.add_tetrahedron(&tetra, &positions) {
                     Ok(id) => {
                         tracing::info!("[LLM] fuse: bridge tetra #{} connecting cluster {}+{} (label_sim={:.3})", id, cluster_a, cluster_b, label_sim);
@@ -916,7 +1145,11 @@ impl SchedulerCenter {
                 let result = DreamEngine::cycle(&self.space, 0.3, 5);
                 let tick = self.tick_count.load(Ordering::SeqCst);
                 self.last_dream_tick.store(tick, Ordering::SeqCst);
-                for &id in result.evicted_ids.iter().chain(result.merged_remove_ids.iter()) {
+                for &id in result
+                    .evicted_ids
+                    .iter()
+                    .chain(result.merged_remove_ids.iter())
+                {
                     self.purge_tetra(id);
                 }
                 tracing::info!(
@@ -933,17 +1166,32 @@ impl SchedulerCenter {
                 self.log_event("dream".to_string());
             }
             SchedulerAction::Link { a, b, reason } => {
-                if self.space.get_tetrahedron(*a).is_none() || self.space.get_tetrahedron(*b).is_none() {
+                if self.space.get_tetrahedron(*a).is_none()
+                    || self.space.get_tetrahedron(*b).is_none()
+                {
                     tracing::warn!("[LLM] link: id {} or {} not found", a, b);
                     return;
                 }
-                let label_sim = if let (Some(ta), Some(tb)) = (self.space.get_tetrahedron(*a), self.space.get_tetrahedron(*b)) {
+                let label_sim = if let (Some(ta), Some(tb)) = (
+                    self.space.get_tetrahedron(*a),
+                    self.space.get_tetrahedron(*b),
+                ) {
                     super::vector::VectorLayer::label_jaccard(&ta.data.labels, &tb.data.labels)
-                } else { 0.0 };
-                self.knowledge.add_relation(*a, *b, crate::engine::knowledge::RelationType::SimilarTo, label_sim.max(0.5));
+                } else {
+                    0.0
+                };
+                self.knowledge.add_relation(
+                    *a,
+                    *b,
+                    crate::engine::knowledge::RelationType::SimilarTo,
+                    label_sim.max(0.5),
+                );
                 tracing::info!(
                     "[LLM] link: #{} ↔ #{} (label_sim={:.3}) reason: {}",
-                    a, b, label_sim, reason
+                    a,
+                    b,
+                    label_sim,
+                    reason
                 );
                 self.log_event(format!("link({},{})", a, b));
             }
@@ -954,7 +1202,9 @@ impl SchedulerCenter {
                 }
                 let mut deleted = 0u64;
                 for &id in ids {
-                    if id == *keep { continue; }
+                    if id == *keep {
+                        continue;
+                    }
                     if self.space.get_tetrahedron(id).is_some() {
                         self.purge_tetra(id);
                         deleted += 1;
@@ -966,7 +1216,15 @@ impl SchedulerCenter {
                         new_labels.push("consolidated".to_string());
                     }
                     let updated = MemoryPayload {
-                        content: format!("{}\n\n[整合自 {} 条记忆: {}]", summary, ids.len(), ids.iter().map(|id| format!("#{}", id)).collect::<Vec<_>>().join(",")),
+                        content: format!(
+                            "{}\n\n[整合自 {} 条记忆: {}]",
+                            summary,
+                            ids.len(),
+                            ids.iter()
+                                .map(|id| format!("#{}", id))
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        ),
                         content_hash: 0,
                         labels: new_labels,
                         timestamp: t.data.timestamp,
@@ -979,16 +1237,30 @@ impl SchedulerCenter {
                         memory_type: t.data.memory_type.clone(),
                     };
                     if let Err(e) = self.space.update_payload(*keep, updated.clone()) {
-                        tracing::warn!("[Scheduler] consolidate update_payload failed for #{}: {}", keep, e);
+                        tracing::warn!(
+                            "[Scheduler] consolidate update_payload failed for #{}: {}",
+                            keep,
+                            e
+                        );
                     }
                     let boost = deleted as f64 * 0.5;
                     if let Err(e) = self.space.update_mass(*keep, boost) {
-                        tracing::warn!("[Scheduler] consolidate update_mass failed for #{}: {}", keep, e);
+                        tracing::warn!(
+                            "[Scheduler] consolidate update_mass failed for #{}: {}",
+                            keep,
+                            e
+                        );
                     }
                     self.persist_tetra(*keep);
-                    self.gateway.update_label_index(*keep, &t.data.labels, &updated.labels);
+                    self.gateway
+                        .update_label_index(*keep, &t.data.labels, &updated.labels);
                 }
-                tracing::info!("[LLM] consolidate: kept #{}, deleted {} duplicates ({})", keep, deleted, summary.chars().take(80).collect::<String>());
+                tracing::info!(
+                    "[LLM] consolidate: kept #{}, deleted {} duplicates ({})",
+                    keep,
+                    deleted,
+                    summary.chars().take(80).collect::<String>()
+                );
                 self.log_event(format!("consolidate({},{})", keep, deleted));
             }
             SchedulerAction::MarkJunk { ids, reason } => {
@@ -1014,21 +1286,43 @@ impl SchedulerCenter {
                             memory_type: t.data.memory_type.clone(),
                         };
                         if let Err(e) = self.space.update_payload(id, updated) {
-                            tracing::warn!("[Scheduler] mark_junk update_payload failed for #{}: {}", id, e);
+                            tracing::warn!(
+                                "[Scheduler] mark_junk update_payload failed for #{}: {}",
+                                id,
+                                e
+                            );
                         } else {
-                            self.gateway.update_label_index(id, &old_labels, &new_labels);
+                            self.gateway
+                                .update_label_index(id, &old_labels, &new_labels);
                         }
                         if let Err(e) = self.space.update_mass(id, 0.05) {
-                            tracing::warn!("[Scheduler] mark_junk update_mass failed for #{}: {}", id, e);
+                            tracing::warn!(
+                                "[Scheduler] mark_junk update_mass failed for #{}: {}",
+                                id,
+                                e
+                            );
                         }
                         self.persist_tetra(id);
                         marked += 1;
                     }
                 }
-                tracing::info!("[LLM] mark_junk: {} memories marked ({})", marked, reason.chars().take(80).collect::<String>());
-                self.log_event(format!("mark_junk({},{})", marked, reason.chars().take(40).collect::<String>()));
+                tracing::info!(
+                    "[LLM] mark_junk: {} memories marked ({})",
+                    marked,
+                    reason.chars().take(80).collect::<String>()
+                );
+                self.log_event(format!(
+                    "mark_junk({},{})",
+                    marked,
+                    reason.chars().take(40).collect::<String>()
+                ));
             }
-            SchedulerAction::Relabel { id, add_labels, remove_labels, reason } => {
+            SchedulerAction::Relabel {
+                id,
+                add_labels,
+                remove_labels,
+                reason,
+            } => {
                 if let Some(t) = self.space.get_tetrahedron(*id) {
                     let old_labels = t.data.labels.clone();
                     let mut new_labels: Vec<String> = t.data.labels.clone();
@@ -1054,13 +1348,20 @@ impl SchedulerCenter {
                         memory_type: t.data.memory_type.clone(),
                     };
                     if let Err(e) = self.space.update_payload(*id, updated) {
-                        tracing::warn!("[Scheduler] relabel update_payload failed for #{}: {}", id, e);
+                        tracing::warn!(
+                            "[Scheduler] relabel update_payload failed for #{}: {}",
+                            id,
+                            e
+                        );
                     } else {
-                        self.gateway.update_label_index(*id, &old_labels, &new_labels);
+                        self.gateway
+                            .update_label_index(*id, &old_labels, &new_labels);
                         self.persist_tetra(*id);
                         tracing::info!(
                             "[LLM] relabel #{}: +{:?} -{:?} ({})",
-                            id, add_labels, remove_labels,
+                            id,
+                            add_labels,
+                            remove_labels,
                             reason.chars().take(80).collect::<String>()
                         );
                     }
@@ -1069,13 +1370,27 @@ impl SchedulerCenter {
                 }
                 self.log_event(format!("relabel({})", id));
             }
-            SchedulerAction::Reflect { observation, insight } => {
-                tracing::info!("[LLM] REFLECT observation: {}", observation.chars().take(120).collect::<String>());
-                tracing::info!("[LLM] REFLECT insight: {}", insight.chars().take(120).collect::<String>());
-                self.log_event(format!("reflect({})", observation.chars().take(40).collect::<String>()));
+            SchedulerAction::Reflect {
+                observation,
+                insight,
+            } => {
+                tracing::info!(
+                    "[LLM] REFLECT observation: {}",
+                    observation.chars().take(120).collect::<String>()
+                );
+                tracing::info!(
+                    "[LLM] REFLECT insight: {}",
+                    insight.chars().take(120).collect::<String>()
+                );
+                self.log_event(format!(
+                    "reflect({})",
+                    observation.chars().take(40).collect::<String>()
+                ));
             }
             SchedulerAction::UseTool { .. } => {
-                tracing::debug!("[Scheduler] UseTool executed by cognitive layer, skipping in execute_action");
+                tracing::debug!(
+                    "[Scheduler] UseTool executed by cognitive layer, skipping in execute_action"
+                );
             }
         }
     }
@@ -1091,7 +1406,10 @@ impl SchedulerCenter {
     }
 
     fn purge_tetra(&self, id: TetraId) {
-        let labels = self.space.get_tetrahedron(id).map(|t| t.data.labels.clone());
+        let labels = self
+            .space
+            .get_tetrahedron(id)
+            .map(|t| t.data.labels.clone());
         if let Err(e) = self.space.remove_tetrahedron(id) {
             tracing::debug!("purge_tetra {}: space already removed: {}", id, e);
         }
@@ -1110,15 +1428,25 @@ impl SchedulerCenter {
     fn record_outcome(&self, action: ActionType, pre_snap: &TickSnapshot, tick: u64) {
         let post_snap = self.build_snapshot();
         let pre_entropy = if !pre_snap.clusters.is_empty() {
-            pre_snap.clusters.iter().map(|c| {
-                dynamics::compute_entropy_from_labels(&c.tetra_ids, &pre_snap.labels_map)
-            }).sum::<f64>() / pre_snap.clusters.len() as f64
-        } else { 0.0 };
+            pre_snap
+                .clusters
+                .iter()
+                .map(|c| dynamics::compute_entropy_from_labels(&c.tetra_ids, &pre_snap.labels_map))
+                .sum::<f64>()
+                / pre_snap.clusters.len() as f64
+        } else {
+            0.0
+        };
         let post_entropy = if !post_snap.clusters.is_empty() {
-            post_snap.clusters.iter().map(|c| {
-                dynamics::compute_entropy_from_labels(&c.tetra_ids, &post_snap.labels_map)
-            }).sum::<f64>() / post_snap.clusters.len() as f64
-        } else { 0.0 };
+            post_snap
+                .clusters
+                .iter()
+                .map(|c| dynamics::compute_entropy_from_labels(&c.tetra_ids, &post_snap.labels_map))
+                .sum::<f64>()
+                / post_snap.clusters.len() as f64
+        } else {
+            0.0
+        };
         let mut outcome = ActionOutcome {
             action,
             pre_entropy,
@@ -1185,7 +1513,9 @@ impl SchedulerCenter {
             emotion_arousal: 0.0,
             adaptive: &adaptive,
         };
-        let purge = |id: TetraId| { self.purge_tetra(id); };
+        let purge = |id: TetraId| {
+            self.purge_tetra(id);
+        };
         super::auto_pipeline::evict_low_quality(&ctx, &snap.tetras, &purge);
     }
 
@@ -1228,9 +1558,11 @@ impl SchedulerCenter {
         // Phase 0: Observe — update drive engine with current state signals
         {
             let avg_entropy = if !snap.clusters.is_empty() {
-                let sum: f64 = snap.clusters.iter().map(|c| {
-                    dynamics::compute_entropy_from_labels(&c.tetra_ids, &snap.labels_map)
-                }).sum::<f64>();
+                let sum: f64 = snap
+                    .clusters
+                    .iter()
+                    .map(|c| dynamics::compute_entropy_from_labels(&c.tetra_ids, &snap.labels_map))
+                    .sum::<f64>();
                 sum / snap.clusters.len() as f64
             } else {
                 0.0
@@ -1238,19 +1570,20 @@ impl SchedulerCenter {
             let energy_ratio = snap.energy / self.max_energy.max(1.0);
             let tetra_count = snap.tetras.len();
             let unexplored_ratio = if tetra_count > 0 {
-                let explored: usize = snap.tetras.iter()
-                    .filter(|t| t.mass > 1.05)
-                    .count();
+                let explored: usize = snap.tetras.iter().filter(|t| t.mass > 1.05).count();
                 1.0 - (explored as f64 / tetra_count as f64)
             } else {
                 1.0
             };
             let redundancy_ratio = if tetra_count > 1 {
-                let content_hashes: Vec<u64> = snap.tetras.iter()
+                let content_hashes: Vec<u64> = snap
+                    .tetras
+                    .iter()
                     .take(100)
                     .map(|t| t.data.content_hash)
                     .collect();
-                let unique: std::collections::HashSet<u64> = content_hashes.iter().copied().collect();
+                let unique: std::collections::HashSet<u64> =
+                    content_hashes.iter().copied().collect();
                 1.0 - (unique.len() as f64 / content_hashes.len().max(1) as f64)
             } else {
                 0.0
@@ -1300,14 +1633,20 @@ impl SchedulerCenter {
 
         // Phase 5: Emotion
         if count % 10 == 0 {
-            let texts: Vec<&str> = snap.tetras.iter()
+            let texts: Vec<&str> = snap
+                .tetras
+                .iter()
                 .take(20)
                 .map(|t| t.data.content.as_str())
                 .collect();
             let new_emotion = super::emotion::EmotionState::analyze_texts(&texts);
             {
                 let mut em = self.emotion.lock();
-                em.affect(new_emotion.pleasure * 0.1, new_emotion.arousal * 0.1, new_emotion.dominance * 0.1);
+                em.affect(
+                    new_emotion.pleasure * 0.1,
+                    new_emotion.arousal * 0.1,
+                    new_emotion.dominance * 0.1,
+                );
                 em.decay(0.05);
             }
         }
@@ -1351,11 +1690,22 @@ impl SchedulerCenter {
                 match super::skills::SkillEngine::security_check(&skill) {
                     Ok(()) => {
                         if let Ok(approved) = skills_engine.approve_skill(skill.id) {
-                            tracing::info!("[Skills] auto approved '{}' (id={})", approved.name, skill.id);
+                            tracing::info!(
+                                "[Skills] auto approved '{}' (id={})",
+                                approved.name,
+                                skill.id
+                            );
 
-                            if let Some(ref desc) = self.cognitive.generate_skill_description(&approved.name, &approved.skill_md).ok() {
+                            if let Some(ref desc) = self
+                                .cognitive
+                                .generate_skill_description(&approved.name, &approved.skill_md)
+                                .ok()
+                            {
                                 let _ = skills_engine.append_description(skill.id, desc);
-                                tracing::info!("[Skills] added Chinese description for '{}'", approved.name);
+                                tracing::info!(
+                                    "[Skills] added Chinese description for '{}'",
+                                    approved.name
+                                );
                             }
 
                             if let Some(ref pub_sk) = pub_engine {
@@ -1369,7 +1719,12 @@ impl SchedulerCenter {
                     }
                     Err(reason) => {
                         if skills_engine.reject_skill(skill.id, &reason).is_ok() {
-                            tracing::info!("[Skills] auto rejected '{}' (id={}): {}", skill.name, skill.id, reason);
+                            tracing::info!(
+                                "[Skills] auto rejected '{}' (id={}): {}",
+                                skill.name,
+                                skill.id,
+                                reason
+                            );
                         }
                     }
                 }
@@ -1380,7 +1735,8 @@ impl SchedulerCenter {
             return;
         }
         let top_labels: Vec<(String, usize)> = {
-            let mut label_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            let mut label_counts: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
             for t in &snap.tetras {
                 for label in &t.data.labels {
                     *label_counts.entry(label.clone()).or_insert(0) += 1;
@@ -1392,10 +1748,14 @@ impl SchedulerCenter {
             v
         };
         if !top_labels.is_empty() {
-            let summary: Vec<String> = top_labels.iter()
+            let summary: Vec<String> = top_labels
+                .iter()
                 .map(|(l, c)| format!("{}({})", l, c))
                 .collect();
-            tracing::debug!("[Skills] top domains: {} — skill matching available", summary.join(", "));
+            tracing::debug!(
+                "[Skills] top domains: {} — skill matching available",
+                summary.join(", ")
+            );
         }
     }
 
@@ -1417,11 +1777,12 @@ impl SchedulerCenter {
             adaptive: &adaptive,
         };
 
-        let pulsed = super::auto_pipeline::auto_pulse(
-            &ctx, &snap.tetras, &snap.clusters, &snap.core_map,
-        );
+        let pulsed =
+            super::auto_pipeline::auto_pulse(&ctx, &snap.tetras, &snap.clusters, &snap.core_map);
         if pulsed > 0 {
-            let _ = self.tx.send(super::bus::EngineEvent::AutoPulse { count: pulsed });
+            let _ = self
+                .tx
+                .send(super::bus::EngineEvent::AutoPulse { count: pulsed });
         }
     }
 
@@ -1447,8 +1808,12 @@ impl SchedulerCenter {
         let last_merge = self.last_merge_pairs.lock().clone();
 
         let outcome = super::auto_pipeline::auto_fission(
-            &ctx, &snap.clusters, &snap.labels_map, &snap.core_map,
-            last_fission, &last_merge,
+            &ctx,
+            &snap.clusters,
+            &snap.labels_map,
+            &snap.core_map,
+            last_fission,
+            &last_merge,
         );
         if outcome.did_fission {
             self.last_fission_tick.store(snap.tick, Ordering::SeqCst);
@@ -1479,7 +1844,9 @@ impl SchedulerCenter {
             adaptive: &adaptive,
         };
 
-        let purge = |id: TetraId| { self.purge_tetra(id); };
+        let purge = |id: TetraId| {
+            self.purge_tetra(id);
+        };
 
         let gov = super::governor::LifecycleGovernor::evaluate(&self.space, &self.knowledge);
 
@@ -1497,8 +1864,13 @@ impl SchedulerCenter {
                     let old_imp = data.importance;
                     data.importance = (data.importance + boost).min(3.5);
                     let _ = self.space.update_payload(rid, data);
-                    tracing::info!("[Governor] tiered boost #{}: importance {:.2} -> {:.2} (access_count={})",
-                        rid, old_imp, old_imp + boost, count);
+                    tracing::info!(
+                        "[Governor] tiered boost #{}: importance {:.2} -> {:.2} (access_count={})",
+                        rid,
+                        old_imp,
+                        old_imp + boost,
+                        count
+                    );
                 }
             }
         }
@@ -1506,7 +1878,7 @@ impl SchedulerCenter {
         // Feedback aggregation: incremental, only process new feedback records
         {
             let feedback_mems = self.gateway.list_by_labels(&["feedback"], 100);
-            let (mut processed_ids, mut should_full) = {
+            let (mut processed_ids, should_full) = {
                 let cache = self.feedback_agg_cache.lock();
                 match &*cache {
                     Some((last_count, last_time, ids)) => {
@@ -1521,11 +1893,15 @@ impl SchedulerCenter {
             let new_feedbacks: Vec<_> = if should_full {
                 feedback_mems.iter().collect()
             } else {
-                feedback_mems.iter().filter(|(id, _)| !processed_ids.contains(id)).collect()
+                feedback_mems
+                    .iter()
+                    .filter(|(id, _)| !processed_ids.contains(id))
+                    .collect()
             };
 
             if !new_feedbacks.is_empty() {
-                let mut feedback_scores: std::collections::HashMap<u64, f64> = std::collections::HashMap::new();
+                let mut feedback_scores: std::collections::HashMap<u64, f64> =
+                    std::collections::HashMap::new();
                 for &(fid, p) in &new_feedbacks {
                     let lower = p.content.to_lowercase();
                     let relevance = if lower.contains("highly_relevant") {
@@ -1542,7 +1918,9 @@ impl SchedulerCenter {
                     } else {
                         0.0
                     };
-                    let correction = if lower.contains("correction: outdated") || lower.contains("correction: incorrect") {
+                    let correction = if lower.contains("correction: outdated")
+                        || lower.contains("correction: incorrect")
+                    {
                         -0.3
                     } else {
                         0.0
@@ -1566,7 +1944,9 @@ impl SchedulerCenter {
 
                 let mut aggregated = 0usize;
                 for (id, total_delta) in &feedback_scores {
-                    if total_delta.abs() < 0.01 { continue; }
+                    if total_delta.abs() < 0.01 {
+                        continue;
+                    }
                     if let Some(tetra) = self.space.get_tetrahedron(*id) {
                         let mut data = tetra.data.clone();
                         let old_imp = data.importance;
@@ -1575,16 +1955,30 @@ impl SchedulerCenter {
                         let _ = self.space.update_payload(*id, data);
                         let _ = self.storage.update_importance(*id, adj);
                         aggregated += 1;
-                        tracing::info!("[Feedback-Agg] #{} delta={:.2} adj={:.3} importance {:.2}->{:.2}",
-                            id, total_delta, adj, old_imp, old_imp + adj);
+                        tracing::info!(
+                            "[Feedback-Agg] #{} delta={:.2} adj={:.3} importance {:.2}->{:.2}",
+                            id,
+                            total_delta,
+                            adj,
+                            old_imp,
+                            old_imp + adj
+                        );
                     }
                 }
                 if aggregated > 0 || !new_feedbacks.is_empty() {
-                    tracing::info!("[Feedback-Agg] {} new records, {} adjustments (total processed: {})",
-                        new_feedbacks.len(), aggregated, processed_ids.len());
+                    tracing::info!(
+                        "[Feedback-Agg] {} new records, {} adjustments (total processed: {})",
+                        new_feedbacks.len(),
+                        aggregated,
+                        processed_ids.len()
+                    );
                 }
             }
-            *self.feedback_agg_cache.lock() = Some((feedback_mems.len(), std::time::Instant::now(), processed_ids));
+            *self.feedback_agg_cache.lock() = Some((
+                feedback_mems.len(),
+                std::time::Instant::now(),
+                processed_ids,
+            ));
         }
 
         if gov.should_consolidate || gov.should_archive || gov.should_merge {
@@ -1592,14 +1986,21 @@ impl SchedulerCenter {
                 self.last_dream_tick.store(tick, Ordering::SeqCst);
                 let decayed = self.gateway.decay_relations();
                 if !gov.recurrent_ids.is_empty() {
-                    super::governor::LifecycleGovernor::reset_access_counts(&self.space, &gov.recurrent_ids);
+                    super::governor::LifecycleGovernor::reset_access_counts(
+                        &self.space,
+                        &gov.recurrent_ids,
+                    );
                 }
 
                 // Governor merge — actually merge duplicate candidates
                 let mut gov_merged = 0usize;
                 if gov.should_merge {
-                    let candidates = super::governor::LifecycleGovernor::find_merge_candidates(&self.space);
-                    gov_merged = super::governor::LifecycleGovernor::execute_merges(&self.space, &candidates);
+                    let candidates =
+                        super::governor::LifecycleGovernor::find_merge_candidates(&self.space);
+                    gov_merged = super::governor::LifecycleGovernor::execute_merges(
+                        &self.space,
+                        &candidates,
+                    );
                 }
 
                 self.log_event(format!(
@@ -1624,11 +2025,16 @@ impl SchedulerCenter {
             let all_mems = self.gateway.list_nodes();
             let avg_imp = if !all_mems.is_empty() {
                 all_mems.iter().map(|(_, p)| p.importance).sum::<f64>() / all_mems.len() as f64
-            } else { 0.0 };
+            } else {
+                0.0
+            };
             let enforced = self.gateway.get_enforced_patterns().len();
             let _ = self.storage.save_health_snapshot(
-                stats.tetra_count as i64, stats.clusters as i64,
-                feedback_mems.len() as i64, avg_imp, enforced as i64,
+                stats.tetra_count as i64,
+                stats.clusters as i64,
+                feedback_mems.len() as i64,
+                avg_imp,
+                enforced as i64,
             );
         }
     }
@@ -1654,12 +2060,25 @@ impl SchedulerCenter {
         super::cognitive_hooks::extract_entities(&ctx, round, &snap.tetras);
     }
 
-    fn perform_fission(&self, cluster_index: usize, cooldown: u64, energy_cost: f64, tag: &str) -> bool {
+    fn perform_fission(
+        &self,
+        cluster_index: usize,
+        cooldown: u64,
+        energy_cost: f64,
+        tag: &str,
+    ) -> bool {
         let snap = self.build_snapshot();
         self.perform_fission_from_snap(cluster_index, cooldown, energy_cost, tag, &snap)
     }
 
-    fn perform_fission_from_snap(&self, cluster_index: usize, cooldown: u64, energy_cost: f64, tag: &str, snap: &TickSnapshot) -> bool {
+    fn perform_fission_from_snap(
+        &self,
+        cluster_index: usize,
+        cooldown: u64,
+        energy_cost: f64,
+        tag: &str,
+        snap: &TickSnapshot,
+    ) -> bool {
         let adaptive = self.adaptive.lock();
         let ctx = super::auto_pipeline::AutoPipelineCtx {
             tick: snap.tick,
@@ -1673,12 +2092,23 @@ impl SchedulerCenter {
             adaptive: &adaptive,
         };
         match super::auto_pipeline::perform_fission_from_snap(
-            &ctx, cluster_index, cooldown, energy_cost, tag,
-            &snap.clusters, &snap.labels_map, &snap.core_map,
+            &ctx,
+            cluster_index,
+            cooldown,
+            energy_cost,
+            tag,
+            &snap.clusters,
+            &snap.labels_map,
+            &snap.core_map,
         ) {
             Some(result) => {
                 self.last_fission_tick.store(result.tick, Ordering::SeqCst);
-                self.log_event(format!("{}({},{})", tag.to_lowercase(), cluster_index, result.moved_count));
+                self.log_event(format!(
+                    "{}({},{})",
+                    tag.to_lowercase(),
+                    cluster_index,
+                    result.moved_count
+                ));
                 true
             }
             None => false,
@@ -1687,26 +2117,50 @@ impl SchedulerCenter {
 
     fn apply_thought(&self, tick: u64, response: super::cognitive::CognitiveResponse) {
         tracing::info!("[LLM thoughts] {}", response.thoughts);
-        let max_actions = if self.energy.available() < 200.0 { 2 } else { 3 };
-        let limited_actions: Vec<&super::cognitive::SchedulerAction> = response.actions.iter().take(max_actions).collect();
+        let max_actions = if self.energy.available() < 200.0 {
+            2
+        } else {
+            3
+        };
+        let limited_actions: Vec<&super::cognitive::SchedulerAction> =
+            response.actions.iter().take(max_actions).collect();
         if response.actions.len() > max_actions {
-            tracing::warn!("[Guard] limited {} actions to {}", response.actions.len(), max_actions);
+            tracing::warn!(
+                "[Guard] limited {} actions to {}",
+                response.actions.len(),
+                max_actions
+            );
         }
         for action in &limited_actions {
             let action_name = match action {
                 SchedulerAction::Pulse { origin, .. } => format!("pulse({})", origin),
                 SchedulerAction::Fission { cluster_index } => format!("fission({})", cluster_index),
-                SchedulerAction::Fuse { cluster_a, cluster_b } => format!("fuse({},{})", cluster_a, cluster_b),
+                SchedulerAction::Fuse {
+                    cluster_a,
+                    cluster_b,
+                } => format!("fuse({},{})", cluster_a, cluster_b),
                 SchedulerAction::Dream => "dream".to_string(),
                 SchedulerAction::Link { a, b, reason } => format!("link({},{},{})", a, b, reason),
-                SchedulerAction::Consolidate { ids, keep, .. } => format!("consolidate({:?}->{})", ids, keep),
+                SchedulerAction::Consolidate { ids, keep, .. } => {
+                    format!("consolidate({:?}->{})", ids, keep)
+                }
                 SchedulerAction::MarkJunk { ids, .. } => format!("mark_junk({:?})", ids),
-                SchedulerAction::Relabel { id, add_labels, remove_labels, .. } => format!("relabel({}+{:?}-{:?})", id, add_labels, remove_labels),
+                SchedulerAction::Relabel {
+                    id,
+                    add_labels,
+                    remove_labels,
+                    ..
+                } => format!("relabel({}+{:?}-{:?})", id, add_labels, remove_labels),
                 SchedulerAction::Reflect { .. } => "reflect".to_string(),
                 SchedulerAction::UseTool { tool, .. } => format!("use_tool({})", tool),
             };
             self.execute_action(action);
-            self.record_decision(tick, &action_name, &response.thoughts.chars().take(100).collect::<String>(), "executed");
+            self.record_decision(
+                tick,
+                &action_name,
+                &response.thoughts.chars().take(100).collect::<String>(),
+                "executed",
+            );
         }
         let action_names: Vec<&str> = limited_actions
             .iter()
@@ -1723,7 +2177,12 @@ impl SchedulerCenter {
                 SchedulerAction::UseTool { .. } => "use_tool",
             })
             .collect();
-        tracing::info!("[LLM] tick {} executed {} actions: {:?}", tick, action_names.len(), action_names);
+        tracing::info!(
+            "[LLM] tick {} executed {} actions: {:?}",
+            tick,
+            action_names.len(),
+            action_names
+        );
 
         if tick % 10 == 0 {
             self.auto_save();
@@ -1765,7 +2224,11 @@ impl SchedulerCenter {
         self.run_with_rx_quiet(rx, true).await;
     }
 
-    async fn run_with_rx_quiet(self: Arc<Self>, mut rx: broadcast::Receiver<EngineEvent>, quiet: bool) {
+    async fn run_with_rx_quiet(
+        self: Arc<Self>,
+        mut rx: broadcast::Receiver<EngineEvent>,
+        quiet: bool,
+    ) {
         if quiet {
             loop {
                 tokio::select! {
@@ -1863,16 +2326,27 @@ impl SchedulerCenter {
     }
 
     fn cluster_ids_centroid(&self, ids: &[u64]) -> Point3 {
-        let mut sum_x = 0.0f64; let mut sum_y = 0.0f64; let mut sum_z = 0.0f64;
+        let mut sum_x = 0.0f64;
+        let mut sum_y = 0.0f64;
+        let mut sum_z = 0.0f64;
         let mut count = 0usize;
         for &id in ids {
             if let Some(t) = self.space.get_tetrahedron(id) {
-                sum_x += t.core.x; sum_y += t.core.y; sum_z += t.core.z;
+                sum_x += t.core.x;
+                sum_y += t.core.y;
+                sum_z += t.core.z;
                 count += 1;
             }
         }
-        if count > 0 { Point3::new(sum_x / count as f64, sum_y / count as f64, sum_z / count as f64) }
-        else { Point3::zero() }
+        if count > 0 {
+            Point3::new(
+                sum_x / count as f64,
+                sum_y / count as f64,
+                sum_z / count as f64,
+            )
+        } else {
+            Point3::zero()
+        }
     }
 
     fn cluster_core_centroid(&self, cluster: &crate::domain::space::Cluster) -> Point3 {
@@ -1883,16 +2357,21 @@ impl SchedulerCenter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::tetra::EDGE_LENGTH;
     use crate::domain::tetra::{MemoryPayload, Tetrahedron};
     use crate::domain::vertex::Point3;
-    use std::sync::Arc;
     use crate::engine::CategoryClassifier;
     use crate::engine::EmbeddingService;
     use crate::engine::GatewayCenter;
     use crate::engine::StorageManager;
-    use crate::domain::tetra::EDGE_LENGTH;
+    use std::sync::Arc;
 
-    fn add_tetra_to_space(space: &Space, core: Point3, content: &str, labels: Vec<String>) -> TetraId {
+    fn add_tetra_to_space(
+        space: &Space,
+        core: Point3,
+        content: &str,
+        labels: Vec<String>,
+    ) -> TetraId {
         let positions = Tetrahedron::compute_vertices(core);
         let data = MemoryPayload {
             content: content.to_string(),
@@ -1907,7 +2386,13 @@ mod tests {
             access_count: 0,
             memory_type: None,
         };
-        let tetra = Tetrahedron { id: 0, vertex_ids: [0; 4], core, data, mass: 1.0 };
+        let tetra = Tetrahedron {
+            id: 0,
+            vertex_ids: [0; 4],
+            core,
+            data,
+            mass: 1.0,
+        };
         space.add_tetrahedron(&tetra, &positions).unwrap()
     }
 
@@ -1923,16 +2408,31 @@ mod tests {
         let classifier = Arc::new(CategoryClassifier::new("", ""));
         let embedding = Arc::new(EmbeddingService::from_env());
         let gateway = Arc::new(GatewayCenter::new(
-            space.clone(), energy.clone(), cognitive.clone(),
-            classifier.clone(), tx.clone(), bus.subscribe(),
-            knowledge.clone(), embedding.clone(), None,
+            space.clone(),
+            energy.clone(),
+            cognitive.clone(),
+            classifier.clone(),
+            tx.clone(),
+            bus.subscribe(),
+            knowledge.clone(),
+            embedding.clone(),
+            None,
         ));
         let security = Arc::new(SecurityGuard::from_env());
-        let storage = Arc::new(StorageManager::new(std::path::Path::new("test_data_scheduler")).unwrap());
+        let storage =
+            Arc::new(StorageManager::new(std::path::Path::new("test_data_scheduler")).unwrap());
         let scheduler = Arc::new(SchedulerCenter::with_security(
-            space.clone(), energy.clone(), knowledge.clone(),
-            cognitive.clone(), gateway.clone(), tx, rx,
-            1000, 10000.0, security, storage,
+            space.clone(),
+            energy.clone(),
+            knowledge.clone(),
+            cognitive.clone(),
+            gateway.clone(),
+            tx,
+            rx,
+            1000,
+            10000.0,
+            security,
+            storage,
         ));
         (scheduler, space, knowledge)
     }
@@ -1943,13 +2443,34 @@ mod tests {
         let mut ids = Vec::new();
         // Cluster A: physics-related, placed in a chain at EDGE_LENGTH spacing
         let physics_topics = [
-            ("Quantum mechanics wave function", vec!["physics".into(), "quantum".into()]),
-            ("General relativity spacetime", vec!["physics".into(), "relativity".into()]),
-            ("Thermodynamics entropy", vec!["physics".into(), "thermo".into()]),
-            ("Electromagnetic field equations", vec!["physics".into(), "em".into()]),
-            ("Particle physics standard model", vec!["physics".into(), "quantum".into()]),
-            ("String theory extra dimensions", vec!["physics".into(), "quantum".into()]),
-            ("Statistical mechanics ensemble", vec!["physics".into(), "thermo".into()]),
+            (
+                "Quantum mechanics wave function",
+                vec!["physics".into(), "quantum".into()],
+            ),
+            (
+                "General relativity spacetime",
+                vec!["physics".into(), "relativity".into()],
+            ),
+            (
+                "Thermodynamics entropy",
+                vec!["physics".into(), "thermo".into()],
+            ),
+            (
+                "Electromagnetic field equations",
+                vec!["physics".into(), "em".into()],
+            ),
+            (
+                "Particle physics standard model",
+                vec!["physics".into(), "quantum".into()],
+            ),
+            (
+                "String theory extra dimensions",
+                vec!["physics".into(), "quantum".into()],
+            ),
+            (
+                "Statistical mechanics ensemble",
+                vec!["physics".into(), "thermo".into()],
+            ),
         ];
         for (i, (text, labels)) in physics_topics.iter().enumerate() {
             let core = Point3::new(i as f64 * EDGE_LENGTH, 0.0, 0.0);
@@ -1958,13 +2479,34 @@ mod tests {
 
         // Cluster B: programming, placed in a separate region
         let prog_topics = [
-            ("Rust ownership and borrowing", vec!["rust".into(), "programming".into()]),
-            ("Python async await patterns", vec!["python".into(), "programming".into()]),
-            ("C++ template metaprogramming", vec!["cpp".into(), "programming".into()]),
-            ("Go goroutines and channels", vec!["go".into(), "programming".into()]),
-            ("JavaScript event loop", vec!["js".into(), "programming".into()]),
-            ("Haskell monad transformers", vec!["haskell".into(), "programming".into()]),
-            ("TypeScript type inference", vec!["ts".into(), "programming".into()]),
+            (
+                "Rust ownership and borrowing",
+                vec!["rust".into(), "programming".into()],
+            ),
+            (
+                "Python async await patterns",
+                vec!["python".into(), "programming".into()],
+            ),
+            (
+                "C++ template metaprogramming",
+                vec!["cpp".into(), "programming".into()],
+            ),
+            (
+                "Go goroutines and channels",
+                vec!["go".into(), "programming".into()],
+            ),
+            (
+                "JavaScript event loop",
+                vec!["js".into(), "programming".into()],
+            ),
+            (
+                "Haskell monad transformers",
+                vec!["haskell".into(), "programming".into()],
+            ),
+            (
+                "TypeScript type inference",
+                vec!["ts".into(), "programming".into()],
+            ),
         ];
         for (i, (text, labels)) in prog_topics.iter().enumerate() {
             let core = Point3::new(20.0 + i as f64 * EDGE_LENGTH, 0.0, 0.0);
@@ -1973,9 +2515,15 @@ mod tests {
 
         // Cluster C: mixed topics — high entropy, designed to trigger fission
         let mixed = [
-            ("Neural network backpropagation", vec!["ai".into(), "ml".into()]),
+            (
+                "Neural network backpropagation",
+                vec!["ai".into(), "ml".into()],
+            ),
             ("Shakespeare sonnet analysis", vec!["literature".into()]),
-            ("Climate change carbon cycle", vec!["science".into(), "climate".into()]),
+            (
+                "Climate change carbon cycle",
+                vec!["science".into(), "climate".into()],
+            ),
             ("Bach fugue counterpoint", vec!["music".into()]),
             ("Roman empire military tactics", vec!["history".into()]),
             ("Recipe for chocolate cake", vec!["cooking".into()]),
@@ -2003,12 +2551,22 @@ mod tests {
 
         // labels_map must cover every tetra
         for t in &snap.tetras {
-            assert!(snap.labels_map.contains_key(&t.id), "labels_map missing tetra {}", t.id);
-            assert!(snap.core_map.contains_key(&t.id), "core_map missing tetra {}", t.id);
+            assert!(
+                snap.labels_map.contains_key(&t.id),
+                "labels_map missing tetra {}",
+                t.id
+            );
+            assert!(
+                snap.core_map.contains_key(&t.id),
+                "core_map missing tetra {}",
+                t.id
+            );
         }
 
         // Verify cluster membership covers all tetras
-        let clustered: HashSet<u64> = snap.clusters.iter()
+        let clustered: HashSet<u64> = snap
+            .clusters
+            .iter()
             .flat_map(|c| c.tetra_ids.iter().copied())
             .collect();
         assert_eq!(clustered.len(), 21, "all 21 tetras should be in a cluster");
@@ -2028,20 +2586,36 @@ mod tests {
         assert_eq!(state.total_clusters, 3);
 
         // Cluster 0 (physics, 7 tetras) should have lower entropy than mixed cluster
-        assert!(state.clusters[0].entropy < 0.7, "physics cluster should be moderately cohesive, entropy={}", state.clusters[0].entropy);
+        assert!(
+            state.clusters[0].entropy < 0.7,
+            "physics cluster should be moderately cohesive, entropy={}",
+            state.clusters[0].entropy
+        );
 
         // Cluster 2 (mixed, 7 tetras) should have the highest entropy (all different labels)
-        assert!(state.clusters[2].entropy >= state.clusters[0].entropy, "mixed cluster entropy ({}) >= physics cluster entropy ({})", state.clusters[2].entropy, state.clusters[0].entropy);
+        assert!(
+            state.clusters[2].entropy >= state.clusters[0].entropy,
+            "mixed cluster entropy ({}) >= physics cluster entropy ({})",
+            state.clusters[2].entropy,
+            state.clusters[0].entropy
+        );
 
         // Memory info should have correct cluster assignments
-        let physics_memories: Vec<_> = state.memories.iter()
+        let physics_memories: Vec<_> = state
+            .memories
+            .iter()
             .filter(|m| m.labels.contains(&"physics".to_string()))
             .collect();
         assert_eq!(physics_memories.len(), 7);
-        assert!(physics_memories.iter().all(|m| m.cluster_index == 0 || m.cluster_index < 3));
+        assert!(physics_memories
+            .iter()
+            .all(|m| m.cluster_index == 0 || m.cluster_index < 3));
 
         // Energy should match
-        assert!(state.energy > 9000.0, "energy should be near max after replenish");
+        assert!(
+            state.energy > 9000.0,
+            "energy should be near max after replenish"
+        );
     }
 
     // ---- Test: auto_pulse reads from snapshot without crashing ----
@@ -2060,7 +2634,10 @@ mod tests {
 
         // Verify pulse actually ran — should not panic, clusters should still be valid
         let clusters = space.find_clusters();
-        assert!(clusters.len() >= 3, "clusters should remain intact after pulse");
+        assert!(
+            clusters.len() >= 3,
+            "clusters should remain intact after pulse"
+        );
     }
 
     // ---- Test: auto_fission skips low-entropy clusters ----
@@ -2071,7 +2648,12 @@ mod tests {
         // Only seed a cohesive cluster — all same label
         for i in 0..7 {
             let core = Point3::new(i as f64 * EDGE_LENGTH, 0.0, 0.0);
-            add_tetra_to_space(&space, core, &format!("physics topic {}", i), vec!["physics".into()]);
+            add_tetra_to_space(
+                &space,
+                core,
+                &format!("physics topic {}", i),
+                vec!["physics".into()],
+            );
         }
 
         sched.tick_count.fetch_add(20, Ordering::SeqCst);
@@ -2108,18 +2690,28 @@ mod tests {
         let snap = sched.build_snapshot();
 
         assert_eq!(snap.clusters.len(), 1, "should start as one cluster");
-        let entropy = dynamics::compute_entropy_from_labels(&snap.clusters[0].tetra_ids, &snap.labels_map);
-        assert!(entropy > 0.5, "diverse labels should have high entropy, got {}", entropy);
+        let entropy =
+            dynamics::compute_entropy_from_labels(&snap.clusters[0].tetra_ids, &snap.labels_map);
+        assert!(
+            entropy > 0.5,
+            "diverse labels should have high entropy, got {}",
+            entropy
+        );
 
         sched.auto_fission(&snap);
 
         // After fission, tetras should have been relocated — at least some positions changed
         let after_tetras = space.all_tetrahedrons();
-        let unique_x: HashSet<i64> = after_tetras.iter()
+        let unique_x: HashSet<i64> = after_tetras
+            .iter()
             .map(|t| (t.core.x * 10.0) as i64)
             .collect();
         // With 8 completely different topics, some should have been pushed apart
-        assert!(unique_x.len() > 1, "fission should relocate minority tetras to new positions, got {} unique x positions", unique_x.len());
+        assert!(
+            unique_x.len() > 1,
+            "fission should relocate minority tetras to new positions, got {} unique x positions",
+            unique_x.len()
+        );
     }
 
     // ---- Test: perform_fission_from_snap uses snapshot data ----
@@ -2165,7 +2757,11 @@ mod tests {
 
         // Verify mass has been updated (auto_pulse adds mass) or at minimum no data loss
         let total_mass: f64 = final_tetras.iter().map(|t| t.mass).sum();
-        assert!(total_mass >= 21.0, "total mass should be at least 21.0 (initial), got {}", total_mass);
+        assert!(
+            total_mass >= 21.0,
+            "total mass should be at least 21.0 (initial), got {}",
+            total_mass
+        );
 
         // Verify decision history was recorded (tick%5 triggers cognitive path)
         let state = sched.collect_state_internal();
@@ -2179,9 +2775,15 @@ mod tests {
     fn api_create_memory_integration() {
         let (sched, space, _kg) = build_scheduler();
 
-        let id1 = sched.api_create_memory("Rust ownership model", vec!["rust".into()]).unwrap();
-        let id2 = sched.api_create_memory("Python list comprehension", vec!["python".into()]).unwrap();
-        let id3 = sched.api_create_memory("Rust trait objects", vec!["rust".into()]).unwrap();
+        let id1 = sched
+            .api_create_memory("Rust ownership model", vec!["rust".into()])
+            .unwrap();
+        let id2 = sched
+            .api_create_memory("Python list comprehension", vec!["python".into()])
+            .unwrap();
+        let id3 = sched
+            .api_create_memory("Rust trait objects", vec!["rust".into()])
+            .unwrap();
 
         assert!(id1 != id2 && id2 != id3, "IDs should be unique");
 
@@ -2189,12 +2791,17 @@ mod tests {
         assert_eq!(tetras.len(), 3);
 
         // Rust memories should be close to each other (same label → nearby placement)
-        let rust_tetras: Vec<&Tetrahedron> = tetras.iter()
+        let rust_tetras: Vec<&Tetrahedron> = tetras
+            .iter()
             .filter(|t| t.data.labels.contains(&"rust".to_string()))
             .collect();
         assert_eq!(rust_tetras.len(), 2);
         let dx = (rust_tetras[0].core.x - rust_tetras[1].core.x).abs();
-        assert!(dx < 5.0, "same-label memories should be placed nearby, dx={}", dx);
+        assert!(
+            dx < 5.0,
+            "same-label memories should be placed nearby, dx={}",
+            dx
+        );
     }
 
     // ---- Test: Multiple fission rounds don't corrupt state ----
@@ -2216,13 +2823,29 @@ mod tests {
         }
 
         let final_tetras = space.all_tetrahedrons();
-        assert_eq!(final_tetras.len(), 20, "no tetras lost after 50 ticks with fission");
+        assert_eq!(
+            final_tetras.len(),
+            20,
+            "no tetras lost after 50 ticks with fission"
+        );
 
         // Verify all tetras have valid positions (no NaN, no extreme values)
         for t in &final_tetras {
-            assert!(t.core.x.is_finite(), "x should be finite for tetra {}", t.id);
-            assert!(t.core.y.is_finite(), "y should be finite for tetra {}", t.id);
-            assert!(t.core.z.is_finite(), "z should be finite for tetra {}", t.id);
+            assert!(
+                t.core.x.is_finite(),
+                "x should be finite for tetra {}",
+                t.id
+            );
+            assert!(
+                t.core.y.is_finite(),
+                "y should be finite for tetra {}",
+                t.id
+            );
+            assert!(
+                t.core.z.is_finite(),
+                "z should be finite for tetra {}",
+                t.id
+            );
             assert!(t.mass > 0.0, "mass should be positive for tetra {}", t.id);
         }
     }
@@ -2239,19 +2862,39 @@ mod tests {
         // Verify snapshot internal consistency: labels_map matches tetras
         for t in &snap.tetras {
             let snap_labels = snap.labels_map.get(&t.id).unwrap();
-            assert_eq!(snap_labels, &t.data.labels, "labels_map mismatch for tetra {}", t.id);
+            assert_eq!(
+                snap_labels, &t.data.labels,
+                "labels_map mismatch for tetra {}",
+                t.id
+            );
 
             let snap_core = snap.core_map.get(&t.id).unwrap();
-            assert!((snap_core.x - t.core.x).abs() < 1e-10, "core_map x mismatch for tetra {}", t.id);
-            assert!((snap_core.y - t.core.y).abs() < 1e-10, "core_map y mismatch for tetra {}", t.id);
-            assert!((snap_core.z - t.core.z).abs() < 1e-10, "core_map z mismatch for tetra {}", t.id);
+            assert!(
+                (snap_core.x - t.core.x).abs() < 1e-10,
+                "core_map x mismatch for tetra {}",
+                t.id
+            );
+            assert!(
+                (snap_core.y - t.core.y).abs() < 1e-10,
+                "core_map y mismatch for tetra {}",
+                t.id
+            );
+            assert!(
+                (snap_core.z - t.core.z).abs() < 1e-10,
+                "core_map z mismatch for tetra {}",
+                t.id
+            );
         }
 
         // Verify cluster membership: all cluster tetra IDs exist in tetras
         let all_ids: HashSet<u64> = snap.tetras.iter().map(|t| t.id).collect();
         for cluster in &snap.clusters {
             for &id in &cluster.tetra_ids {
-                assert!(all_ids.contains(&id), "cluster references non-existent tetra {}", id);
+                assert!(
+                    all_ids.contains(&id),
+                    "cluster references non-existent tetra {}",
+                    id
+                );
             }
         }
     }
@@ -2296,14 +2939,18 @@ mod tests {
         let snap = sched.build_snapshot();
 
         for cluster in &snap.clusters {
-            let snap_entropy = dynamics::compute_entropy_from_labels(
-                &cluster.tetra_ids, &snap.labels_map,
-            );
+            let snap_entropy =
+                dynamics::compute_entropy_from_labels(&cluster.tetra_ids, &snap.labels_map);
             // Compute "ground truth" entropy by reading from space directly
             let ground_truth = dynamics::compute_entropy(&space, cluster);
             let diff = (snap_entropy - ground_truth).abs();
-            assert!(diff < 1e-10, "snapshot entropy ({}) should match ground truth ({}) for cluster with {} tetras",
-                snap_entropy, ground_truth, cluster.tetra_ids.len());
+            assert!(
+                diff < 1e-10,
+                "snapshot entropy ({}) should match ground truth ({}) for cluster with {} tetras",
+                snap_entropy,
+                ground_truth,
+                cluster.tetra_ids.len()
+            );
         }
     }
 
@@ -2313,14 +2960,28 @@ mod tests {
     fn large_scale_100_memories() {
         let (sched, space, _kg) = build_scheduler();
 
-        let categories = ["physics", "chemistry", "biology", "math", "cs", "history", "art", "music"];
+        let categories = [
+            "physics",
+            "chemistry",
+            "biology",
+            "math",
+            "cs",
+            "history",
+            "art",
+            "music",
+        ];
         for i in 0..100 {
             let cat = categories[i % categories.len()];
             // Space in groups: each category gets its own chain
             let cat_idx = (i % categories.len()) as f64;
             let in_chain = (i / categories.len()) as f64;
             let core = Point3::new(cat_idx * 20.0 + in_chain * EDGE_LENGTH, 0.0, 0.0);
-            add_tetra_to_space(&space, core, &format!("Memory #{} about {}", i, cat), vec![cat.to_string()]);
+            add_tetra_to_space(
+                &space,
+                core,
+                &format!("Memory #{} about {}", i, cat),
+                vec![cat.to_string()],
+            );
         }
 
         assert_eq!(space.all_tetrahedrons().len(), 100);
@@ -2331,10 +2992,17 @@ mod tests {
         }
 
         let final_tetras = space.all_tetrahedrons();
-        assert_eq!(final_tetras.len(), 100, "no tetras lost in large-scale test");
+        assert_eq!(
+            final_tetras.len(),
+            100,
+            "no tetras lost in large-scale test"
+        );
 
         let state = sched.collect_state_internal();
-        assert!(state.total_clusters >= 1, "should have at least 1 cluster with 100 memories");
+        assert!(
+            state.total_clusters >= 1,
+            "should have at least 1 cluster with 100 memories"
+        );
         assert_eq!(state.total_tetras, 100);
     }
 }

@@ -1,5 +1,6 @@
-﻿use crate::domain::space::Space;
-use crate::engine::vector::VectorLayer;#[derive(Debug, Clone)]
+use crate::domain::space::Space;
+use crate::engine::vector::VectorLayer;
+#[derive(Debug, Clone)]
 pub struct DreamResult {
     pub memories_consolidated: usize,
     pub connections_formed: usize,
@@ -13,7 +14,10 @@ pub struct DreamResult {
 pub struct DreamEngine;
 
 impl DreamEngine {
-    pub fn recompute_importance(space: &Space, access_counts: &std::collections::HashMap<u64, u32>) -> usize {
+    pub fn recompute_importance(
+        space: &Space,
+        access_counts: &std::collections::HashMap<u64, u32>,
+    ) -> usize {
         let tetras = space.all_tetrahedrons();
         let mut updated = 0;
         let now_ts = std::time::SystemTime::now()
@@ -37,9 +41,13 @@ impl DreamEngine {
             }
 
             let content_lower = t.data.content.to_lowercase();
-            if content_lower.contains("架构") || content_lower.contains("architecture")
-                || content_lower.contains("决策") || content_lower.contains("decision")
-                || content_lower.contains("关键") || content_lower.contains("critical") {
+            if content_lower.contains("架构")
+                || content_lower.contains("architecture")
+                || content_lower.contains("决策")
+                || content_lower.contains("decision")
+                || content_lower.contains("关键")
+                || content_lower.contains("critical")
+            {
                 new_importance = new_importance.max(2.0);
             }
 
@@ -61,11 +69,7 @@ impl DreamEngine {
 }
 
 impl DreamEngine {
-    pub fn cycle(
-        space: &Space,
-        replay_strength: f64,
-        consolidate_depth: usize,
-    ) -> DreamResult {
+    pub fn cycle(space: &Space, replay_strength: f64, consolidate_depth: usize) -> DreamResult {
         let tetras = space.all_tetrahedrons();
         if tetras.len() < 2 {
             return DreamResult {
@@ -109,7 +113,9 @@ impl DreamEngine {
                     }
                     evicted_ids.push(id);
                     junk_evicted += 1;
-                    if junk_evicted >= 10 { break; }
+                    if junk_evicted >= 10 {
+                        break;
+                    }
                 }
             }
         }
@@ -119,10 +125,20 @@ impl DreamEngine {
         }
 
         // Refresh after eviction
-        let tetras = if junk_evicted > 0 { space.all_tetrahedrons() } else { tetras };
+        let tetras = if junk_evicted > 0 {
+            space.all_tetrahedrons()
+        } else {
+            tetras
+        };
 
         let non_meta: Vec<usize> = (0..tetras.len())
-            .filter(|i| !tetras[*i].data.labels.iter().any(|l| l.starts_with("meta-")))
+            .filter(|i| {
+                !tetras[*i]
+                    .data
+                    .labels
+                    .iter()
+                    .any(|l| l.starts_with("meta-"))
+            })
             .collect();
 
         // Phase 2: Find and merge high-similarity pairs (duplicates)
@@ -136,10 +152,14 @@ impl DreamEngine {
                 for wj in (wi + 1)..non_meta.len() {
                     let i = non_meta[wi];
                     let j = non_meta[wj];
-                    if merged_ids.contains(&tetras[i].id) || merged_ids.contains(&tetras[j].id) { continue; }
+                    if merged_ids.contains(&tetras[i].id) || merged_ids.contains(&tetras[j].id) {
+                        continue;
+                    }
                     let sim = VectorLayer::best_similarity(
-                        &tetras[i].data.embedding, &tetras[i].data.labels,
-                        &tetras[j].data.embedding, &tetras[j].data.labels,
+                        &tetras[i].data.embedding,
+                        &tetras[i].data.labels,
+                        &tetras[j].data.embedding,
+                        &tetras[j].data.labels,
                     );
                     if sim > merge_threshold {
                         merge_pairs.push((i, j, sim));
@@ -152,12 +172,22 @@ impl DreamEngine {
                 use rand::Rng;
                 let wi = rng.gen_range(0..non_meta.len());
                 let wj = rng.gen_range(0..non_meta.len());
-                if wi == wj { continue; }
-                let (i, j) = if wi < wj { (non_meta[wi], non_meta[wj]) } else { (non_meta[wj], non_meta[wi]) };
-                if merged_ids.contains(&tetras[i].id) || merged_ids.contains(&tetras[j].id) { continue; }
+                if wi == wj {
+                    continue;
+                }
+                let (i, j) = if wi < wj {
+                    (non_meta[wi], non_meta[wj])
+                } else {
+                    (non_meta[wj], non_meta[wi])
+                };
+                if merged_ids.contains(&tetras[i].id) || merged_ids.contains(&tetras[j].id) {
+                    continue;
+                }
                 let sim = VectorLayer::best_similarity(
-                    &tetras[i].data.embedding, &tetras[i].data.labels,
-                    &tetras[j].data.embedding, &tetras[j].data.labels,
+                    &tetras[i].data.embedding,
+                    &tetras[i].data.labels,
+                    &tetras[j].data.embedding,
+                    &tetras[j].data.labels,
                 );
                 if sim > merge_threshold {
                     merge_pairs.push((i, j, sim));
@@ -170,8 +200,12 @@ impl DreamEngine {
         for (i, j, sim) in merge_pairs.iter().take(consolidate_depth) {
             let ta = &tetras[*i];
             let tb = &tetras[*j];
-            if merged_ids.contains(&ta.id) || merged_ids.contains(&tb.id) { continue; }
-            if space.get_tetrahedron(ta.id).is_none() || space.get_tetrahedron(tb.id).is_none() { continue; }
+            if merged_ids.contains(&ta.id) || merged_ids.contains(&tb.id) {
+                continue;
+            }
+            if space.get_tetrahedron(ta.id).is_none() || space.get_tetrahedron(tb.id).is_none() {
+                continue;
+            }
 
             let (keep_id, remove_id, _keep_mass) = if ta.mass >= tb.mass {
                 (ta.id, tb.id, ta.mass)
@@ -189,17 +223,28 @@ impl DreamEngine {
             merged_remove_ids.push(remove_id);
             duplicates_merged += 1;
 
-            insights.push(format!("merged #{remove_id} into #{keep_id} (sim={sim:.3}, mass boost +0.5)"));
+            insights.push(format!(
+                "merged #{remove_id} into #{keep_id} (sim={sim:.3}, mass boost +0.5)"
+            ));
         }
 
         if duplicates_merged > 0 {
-            insights.push(format!("consolidated {} duplicate pairs", duplicates_merged));
+            insights.push(format!(
+                "consolidated {} duplicate pairs",
+                duplicates_merged
+            ));
         }
 
         // Phase 3: Form connections for moderately similar pairs
         let tetras = space.all_tetrahedrons();
         let non_meta: Vec<usize> = (0..tetras.len())
-            .filter(|i| !tetras[*i].data.labels.iter().any(|l| l.starts_with("meta-")))
+            .filter(|i| {
+                !tetras[*i]
+                    .data
+                    .labels
+                    .iter()
+                    .any(|l| l.starts_with("meta-"))
+            })
             .collect();
 
         let mut pairs: Vec<(usize, usize, f64)> = Vec::new();
@@ -209,8 +254,10 @@ impl DreamEngine {
                     let i = non_meta[wi];
                     let j = non_meta[wj];
                     let sim = VectorLayer::best_similarity(
-                        &tetras[i].data.embedding, &tetras[i].data.labels,
-                        &tetras[j].data.embedding, &tetras[j].data.labels,
+                        &tetras[i].data.embedding,
+                        &tetras[i].data.labels,
+                        &tetras[j].data.embedding,
+                        &tetras[j].data.labels,
                     );
                     if sim > replay_strength {
                         pairs.push((i, j, sim));
@@ -223,11 +270,19 @@ impl DreamEngine {
                 use rand::Rng;
                 let wi = rng.gen_range(0..non_meta.len());
                 let wj = rng.gen_range(0..non_meta.len());
-                if wi == wj { continue; }
-                let (i, j) = if wi < wj { (non_meta[wi], non_meta[wj]) } else { (non_meta[wj], non_meta[wi]) };
+                if wi == wj {
+                    continue;
+                }
+                let (i, j) = if wi < wj {
+                    (non_meta[wi], non_meta[wj])
+                } else {
+                    (non_meta[wj], non_meta[wi])
+                };
                 let sim = VectorLayer::best_similarity(
-                    &tetras[i].data.embedding, &tetras[i].data.labels,
-                    &tetras[j].data.embedding, &tetras[j].data.labels,
+                    &tetras[i].data.embedding,
+                    &tetras[i].data.labels,
+                    &tetras[j].data.embedding,
+                    &tetras[j].data.labels,
                 );
                 if sim > replay_strength {
                     pairs.push((i, j, sim));
@@ -285,12 +340,29 @@ mod tests {
             ("hello there", vec!["greeting".to_string()]),
             ("goodbye moon", vec!["farewell".to_string()]),
             ("hello universe", vec!["greeting".to_string()]),
-        ].iter().enumerate() {
+        ]
+        .iter()
+        .enumerate()
+        {
             let core = Point3::new(i as f64, 0.0, 0.0);
             let pos = Tetrahedron::compute_vertices(core);
             let t = Tetrahedron {
-                id: 0, vertex_ids: [0; 4], core,
-                data: MemoryPayload { content: text.to_string(), content_hash: 0, labels: labels.clone(), timestamp: 0, aliases: vec![], embedding: vec![], importance: 1.0, enforced: false, rationale: None, access_count: 0, memory_type: None },
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: MemoryPayload {
+                    content: text.to_string(),
+                    content_hash: 0,
+                    labels: labels.clone(),
+                    timestamp: 0,
+                    aliases: vec![],
+                    embedding: vec![],
+                    importance: 1.0,
+                    enforced: false,
+                    rationale: None,
+                    access_count: 0,
+                    memory_type: None,
+                },
                 mass: 1.0,
             };
             space.add_tetrahedron(&t, &pos).unwrap();
@@ -317,8 +389,22 @@ mod tests {
             let core = Point3::new(i as f64, 0.0, 0.0);
             let pos = Tetrahedron::compute_vertices(core);
             let t = Tetrahedron {
-                id: 0, vertex_ids: [0; 4], core,
-                data: MemoryPayload { content: String::new(), content_hash: 0, labels: vec!["same".to_string()], timestamp: 0, aliases: vec![], embedding: vec![], importance: 1.0, enforced: false, rationale: None, access_count: 0, memory_type: None },
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: MemoryPayload {
+                    content: String::new(),
+                    content_hash: 0,
+                    labels: vec!["same".to_string()],
+                    timestamp: 0,
+                    aliases: vec![],
+                    embedding: vec![],
+                    importance: 1.0,
+                    enforced: false,
+                    rationale: None,
+                    access_count: 0,
+                    memory_type: None,
+                },
                 mass: 1.0,
             };
             space.add_tetrahedron(&t, &pos).unwrap();
@@ -327,7 +413,11 @@ mod tests {
         let result = DreamEngine::cycle(&space, 0.5, 5);
         let has_cluster = result.insights.iter().any(|i| i.contains("cluster"));
         if !has_cluster {
-            eprintln!("WARN: dream cycle produced {} insights but none mention 'cluster': {:?}", result.insights.len(), result.insights);
+            eprintln!(
+                "WARN: dream cycle produced {} insights but none mention 'cluster': {:?}",
+                result.insights.len(),
+                result.insights
+            );
         }
     }
 }

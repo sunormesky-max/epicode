@@ -1,40 +1,40 @@
-pub mod tools;
+pub mod adaptive;
+pub mod assembler;
+pub mod auto_pipeline;
 pub mod bus;
+pub mod classifier;
 pub mod cognitive;
+pub mod cognitive_hooks;
 pub mod constitution;
 pub mod crypto;
 pub mod digestion;
-pub mod embedding;
-pub mod energy;
-pub mod scheduler;
-pub mod gateway;
-pub mod dynamics;
-pub mod hnsw;
 pub mod dream;
-pub mod emotion;
-pub mod mcp;
-pub mod knowledge;
-pub mod reasoning;
-pub mod pulse;
-pub mod security;
-pub mod storage;
-pub mod classifier;
-pub mod vector;
-pub mod user_manager;
-pub mod skills;
 pub mod drive;
-pub mod outcome;
-pub mod adaptive;
-pub mod auto_pipeline;
-pub mod cognitive_hooks;
-pub mod index_manager;
-pub mod janitor;
-pub mod search_engine;
-pub mod system_skills;
-pub mod intake;
-pub mod assembler;
-pub mod retrieval;
+pub mod dynamics;
+pub mod embedding;
+pub mod emotion;
+pub mod energy;
+pub mod gateway;
 pub mod governor;
+pub mod hnsw;
+pub mod index_manager;
+pub mod intake;
+pub mod janitor;
+pub mod knowledge;
+pub mod mcp;
+pub mod outcome;
+pub mod pulse;
+pub mod reasoning;
+pub mod retrieval;
+pub mod scheduler;
+pub mod search_engine;
+pub mod security;
+pub mod skills;
+pub mod storage;
+pub mod system_skills;
+pub mod tools;
+pub mod user_manager;
+pub mod vector;
 
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -42,17 +42,17 @@ use tokio::task::JoinHandle;
 use crate::domain::space::Space;
 
 use self::bus::EventBus;
-use self::cognitive::CognitiveEngine;
 use self::classifier::CategoryClassifier;
+use self::cognitive::CognitiveEngine;
 use self::embedding::EmbeddingService;
 use self::energy::EnergyCenter;
 use self::gateway::GatewayCenter;
 use self::knowledge::KnowledgeGraph;
-use self::security::SecurityGuard;
-use self::storage::StorageManager;
 use self::scheduler::SchedulerCenter;
-use self::vector::VectorLayer;
+use self::security::SecurityGuard;
 use self::skills::SkillEngine;
+use self::storage::StorageManager;
+use self::vector::VectorLayer;
 
 pub struct Engine {
     pub space: Arc<Space>,
@@ -79,32 +79,53 @@ impl Engine {
         Self::build(data_path, None, None)
     }
 
-    pub fn with_shared_vector(data_path: std::path::PathBuf, shared_vector: Arc<VectorLayer>, user_id: &str) -> Self {
+    pub fn with_shared_vector(
+        data_path: std::path::PathBuf,
+        shared_vector: Arc<VectorLayer>,
+        user_id: &str,
+    ) -> Self {
         Self::build(data_path, Some(shared_vector), Some(user_id))
     }
 
     pub fn load_shared_vector() -> Option<Arc<VectorLayer>> {
         let model_dir = {
-            let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf()));
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|e| e.parent().map(|p| p.to_path_buf()));
             let candidates: Vec<std::path::PathBuf> = vec![
                 std::path::PathBuf::from("models"),
-                exe_dir.unwrap_or_else(|| std::path::PathBuf::from(".")).join("models"),
+                exe_dir
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join("models"),
             ];
-            candidates.into_iter().find(|d| d.join("model.onnx").exists()).unwrap_or_else(|| std::path::PathBuf::from("models"))
+            candidates
+                .into_iter()
+                .find(|d| d.join("model.onnx").exists())
+                .unwrap_or_else(|| std::path::PathBuf::from("models"))
         };
         match VectorLayer::load(&model_dir) {
             Ok(v) => {
-                tracing::info!("Shared VectorLayer initialized (ONNX, {} dims, 1 copy for all users)", self::vector::EMBEDDING_DIM);
+                tracing::info!(
+                    "Shared VectorLayer initialized (ONNX, {} dims, 1 copy for all users)",
+                    self::vector::EMBEDDING_DIM
+                );
                 Some(Arc::new(v))
             }
             Err(e) => {
-                tracing::warn!("VectorLayer unavailable: {} — falling back to HTTP embedding", e);
+                tracing::warn!(
+                    "VectorLayer unavailable: {} — falling back to HTTP embedding",
+                    e
+                );
                 None
             }
         }
     }
 
-    fn build(data_path: std::path::PathBuf, shared_vector: Option<Arc<VectorLayer>>, user_id: Option<&str>) -> Self {
+    fn build(
+        data_path: std::path::PathBuf,
+        shared_vector: Option<Arc<VectorLayer>>,
+        user_id: Option<&str>,
+    ) -> Self {
         let uid = user_id.unwrap_or("mcp-default");
         let api_key = std::env::var("DEEPSEEK_API_KEY").unwrap_or_default();
         if api_key.is_empty() {
@@ -131,21 +152,34 @@ impl Engine {
             Some(sv)
         } else {
             let model_dir = {
-                let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf()));
+                let exe_dir = std::env::current_exe()
+                    .ok()
+                    .and_then(|e| e.parent().map(|p| p.to_path_buf()));
                 let candidates: Vec<std::path::PathBuf> = vec![
                     std::path::PathBuf::from("models"),
-                    exe_dir.unwrap_or_else(|| std::path::PathBuf::from(".")).join("models"),
+                    exe_dir
+                        .unwrap_or_else(|| std::path::PathBuf::from("."))
+                        .join("models"),
                     data_path.join("models"),
                 ];
-                candidates.into_iter().find(|d| d.join("model.onnx").exists()).unwrap_or_else(|| std::path::PathBuf::from("models"))
+                candidates
+                    .into_iter()
+                    .find(|d| d.join("model.onnx").exists())
+                    .unwrap_or_else(|| std::path::PathBuf::from("models"))
             };
             match VectorLayer::load(&model_dir) {
                 Ok(v) => {
-                    tracing::info!("VectorLayer initialized (in-process ONNX, {} dims)", self::vector::EMBEDDING_DIM);
+                    tracing::info!(
+                        "VectorLayer initialized (in-process ONNX, {} dims)",
+                        self::vector::EMBEDDING_DIM
+                    );
                     Some(Arc::new(v))
                 }
                 Err(e) => {
-                    tracing::warn!("VectorLayer unavailable: {} — falling back to HTTP embedding", e);
+                    tracing::warn!(
+                        "VectorLayer unavailable: {} — falling back to HTTP embedding",
+                        e
+                    );
                     None
                 }
             }
@@ -175,8 +209,13 @@ impl Engine {
 
         let report = storage.load_all(&space, &knowledge);
         if report.tetras_loaded > 0 {
-            tracing::info!("[{}] loaded {} tetras, {} relations, {} concepts",
-                uid, report.tetras_loaded, report.relations_loaded, report.concepts_loaded);
+            tracing::info!(
+                "[{}] loaded {} tetras, {} relations, {} concepts",
+                uid,
+                report.tetras_loaded,
+                report.relations_loaded,
+                report.concepts_loaded
+            );
         }
 
         {
@@ -187,7 +226,8 @@ impl Engine {
                         let name = v["name"].as_str().unwrap_or("").to_string();
                         let mission = v["mission"].as_str().unwrap_or("").to_string();
                         let author = v["author"].as_str().unwrap_or("").to_string();
-                        let extra: std::collections::HashMap<String, String> = v.get("extra")
+                        let extra: std::collections::HashMap<String, String> = v
+                            .get("extra")
                             .and_then(|e| serde_json::from_value(e.clone()).ok())
                             .unwrap_or_default();
                         if !name.is_empty() {
@@ -204,11 +244,27 @@ impl Engine {
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
                             let pending = space.pending_identity();
                             let mut p = pending;
-                            if let Some(n) = v["name"].as_str() { if !n.is_empty() { p.name = Some(n.to_string()); } }
-                            if let Some(m) = v["mission"].as_str() { if !m.is_empty() { p.mission = Some(m.to_string()); } }
-                            if let Some(a) = v["author"].as_str() { if !a.is_empty() { p.author = Some(a.to_string()); } }
-                            if let Some(pe) = v["personality"].as_str() { p.personality = Some(pe.to_string()); }
-                            if let Some(l) = v["language"].as_str() { p.language = Some(l.to_string()); }
+                            if let Some(n) = v["name"].as_str() {
+                                if !n.is_empty() {
+                                    p.name = Some(n.to_string());
+                                }
+                            }
+                            if let Some(m) = v["mission"].as_str() {
+                                if !m.is_empty() {
+                                    p.mission = Some(m.to_string());
+                                }
+                            }
+                            if let Some(a) = v["author"].as_str() {
+                                if !a.is_empty() {
+                                    p.author = Some(a.to_string());
+                                }
+                            }
+                            if let Some(pe) = v["personality"].as_str() {
+                                p.personality = Some(pe.to_string());
+                            }
+                            if let Some(l) = v["language"].as_str() {
+                                p.language = Some(l.to_string());
+                            }
                             for (step, val) in [
                                 (1, &p.name),
                                 (2, &p.mission),
@@ -220,11 +276,18 @@ impl Engine {
                                     space.set_identity_step(step, v.clone());
                                 }
                             }
-                            tracing::info!("[{}] pending identity restored: step {}/5", uid, space.pending_identity().current_step());
+                            tracing::info!(
+                                "[{}] pending identity restored: step {}/5",
+                                uid,
+                                space.pending_identity().current_step()
+                            );
                         }
                     }
                 } else {
-                    tracing::info!("[{}] no identity confirmed yet, awaiting first connection", uid);
+                    tracing::info!(
+                        "[{}] no identity confirmed yet, awaiting first connection",
+                        uid
+                    );
                 }
             }
         }
@@ -269,8 +332,15 @@ impl Engine {
         scheduler.set_skills(skills.clone());
 
         Self {
-            space, bus, gateway, energy, scheduler, cognitive, guard: security,
-            storage, skills,
+            space,
+            bus,
+            gateway,
+            energy,
+            scheduler,
+            cognitive,
+            guard: security,
+            storage,
+            skills,
             handles: Vec::new(),
             user_id: uid.to_string(),
             data_path: data_path.clone(),
@@ -289,11 +359,18 @@ impl Engine {
         &self.scheduler
     }
 
-    pub fn confirm_identity(&self, name: String, mission: String, author: String, extra: std::collections::HashMap<String, String>) -> Result<(), String> {
+    pub fn confirm_identity(
+        &self,
+        name: String,
+        mission: String,
+        author: String,
+        extra: std::collections::HashMap<String, String>,
+    ) -> Result<(), String> {
         if self.space.identity_info().is_some() {
             return Err("identity already confirmed and cannot be changed".into());
         }
-        self.space.confirm_identity(name.clone(), mission.clone(), author.clone(), extra.clone());
+        self.space
+            .confirm_identity(name.clone(), mission.clone(), author.clone(), extra.clone());
         let identity_path = self.data_path.join("identity.json");
         let data = serde_json::json!({
             "name": name,
@@ -305,15 +382,26 @@ impl Engine {
         });
         let json = serde_json::to_string_pretty(&data).map_err(|e| format!("serialize: {}", e))?;
         std::fs::write(&identity_path, &json).map_err(|e| format!("write: {}", e))?;
-        tracing::info!("[{}] identity confirmed and persisted: {}", self.user_id, name);
+        tracing::info!(
+            "[{}] identity confirmed and persisted: {}",
+            self.user_id,
+            name
+        );
         Ok(())
     }
 
-    pub fn update_identity(&self, name: Option<String>, mission: Option<String>, author: Option<String>, extra: Option<std::collections::HashMap<String, String>>) -> Result<(), String> {
+    pub fn update_identity(
+        &self,
+        name: Option<String>,
+        mission: Option<String>,
+        author: Option<String>,
+        extra: Option<std::collections::HashMap<String, String>>,
+    ) -> Result<(), String> {
         if self.space.identity_info().is_none() {
             return Err("identity not yet confirmed".into());
         }
-        self.space.update_identity(name.clone(), mission.clone(), author.clone(), extra.clone());
+        self.space
+            .update_identity(name.clone(), mission.clone(), author.clone(), extra.clone());
         let info = self.space.identity_info().unwrap();
         let identity_path = self.data_path.join("identity.json");
         let data = serde_json::json!({
@@ -329,7 +417,11 @@ impl Engine {
         Ok(())
     }
 
-    pub fn identity_step(&self, step: usize, value: String) -> Result<super::domain::cylinder::PendingIdentity, String> {
+    pub fn identity_step(
+        &self,
+        step: usize,
+        value: String,
+    ) -> Result<super::domain::cylinder::PendingIdentity, String> {
         if self.space.identity_info().is_some() {
             return Err("identity already confirmed".into());
         }
@@ -349,7 +441,8 @@ impl Engine {
             "author": pending.author,
             "personality": pending.personality,
             "language": pending.language,
-        })).map_err(|e| format!("serialize: {}", e))?;
+        }))
+        .map_err(|e| format!("serialize: {}", e))?;
         std::fs::write(&identity_path, &json).map_err(|e| format!("write: {}", e))?;
         Ok(pending_clone)
     }
@@ -360,12 +453,17 @@ impl Engine {
         }
         let pending = self.space.pending_identity();
         if !pending.is_complete() {
-            return Err(format!("ritual incomplete: step {} not done. Required: name(1), mission(2), author(3)", pending.current_step()));
+            return Err(format!(
+                "ritual incomplete: step {} not done. Required: name(1), mission(2), author(3)",
+                pending.current_step()
+            ));
         }
         if !self.space.confirm_pending_identity() {
             return Err("confirmation failed".into());
         }
-        let info = self.space.identity_info()
+        let info = self
+            .space
+            .identity_info()
             .ok_or("identity not set after confirmation")?;
         let identity_path = self.data_path.join("identity.json");
         let data = serde_json::json!({
@@ -379,7 +477,11 @@ impl Engine {
         let json = serde_json::to_string_pretty(&data).map_err(|e| format!("serialize: {}", e))?;
         std::fs::write(&identity_path, &json).map_err(|e| format!("write: {}", e))?;
         let _ = std::fs::remove_file(self.data_path.join("identity_pending.json"));
-        tracing::info!("[{}] identity ritual complete: {}", self.user_id, info.system_name);
+        tracing::info!(
+            "[{}] identity ritual complete: {}",
+            self.user_id,
+            info.system_name
+        );
         Ok(info)
     }
 
@@ -429,7 +531,10 @@ impl Engine {
             scheduler.run_with_rx(rx_s).await;
         }));
 
-        tracing::info!("Engine ignited: full mode (tick={}ms, cognitive+LLM enabled)", tick_ms);
+        tracing::info!(
+            "Engine ignited: full mode (tick={}ms, cognitive+LLM enabled)",
+            tick_ms
+        );
     }
 
     pub fn start_quiet_with_interval(&mut self, tick_ms: u64) {
@@ -446,7 +551,10 @@ impl Engine {
             scheduler.run_quiet(rx_s).await;
         }));
 
-        tracing::info!("Engine ignited: quiet mode (tick={}ms, auto-save only)", tick_ms);
+        tracing::info!(
+            "Engine ignited: quiet mode (tick={}ms, auto-save only)",
+            tick_ms
+        );
     }
 
     pub fn save_all(&self) -> Result<(), String> {

@@ -36,10 +36,14 @@ impl VectorLayer {
             .commit_from_file(&model_path)
             .map_err(|e| format!("ONNX session: {}", e))?;
 
-        let tokenizer = Tokenizer::from_file(&tokenizer_path)
-            .map_err(|e| format!("tokenizer load: {}", e))?;
+        let tokenizer =
+            Tokenizer::from_file(&tokenizer_path).map_err(|e| format!("tokenizer load: {}", e))?;
 
-        let input_names: Vec<String> = session.inputs().iter().map(|i| i.name().to_string()).collect();
+        let input_names: Vec<String> = session
+            .inputs()
+            .iter()
+            .map(|i| i.name().to_string())
+            .collect();
         if input_names.iter().any(|n| n == "token_type_ids") {
             tracing::info!("VectorLayer: model supports token_type_ids");
         }
@@ -73,7 +77,8 @@ impl VectorLayer {
             }
         }
 
-        let encoding = self.tokenizer
+        let encoding = self
+            .tokenizer
             .encode(truncated.as_str(), true)
             .map_err(|e| format!("tokenize: {}", e))?;
 
@@ -93,19 +98,24 @@ impl VectorLayer {
                 ("attention_mask", make_int64_tensor(mask, len)?),
             ]);
 
-            let input_names: Vec<String> = session.inputs().iter().map(|i| i.name().to_string()).collect();
+            let input_names: Vec<String> = session
+                .inputs()
+                .iter()
+                .map(|i| i.name().to_string())
+                .collect();
             if input_names.iter().any(|n| n == "token_type_ids") {
                 let type_ids = encoding.get_type_ids();
                 inputs.insert("token_type_ids", make_int64_tensor(type_ids, len)?);
             }
 
-            let outputs = session.run(inputs)
-                .map_err(|e| format!("ort run: {}", e))?;
+            let outputs = session.run(inputs).map_err(|e| format!("ort run: {}", e))?;
 
-            let output_tensor = outputs.get(&*first_output)
+            let output_tensor = outputs
+                .get(&*first_output)
                 .ok_or_else(|| format!("no output: {}", first_output))?;
 
-            let (_shape, data) = output_tensor.try_extract_tensor::<f32>()
+            let (_shape, data) = output_tensor
+                .try_extract_tensor::<f32>()
                 .map_err(|e| format!("extract tensor: {}", e))?;
 
             data.to_vec()
@@ -120,7 +130,9 @@ impl VectorLayer {
             cache.insert(truncated.clone(), normalized.clone());
             order.push(truncated);
             while cache.len() > 1000 {
-                if order.is_empty() { break; }
+                if order.is_empty() {
+                    break;
+                }
                 let old = order.remove(0);
                 cache.remove(&old);
             }
@@ -168,7 +180,11 @@ impl VectorLayer {
             return Vec::new();
         }
         blob.chunks_exact(8)
-            .map(|chunk| f64::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7]]))
+            .map(|chunk| {
+                f64::from_le_bytes([
+                    chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
+                ])
+            })
             .collect()
     }
 
@@ -275,18 +291,17 @@ mod tests {
     #[test]
     fn best_sim_prefers_embedding() {
         let sim = VectorLayer::best_similarity(
-            &[1.0, 0.0], &["rust".into()],
-            &[0.9, 0.1], &["python".into()],
+            &[1.0, 0.0],
+            &["rust".into()],
+            &[0.9, 0.1],
+            &["python".into()],
         );
         assert!(sim > 0.8);
     }
 
     #[test]
     fn best_sim_falls_back_to_labels() {
-        let sim = VectorLayer::best_similarity(
-            &[], &["rust".into()],
-            &[], &["rust".into()],
-        );
+        let sim = VectorLayer::best_similarity(&[], &["rust".into()], &[], &["rust".into()]);
         assert!((sim - 1.0).abs() < 1e-10);
     }
 
@@ -316,20 +331,38 @@ mod tests {
             return;
         }
         let layer = VectorLayer::load(model_dir).expect("VectorLayer load");
-        let emb = layer.embed("quantum tunneling in semiconductors").expect("embed");
+        let emb = layer
+            .embed("quantum tunneling in semiconductors")
+            .expect("embed");
         assert_eq!(emb.len(), EMBEDDING_DIM);
         let norm: f64 = emb.iter().map(|x| x * x).sum::<f64>().sqrt();
-        assert!((norm - 1.0).abs() < 0.01, "embedding should be normalized, norm={}", norm);
+        assert!(
+            (norm - 1.0).abs() < 0.01,
+            "embedding should be normalized, norm={}",
+            norm
+        );
 
         let emb2 = layer.embed("Rust ownership and borrowing").expect("embed2");
         let sim = VectorLayer::cosine_similarity(&emb, &emb2);
-        assert!(sim < 0.9, "unrelated texts should not be too similar: {}", sim);
+        assert!(
+            sim < 0.9,
+            "unrelated texts should not be too similar: {}",
+            sim
+        );
 
-        let emb3 = layer.embed("quantum tunneling in semiconductors").expect("embed3");
+        let emb3 = layer
+            .embed("quantum tunneling in semiconductors")
+            .expect("embed3");
         assert_eq!(emb, emb3, "cache should return identical vector");
 
-        let emb4 = layer.embed("quantum mechanical tunneling through semiconductor barriers").expect("embed4");
+        let emb4 = layer
+            .embed("quantum mechanical tunneling through semiconductor barriers")
+            .expect("embed4");
         let sim_related = VectorLayer::cosine_similarity(&emb, &emb4);
-        assert!(sim_related > 0.5, "similar texts should have high similarity: {}", sim_related);
+        assert!(
+            sim_related > 0.5,
+            "similar texts should have high similarity: {}",
+            sim_related
+        );
     }
 }

@@ -9,7 +9,11 @@ pub struct EmotionState {
 
 impl Default for EmotionState {
     fn default() -> Self {
-        Self { pleasure: 0.0, arousal: 0.0, dominance: 0.0 }
+        Self {
+            pleasure: 0.0,
+            arousal: 0.0,
+            dominance: 0.0,
+        }
     }
 }
 
@@ -58,15 +62,33 @@ impl EmotionState {
         let p = self.pleasure;
         let a = self.arousal;
         let d = self.dominance;
-        if p > 0.3 && a > 0.3 && d > 0.2 { return "passionate"; }
-        if p > 0.3 && a > 0.3 { return "excited"; }
-        if p > 0.3 && a <= 0.3 { return "serene"; }
-        if p > 0.3 && d > 0.3 { return "confident"; }
-        if p <= -0.3 && a > 0.3 { return "anxious"; }
-        if p <= -0.3 && a <= -0.3 { return "melancholy"; }
-        if p <= -0.3 { return "troubled"; }
-        if a > 0.3 { return "alert"; }
-        if a <= -0.3 { return "drowsy"; }
+        if p > 0.3 && a > 0.3 && d > 0.2 {
+            return "passionate";
+        }
+        if p > 0.3 && a > 0.3 {
+            return "excited";
+        }
+        if p > 0.3 && a <= 0.3 {
+            return "serene";
+        }
+        if p > 0.3 && d > 0.3 {
+            return "confident";
+        }
+        if p <= -0.3 && a > 0.3 {
+            return "anxious";
+        }
+        if p <= -0.3 && a <= -0.3 {
+            return "melancholy";
+        }
+        if p <= -0.3 {
+            return "troubled";
+        }
+        if a > 0.3 {
+            return "alert";
+        }
+        if a <= -0.3 {
+            return "drowsy";
+        }
         "neutral"
     }
 
@@ -161,7 +183,11 @@ impl EmotionState {
             d *= scale;
         }
 
-        let mut state = Self { pleasure: p, arousal: a, dominance: d };
+        let mut state = Self {
+            pleasure: p,
+            arousal: a,
+            dominance: d,
+        };
         state.clamp();
         state
     }
@@ -180,7 +206,11 @@ mod tests {
 
     #[test]
     fn clamp_bounds() {
-        let mut e = EmotionState { pleasure: 2.0, arousal: -2.0, dominance: 0.5 };
+        let mut e = EmotionState {
+            pleasure: 2.0,
+            arousal: -2.0,
+            dominance: 0.5,
+        };
         e.clamp();
         assert!(e.pleasure <= 1.0);
         assert!(e.arousal >= -1.0);
@@ -198,9 +228,7 @@ mod tests {
 
     #[test]
     fn analyze_negative_texts() {
-        let e = EmotionState::analyze_texts(&[
-            "error fail broken danger",
-        ]);
+        let e = EmotionState::analyze_texts(&["error fail broken danger"]);
         assert!(e.pleasure < 0.0);
         assert!(e.arousal > 0.0);
     }
@@ -217,17 +245,33 @@ mod tests {
 
     #[test]
     fn to_label_variety() {
-        let excited = EmotionState { pleasure: 0.5, arousal: 0.5, dominance: 0.0 };
+        let excited = EmotionState {
+            pleasure: 0.5,
+            arousal: 0.5,
+            dominance: 0.0,
+        };
         assert_eq!(excited.to_label(), "excited");
-        let serene = EmotionState { pleasure: 0.5, arousal: 0.1, dominance: 0.0 };
+        let serene = EmotionState {
+            pleasure: 0.5,
+            arousal: 0.1,
+            dominance: 0.0,
+        };
         assert_eq!(serene.to_label(), "serene");
-        let anxious = EmotionState { pleasure: -0.5, arousal: 0.5, dominance: 0.0 };
+        let anxious = EmotionState {
+            pleasure: -0.5,
+            arousal: 0.5,
+            dominance: 0.0,
+        };
         assert_eq!(anxious.to_label(), "anxious");
     }
 
     #[test]
     fn pulse_multiplier_range() {
-        let e = EmotionState { pleasure: 0.0, arousal: 1.0, dominance: 0.0 };
+        let e = EmotionState {
+            pleasure: 0.0,
+            arousal: 1.0,
+            dominance: 0.0,
+        };
         assert!(e.pulse_multiplier() > 0.8);
         let neutral = EmotionState::default();
         assert!((neutral.pulse_multiplier() - 0.5).abs() < 0.01);

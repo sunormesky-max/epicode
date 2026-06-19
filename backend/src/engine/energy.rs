@@ -14,7 +14,12 @@ pub struct EnergyCenter {
 }
 
 impl EnergyCenter {
-    pub fn new(max_energy: f64, recharge_rate: f64, _tx: super::bus::EventSender, _rx: broadcast::Receiver<super::bus::EngineEvent>) -> Self {
+    pub fn new(
+        max_energy: f64,
+        recharge_rate: f64,
+        _tx: super::bus::EventSender,
+        _rx: broadcast::Receiver<super::bus::EngineEvent>,
+    ) -> Self {
         let max_i = (max_energy * 1000.0) as i64;
         Self {
             budget: AtomicI64::new(max_i),
@@ -44,7 +49,11 @@ impl EnergyCenter {
                 return false;
             }
             let new = current - amount_i;
-            if self.budget.compare_exchange(current, new, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            if self
+                .budget
+                .compare_exchange(current, new, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
                 return true;
             }
         }
@@ -56,13 +65,20 @@ impl EnergyCenter {
         loop {
             let current = self.budget.load(Ordering::SeqCst);
             let new = (current + amount_i).min(self.max_energy);
-            if self.budget.compare_exchange(current, new, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            if self
+                .budget
+                .compare_exchange(current, new, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
                 return;
             }
         }
     }
 
-    pub async fn run_detached(center: Arc<EnergyCenter>, mut rx: broadcast::Receiver<super::bus::EngineEvent>) {
+    pub async fn run_detached(
+        center: Arc<EnergyCenter>,
+        mut rx: broadcast::Receiver<super::bus::EngineEvent>,
+    ) {
         loop {
             match rx.recv().await {
                 Ok(super::bus::EngineEvent::Shutdown) => break,

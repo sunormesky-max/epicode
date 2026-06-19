@@ -1,13 +1,16 @@
-﻿use crate::domain::space::{Cluster, Space};
+use crate::domain::space::{Cluster, Space};
 use crate::domain::tetra::TetraId;
 use crate::engine::vector::VectorLayer;
 
-pub fn split_cluster(
-    space: &Space,
-    cluster: &Cluster,
-) -> (Cluster, Cluster) {
-    let labels_map: std::collections::HashMap<u64, Vec<String>> = cluster.tetra_ids.iter()
-        .filter_map(|&id| space.get_tetrahedron(id).map(|t| (id, t.data.labels.clone())))
+pub fn split_cluster(space: &Space, cluster: &Cluster) -> (Cluster, Cluster) {
+    let labels_map: std::collections::HashMap<u64, Vec<String>> = cluster
+        .tetra_ids
+        .iter()
+        .filter_map(|&id| {
+            space
+                .get_tetrahedron(id)
+                .map(|t| (id, t.data.labels.clone()))
+        })
         .collect();
     split_cluster_from_labels(cluster, &labels_map)
 }
@@ -41,7 +44,10 @@ pub fn split_cluster_from_labels(
         }
     }
 
-    (Cluster { tetra_ids: group_a }, Cluster { tetra_ids: group_b })
+    (
+        Cluster { tetra_ids: group_a },
+        Cluster { tetra_ids: group_b },
+    )
 }
 
 fn find_seeds_from_labels(
@@ -72,11 +78,7 @@ fn find_seeds_from_labels(
     (seed_a, seed_b)
 }
 
-pub fn should_split(
-    space: &Space,
-    cluster: &Cluster,
-    threshold: f64,
-) -> bool {
+pub fn should_split(space: &Space, cluster: &Cluster, threshold: f64) -> bool {
     compute_entropy(space, cluster) > threshold
 }
 
@@ -88,9 +90,7 @@ pub fn compute_entropy_from_labels(
         return 0.0;
     }
 
-    let labels: Vec<&Vec<String>> = ids.iter()
-        .filter_map(|id| labels_map.get(id))
-        .collect();
+    let labels: Vec<&Vec<String>> = ids.iter().filter_map(|id| labels_map.get(id)).collect();
 
     if labels.len() < 2 {
         return 0.0;
@@ -110,16 +110,14 @@ pub fn compute_entropy_from_labels(
     total_dissimilarity / pairs as f64
 }
 
-pub fn compute_entropy(
-    space: &Space,
-    cluster: &Cluster,
-) -> f64 {
+pub fn compute_entropy(space: &Space, cluster: &Cluster) -> f64 {
     let ids = &cluster.tetra_ids;
     if ids.len() < 2 {
         return 0.0;
     }
 
-    let labels: Vec<Vec<String>> = ids.iter()
+    let labels: Vec<Vec<String>> = ids
+        .iter()
         .filter_map(|id| space.get_tetrahedron(*id).map(|t| t.data.labels.clone()))
         .collect();
 
@@ -141,10 +139,7 @@ pub fn compute_entropy(
     total_dissimilarity / pairs as f64
 }
 
-pub fn execute_fission(
-    space: &Space,
-    cluster: &Cluster,
-) -> Result<(Cluster, Cluster), String> {
+pub fn execute_fission(space: &Space, cluster: &Cluster) -> Result<(Cluster, Cluster), String> {
     if cluster.tetra_ids.len() < 3 {
         return Err("cluster too small to split".into());
     }
@@ -165,21 +160,38 @@ mod tests {
         for (i, (text, labels)) in [
             ("alpha beta gamma", vec!["letters".to_string()]),
             ("quantum physics relativity", vec!["physics".to_string()]),
-        ].iter().enumerate() {
+        ]
+        .iter()
+        .enumerate()
+        {
             let core = Point3::new(i as f64 * 3.0, 0.0, 0.0);
             let positions = Tetrahedron::compute_vertices(core);
             let tetra = Tetrahedron {
                 id: 0,
                 vertex_ids: [0; 4],
                 core,
-                data: MemoryPayload { content: text.to_string(), content_hash: 0, labels: labels.clone(), timestamp: 0, aliases: vec![], embedding: vec![], importance: 1.0, enforced: false, rationale: None, access_count: 0, memory_type: None },
+                data: MemoryPayload {
+                    content: text.to_string(),
+                    content_hash: 0,
+                    labels: labels.clone(),
+                    timestamp: 0,
+                    aliases: vec![],
+                    embedding: vec![],
+                    importance: 1.0,
+                    enforced: false,
+                    rationale: None,
+                    access_count: 0,
+                    memory_type: None,
+                },
                 mass: 1.0,
             };
             let id = space.add_tetrahedron(&tetra, &positions).unwrap();
             ids.push(id);
         }
 
-        let cluster = Cluster { tetra_ids: ids.clone() };
+        let cluster = Cluster {
+            tetra_ids: ids.clone(),
+        };
         let ent = compute_entropy(&space, &cluster);
         assert!(ent > 0.0);
     }
@@ -187,7 +199,9 @@ mod tests {
     #[test]
     fn test_split_small_cluster_fails() {
         let space = Space::new();
-        let cluster = Cluster { tetra_ids: vec![0, 1] };
+        let cluster = Cluster {
+            tetra_ids: vec![0, 1],
+        };
         assert!(execute_fission(&space, &cluster).is_err());
     }
 }

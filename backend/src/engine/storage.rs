@@ -2,12 +2,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use parking_lot::Mutex;
-use rusqlite::{Connection, params, OpenFlags};
+use rusqlite::{params, Connection, OpenFlags};
 
 use crate::domain::space::Space;
-use crate::domain::tetra::{MemoryPayload, Tetrahedron, TetraId};
+use crate::domain::tetra::{MemoryPayload, TetraId, Tetrahedron};
 use crate::domain::vertex::Point3;
-use crate::engine::knowledge::{KnowledgeGraph, RelationType, ConceptPrototype};
+use crate::engine::knowledge::{ConceptPrototype, KnowledgeGraph, RelationType};
 use crate::engine::vector::VectorLayer;
 
 const SCHEMA: &str = "
@@ -70,11 +70,16 @@ CREATE TABLE IF NOT EXISTS health_snapshots (
 ";
 
 const MIGRATION_ADD_EMBEDDING: &str = "ALTER TABLE tetrahedrons ADD COLUMN embedding BLOB";
-const MIGRATION_ADD_IMPORTANCE: &str = "ALTER TABLE tetrahedrons ADD COLUMN importance REAL NOT NULL DEFAULT 1.0";
-const MIGRATION_ADD_ENFORCED: &str = "ALTER TABLE tetrahedrons ADD COLUMN enforced INTEGER NOT NULL DEFAULT 0";
-const MIGRATION_ADD_RATIONALE: &str = "ALTER TABLE tetrahedrons ADD COLUMN rationale TEXT DEFAULT NULL";
-const MIGRATION_ADD_ACCESS_COUNT: &str = "ALTER TABLE tetrahedrons ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0";
-const MIGRATION_ADD_MEMORY_TYPE: &str = "ALTER TABLE tetrahedrons ADD COLUMN memory_type TEXT DEFAULT NULL";
+const MIGRATION_ADD_IMPORTANCE: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN importance REAL NOT NULL DEFAULT 1.0";
+const MIGRATION_ADD_ENFORCED: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN enforced INTEGER NOT NULL DEFAULT 0";
+const MIGRATION_ADD_RATIONALE: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN rationale TEXT DEFAULT NULL";
+const MIGRATION_ADD_ACCESS_COUNT: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0";
+const MIGRATION_ADD_MEMORY_TYPE: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN memory_type TEXT DEFAULT NULL";
 const MIGRATION_ADD_HEALTH_SNAPSHOTS: &str = "CREATE TABLE IF NOT EXISTS health_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp INTEGER NOT NULL,
@@ -108,18 +113,34 @@ impl StorageManager {
         let conn = Connection::open_with_flags(
             &db_path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
-        ).map_err(|e| format!("failed to open SQLite database at {}: {}", db_path.display(), e))?;
+        )
+        .map_err(|e| {
+            format!(
+                "failed to open SQLite database at {}: {}",
+                db_path.display(),
+                e
+            )
+        })?;
 
         conn.execute_batch(SCHEMA)
             .map_err(|e| format!("failed to initialize schema: {}", e))?;
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_EMBEDDING) {
-            tracing::debug!("[Storage] embedding migration skipped (likely already applied): {}", e);
+            tracing::debug!(
+                "[Storage] embedding migration skipped (likely already applied): {}",
+                e
+            );
         }
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_IMPORTANCE) {
-            tracing::debug!("[Storage] importance migration skipped (likely already applied): {}", e);
+            tracing::debug!(
+                "[Storage] importance migration skipped (likely already applied): {}",
+                e
+            );
         }
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_ENFORCED) {
-            tracing::debug!("[Storage] enforced migration skipped (likely already applied): {}", e);
+            tracing::debug!(
+                "[Storage] enforced migration skipped (likely already applied): {}",
+                e
+            );
         }
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_RATIONALE) {
             tracing::debug!("[Storage] rationale migration skipped: {}", e);
@@ -153,9 +174,14 @@ impl StorageManager {
 
     fn encrypt_field(&self, content: &str) -> Result<String, String> {
         if let Some(ref crypto) = self.crypto {
-            crypto.encrypt_content(content, &self.crypto_user)
+            crypto
+                .encrypt_content(content, &self.crypto_user)
                 .map_err(|e| {
-                    tracing::error!("[Storage] FATAL: encrypt failed for user {}: {}. Data NOT stored.", self.crypto_user, e);
+                    tracing::error!(
+                        "[Storage] FATAL: encrypt failed for user {}: {}. Data NOT stored.",
+                        self.crypto_user,
+                        e
+                    );
                     format!("encrypt failed: {}", e)
                 })
         } else {
@@ -168,7 +194,11 @@ impl StorageManager {
             match crypto.decrypt_content(content, &self.crypto_user) {
                 Ok(dec) => dec,
                 Err(e) => {
-                    tracing::error!("[Storage] decrypt failed for user {}: {}. Returning raw.", self.crypto_user, e);
+                    tracing::error!(
+                        "[Storage] decrypt failed for user {}: {}. Returning raw.",
+                        self.crypto_user,
+                        e
+                    );
                     content.to_string()
                 }
             }
@@ -244,9 +274,14 @@ impl StorageManager {
 
     pub fn upsert_tetra(&self, tetra: &Tetrahedron) -> Result<(), String> {
         let conn = self.conn.lock();
-        let labels_json = self.encrypt_field(&serde_json::to_string(&tetra.data.labels).unwrap_or_else(|_| "[]".into()))?;
-        let aliases_json = self.encrypt_field(&serde_json::to_string(&tetra.data.aliases).unwrap_or_else(|_| "[]".into()))?;
-        let vertex_json = serde_json::to_string(&tetra.vertex_ids).unwrap_or_else(|_| "[0,0,0,0]".into());
+        let labels_json = self.encrypt_field(
+            &serde_json::to_string(&tetra.data.labels).unwrap_or_else(|_| "[]".into()),
+        )?;
+        let aliases_json = self.encrypt_field(
+            &serde_json::to_string(&tetra.data.aliases).unwrap_or_else(|_| "[]".into()),
+        )?;
+        let vertex_json =
+            serde_json::to_string(&tetra.vertex_ids).unwrap_or_else(|_| "[0,0,0,0]".into());
         let emb_blob = if tetra.data.embedding.is_empty() {
             None
         } else {
@@ -285,31 +320,45 @@ impl StorageManager {
 
     pub fn update_mass(&self, id: TetraId, mass: f64) -> Result<(), String> {
         let conn = self.conn.lock();
-        conn.execute("UPDATE tetrahedrons SET mass = ?1 WHERE id = ?2", params![mass, id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE tetrahedrons SET mass = ?1 WHERE id = ?2",
+            params![mass, id],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
     pub fn update_aliases(&self, id: TetraId, aliases: &[String]) -> Result<(), String> {
         let conn = self.conn.lock();
-        let aliases_json = self.encrypt_field(&serde_json::to_string(aliases).unwrap_or_else(|_| "[]".into()))?;
-        conn.execute("UPDATE tetrahedrons SET aliases = ?1 WHERE id = ?2", params![aliases_json, id])
-            .map_err(|e| e.to_string())?;
+        let aliases_json =
+            self.encrypt_field(&serde_json::to_string(aliases).unwrap_or_else(|_| "[]".into()))?;
+        conn.execute(
+            "UPDATE tetrahedrons SET aliases = ?1 WHERE id = ?2",
+            params![aliases_json, id],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
     pub fn update_labels(&self, id: TetraId, labels: &[String]) -> Result<(), String> {
         let conn = self.conn.lock();
-        let labels_json = self.encrypt_field(&serde_json::to_string(labels).unwrap_or_else(|_| "[]".into()))?;
-        conn.execute("UPDATE tetrahedrons SET labels = ?1 WHERE id = ?2", params![labels_json, id])
-            .map_err(|e| e.to_string())?;
+        let labels_json =
+            self.encrypt_field(&serde_json::to_string(labels).unwrap_or_else(|_| "[]".into()))?;
+        conn.execute(
+            "UPDATE tetrahedrons SET labels = ?1 WHERE id = ?2",
+            params![labels_json, id],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
     pub fn update_enforced(&self, id: TetraId, enforced: bool) -> Result<(), String> {
         let conn = self.conn.lock();
-        conn.execute("UPDATE tetrahedrons SET importance = importance, enforced = ?1 WHERE id = ?2", params![enforced, id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE tetrahedrons SET importance = importance, enforced = ?1 WHERE id = ?2",
+            params![enforced, id],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -320,7 +369,14 @@ impl StorageManager {
         Ok(())
     }
 
-    pub fn save_health_snapshot(&self, total: i64, clusters: i64, feedback: i64, avg_imp: f64, enforced: i64) -> Result<(), String> {
+    pub fn save_health_snapshot(
+        &self,
+        total: i64,
+        clusters: i64,
+        feedback: i64,
+        avg_imp: f64,
+        enforced: i64,
+    ) -> Result<(), String> {
         let conn = self.conn.lock();
         let ts = chrono::Utc::now().timestamp();
         conn.execute(
@@ -338,16 +394,28 @@ impl StorageManager {
         let mut stmt = conn.prepare(
             "SELECT timestamp, total_memories, clusters, feedback_records, avg_importance, enforced_count FROM health_snapshots WHERE timestamp > ?1 ORDER BY timestamp ASC"
         ).unwrap();
-        let rows = stmt.query_map(params![cutoff], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
-        }).unwrap();
+        let rows = stmt
+            .query_map(params![cutoff], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            })
+            .unwrap();
         rows.filter_map(|r| r.ok()).collect()
     }
 
     pub fn update_access_count(&self, id: TetraId, count: u32) -> Result<(), String> {
         let conn = self.conn.lock();
-        conn.execute("UPDATE tetrahedrons SET access_count = ?1 WHERE id = ?2", params![count, id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE tetrahedrons SET access_count = ?1 WHERE id = ?2",
+            params![count, id],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -360,9 +428,14 @@ impl StorageManager {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         for &id in ids {
             if let Some(tetra) = space.get_tetrahedron(id) {
-                let labels_json = self.encrypt_field(&serde_json::to_string(&tetra.data.labels).unwrap_or_else(|_| "[]".into()))?;
-                let aliases_json = self.encrypt_field(&serde_json::to_string(&tetra.data.aliases).unwrap_or_else(|_| "[]".into()))?;
-                let vertex_json = serde_json::to_string(&tetra.vertex_ids).unwrap_or_else(|_| "[0,0,0,0]".into());
+                let labels_json = self.encrypt_field(
+                    &serde_json::to_string(&tetra.data.labels).unwrap_or_else(|_| "[]".into()),
+                )?;
+                let aliases_json = self.encrypt_field(
+                    &serde_json::to_string(&tetra.data.aliases).unwrap_or_else(|_| "[]".into()),
+                )?;
+                let vertex_json =
+                    serde_json::to_string(&tetra.vertex_ids).unwrap_or_else(|_| "[0,0,0,0]".into());
                 let emb_blob = if tetra.data.embedding.is_empty() {
                     None
                 } else {
@@ -407,7 +480,8 @@ impl StorageManager {
         conn.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
             params![key, value],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -421,7 +495,8 @@ impl StorageManager {
             tx.execute(
                 "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
                 params![key, value],
-            ).map_err(|e| format!("set_meta_batch({}): {}", key, e))?;
+            )
+            .map_err(|e| format!("set_meta_batch({}): {}", key, e))?;
         }
         tx.commit().map_err(|e| e.to_string())?;
         Ok(())
@@ -436,20 +511,25 @@ impl StorageManager {
 
     pub fn tetra_count(&self) -> usize {
         let conn = self.conn.lock();
-        conn.query_row("SELECT COUNT(*) FROM tetrahedrons", [], |row| row.get::<_, i64>(0))
-            .unwrap_or(0) as usize
+        conn.query_row("SELECT COUNT(*) FROM tetrahedrons", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap_or(0) as usize
     }
 
     pub fn relation_count(&self) -> usize {
         let conn = self.conn.lock();
-        conn.query_row("SELECT COUNT(*) FROM relations", [], |row| row.get::<_, i64>(0))
-            .unwrap_or(0) as usize
+        conn.query_row("SELECT COUNT(*) FROM relations", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap_or(0) as usize
     }
 
     pub fn backup(&self) -> Result<String, String> {
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
         let backup_path = self.backup_dir.join(format!("epicode_{}.db", timestamp));
-        let backup_str = backup_path.to_str()
+        let backup_str = backup_path
+            .to_str()
             .ok_or_else(|| "backup path is not valid UTF-8".to_string())?;
 
         let conn = self.conn.lock();
@@ -472,7 +552,11 @@ impl StorageManager {
                         .and_then(|s| s.strip_suffix(".db"))
                         .unwrap_or("unknown")
                         .to_string();
-                    backups.push(BackupInfo { timestamp: ts, size_bytes: size, filename: name });
+                    backups.push(BackupInfo {
+                        timestamp: ts,
+                        size_bytes: size,
+                        filename: name,
+                    });
                 }
             }
         }
@@ -494,45 +578,94 @@ impl StorageManager {
             "SELECT id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type FROM tetrahedrons ORDER BY id"
         ).map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map([], |row| {
-            let id: u64 = row.get(0)?;
-            let core_x: f64 = row.get(1)?;
-            let core_y: f64 = row.get(2)?;
-            let core_z: f64 = row.get(3)?;
-            let content: String = row.get(4)?;
-            let decrypted_content = self.decrypt_field(&content);
-            let content_hash: u64 = {
-                let h: i64 = row.get(5)?;
-                h as u64
-            };
-            let labels_json = self.decrypt_field(&row.get::<_, String>(6)?);
-            let mass: f64 = row.get(7)?;
-            let timestamp: i64 = row.get(8)?;
-            let aliases_json = self.decrypt_field(&row.get::<_, String>(9)?);
-            let vertex_json: String = row.get::<_, String>(10).unwrap_or_else(|_| "[0,0,0,0]".into());
-            let emb_blob: Option<Vec<u8>> = row.get(11).unwrap_or(None);
-            let importance: f64 = row.get::<_, f64>(12).unwrap_or(1.0);
-            let enforced: bool = row.get::<_, i32>(13).unwrap_or(0) != 0;
-            let rationale: Option<String> = row.get(14).unwrap_or(None);
-            let access_count: u32 = row.get::<_, i32>(15).unwrap_or(0) as u32;
-            let memory_type: Option<String> = row.get(16).unwrap_or(None);
+        let rows = stmt
+            .query_map([], |row| {
+                let id: u64 = row.get(0)?;
+                let core_x: f64 = row.get(1)?;
+                let core_y: f64 = row.get(2)?;
+                let core_z: f64 = row.get(3)?;
+                let content: String = row.get(4)?;
+                let decrypted_content = self.decrypt_field(&content);
+                let content_hash: u64 = {
+                    let h: i64 = row.get(5)?;
+                    h as u64
+                };
+                let labels_json = self.decrypt_field(&row.get::<_, String>(6)?);
+                let mass: f64 = row.get(7)?;
+                let timestamp: i64 = row.get(8)?;
+                let aliases_json = self.decrypt_field(&row.get::<_, String>(9)?);
+                let vertex_json: String = row
+                    .get::<_, String>(10)
+                    .unwrap_or_else(|_| "[0,0,0,0]".into());
+                let emb_blob: Option<Vec<u8>> = row.get(11).unwrap_or(None);
+                let importance: f64 = row.get::<_, f64>(12).unwrap_or(1.0);
+                let enforced: bool = row.get::<_, i32>(13).unwrap_or(0) != 0;
+                let rationale: Option<String> = row.get(14).unwrap_or(None);
+                let access_count: u32 = row.get::<_, i32>(15).unwrap_or(0) as u32;
+                let memory_type: Option<String> = row.get(16).unwrap_or(None);
 
-            let labels: Vec<String> = serde_json::from_str(&labels_json).unwrap_or_else(|e| {
-                tracing::warn!("[Storage] labels parse error (may be plaintext migration): {}", e);
-                vec![]
-            });
-            let aliases: Vec<String> = serde_json::from_str(&aliases_json).unwrap_or_else(|e| {
-                tracing::warn!("[Storage] aliases parse error (may be plaintext migration): {}", e);
-                vec![]
-            });
-            let embedding = emb_blob.as_deref().map_or(vec![], VectorLayer::blob_to_embedding);
+                let labels: Vec<String> = serde_json::from_str(&labels_json).unwrap_or_else(|e| {
+                    tracing::warn!(
+                        "[Storage] labels parse error (may be plaintext migration): {}",
+                        e
+                    );
+                    vec![]
+                });
+                let aliases: Vec<String> =
+                    serde_json::from_str(&aliases_json).unwrap_or_else(|e| {
+                        tracing::warn!(
+                            "[Storage] aliases parse error (may be plaintext migration): {}",
+                            e
+                        );
+                        vec![]
+                    });
+                let embedding = emb_blob
+                    .as_deref()
+                    .map_or(vec![], VectorLayer::blob_to_embedding);
 
-            Ok((id, core_x, core_y, core_z, decrypted_content, content_hash, labels, mass, timestamp, aliases, vertex_json, embedding, importance, enforced, rationale, access_count, memory_type))
-        }).map_err(|e| e.to_string())?;
+                Ok((
+                    id,
+                    core_x,
+                    core_y,
+                    core_z,
+                    decrypted_content,
+                    content_hash,
+                    labels,
+                    mass,
+                    timestamp,
+                    aliases,
+                    vertex_json,
+                    embedding,
+                    importance,
+                    enforced,
+                    rationale,
+                    access_count,
+                    memory_type,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
 
         let mut count = 0;
         for row in rows {
-            let (id, cx, cy, cz, content, hash, labels, mass, ts, aliases, vertex_json, embedding, importance, enforced, rationale, access_count, memory_type) = row.map_err(|e: rusqlite::Error| e.to_string())?;
+            let (
+                id,
+                cx,
+                cy,
+                cz,
+                content,
+                hash,
+                labels,
+                mass,
+                ts,
+                aliases,
+                vertex_json,
+                embedding,
+                importance,
+                enforced,
+                rationale,
+                access_count,
+                memory_type,
+            ) = row.map_err(|e: rusqlite::Error| e.to_string())?;
             let positions = Tetrahedron::compute_vertices(Point3::new(cx, cy, cz));
             let saved_vertex_ids: Vec<u64> = serde_json::from_str(&vertex_json).unwrap_or_default();
             let tetra = Tetrahedron {
@@ -564,10 +697,15 @@ impl StorageManager {
                 let loaded = space.get_tetrahedron(tetra_id);
                 if let Some(t) = &loaded {
                     let current_ids = t.vertex_ids;
-                    if current_ids == [0u64; 4] || current_ids.iter().all(|&v| v == current_ids[0]) {
+                    if current_ids == [0u64; 4] || current_ids.iter().all(|&v| v == current_ids[0])
+                    {
                         if let Ok(loaded_verts) = serde_json::from_str::<[u64; 4]>(&vertex_json) {
                             if let Err(e) = space.update_vertex_ids(tetra_id, loaded_verts) {
-                                tracing::debug!("[Storage] vertex id restore failed for {}: {}", tetra_id, e);
+                                tracing::debug!(
+                                    "[Storage] vertex id restore failed for {}: {}",
+                                    tetra_id,
+                                    e
+                                );
                             }
                         }
                     }
@@ -579,21 +717,25 @@ impl StorageManager {
 
     fn load_relations(&self, kg: &KnowledgeGraph) -> Result<usize, String> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare("SELECT source, target, rel_type, strength FROM relations")
+        let mut stmt = conn
+            .prepare("SELECT source, target, rel_type, strength FROM relations")
             .map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map([], |row| {
-            let source: u64 = row.get(0)?;
-            let target: u64 = row.get(1)?;
-            let rel_type_str: String = row.get(2)?;
-            let strength: f64 = row.get(3)?;
-            let rel_type = Self::parse_rel_type(&rel_type_str);
-            Ok((source, target, rel_type, strength))
-        }).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                let source: u64 = row.get(0)?;
+                let target: u64 = row.get(1)?;
+                let rel_type_str: String = row.get(2)?;
+                let strength: f64 = row.get(3)?;
+                let rel_type = Self::parse_rel_type(&rel_type_str);
+                Ok((source, target, rel_type, strength))
+            })
+            .map_err(|e| e.to_string())?;
 
         let mut count = 0;
         for row in rows {
-            let (source, target, rel_type, strength) = row.map_err(|e: rusqlite::Error| e.to_string())?;
+            let (source, target, rel_type, strength) =
+                row.map_err(|e: rusqlite::Error| e.to_string())?;
             kg.add_relation(source, target, rel_type, strength);
             count += 1;
         }
@@ -602,15 +744,24 @@ impl StorageManager {
 
     fn load_concepts(&self, kg: &KnowledgeGraph) -> Result<usize, String> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare("SELECT id, label, member_count FROM concepts")
+        let mut stmt = conn
+            .prepare("SELECT id, label, member_count FROM concepts")
             .map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map([], |row| {
-            let id: u64 = row.get(0)?;
-            let label: String = row.get(1)?;
-            let member_count: u64 = row.get(2)?;
-            Ok(ConceptPrototype { id, centroid: vec![], member_count, label, member_ids: vec![] })
-        }).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                let id: u64 = row.get(0)?;
+                let label: String = row.get(1)?;
+                let member_count: u64 = row.get(2)?;
+                Ok(ConceptPrototype {
+                    id,
+                    centroid: vec![],
+                    member_count,
+                    label,
+                    member_ids: vec![],
+                })
+            })
+            .map_err(|e| e.to_string())?;
 
         let concepts: Vec<ConceptPrototype> = rows.filter_map(|r| r.ok()).collect();
         let count = concepts.len();
@@ -618,14 +769,24 @@ impl StorageManager {
         Ok(count)
     }
 
-    fn save_tetrahedrons_tx(&self, tx: &rusqlite::Transaction, space: &Space) -> Result<(), String> {
+    fn save_tetrahedrons_tx(
+        &self,
+        tx: &rusqlite::Transaction,
+        space: &Space,
+    ) -> Result<(), String> {
         let tetras = space.all_tetrahedrons();
-        tx.execute("DELETE FROM tetrahedrons", []).map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM tetrahedrons", [])
+            .map_err(|e| e.to_string())?;
 
         for t in &tetras {
-            let labels_json = self.encrypt_field(&serde_json::to_string(&t.data.labels).unwrap_or_else(|_| "[]".into()))?;
-            let aliases_json = self.encrypt_field(&serde_json::to_string(&t.data.aliases).unwrap_or_else(|_| "[]".into()))?;
-            let vertex_json = serde_json::to_string(&t.vertex_ids).unwrap_or_else(|_| "[0,0,0,0]".into());
+            let labels_json = self.encrypt_field(
+                &serde_json::to_string(&t.data.labels).unwrap_or_else(|_| "[]".into()),
+            )?;
+            let aliases_json = self.encrypt_field(
+                &serde_json::to_string(&t.data.aliases).unwrap_or_else(|_| "[]".into()),
+            )?;
+            let vertex_json =
+                serde_json::to_string(&t.vertex_ids).unwrap_or_else(|_| "[0,0,0,0]".into());
             let emb_blob = if t.data.embedding.is_empty() {
                 None
             } else {
@@ -649,9 +810,14 @@ impl StorageManager {
         Ok(())
     }
 
-    fn save_relations_tx(&self, tx: &rusqlite::Transaction, kg: &KnowledgeGraph) -> Result<(), String> {
+    fn save_relations_tx(
+        &self,
+        tx: &rusqlite::Transaction,
+        kg: &KnowledgeGraph,
+    ) -> Result<(), String> {
         let relations = kg.all_relations();
-        tx.execute("DELETE FROM relations", []).map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM relations", [])
+            .map_err(|e| e.to_string())?;
 
         for r in &relations {
             let rel_type_str = Self::rel_type_str(&r.relation_type);
@@ -663,9 +829,14 @@ impl StorageManager {
         Ok(())
     }
 
-    fn save_concepts_tx(&self, tx: &rusqlite::Transaction, kg: &KnowledgeGraph) -> Result<(), String> {
+    fn save_concepts_tx(
+        &self,
+        tx: &rusqlite::Transaction,
+        kg: &KnowledgeGraph,
+    ) -> Result<(), String> {
         let concepts = kg.get_concepts();
-        tx.execute("DELETE FROM concepts", []).map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM concepts", [])
+            .map_err(|e| e.to_string())?;
 
         for c in &concepts {
             let centroid_blob = if c.centroid.is_empty() {
@@ -676,7 +847,8 @@ impl StorageManager {
             tx.execute(
                 "INSERT INTO concepts (id, label, member_count, centroid) VALUES (?1, ?2, ?3, ?4)",
                 params![c.id, c.label, c.member_count, centroid_blob],
-            ).map_err(|e| e.to_string())?;
+            )
+            .map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -758,7 +930,11 @@ mod tests {
                 content_hash: id * 100,
                 labels: vec![format!("label_{}", id)],
                 timestamp: 1000 + id as i64,
-                aliases: if id > 0 { vec![format!("alias_{}", id)] } else { vec![] },
+                aliases: if id > 0 {
+                    vec![format!("alias_{}", id)]
+                } else {
+                    vec![]
+                },
                 embedding: vec![],
                 importance: 1.0,
                 enforced: false,
@@ -862,7 +1038,9 @@ mod tests {
         storage.upsert_tetra(&t).unwrap();
 
         storage.update_mass(10, 3.14).unwrap();
-        storage.update_aliases(10, &["alias_a".into(), "alias_b".into()]).unwrap();
+        storage
+            .update_aliases(10, &["alias_a".into(), "alias_b".into()])
+            .unwrap();
 
         let space = Space::new();
         storage.load_all(&space, &KnowledgeGraph::new());

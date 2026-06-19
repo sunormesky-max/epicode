@@ -20,7 +20,11 @@ impl Point3 {
     }
 
     pub fn zero() -> Self {
-        Self { x: 0.0, y: 0.0, z: 0.0 }
+        Self {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        }
     }
 
     /// Euclidean distance between two points.
@@ -54,11 +58,9 @@ impl Point3 {
             return Self::zero();
         }
         let n = points.len() as f64;
-        let sum = points
-            .iter()
-            .fold((0.0, 0.0, 0.0), |(sx, sy, sz), p| {
-                (sx + p.x, sy + p.y, sz + p.z)
-            });
+        let sum = points.iter().fold((0.0, 0.0, 0.0), |(sx, sy, sz), p| {
+            (sx + p.x, sy + p.y, sz + p.z)
+        });
         Self {
             x: sum.0 / n,
             y: sum.1 / n,

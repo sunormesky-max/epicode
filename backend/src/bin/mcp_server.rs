@@ -2,9 +2,19 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use epicode::engine::Engine;
 use epicode::engine::mcp::McpHandler;
 use epicode::engine::user_manager::UserManager;
+use epicode::engine::Engine;
+
+fn parse_directive(s: &str) -> tracing_subscriber::filter::Directive {
+    match s.parse() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!("invalid tracing directive '{}': {}", s, e);
+            std::process::exit(1);
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -17,13 +27,14 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("epicode=warn".parse().unwrap())
-                .add_directive("epicode_mcp=info".parse().unwrap()),
+                .add_directive(parse_directive("epicode=warn"))
+                .add_directive(parse_directive("epicode_mcp=info")),
         )
         .with_writer(io::stderr)
         .init();
 
-    let is_multi_user = std::env::var("TETRAMEM_PORT").is_ok() || std::env::var("TETRAMEM_MULTI_USER").is_ok();
+    let is_multi_user =
+        std::env::var("TETRAMEM_PORT").is_ok() || std::env::var("TETRAMEM_MULTI_USER").is_ok();
 
     if is_multi_user {
         run_multi_user_server(data_dir);
@@ -33,7 +44,10 @@ async fn main() {
 }
 
 fn run_single_user(data_dir: PathBuf) {
-    tracing::info!("Epicode MCP server (single-user), data_dir={}", data_dir.display());
+    tracing::info!(
+        "Epicode MCP server (single-user), data_dir={}",
+        data_dir.display()
+    );
 
     let mut engine = Engine::with_data_dir(data_dir);
     engine.start_quiet_with_interval(30000);
@@ -58,7 +72,9 @@ fn run_single_user(data_dir: PathBuf) {
             }
         }
         let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
 
         let t = std::time::Instant::now();
         let response = handler.process_json(trimmed);
@@ -80,7 +96,10 @@ fn run_single_user(data_dir: PathBuf) {
 }
 
 fn run_multi_user_server(data_dir: PathBuf) {
-    tracing::info!("Epicode TCP multi-user server starting, data_dir={}", data_dir.display());
+    tracing::info!(
+        "Epicode TCP multi-user server starting, data_dir={}",
+        data_dir.display()
+    );
 
     let shared_vector = Engine::load_shared_vector();
     let user_mgr = if let Some(sv) = shared_vector {
@@ -110,7 +129,10 @@ fn run_multi_user_server(data_dir: PathBuf) {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_else(|_| "unknown".into());
+                let peer = stream
+                    .peer_addr()
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|_| "unknown".into());
                 tracing::info!("client connected: {}", peer);
                 let mgr = user_mgr.clone();
                 let rt_handle = tokio::runtime::Handle::current();
@@ -135,13 +157,22 @@ fn run_multi_user_server(data_dir: PathBuf) {
     }
 }
 
-fn handle_authenticated_connection(stream: std::net::TcpStream, user_mgr: &UserManager, peer: &str) {
+fn handle_authenticated_connection(
+    stream: std::net::TcpStream,
+    user_mgr: &UserManager,
+    peer: &str,
+) {
     use std::io::{BufReader, BufWriter};
 
     stream.set_nonblocking(false).ok();
-    let reader = BufReader::new(stream.try_clone().unwrap_or_else(|_| {
-        stream.try_clone().expect("failed to clone stream")
-    }));
+    let reader_stream = match stream.try_clone() {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("failed to clone stream for {}: {}", peer, e);
+            return;
+        }
+    };
+    let reader = BufReader::new(reader_stream);
     let mut writer = BufWriter::new(stream);
 
     let mut handler: Option<Arc<McpHandler>> = None;
@@ -151,7 +182,9 @@ fn handle_authenticated_connection(stream: std::net::TcpStream, user_mgr: &UserM
         match line {
             Ok(l) => {
                 let trimmed = l.trim();
-                if trimmed.is_empty() { continue; }
+                if trimmed.is_empty() {
+                    continue;
+                }
 
                 if handler.is_none() {
                     match try_authenticate(trimmed, user_mgr) {
@@ -166,14 +199,18 @@ fn handle_authenticated_connection(stream: std::net::TcpStream, user_mgr: &UserM
                                 tracing::warn!("write error to {}: {}", peer, e);
                                 break;
                             }
-                            if let Err(_) = writer.flush() { break; }
+                            if let Err(_) = writer.flush() {
+                                break;
+                            }
                             continue;
                         }
                         Err(resp_str) => {
                             if let Err(_e) = writeln!(writer, "{}", resp_str) {
                                 break;
                             }
-                            if let Err(_) = writer.flush() { break; }
+                            if let Err(_) = writer.flush() {
+                                break;
+                            }
                             continue;
                         }
                     }
@@ -186,13 +223,20 @@ fn handle_authenticated_connection(stream: std::net::TcpStream, user_mgr: &UserM
                     let t = std::time::Instant::now();
                     let response = h.process_json(trimmed);
                     if t.elapsed().as_millis() > 100 {
-                        tracing::warn!("slow request from {} ({}): {}ms", peer, authenticated_user.as_deref().unwrap_or("?"), t.elapsed().as_millis());
+                        tracing::warn!(
+                            "slow request from {} ({}): {}ms",
+                            peer,
+                            authenticated_user.as_deref().unwrap_or("?"),
+                            t.elapsed().as_millis()
+                        );
                     }
                     if let Err(e) = writeln!(writer, "{}", response) {
                         tracing::warn!("write error to {}: {}", peer, e);
                         break;
                     }
-                    if let Err(_) = writer.flush() { break; }
+                    if let Err(_) = writer.flush() {
+                        break;
+                    }
                 }
             }
             Err(e) => {
@@ -208,29 +252,43 @@ fn handle_authenticated_connection(stream: std::net::TcpStream, user_mgr: &UserM
     }
 }
 
-fn try_authenticate(msg: &str, user_mgr: &UserManager) -> Result<(String, Arc<McpHandler>), String> {
-    let parsed: serde_json::Value = serde_json::from_str(msg)
-        .map_err(|_| auth_error(extract_id(msg), "invalid JSON"))?;
+fn try_authenticate(
+    msg: &str,
+    user_mgr: &UserManager,
+) -> Result<(String, Arc<McpHandler>), String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(msg).map_err(|_| auth_error(extract_id(msg), "invalid JSON"))?;
 
     let method = parsed.get("method").and_then(|v| v.as_str()).unwrap_or("");
-    let params = parsed.get("params").cloned().unwrap_or(serde_json::Value::Null);
+    let params = parsed
+        .get("params")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
 
     if method == "initialize" {
         let api_key = params.get("api_key").and_then(|v| v.as_str()).unwrap_or("");
         if api_key.is_empty() {
-            return Err(auth_error(extract_id(msg), "api_key required in initialize params"));
+            return Err(auth_error(
+                extract_id(msg),
+                "api_key required in initialize params",
+            ));
         }
-        let user_info = user_mgr.authenticate(api_key)
+        let user_info = user_mgr
+            .authenticate(api_key)
             .ok_or_else(|| auth_error(extract_id(msg), "authentication failed"))?;
 
-        let engine = user_mgr.get_engine(&user_info.user_id)
+        let engine = user_mgr
+            .get_engine(&user_info.user_id)
             .map_err(|e| auth_error(extract_id(msg), &e))?;
 
         let handler = Arc::new(McpHandler::new(engine));
         tracing::info!("user '{}' authenticated", user_info.user_id);
         Ok((user_info.user_id, handler))
     } else {
-        Err(auth_error(extract_id(msg), "first message must be initialize with api_key"))
+        Err(auth_error(
+            extract_id(msg),
+            "first message must be initialize with api_key",
+        ))
     }
 }
 
@@ -238,7 +296,8 @@ fn auth_error(id: Option<u64>, msg: &str) -> String {
     serde_json::json!({
         "jsonrpc": "2.0", "id": id,
         "error": {"code": -32001, "message": msg}
-    }).to_string()
+    })
+    .to_string()
 }
 
 fn extract_id(msg: &str) -> Option<u64> {

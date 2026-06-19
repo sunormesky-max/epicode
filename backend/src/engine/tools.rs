@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use crate::domain::space::Space;
 
+use super::dynamics;
 use super::energy::EnergyCenter;
 use super::knowledge::KnowledgeGraph;
 use super::security::SecurityGuard;
-use super::dynamics;
 
 pub struct ToolContext {
     pub space: Arc<Space>,
@@ -23,7 +23,13 @@ impl ToolContext {
         security: Arc<SecurityGuard>,
         max_energy: f64,
     ) -> Self {
-        Self { space, energy, knowledge, security, max_energy }
+        Self {
+            space,
+            energy,
+            knowledge,
+            security,
+            max_energy,
+        }
     }
 }
 
@@ -164,7 +170,10 @@ impl ToolRegistry {
 
     fn query_memory(&self, args: &serde_json::Value) -> Result<String, String> {
         let id = args["id"].as_u64().ok_or("missing id")?;
-        let t = self.ctx.space.get_tetrahedron(id)
+        let t = self
+            .ctx
+            .space
+            .get_tetrahedron(id)
             .ok_or(format!("tetra {} not found", id))?;
         let neighbors = self.ctx.knowledge.query_relations(id);
         Ok(serde_json::json!({
@@ -183,8 +192,11 @@ impl ToolRegistry {
     fn cluster_detail(&self, args: &serde_json::Value) -> Result<String, String> {
         let idx = args["index"].as_u64().ok_or("missing index")? as usize;
         let clusters = self.ctx.space.find_clusters();
-        let cluster = clusters.get(idx)
-            .ok_or(format!("cluster {} not found (total: {})", idx, clusters.len()))?;
+        let cluster = clusters.get(idx).ok_or(format!(
+            "cluster {} not found (total: {})",
+            idx,
+            clusters.len()
+        ))?;
         let mut members = Vec::new();
         let mut label_counts = std::collections::HashMap::new();
         for &id in &cluster.tetra_ids {
@@ -207,7 +219,8 @@ impl ToolRegistry {
             "entropy": format!("{:.3}", entropy),
             "labels": label_counts,
             "members": members
-        }).to_string())
+        })
+        .to_string())
     }
 
     fn search_memories(&self, args: &serde_json::Value) -> Result<String, String> {
@@ -216,8 +229,14 @@ impl ToolRegistry {
         let query_lower = query.to_lowercase();
         let query_words: Vec<&str> = query_lower.split_whitespace().collect();
         let all = self.ctx.space.all_tetrahedrons();
-        let mut scored: Vec<(u64, f64, String, Vec<String>)> = all.into_iter()
-            .filter(|t| !t.data.labels.iter().any(|l| l.starts_with("meta-") || l.starts_with("bridge")))
+        let mut scored: Vec<(u64, f64, String, Vec<String>)> = all
+            .into_iter()
+            .filter(|t| {
+                !t.data
+                    .labels
+                    .iter()
+                    .any(|l| l.starts_with("meta-") || l.starts_with("bridge"))
+            })
             .map(|t| {
                 let content_lower = t.data.content.to_lowercase();
                 let label_text = t.data.labels.join(" ").to_lowercase();
@@ -226,10 +245,18 @@ impl ToolRegistry {
                 let sim = if query_words.is_empty() {
                     0.0
                 } else {
-                    let matched = query_words.iter().filter(|w| searchable.contains(*w)).count();
+                    let matched = query_words
+                        .iter()
+                        .filter(|w| searchable.contains(*w))
+                        .count();
                     matched as f64 / query_words.len() as f64
                 };
-                (t.id, sim, t.data.content.chars().take(80).collect::<String>(), t.data.labels.clone())
+                (
+                    t.id,
+                    sim,
+                    t.data.content.chars().take(80).collect::<String>(),
+                    t.data.labels.clone(),
+                )
             })
             .collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -239,7 +266,10 @@ impl ToolRegistry {
                 serde_json::json!({"id": id, "similarity": format!("{:.3}", sim), "content": content, "labels": labels})
             })
             .collect();
-        Ok(serde_json::json!({"query": query, "count": results.len(), "results": results}).to_string())
+        Ok(
+            serde_json::json!({"query": query, "count": results.len(), "results": results})
+                .to_string(),
+        )
     }
 
     fn cluster_similarity(&self, args: &serde_json::Value) -> Result<String, String> {
@@ -249,18 +279,26 @@ impl ToolRegistry {
         let ca = clusters.get(a).ok_or(format!("cluster {} not found", a))?;
         let cb = clusters.get(b).ok_or(format!("cluster {} not found", b))?;
 
-        let labels_a: std::collections::HashSet<String> = ca.tetra_ids.iter()
+        let labels_a: std::collections::HashSet<String> = ca
+            .tetra_ids
+            .iter()
             .filter_map(|id| self.ctx.space.get_tetrahedron(*id))
             .flat_map(|t| t.data.labels.clone())
             .collect();
-        let labels_b: std::collections::HashSet<String> = cb.tetra_ids.iter()
+        let labels_b: std::collections::HashSet<String> = cb
+            .tetra_ids
+            .iter()
             .filter_map(|id| self.ctx.space.get_tetrahedron(*id))
             .flat_map(|t| t.data.labels.clone())
             .collect();
 
         let intersection = labels_a.intersection(&labels_b).count();
         let union = labels_a.union(&labels_b).count();
-        let avg = if union == 0 { 0.0 } else { intersection as f64 / union as f64 };
+        let avg = if union == 0 {
+            0.0
+        } else {
+            intersection as f64 / union as f64
+        };
 
         Ok(serde_json::json!({
             "cluster_a": a, "cluster_b": b,
@@ -268,7 +306,8 @@ impl ToolRegistry {
             "labels_a": labels_a.len(),
             "labels_b": labels_b.len(),
             "shared_labels": intersection,
-        }).to_string())
+        })
+        .to_string())
     }
 
     fn check_operation(&self, args: &serde_json::Value) -> Result<String, String> {
@@ -279,7 +318,8 @@ impl ToolRegistry {
 
         match op {
             "fission" => {
-                let params_idx = args["params"].as_str()
+                let params_idx = args["params"]
+                    .as_str()
                     .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
                     .and_then(|v| v["cluster_index"].as_u64());
                 let clusters = self.ctx.space.find_clusters();
@@ -287,9 +327,13 @@ impl ToolRegistry {
                     if let Some(c) = clusters.get(idx as usize) {
                         let entropy = dynamics::compute_entropy(&self.ctx.space, c);
                         checks.push(format!("entropy={:.3} (need>0.3)", entropy));
-                        if entropy < 0.3 { feasible = false; }
+                        if entropy < 0.3 {
+                            feasible = false;
+                        }
                         checks.push(format!("size={} (need>=6)", c.tetra_ids.len()));
-                        if c.tetra_ids.len() < 6 { feasible = false; }
+                        if c.tetra_ids.len() < 6 {
+                            feasible = false;
+                        }
                     } else {
                         checks.push(format!("cluster {} not found", idx));
                         feasible = false;
@@ -299,11 +343,15 @@ impl ToolRegistry {
                 }
                 checks.push("cooldown=10ticks (auto_fission manages this)".to_string());
                 checks.push("energy_cost=8".to_string());
-                if energy < 8.0 { feasible = false; }
+                if energy < 8.0 {
+                    feasible = false;
+                }
             }
             "fuse" => {
                 checks.push("energy_cost=8".to_string());
-                if energy < 8.0 { feasible = false; }
+                if energy < 8.0 {
+                    feasible = false;
+                }
                 checks.push("cluster_a!=cluster_b (verify before calling)".to_string());
             }
             "link" => {
@@ -311,26 +359,43 @@ impl ToolRegistry {
             }
             "dream" => {
                 checks.push("energy_cost=15".to_string());
-                if energy < 15.0 { feasible = false; }
+                if energy < 15.0 {
+                    feasible = false;
+                }
             }
-            _ => { checks.push(format!("unknown operation: {}", op)); feasible = false; }
+            _ => {
+                checks.push(format!("unknown operation: {}", op));
+                feasible = false;
+            }
         }
-        checks.push(format!("energy_available={:.0}/{}", energy, self.ctx.max_energy));
+        checks.push(format!(
+            "energy_available={:.0}/{}",
+            energy, self.ctx.max_energy
+        ));
 
-        Ok(serde_json::json!({"operation": op, "checks": checks, "feasible": feasible}).to_string())
+        Ok(
+            serde_json::json!({"operation": op, "checks": checks, "feasible": feasible})
+                .to_string(),
+        )
     }
 
     fn list_by_label(&self, args: &serde_json::Value) -> Result<String, String> {
         let label = args["label"].as_str().ok_or("missing label")?;
         let tetras = self.ctx.space.all_tetrahedrons();
-        let matches: Vec<serde_json::Value> = tetras.iter()
+        let matches: Vec<serde_json::Value> = tetras
+            .iter()
             .filter(|t| t.data.labels.iter().any(|l| l == label))
-            .map(|t| serde_json::json!({
-                "id": t.id,
-                "content": t.data.content.chars().take(80).collect::<String>(),
-                "labels": t.data.labels
-            }))
+            .map(|t| {
+                serde_json::json!({
+                    "id": t.id,
+                    "content": t.data.content.chars().take(80).collect::<String>(),
+                    "labels": t.data.labels
+                })
+            })
             .collect();
-        Ok(serde_json::json!({"label": label, "count": matches.len(), "memories": matches}).to_string())
+        Ok(
+            serde_json::json!({"label": label, "count": matches.len(), "memories": matches})
+                .to_string(),
+        )
     }
 }

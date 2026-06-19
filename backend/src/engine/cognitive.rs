@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 fn truncate_str(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
@@ -123,15 +123,30 @@ pub enum SchedulerAction {
     #[serde(rename = "link")]
     Link { a: u64, b: u64, reason: String },
     #[serde(rename = "consolidate")]
-    Consolidate { ids: Vec<u64>, keep: u64, summary: String },
+    Consolidate {
+        ids: Vec<u64>,
+        keep: u64,
+        summary: String,
+    },
     #[serde(rename = "mark_junk")]
     MarkJunk { ids: Vec<u64>, reason: String },
     #[serde(rename = "relabel")]
-    Relabel { id: u64, add_labels: Vec<String>, remove_labels: Vec<String>, reason: String },
+    Relabel {
+        id: u64,
+        add_labels: Vec<String>,
+        remove_labels: Vec<String>,
+        reason: String,
+    },
     #[serde(rename = "reflect")]
-    Reflect { observation: String, insight: String },
+    Reflect {
+        observation: String,
+        insight: String,
+    },
     #[serde(rename = "use_tool")]
-    UseTool { tool: String, args: serde_json::Value },
+    UseTool {
+        tool: String,
+        args: serde_json::Value,
+    },
 }
 
 fn default_pulse_type() -> String {
@@ -200,9 +215,51 @@ impl CognitiveEngine {
         let c = content.to_lowercase();
         // Identity/system rules checked first — highest priority
         let identity_rules: &[(&[&str], &[&str])] = &[
-            (&["i am david","i'm david","my identity","epicode identity","david identity","ai identity of epicode"], &["identity","system"]),
-            (&["epicode uses","epicode architecture","cylinder hub","central cylinder","pulseengine","dreamengine","gatewaycenter","scheduler","cognitive engine","knowledge graph","hnsw","vector layer","spaceinner","space inner","decisioncenter","fission","lock contention","read locks","write lock"], &["system","architecture"]),
-            (&["edge length is fixed","vertex merge epsilon","vertex merge","regular tetrahedron","tetrahedrons in 3d"], &["system","geometry"]),
+            (
+                &[
+                    "i am david",
+                    "i'm david",
+                    "my identity",
+                    "epicode identity",
+                    "david identity",
+                    "ai identity of epicode",
+                ],
+                &["identity", "system"],
+            ),
+            (
+                &[
+                    "epicode uses",
+                    "epicode architecture",
+                    "cylinder hub",
+                    "central cylinder",
+                    "pulseengine",
+                    "dreamengine",
+                    "gatewaycenter",
+                    "scheduler",
+                    "cognitive engine",
+                    "knowledge graph",
+                    "hnsw",
+                    "vector layer",
+                    "spaceinner",
+                    "space inner",
+                    "decisioncenter",
+                    "fission",
+                    "lock contention",
+                    "read locks",
+                    "write lock",
+                ],
+                &["system", "architecture"],
+            ),
+            (
+                &[
+                    "edge length is fixed",
+                    "vertex merge epsilon",
+                    "vertex merge",
+                    "regular tetrahedron",
+                    "tetrahedrons in 3d",
+                ],
+                &["system", "geometry"],
+            ),
         ];
         for (keywords, labels) in identity_rules {
             if keywords.iter().any(|kw| c.contains(kw)) {
@@ -211,27 +268,295 @@ impl CognitiveEngine {
         }
 
         let rules: &[(&[&str], &[&str])] = &[
-            (&["rust","borrow","trait","closure","async","cargo","lifetime","macro","ownership","unsafe","arc","mutex","rwlock"], &["programming","rust"]),
-            (&["python","list comprehension","decorator","generator","gil","context manager","asyncio","dataclass","pandas","numpy","flask","django"], &["programming","python"]),
-            (&["javascript","typescript","node","promise","react","vue","angular","webpack","npm","event loop","closure"], &["programming","javascript"]),
-            (&["haskell","monad","lazy evaluation","algebraic data type","functor","type class","purescript"], &["programming","haskell"]),
-            (&["goroutine","channel","golang","go module","defer","interface"], &["programming","go"]),
-            (&["java ","spring","jvm","kotlin","gradle","maven","servlet"], &["programming","java"]),
-            (&["quantum","entangle","superposition","heisenberg","wave-particle","tunneling","qubit","qpu"], &["physics","quantum"]),
-            (&["relativity","spacetime","einstein","gravitational","light speed","lorentz"], &["physics","relativity"]),
-            (&["thermodynamic","entropy","heat ","boltzmann","carnot"], &["physics","thermodynamics"]),
-            (&["mount everest","mariana trench","k2 ","dead sea","amazon river","lake baikal","barrier reef","mountain","trench","geography","volcano","earthquake","tectonic"], &["geography","earth"]),
-            (&["tcp ","udp ","http","quic","dns ","websocket","bgp","routing","firewall","socket","protocol","packet","bandwidth"], &["networking","protocol"]),
-            (&["bitcoin","ethereum","litecoin","solana","polkadot","defi","nft","blockchain","crypto","smart contract","satoshi"], &["cryptocurrency","blockchain"]),
-            (&["photosynthesis","mitochondria","dna ","rna ","crispr","gene","protein","cell ","evolution","species","ecosystem","biodiversity","waggle","octopus"], &["biology","life"]),
-            (&["fibonacci","golden ratio","fractal","chaos theory","mandelbrot","prime number"], &["mathematics","patterns"]),
-            (&["coffee","wine ","chocolate","cacao","fermentation","beer ","tea "], &["food","beverage"]),
-            (&["lithium","graphene","neutron star","black hole","supernova","quasar","dark matter","dark energy","photon","electron","proton","neutrino"], &["physics","astronomy"]),
-            (&["ai ","machine learning","neural network","deep learning","transformer","gpt","bert","llm","embedding","training","inference"], &["ai","ml"]),
-            (&["database","sql","nosql","redis","postgres","mysql","mongodb","query","index","transaction"], &["database","storage"]),
-            (&["docker","kubernetes","container","k8s","microservice","devops","ci/cd","terraform"], &["devops","infrastructure"]),
-            (&["security","encryption","authentication","vulnerability","exploit","firewall","ssl","tls","oauth"], &["security","cyber"]),
-            (&["architecture","design pattern","refactor","clean code","solid ","dry ","kiss "], &["architecture","engineering"]),
+            (
+                &[
+                    "rust",
+                    "borrow",
+                    "trait",
+                    "closure",
+                    "async",
+                    "cargo",
+                    "lifetime",
+                    "macro",
+                    "ownership",
+                    "unsafe",
+                    "arc",
+                    "mutex",
+                    "rwlock",
+                ],
+                &["programming", "rust"],
+            ),
+            (
+                &[
+                    "python",
+                    "list comprehension",
+                    "decorator",
+                    "generator",
+                    "gil",
+                    "context manager",
+                    "asyncio",
+                    "dataclass",
+                    "pandas",
+                    "numpy",
+                    "flask",
+                    "django",
+                ],
+                &["programming", "python"],
+            ),
+            (
+                &[
+                    "javascript",
+                    "typescript",
+                    "node",
+                    "promise",
+                    "react",
+                    "vue",
+                    "angular",
+                    "webpack",
+                    "npm",
+                    "event loop",
+                    "closure",
+                ],
+                &["programming", "javascript"],
+            ),
+            (
+                &[
+                    "haskell",
+                    "monad",
+                    "lazy evaluation",
+                    "algebraic data type",
+                    "functor",
+                    "type class",
+                    "purescript",
+                ],
+                &["programming", "haskell"],
+            ),
+            (
+                &[
+                    "goroutine",
+                    "channel",
+                    "golang",
+                    "go module",
+                    "defer",
+                    "interface",
+                ],
+                &["programming", "go"],
+            ),
+            (
+                &[
+                    "java ", "spring", "jvm", "kotlin", "gradle", "maven", "servlet",
+                ],
+                &["programming", "java"],
+            ),
+            (
+                &[
+                    "quantum",
+                    "entangle",
+                    "superposition",
+                    "heisenberg",
+                    "wave-particle",
+                    "tunneling",
+                    "qubit",
+                    "qpu",
+                ],
+                &["physics", "quantum"],
+            ),
+            (
+                &[
+                    "relativity",
+                    "spacetime",
+                    "einstein",
+                    "gravitational",
+                    "light speed",
+                    "lorentz",
+                ],
+                &["physics", "relativity"],
+            ),
+            (
+                &["thermodynamic", "entropy", "heat ", "boltzmann", "carnot"],
+                &["physics", "thermodynamics"],
+            ),
+            (
+                &[
+                    "mount everest",
+                    "mariana trench",
+                    "k2 ",
+                    "dead sea",
+                    "amazon river",
+                    "lake baikal",
+                    "barrier reef",
+                    "mountain",
+                    "trench",
+                    "geography",
+                    "volcano",
+                    "earthquake",
+                    "tectonic",
+                ],
+                &["geography", "earth"],
+            ),
+            (
+                &[
+                    "tcp ",
+                    "udp ",
+                    "http",
+                    "quic",
+                    "dns ",
+                    "websocket",
+                    "bgp",
+                    "routing",
+                    "firewall",
+                    "socket",
+                    "protocol",
+                    "packet",
+                    "bandwidth",
+                ],
+                &["networking", "protocol"],
+            ),
+            (
+                &[
+                    "bitcoin",
+                    "ethereum",
+                    "litecoin",
+                    "solana",
+                    "polkadot",
+                    "defi",
+                    "nft",
+                    "blockchain",
+                    "crypto",
+                    "smart contract",
+                    "satoshi",
+                ],
+                &["cryptocurrency", "blockchain"],
+            ),
+            (
+                &[
+                    "photosynthesis",
+                    "mitochondria",
+                    "dna ",
+                    "rna ",
+                    "crispr",
+                    "gene",
+                    "protein",
+                    "cell ",
+                    "evolution",
+                    "species",
+                    "ecosystem",
+                    "biodiversity",
+                    "waggle",
+                    "octopus",
+                ],
+                &["biology", "life"],
+            ),
+            (
+                &[
+                    "fibonacci",
+                    "golden ratio",
+                    "fractal",
+                    "chaos theory",
+                    "mandelbrot",
+                    "prime number",
+                ],
+                &["mathematics", "patterns"],
+            ),
+            (
+                &[
+                    "coffee",
+                    "wine ",
+                    "chocolate",
+                    "cacao",
+                    "fermentation",
+                    "beer ",
+                    "tea ",
+                ],
+                &["food", "beverage"],
+            ),
+            (
+                &[
+                    "lithium",
+                    "graphene",
+                    "neutron star",
+                    "black hole",
+                    "supernova",
+                    "quasar",
+                    "dark matter",
+                    "dark energy",
+                    "photon",
+                    "electron",
+                    "proton",
+                    "neutrino",
+                ],
+                &["physics", "astronomy"],
+            ),
+            (
+                &[
+                    "ai ",
+                    "machine learning",
+                    "neural network",
+                    "deep learning",
+                    "transformer",
+                    "gpt",
+                    "bert",
+                    "llm",
+                    "embedding",
+                    "training",
+                    "inference",
+                ],
+                &["ai", "ml"],
+            ),
+            (
+                &[
+                    "database",
+                    "sql",
+                    "nosql",
+                    "redis",
+                    "postgres",
+                    "mysql",
+                    "mongodb",
+                    "query",
+                    "index",
+                    "transaction",
+                ],
+                &["database", "storage"],
+            ),
+            (
+                &[
+                    "docker",
+                    "kubernetes",
+                    "container",
+                    "k8s",
+                    "microservice",
+                    "devops",
+                    "ci/cd",
+                    "terraform",
+                ],
+                &["devops", "infrastructure"],
+            ),
+            (
+                &[
+                    "security",
+                    "encryption",
+                    "authentication",
+                    "vulnerability",
+                    "exploit",
+                    "firewall",
+                    "ssl",
+                    "tls",
+                    "oauth",
+                ],
+                &["security", "cyber"],
+            ),
+            (
+                &[
+                    "architecture",
+                    "design pattern",
+                    "refactor",
+                    "clean code",
+                    "solid ",
+                    "dry ",
+                    "kiss ",
+                ],
+                &["architecture", "engineering"],
+            ),
         ];
         for (keywords, labels) in rules {
             if keywords.iter().any(|kw| c.contains(kw)) {
@@ -266,11 +591,16 @@ impl CognitiveEngine {
             .as_str()
             .ok_or("no content in classify response")?;
 
-        let parsed: serde_json::Value = serde_json::from_str(body)
-            .map_err(|e| format!("parse classify: {}", e))?;
+        let parsed: serde_json::Value =
+            serde_json::from_str(body).map_err(|e| format!("parse classify: {}", e))?;
 
-        parsed["labels"].as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        parsed["labels"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .ok_or_else(|| "no labels array".into())
     }
 
@@ -335,7 +665,8 @@ impl CognitiveEngine {
         let parsed: serde_json::Value = serde_json::from_str(content)
             .map_err(|e| format!("parse rerank: {} | raw: {}", e, truncate_str(content, 200)))?;
 
-        parsed["ranking"].as_array()
+        parsed["ranking"]
+            .as_array()
             .map(|arr| arr.iter().filter_map(|v| v.as_u64()).collect())
             .ok_or_else(|| "no ranking array".into())
     }
@@ -372,7 +703,8 @@ impl CognitiveEngine {
         let system_prompt = "Translate this Chinese query to English for semantic search. If it's a short/ambiguous query, expand into a descriptive sentence (1-2 sentences). Return JSON: {\"result\": \"...\"}";
 
         let url = format!("{}/v1/chat/completions", DEEPSEEK_BASE);
-        let resp: serde_json::Value = self.client
+        let resp: serde_json::Value = self
+            .client
             .post(&url)
             .set("Authorization", &format!("Bearer {}", self.api_key))
             .set("Content-Type", "application/json")
@@ -394,10 +726,11 @@ impl CognitiveEngine {
             .as_str()
             .ok_or("no content in translate_expand response")?;
 
-        let parsed: serde_json::Value = serde_json::from_str(content)
-            .map_err(|e| format!("parse translate_expand: {}", e))?;
+        let parsed: serde_json::Value =
+            serde_json::from_str(content).map_err(|e| format!("parse translate_expand: {}", e))?;
 
-        let result = parsed["result"].as_str()
+        let result = parsed["result"]
+            .as_str()
             .map(|s| s.to_string())
             .unwrap_or_else(|| query.to_string());
 
@@ -410,24 +743,35 @@ impl CognitiveEngine {
             cache.insert(key.clone(), result.clone());
             order.push(key);
             while cache.len() > 500 {
-                if order.is_empty() { break; }
+                if order.is_empty() {
+                    break;
+                }
                 let old = order.remove(0);
                 cache.remove(&old);
             }
         }
 
-        tracing::info!("[Cognitive] translate_and_expand: '{}' -> '{}' (translated={})", query, result, was_translated);
+        tracing::info!(
+            "[Cognitive] translate_and_expand: '{}' -> '{}' (translated={})",
+            query,
+            result,
+            was_translated
+        );
         Ok((result, was_translated))
     }
 
-    pub fn generate_aliases(&self, memories: Vec<(u64, String, Vec<String>)>) -> Result<Vec<(u64, Vec<String>)>, String> {
+    pub fn generate_aliases(
+        &self,
+        memories: Vec<(u64, String, Vec<String>)>,
+    ) -> Result<Vec<(u64, Vec<String>)>, String> {
         if !self.enabled || memories.is_empty() {
             return Ok(vec![]);
         }
 
         let id_order: Vec<u64> = memories.iter().map(|(id, _, _)| *id).collect();
 
-        let mem_text = memories.iter()
+        let mem_text = memories
+            .iter()
             .enumerate()
             .map(|(i, (_, content, labels))| {
                 let preview: String = content.chars().take(100).collect();
@@ -464,14 +808,18 @@ impl CognitiveEngine {
         let parsed: serde_json::Value = serde_json::from_str(content)
             .map_err(|e| format!("parse alias: {} | raw: {}", e, truncate_str(content, 200)))?;
 
-        let items = parsed["aliases"].as_array()
-            .ok_or("no aliases array")?;
+        let items = parsed["aliases"].as_array().ok_or("no aliases array")?;
 
         let mut result: Vec<(u64, Vec<String>)> = Vec::new();
         for item in items {
             let idx = item["id"].as_u64().unwrap_or(0) as usize;
-            let aliases: Vec<String> = item["aliases"].as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            let aliases: Vec<String> = item["aliases"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             if idx < id_order.len() && !aliases.is_empty() {
                 result.push((id_order[idx], aliases));
@@ -481,14 +829,18 @@ impl CognitiveEngine {
         Ok(result)
     }
 
-    pub fn extract_entities(&self, memories: Vec<(u64, String)>) -> Result<Vec<(u64, Vec<String>)>, String> {
+    pub fn extract_entities(
+        &self,
+        memories: Vec<(u64, String)>,
+    ) -> Result<Vec<(u64, Vec<String>)>, String> {
         if !self.enabled || memories.is_empty() {
             return Ok(vec![]);
         }
 
         let id_order: Vec<u64> = memories.iter().map(|(id, _)| *id).collect();
 
-        let mem_text = memories.iter()
+        let mem_text = memories
+            .iter()
             .enumerate()
             .map(|(i, (_, content))| {
                 let preview: String = content.chars().take(120).collect();
@@ -524,17 +876,21 @@ impl CognitiveEngine {
         let parsed: serde_json::Value = serde_json::from_str(content)
             .map_err(|e| format!("parse entity: {} | raw: {}", e, truncate_str(content, 200)))?;
 
-        let items = parsed["items"].as_array()
+        let items = parsed["items"]
+            .as_array()
             .ok_or("no items array in entity response")?;
 
         let mut result: Vec<(u64, Vec<String>)> = Vec::new();
         for item in items {
             let idx = item["id"].as_u64().unwrap_or(0) as usize;
-            let entities: Vec<String> = item["entities"].as_array()
-                .map(|a| a.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .filter(|s| s.starts_with("entity:") && s.len() > 7)
-                    .collect())
+            let entities: Vec<String> = item["entities"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .filter(|s| s.starts_with("entity:") && s.len() > 7)
+                        .collect()
+                })
                 .unwrap_or_default();
             if idx < id_order.len() && !entities.is_empty() {
                 result.push((id_order[idx], entities));
@@ -590,7 +946,12 @@ impl CognitiveEngine {
         let user_prompt = self.build_decision_prompt(state);
         {
             let mut last = self.last_prompt_sent.lock();
-            let safe = user_prompt.char_indices().take_while(|(i, _)| *i < 3000).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0);
+            let safe = user_prompt
+                .char_indices()
+                .take_while(|(i, _)| *i < 3000)
+                .last()
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(0);
             *last = user_prompt[..safe].to_string();
         }
 
@@ -599,7 +960,8 @@ impl CognitiveEngine {
         let mut prompt = user_prompt;
 
         for round in 0..3 {
-            let resp_body = self.client
+            let resp_body = self
+                .client
                 .post(&url)
                 .set("Authorization", &format!("Bearer {}", self.api_key))
                 .set("Content-Type", "application/json")
@@ -617,8 +979,14 @@ impl CognitiveEngine {
                 .into_string()
                 .map_err(|e| format!("LLM body round{}: {}", round, e))?;
 
-            let resp: serde_json::Value = serde_json::from_str(&resp_body)
-                .map_err(|e| format!("LLM JSON round{}: {} | body_len={}", round, e, resp_body.len()))?;
+            let resp: serde_json::Value = serde_json::from_str(&resp_body).map_err(|e| {
+                format!(
+                    "LLM JSON round{}: {} | body_len={}",
+                    round,
+                    e,
+                    resp_body.len()
+                )
+            })?;
 
             let content_raw = resp["choices"][0]["message"]["content"]
                 .as_str()
@@ -632,24 +1000,46 @@ impl CognitiveEngine {
             } else {
                 content_raw.trim()
             };
-            let finish_reason = resp["choices"][0]["finish_reason"].as_str().unwrap_or("unknown");
+            let finish_reason = resp["choices"][0]["finish_reason"]
+                .as_str()
+                .unwrap_or("unknown");
             let usage_prompt = resp["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
             let usage_completion = resp["usage"]["completion_tokens"].as_u64().unwrap_or(0);
-            let reasoning = resp["choices"][0]["message"]["reasoning_content"].as_str().unwrap_or("");
+            let reasoning = resp["choices"][0]["message"]["reasoning_content"]
+                .as_str()
+                .unwrap_or("");
             if content_raw.len() != content.len() {
-                tracing::warn!("[LLM round{}] trimmed {}->{} chars", round, content_raw.len(), content.len());
+                tracing::warn!(
+                    "[LLM round{}] trimmed {}->{} chars",
+                    round,
+                    content_raw.len(),
+                    content.len()
+                );
             }
             tracing::info!(
                 "[LLM round{}] body_len={} content_len={} finish={} tokens={}/{} reasoning_len={}",
-                round, resp_body.len(), content.len(), finish_reason, usage_prompt, usage_completion, reasoning.len()
+                round,
+                resp_body.len(),
+                content.len(),
+                finish_reason,
+                usage_prompt,
+                usage_completion,
+                reasoning.len()
             );
 
             if content.is_empty() || content.len() < 5 {
-                tracing::warn!("[LLM round{}] content too short ({} chars), retrying...", round, content.len());
+                tracing::warn!(
+                    "[LLM round{}] content too short ({} chars), retrying...",
+                    round,
+                    content.len()
+                );
                 if round < 2 {
                     continue;
                 }
-                return Err(format!("LLM returned empty/truncated content after {} rounds", round + 1));
+                return Err(format!(
+                    "LLM returned empty/truncated content after {} rounds",
+                    round + 1
+                ));
             }
 
             if finish_reason == "length" {
@@ -659,7 +1049,12 @@ impl CognitiveEngine {
                 continue;
             }
 
-            let safe_500 = content.char_indices().take_while(|(i, _)| *i < 500).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0);
+            let safe_500 = content
+                .char_indices()
+                .take_while(|(i, _)| *i < 500)
+                .last()
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(0);
             tracing::info!("[LLM round{}] {}", round, &content[..safe_500]);
 
             {
@@ -678,8 +1073,19 @@ impl CognitiveEngine {
                             match serde_json::from_str(sub) {
                                 Ok(c) => c,
                                 Err(e2) => {
-                                    let safe_200 = content.char_indices().take_while(|(i, _)| *i < 200).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0);
-                                    return Err(format!("parse round{}: {} / {} | raw: {}", round, e1, e2, &content[..safe_200]));
+                                    let safe_200 = content
+                                        .char_indices()
+                                        .take_while(|(i, _)| *i < 200)
+                                        .last()
+                                        .map(|(i, c)| i + c.len_utf8())
+                                        .unwrap_or(0);
+                                    return Err(format!(
+                                        "parse round{}: {} / {} | raw: {}",
+                                        round,
+                                        e1,
+                                        e2,
+                                        &content[..safe_200]
+                                    ));
                                 }
                             }
                         }
@@ -695,26 +1101,52 @@ impl CognitiveEngine {
                                     let fixed2 = sub.to_string() + "]}]";
                                     match serde_json::from_str(&fixed2) {
                                         Ok(c) => {
-                                            tracing::warn!("[LLM round{}] recovered truncated JSON (v2)", round);
+                                            tracing::warn!(
+                                                "[LLM round{}] recovered truncated JSON (v2)",
+                                                round
+                                            );
                                             c
                                         }
                                         Err(e2) => {
-                                            let safe_200 = content.char_indices().take_while(|(i, _)| *i < 200).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0);
-                                            return Err(format!("parse round{} (truncated): {} | raw: {}", round, e2, &content[..safe_200]));
+                                            let safe_200 = content
+                                                .char_indices()
+                                                .take_while(|(i, _)| *i < 200)
+                                                .last()
+                                                .map(|(i, c)| i + c.len_utf8())
+                                                .unwrap_or(0);
+                                            return Err(format!(
+                                                "parse round{} (truncated): {} | raw: {}",
+                                                round,
+                                                e2,
+                                                &content[..safe_200]
+                                            ));
                                         }
                                     }
                                 }
                             }
                         }
                         _ => {
-                            let safe_200 = content.char_indices().take_while(|(i, _)| *i < 200).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0);
-                            return Err(format!("parse round{}: {} | raw: {}", round, e1, &content[..safe_200]));
+                            let safe_200 = content
+                                .char_indices()
+                                .take_while(|(i, _)| *i < 200)
+                                .last()
+                                .map(|(i, c)| i + c.len_utf8())
+                                .unwrap_or(0);
+                            return Err(format!(
+                                "parse round{}: {} | raw: {}",
+                                round,
+                                e1,
+                                &content[..safe_200]
+                            ));
                         }
                     }
                 }
             };
 
-            let has_tool_call = cognitive.actions.iter().any(|a| matches!(a, SchedulerAction::UseTool { .. }));
+            let has_tool_call = cognitive
+                .actions
+                .iter()
+                .any(|a| matches!(a, SchedulerAction::UseTool { .. }));
             if !has_tool_call {
                 return Ok(cognitive);
             }
@@ -724,15 +1156,22 @@ impl CognitiveEngine {
                 for action in &cognitive.actions {
                     if let SchedulerAction::UseTool { tool, args } = action {
                         tracing::info!("[LLM tool] round{} calling {}({})", round, tool, args);
-                        let result = provider.execute_tool(tool, args)
+                        let result = provider
+                            .execute_tool(tool, args)
                             .unwrap_or_else(|e| format!("error: {}", e));
-                        tracing::info!("[LLM tool] -> {}", result.chars().take(200).collect::<String>());
+                        tracing::info!(
+                            "[LLM tool] -> {}",
+                            result.chars().take(200).collect::<String>()
+                        );
                         tool_results.push(format!("工具 {} 返回:\n{}", tool, result));
                     }
                 }
                 if !tool_results.is_empty() {
                     prompt = format!("{}\n\n## 工具调用结果\n{}\n\n基于以上工具结果，现在做出最终决策。如果工具结果显示操作不可行，返回空actions。", prompt, tool_results.join("\n\n"));
-                    tracing::info!("[LLM] round{} tool results fed back, requesting final decision", round);
+                    tracing::info!(
+                        "[LLM] round{} tool results fed back, requesting final decision",
+                        round
+                    );
                     continue;
                 }
             }
@@ -816,15 +1255,25 @@ impl CognitiveEngine {
 
         sections.push("\n## Cluster Details".to_string());
         for c in &state.clusters {
-            let labels_str = c.label_distribution.iter()
+            let labels_str = c
+                .label_distribution
+                .iter()
                 .map(|(k, v)| format!("{}:{}", k, v))
                 .collect::<Vec<_>>()
                 .join(" ");
-            let samples: Vec<String> = state.memories.iter()
+            let samples: Vec<String> = state
+                .memories
+                .iter()
                 .filter(|m| m.cluster_index == c.index)
                 .take(3)
                 .map(|m| {
-                    let label_str = m.labels.iter().take(2).cloned().collect::<Vec<_>>().join(",");
+                    let label_str = m
+                        .labels
+                        .iter()
+                        .take(2)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(",");
                     format!("#{}[{}]{}", m.id, label_str, m.content_preview)
                 })
                 .collect();
@@ -850,7 +1299,10 @@ impl CognitiveEngine {
                     let dist = (dx * dx + dy * dy + dz * dz).sqrt();
                     let li = ci.member_labels.first().map(|s| s.as_str()).unwrap_or("?");
                     let lj = cj.member_labels.first().map(|s| s.as_str()).unwrap_or("?");
-                    sections.push(format!("- Cluster {}[{}] ↔ Cluster {}[{}]: distance={:.2}", i, li, j, lj, dist));
+                    sections.push(format!(
+                        "- Cluster {}[{}] ↔ Cluster {}[{}]: distance={:.2}",
+                        i, li, j, lj, dist
+                    ));
                 }
             }
         }
@@ -858,7 +1310,13 @@ impl CognitiveEngine {
         if !state.decision_history.is_empty() {
             sections.push("\n## Recent Decision History".to_string());
             for d in state.decision_history.iter().rev().take(10) {
-                sections.push(format!("- tick{}: {} | {} → {}", d.tick, d.action, d.detail.chars().take(60).collect::<String>(), d.result));
+                sections.push(format!(
+                    "- tick{}: {} | {} → {}",
+                    d.tick,
+                    d.action,
+                    d.detail.chars().take(60).collect::<String>(),
+                    d.result
+                ));
             }
         }
 
@@ -869,10 +1327,17 @@ impl CognitiveEngine {
             }
         }
 
-        let content_tetras: Vec<&MemoryInfo> = state.memories.iter()
-            .filter(|m| !m.labels.iter().any(|l| l.starts_with("meta-") || l.starts_with("bridge")))
+        let content_tetras: Vec<&MemoryInfo> = state
+            .memories
+            .iter()
+            .filter(|m| {
+                !m.labels
+                    .iter()
+                    .any(|l| l.starts_with("meta-") || l.starts_with("bridge"))
+            })
             .collect();
-        let mut by_cluster: std::collections::HashMap<usize, Vec<&MemoryInfo>> = std::collections::HashMap::new();
+        let mut by_cluster: std::collections::HashMap<usize, Vec<&MemoryInfo>> =
+            std::collections::HashMap::new();
         for m in &content_tetras {
             by_cluster.entry(m.cluster_index).or_default().push(*m);
         }
@@ -887,15 +1352,20 @@ impl CognitiveEngine {
                 let a = all_content[i];
                 let b = all_content[j];
                 if a.cluster_index != b.cluster_index {
-                    let a_labels: std::collections::HashSet<&str> = a.labels.iter().map(|s| s.as_str()).collect();
-                    let b_labels: std::collections::HashSet<&str> = b.labels.iter().map(|s| s.as_str()).collect();
+                    let a_labels: std::collections::HashSet<&str> =
+                        a.labels.iter().map(|s| s.as_str()).collect();
+                    let b_labels: std::collections::HashSet<&str> =
+                        b.labels.iter().map(|s| s.as_str()).collect();
                     let shared: Vec<&&str> = a_labels.intersection(&b_labels).collect();
                     if !shared.is_empty() {
-                        let shared_str: String = shared.iter().map(|s| -> &str { **s }).collect::<Vec<&str>>().join(",");
+                        let shared_str: String = shared
+                            .iter()
+                            .map(|s| -> &str { **s })
+                            .collect::<Vec<&str>>()
+                            .join(",");
                         cross_cluster_pairs.push(format!(
                             "- #{}[cluster {}] ↔ #{}[cluster {}] (shared labels: {})",
-                            a.id, a.cluster_index, b.id, b.cluster_index,
-                            shared_str
+                            a.id, a.cluster_index, b.id, b.cluster_index, shared_str
                         ));
                     }
                 }
@@ -912,35 +1382,58 @@ impl CognitiveEngine {
         // Quality scan
         sections.push("\n## Quality Scan".to_string());
 
-        let low_mass: Vec<&&MemoryInfo> = content_tetras.iter()
+        let low_mass: Vec<&&MemoryInfo> = content_tetras
+            .iter()
             .filter(|m| m.mass < 0.3)
             .take(15)
             .collect();
         if low_mass.is_empty() {
             sections.push("- All memories healthy (mass >= 0.3)".to_string());
         } else {
-            sections.push(format!("### Low quality (mass < 0.3, {} total)", low_mass.len()));
+            sections.push(format!(
+                "### Low quality (mass < 0.3, {} total)",
+                low_mass.len()
+            ));
             for m in &low_mass {
                 let preview: String = m.content_preview.chars().take(60).collect();
-                sections.push(format!("- #{} [mass={:.2}] [{}] {}", m.id, m.mass, m.labels.iter().take(2).cloned().collect::<Vec<_>>().join(","), preview));
+                sections.push(format!(
+                    "- #{} [mass={:.2}] [{}] {}",
+                    m.id,
+                    m.mass,
+                    m.labels
+                        .iter()
+                        .take(2)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    preview
+                ));
             }
         }
 
         let mut duplicate_candidates: Vec<String> = Vec::new();
         for (_cluster, members) in &by_cluster {
-            if members.len() < 2 { continue; }
+            if members.len() < 2 {
+                continue;
+            }
             for i in 0..members.len() {
                 for j in (i + 1)..members.len().min(i + 10) {
                     let a = members[i];
                     let b = members[j];
-                    let a_labels: std::collections::HashSet<&str> = a.labels.iter().map(|s| s.as_str()).collect();
-                    let b_labels: std::collections::HashSet<&str> = b.labels.iter().map(|s| s.as_str()).collect();
+                    let a_labels: std::collections::HashSet<&str> =
+                        a.labels.iter().map(|s| s.as_str()).collect();
+                    let b_labels: std::collections::HashSet<&str> =
+                        b.labels.iter().map(|s| s.as_str()).collect();
                     let shared_count = a_labels.intersection(&b_labels).count();
                     let min_labels = a_labels.len().min(b_labels.len()).max(1);
                     if shared_count as f64 / min_labels as f64 > 0.6 {
                         duplicate_candidates.push(format!(
                             "- #{} ↔ #{} [cluster {}] label overlap {}/{}: \"{}\" vs \"{}\"",
-                            a.id, b.id, _cluster, shared_count, min_labels,
+                            a.id,
+                            b.id,
+                            _cluster,
+                            shared_count,
+                            min_labels,
                             a.content_preview.chars().take(40).collect::<String>(),
                             b.content_preview.chars().take(40).collect::<String>()
                         ));
@@ -951,7 +1444,10 @@ impl CognitiveEngine {
         if duplicate_candidates.is_empty() {
             sections.push("\n### Potential duplicates: none".to_string());
         } else {
-            sections.push(format!("\n### Potential duplicates ({} pairs)", duplicate_candidates.len()));
+            sections.push(format!(
+                "\n### Potential duplicates ({} pairs)",
+                duplicate_candidates.len()
+            ));
             for p in duplicate_candidates.iter().take(10) {
                 sections.push(p.clone());
             }
@@ -962,7 +1458,12 @@ impl CognitiveEngine {
         let max_prompt_chars = 8000;
         if prompt.len() > max_prompt_chars {
             let truncated: String = prompt.chars().take(max_prompt_chars).collect();
-            format!("{}\n\n[... prompt truncated from {} chars, {} sections ...]", truncated, prompt.len(), sections.len())
+            format!(
+                "{}\n\n[... prompt truncated from {} chars, {} sections ...]",
+                truncated,
+                prompt.len(),
+                sections.len()
+            )
         } else {
             prompt
         }

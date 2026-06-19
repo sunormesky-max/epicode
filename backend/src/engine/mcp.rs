@@ -47,10 +47,16 @@ pub struct McpHandler {
 
 impl McpHandler {
     pub fn new(engine: Arc<Engine>) -> Self {
-        Self { engine, pub_skills: None }
+        Self {
+            engine,
+            pub_skills: None,
+        }
     }
 
-    fn build_search_filters(&self, args: &serde_json::Value) -> Option<super::search_engine::SearchFilters> {
+    fn build_search_filters(
+        &self,
+        args: &serde_json::Value,
+    ) -> Option<super::search_engine::SearchFilters> {
         let has_labels = args["labels"].is_array();
         let has_min_imp = args["min_importance"].is_number();
         let has_project = args["project"].is_string();
@@ -61,7 +67,9 @@ impl McpHandler {
         let mut f = super::search_engine::SearchFilters::default();
         if has_labels {
             f.labels = args["labels"].as_array().map(|arr| {
-                arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
             });
         }
         if has_min_imp {
@@ -80,7 +88,10 @@ impl McpHandler {
         Some(f)
     }
 
-    fn build_action_items(&self, sched: &super::scheduler::SchedulerCenter) -> Vec<serde_json::Value> {
+    fn build_action_items(
+        &self,
+        sched: &super::scheduler::SchedulerCenter,
+    ) -> Vec<serde_json::Value> {
         let mut items: Vec<serde_json::Value> = Vec::new();
         let now_ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -110,7 +121,7 @@ impl McpHandler {
         let all = sched.api_load_context(50);
         let mut potential_dupes: Vec<(String, String, u64, u64)> = Vec::new();
         for i in 0..all.len() {
-            for j in (i+1)..all.len().min(i+10) {
+            for j in (i + 1)..all.len().min(i + 10) {
                 let (_, s1, c1, l1) = &all[i];
                 let (_, s2, c2, l2) = &all[j];
                 if *s1 > 1.5 && *s2 > 1.5 {
@@ -118,13 +129,22 @@ impl McpHandler {
                     if overlap_labels.len() >= 2 && (c1.len() > 30 || c2.len() > 30) {
                         let sim = super::intake::MemoryIntake::text_similarity(c1, c2);
                         if sim > 0.55 {
-                            potential_dupes.push((c1.chars().take(60).collect(), c2.chars().take(60).collect(), 0, 0));
-                            if potential_dupes.len() >= 3 { break; }
+                            potential_dupes.push((
+                                c1.chars().take(60).collect(),
+                                c2.chars().take(60).collect(),
+                                0,
+                                0,
+                            ));
+                            if potential_dupes.len() >= 3 {
+                                break;
+                            }
                         }
                     }
                 }
             }
-            if potential_dupes.len() >= 3 { break; }
+            if potential_dupes.len() >= 3 {
+                break;
+            }
         }
         for (a, b, _, _) in &potential_dupes {
             items.push(serde_json::json!({
@@ -133,7 +153,8 @@ impl McpHandler {
             }));
         }
 
-        let low_imp_stale: Vec<_> = all.iter()
+        let low_imp_stale: Vec<_> = all
+            .iter()
             .filter(|(_, s, c, _)| *s < 0.5 && c.len() > 20)
             .take(2)
             .collect();
@@ -157,8 +178,14 @@ impl McpHandler {
         items
     }
 
-    pub fn with_pub_skills(engine: Arc<Engine>, pub_skills: Arc<super::skills::SkillEngine>) -> Self {
-        Self { engine, pub_skills: Some(pub_skills) }
+    pub fn with_pub_skills(
+        engine: Arc<Engine>,
+        pub_skills: Arc<super::skills::SkillEngine>,
+    ) -> Self {
+        Self {
+            engine,
+            pub_skills: Some(pub_skills),
+        }
     }
 
     pub fn engine(&self) -> Arc<Engine> {
@@ -181,7 +208,10 @@ impl McpHandler {
                 jsonrpc: "2.0".into(),
                 id: req.id,
                 result: None,
-                error: Some(McpError { code: -32601, message: format!("unknown method: {}", req.method) }),
+                error: Some(McpError {
+                    code: -32601,
+                    message: format!("unknown method: {}", req.method),
+                }),
             },
         }
     }
@@ -566,14 +596,21 @@ impl McpHandler {
         }
     }
 
-    fn tools_call(&self, id: Option<serde_json::Value>, params: Option<serde_json::Value>) -> McpResponse {
+    fn tools_call(
+        &self,
+        id: Option<serde_json::Value>,
+        params: Option<serde_json::Value>,
+    ) -> McpResponse {
         let params = match params {
             Some(p) => p,
             None => return self.error(id, -32602, "missing params"),
         };
 
         let name = params["name"].as_str().unwrap_or("");
-        let args = params.get("arguments").cloned().unwrap_or(serde_json::Value::Null);
+        let args = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
 
         let result = match name {
             "memory_create" | "memory_search" | "memory_recall" | "memory_get" => {
@@ -593,7 +630,7 @@ impl McpHandler {
                         "memory_search" => self.tool_memory_search(&args),
                         "memory_recall" => self.tool_memory_recall(&args),
                         "memory_get" => self.tool_memory_get(&args),
-                        _ => unreachable!()
+                        _ => unreachable!(),
                     }
                 }
             }
@@ -639,8 +676,13 @@ impl McpHandler {
         if content.trim().is_empty() {
             return serde_json::json!({"status": "error", "message": "content is required"});
         }
-        let labels: Vec<String> = args["labels"].as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        let labels: Vec<String> = args["labels"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         match self.engine.scheduler.api_create_memory(&content, labels) {
             Ok(id) => serde_json::json!({"status": "created", "id": id, "content": content}),
@@ -657,22 +699,28 @@ impl McpHandler {
         let offset = args["offset"].as_u64().unwrap_or(0) as usize;
         let fetch = (limit + offset).min(200);
         let filters = self.build_search_filters(args);
-        match self.engine.scheduler.api_search_filtered(query, fetch, filters.as_ref()) {
+        match self
+            .engine
+            .scheduler
+            .api_search_filtered(query, fetch, filters.as_ref())
+        {
             Ok(results) => {
                 let total_found = results.len();
-                let items: Vec<serde_json::Value> = results.into_iter()
+                let items: Vec<serde_json::Value> = results
+                    .into_iter()
                     .skip(offset)
                     .take(limit)
                     .map(|(id, sim, mass, payload)| {
-                    serde_json::json!({
-                        "id": id,
-                        "content": payload.content,
-                        "labels": payload.labels,
-                        "similarity": (sim * 100.0).round() / 100.0,
-                        "mass": (mass * 100.0).round() / 100.0,
-                        "timestamp": payload.timestamp,
+                        serde_json::json!({
+                            "id": id,
+                            "content": payload.content,
+                            "labels": payload.labels,
+                            "similarity": (sim * 100.0).round() / 100.0,
+                            "mass": (mass * 100.0).round() / 100.0,
+                            "timestamp": payload.timestamp,
+                        })
                     })
-                }).collect();
+                    .collect();
                 serde_json::json!({"results": items, "count": items.len(), "total_found": total_found, "offset": offset, "query": query})
             }
             Err(e) => serde_json::json!({"status": "error", "message": e}),
@@ -709,13 +757,20 @@ impl McpHandler {
                 "access_count": payload.access_count,
                 "embedding_dims": payload.embedding.len(),
             }),
-            None => serde_json::json!({"status": "error", "message": format!("memory {} not found", id)}),
+            None => {
+                serde_json::json!({"status": "error", "message": format!("memory {} not found", id)})
+            }
         }
     }
 
     fn tool_memory_list(&self, args: &serde_json::Value) -> serde_json::Value {
-        let label_filters: Vec<String> = args["labels"].as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        let label_filters: Vec<String> = args["labels"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         let offset = args["offset"].as_u64().unwrap_or(0) as usize;
         let limit = args["limit"].as_u64().unwrap_or(100) as usize;
@@ -749,26 +804,56 @@ impl McpHandler {
         }
         let mut updated = Vec::new();
         if let Some(labels) = args["labels"].as_array() {
-            let new_labels: Vec<String> = labels.iter().filter_map(|v| v.as_str().map(String::from)).collect();
-            let old_labels = self.engine.space().get_tetrahedron(id).map(|t| t.data.labels.clone()).unwrap_or_default();
+            let new_labels: Vec<String> = labels
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            let old_labels = self
+                .engine
+                .space()
+                .get_tetrahedron(id)
+                .map(|t| t.data.labels.clone())
+                .unwrap_or_default();
             if let Err(e) = self.engine.space().update_labels(id, new_labels.clone()) {
                 return serde_json::json!({"status": "error", "message": format!("update labels failed: {}", e)});
             }
-            if let Err(e) = self.engine.scheduler.storage_handle().update_labels(id, &new_labels) {
+            if let Err(e) = self
+                .engine
+                .scheduler
+                .storage_handle()
+                .update_labels(id, &new_labels)
+            {
                 tracing::warn!("[MCP] label persist failed for {}: {}", id, e);
                 let _ = self.engine.space().update_labels(id, old_labels);
                 return serde_json::json!({"status": "error", "message": format!("persist failed: {}", e)});
             }
-            let final_labels = self.engine.space().get_tetrahedron(id).map(|t| t.data.labels.clone()).unwrap_or_default();
-            self.engine.scheduler.gateway_handle().update_label_index(id, &old_labels, &final_labels);
+            let final_labels = self
+                .engine
+                .space()
+                .get_tetrahedron(id)
+                .map(|t| t.data.labels.clone())
+                .unwrap_or_default();
+            self.engine.scheduler.gateway_handle().update_label_index(
+                id,
+                &old_labels,
+                &final_labels,
+            );
             updated.push("labels");
         }
         if let Some(aliases) = args["aliases"].as_array() {
-            let new_aliases: Vec<String> = aliases.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+            let new_aliases: Vec<String> = aliases
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
             if let Err(e) = self.engine.space().update_aliases(id, new_aliases.clone()) {
                 return serde_json::json!({"status": "error", "message": format!("update aliases failed: {}", e)});
             }
-            if let Err(e) = self.engine.scheduler.storage_handle().update_aliases(id, &new_aliases) {
+            if let Err(e) = self
+                .engine
+                .scheduler
+                .storage_handle()
+                .update_aliases(id, &new_aliases)
+            {
                 tracing::warn!("[MCP] alias persist failed for {}: {}", id, e);
                 return serde_json::json!({"status": "error", "message": format!("persist failed: {}", e)});
             }
@@ -778,7 +863,12 @@ impl McpHandler {
             if let Err(e) = self.engine.space().update_enforced(id, enforced) {
                 return serde_json::json!({"status": "error", "message": format!("update enforced failed: {}", e)});
             }
-            if let Err(e) = self.engine.scheduler.storage_handle().update_enforced(id, enforced) {
+            if let Err(e) = self
+                .engine
+                .scheduler
+                .storage_handle()
+                .update_enforced(id, enforced)
+            {
                 tracing::warn!("[MCP] enforced persist failed for {}: {}", id, e);
                 let _ = self.engine.space().update_enforced(id, !enforced);
                 return serde_json::json!({"status": "error", "message": format!("persist failed: {}", e)});
@@ -798,7 +888,9 @@ impl McpHandler {
         };
         match self.engine.scheduler.api_delete_memory(id) {
             Ok(_) => serde_json::json!({"status": "deleted", "id": id}),
-            Err(e) => serde_json::json!({"status": "error", "message": format!("delete failed: {}", e)}),
+            Err(e) => {
+                serde_json::json!({"status": "error", "message": format!("delete failed: {}", e)})
+            }
         }
     }
 
@@ -814,9 +906,12 @@ impl McpHandler {
         let task = if task_arg.is_empty() {
             let sessions = sched.api_list_by_labels(&["session-summary"], 5);
             let filtered: Vec<_> = if !project.is_empty() {
-                sessions.into_iter().filter(|(_, p)| {
-                    p.content.contains(project) || p.labels.iter().any(|l| l == project)
-                }).collect()
+                sessions
+                    .into_iter()
+                    .filter(|(_, p)| {
+                        p.content.contains(project) || p.labels.iter().any(|l| l == project)
+                    })
+                    .collect()
             } else {
                 sessions
             };
@@ -846,7 +941,10 @@ impl McpHandler {
             }
             let inferred = parts.join(" | ");
             if !inferred.is_empty() {
-                tracing::info!("[ctx_load] auto-inferred task from sessions: {:?}", truncate_str(&inferred, 80));
+                tracing::info!(
+                    "[ctx_load] auto-inferred task from sessions: {:?}",
+                    truncate_str(&inferred, 80)
+                );
             }
             inferred
         } else {
@@ -877,24 +975,32 @@ impl McpHandler {
 
         let health = {
             let feedback_mems = sched.api_list_by_labels(&["feedback"], 50);
-            let positive_fb = feedback_mems.iter().filter(|(_, p)| p.content.contains("highly_relevant")).count();
+            let positive_fb = feedback_mems
+                .iter()
+                .filter(|(_, p)| p.content.contains("highly_relevant"))
+                .count();
             let total_fb = feedback_mems.len();
             let enforced_count = enforced.len();
             let high_imp = sched.api_load_context(20);
             let avg_importance = if !high_imp.is_empty() {
                 high_imp.iter().map(|(_, s, _, _)| s).sum::<f64>() / high_imp.len() as f64
-            } else { 0.0 };
+            } else {
+                0.0
+            };
             let trend_7d = sched.storage_handle().get_health_trend(168);
-            let trend_json: Vec<serde_json::Value> = trend_7d.iter().map(|(ts, total, clusters, fb, avg, enf)| {
-                serde_json::json!({
-                    "timestamp": ts,
-                    "total_memories": total,
-                    "clusters": clusters,
-                    "feedback_records": fb,
-                    "avg_importance": (avg * 100.0).round() / 100.0,
-                    "enforced": enf,
+            let trend_json: Vec<serde_json::Value> = trend_7d
+                .iter()
+                .map(|(ts, total, clusters, fb, avg, enf)| {
+                    serde_json::json!({
+                        "timestamp": ts,
+                        "total_memories": total,
+                        "clusters": clusters,
+                        "feedback_records": fb,
+                        "avg_importance": (avg * 100.0).round() / 100.0,
+                        "enforced": enf,
+                    })
                 })
-            }).collect();
+                .collect();
             serde_json::json!({
                 "total_memories": stats.tetra_count,
                 "clusters": stats.clusters,
@@ -932,7 +1038,11 @@ impl McpHandler {
             for lbl in &["session-summary", "decision", "pattern"] {
                 let items = sched.api_list_by_labels(&[*lbl], 5);
                 for (id, p) in items {
-                    if global_scope || project.is_empty() || p.content.contains(project) || p.labels.iter().any(|l| l == project) {
+                    if global_scope
+                        || project.is_empty()
+                        || p.content.contains(project)
+                        || p.labels.iter().any(|l| l == project)
+                    {
                         label_results.push((id, p));
                     }
                 }
@@ -948,7 +1058,10 @@ impl McpHandler {
             all_memories.retain(|(id, _)| seen.insert(*id));
 
             let narrative = super::assembler::ContextAssembler::assemble(
-                &all_memories, &enforced, 15, &intent.primary_intent,
+                &all_memories,
+                &enforced,
+                15,
+                &intent.primary_intent,
             );
 
             let task_context: Vec<serde_json::Value> = search_results.iter().take(8).map(|(id, sim, _, p)| {
@@ -990,8 +1103,12 @@ impl McpHandler {
         let mut preferences = sched.api_list_by_labels(&["preference", "ctx-preference"], 15);
 
         let filter_project = |items: &mut Vec<(u64, MemoryPayload)>| {
-            if project.is_empty() { return; }
-            items.retain(|(_, p)| p.content.contains(project) || p.labels.iter().any(|l| l == project));
+            if project.is_empty() {
+                return;
+            }
+            items.retain(|(_, p)| {
+                p.content.contains(project) || p.labels.iter().any(|l| l == project)
+            });
         };
         filter_project(&mut decisions);
         filter_project(&mut patterns);
@@ -1007,14 +1124,26 @@ impl McpHandler {
 
         let mut sections: Vec<serde_json::Value> = Vec::new();
         let add_section = |name, items: Vec<serde_json::Value>| -> Option<serde_json::Value> {
-            if items.is_empty() { return None; }
+            if items.is_empty() {
+                return None;
+            }
             Some(serde_json::json!({"category": name, "items": items}))
         };
-        if let Some(s) = add_section("decisions", to_json(decisions)) { sections.push(s); }
-        if let Some(s) = add_section("patterns", to_json(patterns)) { sections.push(s); }
-        if let Some(s) = add_section("bugs", to_json(bugs)) { sections.push(s); }
-        if let Some(s) = add_section("sessions", to_json(sessions)) { sections.push(s); }
-        if let Some(s) = add_section("preferences", to_json(preferences)) { sections.push(s); }
+        if let Some(s) = add_section("decisions", to_json(decisions)) {
+            sections.push(s);
+        }
+        if let Some(s) = add_section("patterns", to_json(patterns)) {
+            sections.push(s);
+        }
+        if let Some(s) = add_section("bugs", to_json(bugs)) {
+            sections.push(s);
+        }
+        if let Some(s) = add_section("sessions", to_json(sessions)) {
+            sections.push(s);
+        }
+        if let Some(s) = add_section("preferences", to_json(preferences)) {
+            sections.push(s);
+        }
 
         let high_priority: Vec<serde_json::Value> = sched
             .api_load_context(10)
@@ -1137,9 +1266,12 @@ impl McpHandler {
 
         match self.engine.scheduler.api_search(&query, 10) {
             Ok(results) => {
-                let items: Vec<serde_json::Value> = results.into_iter()
+                let items: Vec<serde_json::Value> = results
+                    .into_iter()
                     .filter(|(_, sim, _, payload)| {
-                        if *sim < 0.05 { return false; }
+                        if *sim < 0.05 {
+                            return false;
+                        }
                         payload.labels.contains(&"pattern".to_string())
                             || payload.labels.contains(&"convention".to_string())
                             || payload.content.contains("[pattern]")
@@ -1173,18 +1305,36 @@ impl McpHandler {
                             }
                         }
                         if rule.is_empty() {
-                            let raw: Vec<&str> = content.split(" | ")
-                                .filter(|p| !p.starts_with("lang:") && !p.starts_with("project:") && !p.starts_with("[pattern]") && !p.starts_with("when:") && !p.starts_with("steps:") && !p.starts_with("example:") && !p.starts_with("pitfalls:"))
+                            let raw: Vec<&str> = content
+                                .split(" | ")
+                                .filter(|p| {
+                                    !p.starts_with("lang:")
+                                        && !p.starts_with("project:")
+                                        && !p.starts_with("[pattern]")
+                                        && !p.starts_with("when:")
+                                        && !p.starts_with("steps:")
+                                        && !p.starts_with("example:")
+                                        && !p.starts_with("pitfalls:")
+                                })
                                 .collect();
                             rule = raw.first().unwrap_or(&"").to_string();
                         }
                         structured["pattern"] = serde_json::json!(rule);
-                        if !when_val.is_empty() { structured["when"] = serde_json::json!(when_val); }
-                        if !steps_val.is_empty() { structured["steps"] = serde_json::json!(steps_val); }
-                        if !example_val.is_empty() { structured["example"] = serde_json::json!(example_val); }
-                        if !pitfalls_val.is_empty() { structured["pitfalls"] = serde_json::json!(pitfalls_val); }
+                        if !when_val.is_empty() {
+                            structured["when"] = serde_json::json!(when_val);
+                        }
+                        if !steps_val.is_empty() {
+                            structured["steps"] = serde_json::json!(steps_val);
+                        }
+                        if !example_val.is_empty() {
+                            structured["example"] = serde_json::json!(example_val);
+                        }
+                        if !pitfalls_val.is_empty() {
+                            structured["pitfalls"] = serde_json::json!(pitfalls_val);
+                        }
                         structured
-                    }).collect();
+                    })
+                    .collect();
                 serde_json::json!({"patterns": items, "count": items.len(), "context": context})
             }
             Err(e) => serde_json::json!({"status": "error", "message": e}),
@@ -1219,7 +1369,9 @@ impl McpHandler {
         }
 
         match self.engine.scheduler.api_create_memory(&content, labels) {
-            Ok(id) => serde_json::json!({"status": "recorded", "id": id, "title": title, "chosen": chosen}),
+            Ok(id) => {
+                serde_json::json!({"status": "recorded", "id": id, "title": title, "chosen": chosen})
+            }
             Err(e) => serde_json::json!({"status": "error", "message": e}),
         }
     }
@@ -1334,28 +1486,39 @@ impl McpHandler {
         };
         let inline = args["inline_content"].as_bool().unwrap_or(false);
         let rels = self.engine.scheduler.api_get_relations(id);
-        let items: Vec<serde_json::Value> = rels.into_iter().map(|(target, rel_type, strength)| {
-            let mut item = serde_json::json!({
-                "target": target,
-                "type": rel_type,
-                "strength": (strength * 100.0).round() / 100.0,
-            });
-            if inline {
-                if let Some(payload) = self.engine.scheduler.api_get_node(target) {
-                    item["target_content"] = serde_json::Value::String(payload.content.chars().take(200).collect());
-                    item["target_labels"] = serde_json::Value::Array(payload.labels.into_iter().map(serde_json::Value::String).collect());
+        let items: Vec<serde_json::Value> = rels
+            .into_iter()
+            .map(|(target, rel_type, strength)| {
+                let mut item = serde_json::json!({
+                    "target": target,
+                    "type": rel_type,
+                    "strength": (strength * 100.0).round() / 100.0,
+                });
+                if inline {
+                    if let Some(payload) = self.engine.scheduler.api_get_node(target) {
+                        item["target_content"] =
+                            serde_json::Value::String(payload.content.chars().take(200).collect());
+                        item["target_labels"] = serde_json::Value::Array(
+                            payload
+                                .labels
+                                .into_iter()
+                                .map(serde_json::Value::String)
+                                .collect(),
+                        );
+                    }
                 }
-            }
-            item
-        }).collect();
+                item
+            })
+            .collect();
         serde_json::json!({"id": id, "relations": items, "count": items.len()})
     }
 
     fn tool_concepts(&self) -> serde_json::Value {
         let concepts = self.engine.scheduler.api_get_concepts();
-        let items: Vec<serde_json::Value> = concepts.into_iter().map(|(label, count)| {
-            serde_json::json!({"label": label, "member_count": count})
-        }).collect();
+        let items: Vec<serde_json::Value> = concepts
+            .into_iter()
+            .map(|(label, count)| serde_json::json!({"label": label, "member_count": count}))
+            .collect();
         serde_json::json!({"concepts": items, "count": items.len()})
     }
 
@@ -1397,9 +1560,7 @@ impl McpHandler {
             let is_dup = match self.engine.scheduler.api_search(check_query, 3) {
                 Ok(results) => results.iter().any(|(_, sim, _, payload)| {
                     if *sim > 0.85 {
-                        let overlap = ext.content.chars()
-                            .take(60)
-                            .collect::<String>();
+                        let overlap = ext.content.chars().take(60).collect::<String>();
                         payload.content.contains(&overlap)
                     } else {
                         false
@@ -1413,7 +1574,11 @@ impl McpHandler {
                 continue;
             }
 
-            match self.engine.scheduler.api_create_memory(&ext.content, ext.labels.clone()) {
+            match self
+                .engine
+                .scheduler
+                .api_create_memory(&ext.content, ext.labels.clone())
+            {
                 Ok(id) => {
                     created.push(serde_json::json!({
                         "id": id,
@@ -1421,7 +1586,9 @@ impl McpHandler {
                         "preview": ext.content.chars().take(80).collect::<String>(),
                     }));
                 }
-                Err(_) => { skipped += 1; }
+                Err(_) => {
+                    skipped += 1;
+                }
             }
         }
 
@@ -1568,7 +1735,9 @@ impl McpHandler {
 
         let pub_skills = match &self.pub_skills {
             Some(ps) => ps,
-            None => return serde_json::json!({"status": "error", "message": "public skills store not available"}),
+            None => {
+                return serde_json::json!({"status": "error", "message": "public skills store not available"})
+            }
         };
 
         let all_skills = pub_skills.list_public();
@@ -1656,7 +1825,8 @@ impl McpHandler {
     }
 
     fn tool_feedback_submit(&self, args: &serde_json::Value) -> serde_json::Value {
-        let ids: Vec<u64> = args["memory_ids"].as_array()
+        let ids: Vec<u64> = args["memory_ids"]
+            .as_array()
             .map(|a| a.iter().filter_map(|v| v.as_u64()).collect())
             .unwrap_or_default();
         if ids.is_empty() {
@@ -1690,19 +1860,32 @@ impl McpHandler {
             _ => -0.1,
         };
 
-        let is_correction = correction == "outdated" || correction == "incorrect" || correction == "superseded";
+        let is_correction =
+            correction == "outdated" || correction == "incorrect" || correction == "superseded";
         let is_restored = correction == "restored";
-        let correction_importance = if is_correction { -0.8 } else if is_restored { 0.5 } else { 0.0 };
+        let correction_importance = if is_correction {
+            -0.8
+        } else if is_restored {
+            0.5
+        } else {
+            0.0
+        };
 
         let total_delta = mass_delta + outcome_bonus;
         let mut affected = 0usize;
         for &id in &ids {
             let had_tetra = self.engine.space.get_tetrahedron(id).is_some();
-            if !had_tetra { continue; }
+            if !had_tetra {
+                continue;
+            }
 
             let _ = self.engine.space.update_mass(id, total_delta);
             if let Some(t) = self.engine.space.get_tetrahedron(id) {
-                let _ = self.engine.scheduler.storage_handle().update_mass(id, t.mass);
+                let _ = self
+                    .engine
+                    .scheduler
+                    .storage_handle()
+                    .update_mass(id, t.mass);
             }
 
             {
@@ -1716,16 +1899,34 @@ impl McpHandler {
                     }
                 }
                 if is_restored {
-                    payload.labels.retain(|l| l != "outdated" && l != "superseded");
+                    payload
+                        .labels
+                        .retain(|l| l != "outdated" && l != "superseded");
                 }
                 let _ = self.engine.space.update_payload(id, payload.clone());
-                let _ = self.engine.scheduler.storage_handle().update_importance(id, final_delta);
+                let _ = self
+                    .engine
+                    .scheduler
+                    .storage_handle()
+                    .update_importance(id, final_delta);
                 if is_correction {
-                    let _ = self.engine.scheduler.storage_handle().update_labels(id, &payload.labels);
+                    let _ = self
+                        .engine
+                        .scheduler
+                        .storage_handle()
+                        .update_labels(id, &payload.labels);
                 }
-                tracing::info!("[Feedback] id={} importance {:.2} -> {:.2}{}",
-                    id, old_importance, payload.importance,
-                    if is_correction { " [CORRECTED-outdated]" } else { "" });
+                tracing::info!(
+                    "[Feedback] id={} importance {:.2} -> {:.2}{}",
+                    id,
+                    old_importance,
+                    payload.importance,
+                    if is_correction {
+                        " [CORRECTED-outdated]"
+                    } else {
+                        ""
+                    }
+                );
             }
 
             affected += 1;
@@ -1737,7 +1938,11 @@ impl McpHandler {
                 query, relevance, outcome, correction, notes, ids
             );
             let labels = vec!["feedback".to_string(), "agent-signal".to_string()];
-            if let Err(e) = self.engine.scheduler.api_create_memory(&feedback_content, labels) {
+            if let Err(e) = self
+                .engine
+                .scheduler
+                .api_create_memory(&feedback_content, labels)
+            {
                 tracing::debug!("[MCP] feedback memory creation failed: {}", e);
             }
         }
@@ -1784,7 +1989,13 @@ impl McpHandler {
                 .collect::<Vec<_>>()
                 .join("-")
                 .chars()
-                .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
                 .collect::<String>()
                 .split('-')
                 .filter(|s| !s.is_empty())
@@ -1792,34 +2003,40 @@ impl McpHandler {
                 .join("-")
         };
 
-        let skills_data: Vec<serde_json::Value> = all_skills.iter().map(|sk| {
-            let slug = slugify(&sk.name, &sk.skill_md);
+        let skills_data: Vec<serde_json::Value> = all_skills
+            .iter()
+            .map(|sk| {
+                let slug = slugify(&sk.name, &sk.skill_md);
 
-            if format == "opencode" {
-                let description = sk.skill_md.lines().next()
-                    .map(|l| l.trim_start_matches('#').trim())
-                    .unwrap_or(&sk.name);
-                let content = format!(
-                    "---\nname: {}\ndescription: \"Epicode skill - {}\"\n---\n\n{}",
-                    slug, description, sk.skill_md
-                );
-                serde_json::json!({
-                    "slug": slug,
-                    "filename": "SKILL.md",
-                    "content": content,
-                    "skill_id": sk.id,
-                    "name": sk.name,
-                })
-            } else {
-                serde_json::json!({
-                    "slug": slug,
-                    "filename": format!("{}.md", slug),
-                    "content": sk.skill_md,
-                    "skill_id": sk.id,
-                    "name": sk.name,
-                })
-            }
-        }).collect();
+                if format == "opencode" {
+                    let description = sk
+                        .skill_md
+                        .lines()
+                        .next()
+                        .map(|l| l.trim_start_matches('#').trim())
+                        .unwrap_or(&sk.name);
+                    let content = format!(
+                        "---\nname: {}\ndescription: \"Epicode skill - {}\"\n---\n\n{}",
+                        slug, description, sk.skill_md
+                    );
+                    serde_json::json!({
+                        "slug": slug,
+                        "filename": "SKILL.md",
+                        "content": content,
+                        "skill_id": sk.id,
+                        "name": sk.name,
+                    })
+                } else {
+                    serde_json::json!({
+                        "slug": slug,
+                        "filename": format!("{}.md", slug),
+                        "content": sk.skill_md,
+                        "skill_id": sk.id,
+                        "name": sk.name,
+                    })
+                }
+            })
+            .collect();
 
         serde_json::json!({
             "status": "success",
@@ -1846,7 +2063,10 @@ impl McpHandler {
             jsonrpc: "2.0".into(),
             id,
             result: None,
-            error: Some(McpError { code, message: msg.to_string() }),
+            error: Some(McpError {
+                code,
+                message: msg.to_string(),
+            }),
         }
     }
 
@@ -1858,7 +2078,10 @@ impl McpHandler {
                     jsonrpc: "2.0".into(),
                     id: None,
                     result: None,
-                    error: Some(McpError { code: -32700, message: format!("parse error: {}", e) }),
+                    error: Some(McpError {
+                        code: -32700,
+                        message: format!("parse error: {}", e),
+                    }),
                 };
                 return serde_json::to_string(&resp).unwrap_or_default();
             }
@@ -1874,7 +2097,9 @@ fn strip_html(s: &str) -> String {
     for ch in s.chars() {
         match ch {
             '<' => in_tag = true,
-            '>' => { in_tag = false; }
+            '>' => {
+                in_tag = false;
+            }
             _ if !in_tag => result.push(ch),
             _ => {}
         }
@@ -1883,7 +2108,15 @@ fn strip_html(s: &str) -> String {
 }
 
 fn sanitize_label(s: &str) -> String {
-    s.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '-' }).collect()
+    s.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 fn regex_captures(name: &str) -> String {
@@ -1891,12 +2124,23 @@ fn regex_captures(name: &str) -> String {
         if let Some(end) = name.find(')') {
             if start < end {
                 let eng = &name[start + 1..end];
-                let slug: String = eng.to_lowercase()
+                let slug: String = eng
+                    .to_lowercase()
                     .replace(&[':', '/', '\\', ' '][..], "-")
                     .chars()
-                    .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+                    .map(|c| {
+                        if c.is_alphanumeric() || c == '-' {
+                            c
+                        } else {
+                            '-'
+                        }
+                    })
                     .collect();
-                return slug.split('-').filter(|s| !s.is_empty()).collect::<Vec<_>>().join("-");
+                return slug
+                    .split('-')
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("-");
             }
         }
     }
@@ -1914,19 +2158,51 @@ fn extract_context_memories(context: &str, project: &str, role: &str) -> Vec<Ext
     let mut used_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
     for (line_idx, line) in context.lines().enumerate() {
-        if used_lines.contains(&line_idx) { continue; }
-        if line.len() < 15 || line.len() > 2000 { continue; }
+        if used_lines.contains(&line_idx) {
+            continue;
+        }
+        if line.len() < 15 || line.len() > 2000 {
+            continue;
+        }
         let line_lower = line.to_lowercase();
-        let truncated = if line.len() > 500 { truncate_str(line, 500) } else { line };
+        let truncated = if line.len() > 500 {
+            truncate_str(line, 500)
+        } else {
+            line
+        };
 
         let extracted = if has_bug_and_fix(&line_lower) {
-            Some(make_extraction("bug", truncated, context, project, &["bug", "fix"]))
+            Some(make_extraction(
+                "bug",
+                truncated,
+                context,
+                project,
+                &["bug", "fix"],
+            ))
         } else if matches_decision(&line_lower) {
-            Some(make_extraction("decision", truncated, context, project, &["decision"]))
+            Some(make_extraction(
+                "decision",
+                truncated,
+                context,
+                project,
+                &["decision"],
+            ))
         } else if matches_pattern(&line_lower) {
-            Some(make_extraction("pattern", truncated, context, project, &["pattern", "convention"]))
+            Some(make_extraction(
+                "pattern",
+                truncated,
+                context,
+                project,
+                &["pattern", "convention"],
+            ))
         } else if matches_preference(&line_lower) {
-            Some(make_extraction("preference", truncated, context, project, &["preference"]))
+            Some(make_extraction(
+                "preference",
+                truncated,
+                context,
+                project,
+                &["preference"],
+            ))
         } else {
             None
         };
@@ -1936,7 +2212,9 @@ fn extract_context_memories(context: &str, project: &str, role: &str) -> Vec<Ext
             results.push(ext);
         }
 
-        if results.len() >= 3 { break; }
+        if results.len() >= 3 {
+            break;
+        }
     }
 
     if results.is_empty() {
@@ -1946,36 +2224,103 @@ fn extract_context_memories(context: &str, project: &str, role: &str) -> Vec<Ext
     results
 }
 
-fn make_extraction(category: &str, line: &str, context: &str, project: &str, base_labels: &[&str]) -> ExtractedMemory {
-    let content = format!("[{}] {} | context: {}", category, line.trim(), summarize_context(context));
-    let mut labels: Vec<String> = base_labels.iter().map(|s| s.to_string()).chain(std::iter::once("auto-extracted".to_string())).collect();
-    if !project.is_empty() { labels.push(sanitize_label(project)); }
-    ExtractedMemory { category: category.to_string(), content, labels }
+fn make_extraction(
+    category: &str,
+    line: &str,
+    context: &str,
+    project: &str,
+    base_labels: &[&str],
+) -> ExtractedMemory {
+    let content = format!(
+        "[{}] {} | context: {}",
+        category,
+        line.trim(),
+        summarize_context(context)
+    );
+    let mut labels: Vec<String> = base_labels
+        .iter()
+        .map(|s| s.to_string())
+        .chain(std::iter::once("auto-extracted".to_string()))
+        .collect();
+    if !project.is_empty() {
+        labels.push(sanitize_label(project));
+    }
+    ExtractedMemory {
+        category: category.to_string(),
+        content,
+        labels,
+    }
 }
 
 fn has_bug_and_fix(line: &str) -> bool {
-    let bug = ["bug", "bugs", "crash", "panic", "broken", "error", "fail", "wrong", "issue"];
-    let fix = ["fixed by", "root cause", "the fix", "workaround", "resolved", "fixed in", "both fixed", "fix:"];
+    let bug = [
+        "bug", "bugs", "crash", "panic", "broken", "error", "fail", "wrong", "issue",
+    ];
+    let fix = [
+        "fixed by",
+        "root cause",
+        "the fix",
+        "workaround",
+        "resolved",
+        "fixed in",
+        "both fixed",
+        "fix:",
+    ];
     bug.iter().any(|k| line.contains(k)) && fix.iter().any(|k| line.contains(k))
 }
 
 fn matches_decision(line: &str) -> bool {
-    let keywords = ["decided to", "we chose", "going with", "switched to", "migrated to", "adopted", "settled on", "instead of", "we should", "let's use", "we'll use", "we need to use"];
+    let keywords = [
+        "decided to",
+        "we chose",
+        "going with",
+        "switched to",
+        "migrated to",
+        "adopted",
+        "settled on",
+        "instead of",
+        "we should",
+        "let's use",
+        "we'll use",
+        "we need to use",
+    ];
     keywords.iter().any(|k| line.contains(k))
 }
 
 fn matches_pattern(line: &str) -> bool {
-    let keywords = ["always use", "convention", "pattern is", "we follow", "standard practice", "rule:", "best practice", "make sure to", "remember to", "don't forget"];
+    let keywords = [
+        "always use",
+        "convention",
+        "pattern is",
+        "we follow",
+        "standard practice",
+        "rule:",
+        "best practice",
+        "make sure to",
+        "remember to",
+        "don't forget",
+    ];
     keywords.iter().any(|k| line.contains(k))
 }
 
 fn matches_preference(line: &str) -> bool {
-    let keywords = ["prefer", "i like", "i want", "don't use", "avoid", "never use", "must use", "i'd rather", "favorite"];
+    let keywords = [
+        "prefer",
+        "i like",
+        "i want",
+        "don't use",
+        "avoid",
+        "never use",
+        "must use",
+        "i'd rather",
+        "favorite",
+    ];
     keywords.iter().any(|k| line.contains(k))
 }
 
 fn extract_fallback(context: &str, project: &str, role: &str, results: &mut Vec<ExtractedMemory>) {
-    let significant_lines: Vec<&str> = context.lines()
+    let significant_lines: Vec<&str> = context
+        .lines()
         .filter(|l| l.len() > 30 && l.len() < 800)
         .collect();
 
@@ -1991,7 +2336,9 @@ fn extract_fallback(context: &str, project: &str, role: &str, results: &mut Vec<
     let role_label = if role.is_empty() { "general" } else { role };
     let content = format!("[{}] session context: {}", role_label, summary);
     let mut labels = vec!["auto-extracted".to_string(), format!("role-{}", role_label)];
-    if !project.is_empty() { labels.push(sanitize_label(project)); }
+    if !project.is_empty() {
+        labels.push(sanitize_label(project));
+    }
 
     results.push(ExtractedMemory {
         category: "context".to_string(),
@@ -2028,7 +2375,8 @@ impl McpHandler {
 
     fn tool_project_list(&self) -> serde_json::Value {
         let projects = self.engine.scheduler().api_list_projects();
-        let items: Vec<serde_json::Value> = projects.into_iter()
+        let items: Vec<serde_json::Value> = projects
+            .into_iter()
             .map(|(name, count)| {
                 let display_name = name.trim_start_matches("project:").to_string();
                 serde_json::json!({"project": display_name, "memory_count": count})
@@ -2119,7 +2467,10 @@ mod tests {
         let init_raw = r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_step","arguments":{"step":1,"value":"TestAgent"}}}"#;
         h.process_json(init_raw);
         for step in 2..=5 {
-            let raw = format!(r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"test"}}}}}}"#, step);
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"test"}}}}}}"#,
+                step
+            );
             h.process_json(&raw);
         }
         let finalize_raw = r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#;
@@ -2206,7 +2557,10 @@ mod tests {
         let h = McpHandler::new(Arc::new(eng));
         for step in 1..=5 {
             let val = if step == 1 { "TestAgent" } else { "test" };
-            let raw = format!(r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#, step, val);
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            );
             h.process_json(&raw);
         }
         h.process_json(r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#);
@@ -2216,7 +2570,11 @@ mod tests {
 
         let search_raw = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_search","arguments":{"query":"Rust memory","limit":5}}}"#;
         let search_output = h.process_json(search_raw);
-        assert!(search_output.contains("ownership model"), "output was: {}", search_output);
+        assert!(
+            search_output.contains("ownership model"),
+            "output was: {}",
+            search_output
+        );
         assert!(search_output.contains("content"));
     }
 
