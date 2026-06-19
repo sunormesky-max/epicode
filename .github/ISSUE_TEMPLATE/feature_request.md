@@ -10,6 +10,10 @@ assignees: ''
 
 <!-- What problem does this feature solve? -->
 
+## User Story
+
+<!-- Who needs this and what do they want to achieve? -->
+
 ## Proposed Solution
 
 <!-- Describe your proposed solution -->

@@ -4,7 +4,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import {
   Brain, Zap, Layers, BarChart3, Crown, GitBranch,
   User, Key, Users, Shield, Activity, Database,
-  TrendingUp, Clock, Target, Hash
+  Target
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 

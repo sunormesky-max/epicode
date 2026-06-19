@@ -6,12 +6,12 @@
 
 **Give AI an Unforgettable Memory**
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.85+-orange.svg)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
 [![Live](https://img.shields.io/badge/Live-epicode.cn-success.svg)](https://epicode.cn)
 
-[官网](https://epicode.cn) · [快速上手](#-快速上手) · [文档](https://epicode.cn/#/docs) · [API 参考](#-api-参考) · [架构](#-架构)
+[官网](https://epicode.cn) · [快速上手](#-快速上手) · [文档](https://epicode.cn/#/docs) · [API 参考](#-api-参考) · [架构](#-架构) · [变更记录](CHANGELOG.md) · [行为规范](CODE_OF_CONDUCT.md)
 
 </div>
 
@@ -26,7 +26,8 @@ Epicode 是一个**开源的空间 AI 记忆系统**。它将 AI 的记忆以正
 - **向量记忆存储** — 每条信息被嵌入、索引，在跨会话中可检索
 - **语义搜索** — BM25 + HNSW 混合搜索，自然语言查询返回上下文相关结果
 - **知识图谱** — 自动关系提取，创建互联记忆的动态图谱
-- **MCP 集成** — 27 个标准化工具，任何 AI 代理都能存储、搜索和回忆
+- **MCP 集成** — 35 个标准化工具，任何 AI 代理都能存储、搜索和回忆
+- **SMRP 规范** — 结构化记忆响应信封，暴露 tier、source、topology 和写入副产物
 - **多用户 Cloud** — 完整的用户注册、认证、配额管理、邀请码系统
 - **自动防御** — 内置服务器安全守护，SSH/Web/蜜罐多层防护
 
@@ -115,6 +116,8 @@ curl -H "X-API-Key: your-api-key" \
 
 ## API 参考
 
+> 线上站点通常通过 `/api` 前缀暴露；本地部署或反向代理配置不同，可能直接使用 `/v1`。
+
 ### 核心端点
 
 | 方法 | 路径 | 说明 |
@@ -126,11 +129,30 @@ curl -H "X-API-Key: your-api-key" \
 | `GET` | `/v1/graph/analysis` | 知识图谱分析 |
 | `GET` | `/v1/health` | 健康检查 |
 
-### MCP 工具（27 个）
+### MCP 工具（35 个）
 
 通过 MCP（Model Context Protocol）协议，支持以下操作：
 
 `memory_create` · `memory_search` · `memory_recall` · `memory_get` · `memory_list` · `memory_update` · `memory_delete` · `ctx_load` · `ctx_save` · `pattern_learn` · `pattern_recall` · `decision_record` · `bug_memory` · `session_summary` · `space_stats` · `dream_cycle` · `knowledge_relations` · `concepts` · `context_observe` · `identity_confirm` · `skill_execute` · `feedback_submit` · `skills_sync` · `enforced_rules` · `project_list` · `identity_step` · `identity_finalize`
+
+### SMRP 结构化响应
+
+SMRP（Structured Memory Response Protocol）为记忆类工具提供统一的响应信封：
+
+```json
+{
+  "protocol": {
+    "schema_version": "1.0",
+    "tool": "memory_search",
+    "ok": true,
+    "error": null
+  },
+  "data": {},
+  "status": {}
+}
+```
+
+它把记忆结果从“扁平列表”提升为“可解释结构”，为 AI 代理提供 tier、source、topology 和 placement 等信息。
 
 ---
 
@@ -289,12 +311,13 @@ sudo systemctl enable --now epicode-guard
 We welcome contributions! Please see:
 
 - [Contributing Guide](CONTRIBUTING.md) — development setup, code style, PR guidelines
+- [Code of Conduct](CODE_OF_CONDUCT.md) — community behavior expectations
 - [Security Policy](SECURITY.md) — how to report vulnerabilities
 - [Discussions](https://github.com/sunormesky-max/epicode/discussions) — ask questions, share ideas
 
 ## License
 
-本项目采用 [AGPL-3.0](LICENSE) 许可证。
+本项目采用 [MIT](LICENSE) 许可证。
 
 ---
 

@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect, useMemo } from 'react';
 import { searchMemories, getTimeline, deleteMemory, storeMemory, type SearchResult, type TimelineEvent } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
-import { Search, Plus, Trash2, Copy, Check, Filter, X, ChevronDown, Calendar, Tag, Hash } from 'lucide-react';
+import { Search, Plus, Filter, X, ChevronDown, Calendar, Tag, Hash } from 'lucide-react';
 
 export default function DashboardMemories() {
   const [query, setQuery] = useState('');
