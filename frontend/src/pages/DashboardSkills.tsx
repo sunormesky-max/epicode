@@ -1,11 +1,10 @@
 ﻿import { useState, useEffect, useMemo } from 'react';
 import { getMySkills, getPublicSkills, createSkill, type SkillData, type CommunitySkill } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
-import { Brain, Wrench, Users, Clock, Tag, Plus, Search, X, Check, Star, Filter, ChevronDown } from 'lucide-react';
+import { Brain, Wrench, Users, Clock, Tag, Plus, Search, X, Star, Filter } from 'lucide-react';
 
 function SkillCard({ skill, color }: { skill: SkillData | CommunitySkill; color: string }) {
   const [expanded, setExpanded] = useState(false);
-  const isMy = 'review_status' in skill;
 
   return (
     <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -96,28 +95,29 @@ export default function Dashboard技能() {
     setCreating(false);
   }
 
-  const display = tab === 'my' ? my技能 : pub技能;
-
   const all作者s = useMemo(() => {
     const s = new Set<string>();
-    for (const sk of display) s.add(sk.owner);
+    for (const sk of [...my技能, ...pub技能]) s.add(sk.owner);
     return Array.from(s).sort();
-  }, [display]);
+  }, [my技能, pub技能]);
 
   const filtered = useMemo(() => {
-    let f = display;
+    if (tab === 'my') {
+      let f = my技能;
+      if (searchQ) f = f.filter(s => s.name.toLowerCase().includes(searchQ.toLowerCase()));
+      if (statusFilter !== 'all') f = f.filter(s => s.review_status === statusFilter);
+      if (ownerFilter !== 'all') f = f.filter(s => s.owner === ownerFilter);
+      return f;
+    }
+    let f = pub技能;
     if (searchQ) f = f.filter(s => s.name.toLowerCase().includes(searchQ.toLowerCase()));
     if (statusFilter !== 'all') {
-      if (tab === 'my') {
-        f = (f as SkillData[]).filter(s => s.review_status === statusFilter);
-      } else {
-        if (statusFilter === 'system') f = (f as CommunitySkill[]).filter(s => s.is_system);
-        else if (statusFilter === 'public') f = (f as CommunitySkill[]).filter(s => s.is_public && !s.is_system);
-      }
+      if (statusFilter === 'system') f = f.filter(s => s.is_system);
+      else if (statusFilter === 'public') f = f.filter(s => s.is_public && !s.is_system);
     }
     if (ownerFilter !== 'all') f = f.filter(s => s.owner === ownerFilter);
     return f;
-  }, [display, searchQ, statusFilter, ownerFilter, tab]);
+  }, [my技能, pub技能, searchQ, statusFilter, ownerFilter, tab]);
 
   if (loading) {
     return (

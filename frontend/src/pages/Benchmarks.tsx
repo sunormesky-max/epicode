@@ -3,8 +3,8 @@ import { motion } from 'framer-motion';
 import Layout from '@/components/Layout';
 import { getPublicStats } from '@/lib/api';
 import {
-  BarChart3, Zap, Clock, Database, Brain, GitBranch,
-  Activity, TrendingUp, Server, Cpu
+  BarChart3, Zap, Database, Brain, GitBranch,
+  Activity, Server, Cpu
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,

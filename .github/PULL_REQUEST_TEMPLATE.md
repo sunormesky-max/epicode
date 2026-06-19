@@ -1,22 +1,23 @@
 ## Description
 
-<!-- What does this PR do? -->
+<!-- What does this PR change? -->
 
 ## Motivation
 
-<!-- Why is this change needed? -->
+<!-- Why is this change needed? Link the issue if available. -->
 
 ## Changes
 
-<!-- List key changes -->
+<!-- List the key changes in this PR. -->
 
--
+- 
 
 ## Testing
 
-<!-- How was this tested? -->
+<!-- How did you verify the change? -->
 
-- [ ] Unit tests pass
+- [ ] `cargo test` / backend tests pass
+- [ ] `npm test` / frontend tests pass
 - [ ] Manual testing performed
 
 ## Checklist
@@ -25,3 +26,4 @@
 - [ ] No unnecessary dependencies added
 - [ ] Documentation updated if needed
 - [ ] No secrets or credentials in code
+- [ ] Breaking changes documented

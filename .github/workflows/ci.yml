@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -17,7 +24,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.85"
-          components: rustfmt
+          components: rustfmt, clippy
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev pkg-config libssl-dev
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -26,16 +35,12 @@ jobs:
             ~/.cargo/git
             backend/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev pkg-config libssl-dev
       - name: Check formatting
-        run: cargo fmt -- --check
-        continue-on-error: true
-      - name: Check compilation
-        run: cargo check 2>&1 | tail -20
+        run: cargo fmt --all --check
+      - name: Check build
+        run: cargo check --locked
       - name: Run tests
-        run: cargo test --lib 2>&1 | tail -20
-        continue-on-error: true
+        run: cargo test --locked --all-targets
 
   frontend:
     runs-on: ubuntu-latest
@@ -51,8 +56,11 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Type check
+        run: npm run check
       - name: Lint
-        run: npm run lint --if-present
-        continue-on-error: true
+        run: npm run lint
+      - name: Test
+        run: npm run test
       - name: Build
         run: npm run build

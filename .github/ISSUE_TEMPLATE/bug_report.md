@@ -10,6 +10,10 @@ assignees: ''
 
 <!-- A clear description of the bug -->
 
+## Impact
+
+<!-- How severe is the bug? Which users or flows are affected? -->
+
 ## Steps to Reproduce
 
 1.
@@ -26,10 +30,12 @@ assignees: ''
 
 ## Environment
 
-- Epicode version:
+- Epicode version / commit:
 - OS:
+- Browser (if applicable):
 - Rust version (if applicable):
 - Node.js version (if applicable):
+- Deployment mode (local / cloud):
 
 ## Logs / Screenshots
 

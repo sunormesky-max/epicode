@@ -5,7 +5,7 @@ import Layout from '@/components/Layout';
 import { getPublicStats } from '@/lib/api';
 import {
   Database, Search, GitBranch, Plug, Brain, RefreshCw, Compass,
-  Network, Layers, Shield, Eye, MessageSquare, Check, ArrowRight,
+  Network, Layers, Shield, Eye, MessageSquare, ArrowRight,
   Zap, Lock, Globe, Code2
 } from 'lucide-react';
 
