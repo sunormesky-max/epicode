@@ -2,7 +2,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::middleware;
-use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
 use tokio::net::TcpListener;
@@ -10,7 +9,6 @@ use tower_http::trace::TraceLayer;
 
 use epicode::api::routes;
 use epicode::api::server;
-use epicode::engine::security::SecurityResult;
 use epicode::engine::Engine;
 
 #[tokio::main]
@@ -47,48 +45,6 @@ async fn main() {
     );
 
     let state = Arc::new(engine);
-
-    let security_fn = |axum::extract::State(engine): axum::extract::State<Arc<Engine>>,
-                       headers: axum::http::HeaderMap,
-                       request: axum::extract::Request,
-                       next: axum::middleware::Next| async move {
-        let guard = engine.guard.clone();
-        let path = request.uri().path().to_string();
-        let method = request.method().clone().to_string();
-        let action = format!("{method} {path}");
-
-        if path == "/" || path == "/dashboard" || path.starts_with("/health") {
-            return next.run(request).await;
-        }
-
-        let api_key = headers
-            .get("X-API-Key")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-
-        match guard.full_check(api_key, &action) {
-            Ok(_client_id) => next.run(request).await,
-            Err((result, _detail)) => {
-                let status = match result {
-                    SecurityResult::DeniedAuth => axum::http::StatusCode::UNAUTHORIZED,
-                    SecurityResult::DeniedRateLimit => axum::http::StatusCode::TOO_MANY_REQUESTS,
-                    SecurityResult::DeniedValidation => axum::http::StatusCode::BAD_REQUEST,
-                    SecurityResult::DeniedConstitution => axum::http::StatusCode::FORBIDDEN,
-                    SecurityResult::DeniedEnergy => axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                    SecurityResult::Allowed => axum::http::StatusCode::OK,
-                };
-                (
-                    status,
-                    axum::Json(serde_json::json!({
-                        "success": false,
-                        "error": format!("{:?}", result),
-                        "action": action,
-                    })),
-                )
-                    .into_response()
-            }
-        }
-    };
 
     let app = Router::new()
         .route("/", get(routes::dashboard))
@@ -146,7 +102,10 @@ async fn main() {
         .route("/mcp", post(routes::mcp))
         .route("/timeline", get(routes::timeline))
         .route("/backups", get(routes::list_backups))
-        .layer(middleware::from_fn_with_state(state.clone(), security_fn))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            epicode::api::middleware::security_layer,
+        ))
         .layer(middleware::from_fn(server::security_headers_middleware))
         .layer(
             server::cors_layer(

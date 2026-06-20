@@ -123,7 +123,7 @@ pub async fn remember(
             serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
         );
     }
-    match engine.remember(&req.content) {
+    match engine.remember_async(&req.content).await {
         Ok((id, labels)) => Json(serde_json::json!({"success": true, "id": id, "labels": labels})),
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
@@ -139,7 +139,7 @@ pub async fn ask(
         );
     }
     let depth = req.depth.unwrap_or(2).min(10);
-    match engine.ask(&req.question, depth) {
+    match engine.ask_async(&req.question, depth).await {
         Ok(result) => Json(
             serde_json::json!({"success": true, "question": result["question"], "answer": result["answer"], "memories": result["memories"], "memory_count": result["memory_count"]}),
         ),
@@ -172,7 +172,7 @@ pub async fn constitution(State(_engine): State<Arc<Engine>>) -> Json<serde_json
 
 pub async fn health(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
     let stats = engine.stats();
-    let health_report = engine.space().cylinder_health();
+    let health_report = engine.cylinder_health();
     Json(serde_json::json!({
         "status": "ok", "version": env!("CARGO_PKG_VERSION"),
         "tetra_count": stats.tetra_count,
@@ -180,10 +180,10 @@ pub async fn health(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value
         "energy": stats.energy,
         "clusters": stats.clusters,
         "cylinder": {
-            "radius": engine.space().cylinder_radius(),
-            "height": engine.space().cylinder_height(),
-            "total_ports": engine.space().cylinder_port_count(),
-            "identity_confirmed": engine.space().is_identity_confirmed(),
+            "radius": engine.cylinder_radius(),
+            "height": engine.cylinder_height(),
+            "total_ports": engine.cylinder_port_count(),
+            "identity_confirmed": engine.is_identity_confirmed(),
         },
         "health": {
             "total_ports": health_report.total_ports,
@@ -193,7 +193,7 @@ pub async fn health(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value
 }
 
 pub async fn get_identity(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    match engine.space().identity_info() {
+    match engine.identity_info() {
         Some(info) => Json(serde_json::json!({
             "success": true,
             "identity": {
@@ -230,18 +230,20 @@ pub async fn confirm_identity(
     if req.confirm_token.as_deref() != Some(&expected_token) {
         return Json(serde_json::json!({"success": false, "error": "invalid confirm_token"}));
     }
-    if engine.space().is_identity_confirmed() {
+    if engine.is_identity_confirmed() {
         return Json(
             serde_json::json!({"success": false, "error": "identity already confirmed, reset required to change"}),
         );
     }
-    engine.space().confirm_identity(
+    match engine.confirm_identity(
         req.name,
         req.mission,
         req.author,
         req.extra.unwrap_or_default(),
-    );
-    Json(serde_json::json!({"success": true, "message": "identity confirmed and sealed"}))
+    ) {
+        Ok(()) => Json(serde_json::json!({"success": true, "message": "identity confirmed and sealed"})),
+        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
+    }
 }
 
 pub async fn create_node(
@@ -259,12 +261,12 @@ pub async fn create_node(
             serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
         );
     }
-    match engine.create_memory_with_time(
-        &req.content,
+    match engine.create_memory_with_time_async(
+        req.content.clone(),
         user_labels,
         req.timestamp
             .unwrap_or_else(|| chrono::Utc::now().timestamp()),
-    ) {
+    ).await {
         Ok(id) => Json(serde_json::json!({"success": true, "id": id, "status": "created"})),
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
@@ -311,7 +313,7 @@ pub async fn delete_node(
     State(engine): State<Arc<Engine>>,
     Path(id): Path<u64>,
 ) -> Json<serde_json::Value> {
-    match engine.delete_memory(id) {
+    match engine.delete_memory_async(id).await {
         Ok(restored_id) => Json(
             serde_json::json!({"success": true, "deleted": restored_id, "mode": "soft_delete"}),
         ),
@@ -332,7 +334,7 @@ pub async fn restore_node(
     State(engine): State<Arc<Engine>>,
     Path(id): Path<u64>,
 ) -> Json<serde_json::Value> {
-    match engine.restore_memory(id) {
+    match engine.restore_memory_async(id).await {
         Ok(restored_id) => Json(serde_json::json!({"success": true, "restored": restored_id})),
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
@@ -354,11 +356,14 @@ pub async fn search(
         ..Default::default()
     };
     let has_filters = filters.since_ts.is_some() || filters.until_ts.is_some();
-    match engine.search_filtered(
-        &req.query,
-        limit,
-        if has_filters { Some(&filters) } else { None },
-    ) {
+    match engine
+        .search_filtered_async(
+            req.query.clone(),
+            limit,
+            if has_filters { Some(filters) } else { None },
+        )
+        .await
+    {
         Ok(results) => {
             let items: Vec<serde_json::Value> = results.into_iter()
                 .map(|(id, sim, mass, payload)| {
@@ -376,7 +381,7 @@ pub async fn send_pulse(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<PulseRequest>,
 ) -> Json<serde_json::Value> {
-    match engine.pulse(req.origin, req.ttl.unwrap_or(5)) {
+    match engine.pulse_async(req.origin, req.ttl.unwrap_or(5)).await {
         Ok(result) => Json(serde_json::json!({
             "success": true,
             "origin": result.origin,
@@ -413,7 +418,7 @@ pub async fn recall(
         );
     }
     let max_depth = req.depth.unwrap_or(2).min(10);
-    match engine.recall(&req.query, max_depth) {
+    match engine.recall_async(&req.query, max_depth).await {
         Ok(result) => Json(serde_json::json!({
             "success": true,
             "query": result["query"],
@@ -462,7 +467,7 @@ pub async fn concepts(State(engine): State<Arc<Engine>>) -> Json<serde_json::Val
 // ── Dream ──
 
 pub async fn dream_cycle(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    match engine.dream() {
+    match engine.dream_async().await {
         Ok(report) => Json(serde_json::json!({"success": true, "report": report})),
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
@@ -486,7 +491,7 @@ pub async fn reasoning_analogies(
 }
 
 pub async fn reasoning_patterns(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let patterns = engine.reason_patterns();
+    let patterns = engine.reason_patterns_async().await;
     Json(serde_json::json!({"success": true, "patterns": patterns}))
 }
 
@@ -511,7 +516,7 @@ pub async fn mcp(State(engine): State<Arc<Engine>>, body: String) -> Json<serde_
 // ── Security ──
 
 pub async fn security_stats(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let stats = engine.guard.stats();
+    let stats = engine.guard_stats();
     Json(serde_json::json!({
         "success": true,
         "enabled": stats.enabled,
@@ -529,7 +534,7 @@ pub async fn security_stats(State(engine): State<Arc<Engine>>) -> Json<serde_jso
 }
 
 pub async fn security_audit(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let entries = engine.guard.audit_log(50);
+    let entries = engine.guard_audit_log(50);
     Json(serde_json::json!({
         "success": true,
         "entries": entries,
@@ -539,7 +544,7 @@ pub async fn security_audit(State(engine): State<Arc<Engine>>) -> Json<serde_jso
 
 pub async fn cache_stats(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
     let (l1_hits, l1_misses, l2_hits, l2_misses, evictions, hit_ratio, l1_hit_ratio, l2_hit_ratio) =
-        engine.gateway().cache_stats_snapshot();
+        engine.cache_stats_snapshot();
     Json(serde_json::json!({
         "success": true,
         "l1_hits": l1_hits,
@@ -554,7 +559,7 @@ pub async fn cache_stats(State(engine): State<Arc<Engine>>) -> Json<serde_json::
 }
 
 pub async fn clear_cache(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    engine.gateway().clear_query_cache();
+    engine.clear_query_cache();
     Json(serde_json::json!({
         "success": true,
         "message": "query cache cleared",
@@ -562,9 +567,9 @@ pub async fn clear_cache(State(engine): State<Arc<Engine>>) -> Json<serde_json::
 }
 
 pub async fn list_backups(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let backups = engine.storage.list_backups();
-    let tetra_count = engine.storage.tetra_count();
-    let rel_count = engine.storage.relation_count();
+    let backups = engine.storage_list_backups();
+    let tetra_count = engine.storage_tetra_count();
+    let rel_count = engine.storage_relation_count();
     Json(serde_json::json!({
         "success": true,
         "backups": backups,
@@ -612,13 +617,13 @@ pub async fn sse_stream(
     .map(move |_| {
         let tick = tick_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let stats = engine.stats();
-        let db_tetra = engine.storage.tetra_count();
-        let db_rel = engine.storage.relation_count();
-        let cognitive_enabled = engine.cognitive.enabled();
-        let sec = engine.guard.stats();
+        let db_tetra = engine.storage_tetra_count();
+        let db_rel = engine.storage_relation_count();
+        let cognitive_enabled = engine.cognitive_enabled();
+        let sec = engine.guard_stats();
 
         let cluster_data: Vec<serde_json::Value> = if tick.is_multiple_of(5) {
-            let clusters = engine.space().find_clusters();
+            let clusters = engine.find_clusters();
             clusters
                 .iter()
                 .enumerate()
@@ -626,7 +631,7 @@ pub async fn sse_stream(
                     let labels: Vec<String> = c
                         .tetra_ids
                         .iter()
-                        .filter_map(|id| engine.space().get_tetrahedron(*id))
+                        .filter_map(|id| engine.get_tetrahedron(*id))
                         .flat_map(|t| t.data.labels.clone())
                         .collect();
                     serde_json::json!({
@@ -643,10 +648,10 @@ pub async fn sse_stream(
 
         let cyl_data = {
             serde_json::json!({
-                "radius": engine.space().cylinder_radius(),
-                "height": engine.space().cylinder_height(),
-                "ports": engine.space().cylinder_port_count(),
-                "identity_confirmed": engine.space().is_identity_confirmed(),
+                "radius": engine.cylinder_radius(),
+                "height": engine.cylinder_height(),
+                "ports": engine.cylinder_port_count(),
+                "identity_confirmed": engine.is_identity_confirmed(),
             })
         };
         let data = serde_json::json!({
@@ -680,19 +685,19 @@ pub struct UpdateConfigRequest {
 }
 
 pub async fn get_config(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let meta_model = engine.storage.get_meta("cognitive_model");
-    let meta_tick = engine.storage.get_meta("tick_interval_ms");
+    let meta_model = engine.storage_get_meta("cognitive_model");
+    let meta_tick = engine.storage_get_meta("tick_interval_ms");
     Json(serde_json::json!({
         "success": true,
         "cognitive": {
-            "enabled": engine.cognitive.enabled(),
+            "enabled": engine.cognitive_enabled(),
             "model": meta_model.unwrap_or_else(|| "deepseek-chat".into()),
         },
         "tick_interval_ms": meta_tick.unwrap_or_else(|| "1000".into()),
         "security": {
-            "enabled": engine.guard.config.enabled,
-            "rate_limit": engine.guard.config.rate_limit_per_minute,
-            "max_content_length": engine.guard.config.max_content_length,
+            "enabled": engine.guard_config().enabled,
+            "rate_limit": engine.guard_config().rate_limit_per_minute,
+            "max_content_length": engine.guard_config().max_content_length,
         },
     }))
 }
@@ -715,7 +720,7 @@ pub async fn update_config(
     }
     if !entries.is_empty() {
         let refs: Vec<(&str, &str)> = entries.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        if let Err(e) = engine.storage.set_meta_batch(&refs) {
+        if let Err(e) = engine.storage_set_meta_batch(&refs) {
             return Json(serde_json::json!({"success": false, "error": e}));
         }
     }

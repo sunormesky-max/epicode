@@ -4,6 +4,21 @@ use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::{middleware, Json};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
+/// Run a synchronous, potentially blocking computation on a dedicated blocking
+/// thread pool. Use this for Engine calls that may perform I/O (SQLite, HTTP
+/// embedding fallback) or CPU-heavy work (ONNX inference) so that tokio worker
+/// threads stay responsive.
+pub async fn blocking<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    match tokio::task::spawn_blocking(f).await {
+        Ok(v) => v,
+        Err(e) => panic!("blocking task panicked: {e}"),
+    }
+}
+
 /// Standard error response shape used across all server modes.
 pub fn error_response(
     status: StatusCode,

@@ -21,18 +21,19 @@ impl SecurityContext {
 
 pub async fn security_layer(
     headers: HeaderMap,
-    engine_state: Option<axum::extract::State<Arc<crate::engine::Engine>>>,
+    axum::extract::State(engine): axum::extract::State<Arc<crate::engine::Engine>>,
     request: Request,
     next: Next,
 ) -> Response {
-    let guard = match engine_state {
-        Some(axum::extract::State(engine)) => engine.guard.clone(),
-        None => return next.run(request).await,
-    };
+    let guard = engine.guard.clone();
 
     let path = request.uri().path().to_string();
     let method = request.method().clone().to_string();
     let action = format!("{method} {path}");
+
+    if path == "/" || path == "/dashboard" || path.starts_with("/health") {
+        return next.run(request).await;
+    }
 
     let api_key = headers
         .get("X-API-Key")
