@@ -1,5 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
-use rand::RngCore;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -63,7 +63,7 @@ impl KeyRotation {
         let mut keys = HashMap::new();
 
         let mut key_data = vec![0u8; 32];
-        rand::thread_rng().fill_bytes(&mut key_data);
+        rand::rng().fill_bytes(&mut key_data);
 
         let metadata = KeyMetadata {
             key_id: initial_key_id.clone(),
@@ -115,7 +115,7 @@ impl KeyRotation {
 
         // Generate new key
         let mut new_key_data = vec![0u8; 32];
-        rand::thread_rng().fill_bytes(&mut new_key_data);
+        rand::rng().fill_bytes(&mut new_key_data);
 
         // Mark old key as transitioning
         if let Some((_, meta)) = self.keys.get_mut(&old_id) {

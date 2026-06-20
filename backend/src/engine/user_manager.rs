@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{PasswordHash, SaltString};
 use argon2::{Algorithm, Argon2, Params, PasswordHasher, PasswordVerifier, Version};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
@@ -12,7 +13,7 @@ use super::vector::VectorLayer;
 use super::Engine;
 
 fn hash_password(password: &str) -> String {
-    let salt = SaltString::generate(&mut rand::rngs::OsRng);
+    let salt = SaltString::generate(&mut OsRng);
     let params = Params::new(65536, 3, 4, Some(32)).unwrap();
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let hash = argon2
@@ -146,11 +147,11 @@ impl UserManager {
     }
 
     fn generate_invite_code() -> String {
-        use rand::Rng;
+        use rand::RngExt;
         let chars: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         (0..32)
-            .map(|_| chars[rng.gen_range(0..chars.len())] as char)
+            .map(|_| chars[rng.random_range(0..chars.len())] as char)
             .collect()
     }
 

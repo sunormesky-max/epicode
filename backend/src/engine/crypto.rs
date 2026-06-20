@@ -1,10 +1,9 @@
 use aes_gcm::{
-    aead::{Aead, KeyInit},
+    aead::{rand_core::RngCore, Aead, KeyInit, OsRng},
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use hmac::{Hmac, Mac};
-use rand::{rngs::OsRng, RngCore};
 use sha2::Sha256;
 use zeroize::Zeroize;
 
