@@ -989,10 +989,8 @@ async fn register_user(
         if let Err(resp) = require_admin(&st.admin_key, &headers) {
             return resp;
         }
-    } else {
-        if let Err(e) = st.user_mgr.use_invite_code(invite_code) {
-            return error_response(StatusCode::FORBIDDEN, &e);
-        }
+    } else if let Err(e) = st.user_mgr.use_invite_code(invite_code) {
+        return error_response(StatusCode::FORBIDDEN, &e);
     }
 
     if let Err(e) = validate_user_id(&req.user_id) {
