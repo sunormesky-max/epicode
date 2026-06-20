@@ -29,13 +29,13 @@ fi
 
 # 3. 构建二进制（本地交叉编译，不上传源码）
 echo "[...] 本地编译 release binary..."
-cargo build --release --bin cloud 2>/dev/null
+cargo build --release --locked --bin epicode-cloud 2>/dev/null
 echo "[OK] 编译完成 (binary only, 无源码上传)"
 
 # 4. 检查二进制安全
 echo ""
 echo "=== 二进制安全检查 ==="
-BINARY="target/release/cloud"
+BINARY="target/release/epicode-cloud"
 echo "  stripped: $(file $BINARY | grep -c 'stripped' || echo 'YES')"
 echo "  static:   $(ldd $BINARY 2>&1 | grep -c 'not a dynamic' || echo 'YES')"
 echo "  size:     $(du -h $BINARY | cut -f1)"
@@ -55,11 +55,12 @@ services:
     container_name: epicode-cloud
     restart: unless-stopped
     ports:
-      - "127.0.0.1:9110:9110"
+      - "127.0.0.1:9111:9111"
     environment:
       - TETRAMEM_MASTER_KEY=${MASTER_KEY}
       - TETRAMEM_ADMIN_KEY=${ADMIN_KEY}
       - DEEPSEEK_API_KEY=\${DEEPSEEK_API_KEY}
+      - TETRAMEM_LISTEN_ADDR=0.0.0.0:9111
       - RUST_LOG=info
     volumes:
       - epicode-data:/app/data
@@ -81,7 +82,7 @@ services:
           memory: 512M
           cpus: '0.5'
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9110/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:9111/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -137,7 +138,7 @@ server {
     limit_req zone=api burst=50 nodelay;
 
     location / {
-        proxy_pass http://epicode:9110;
+        proxy_pass http://epicode:9111;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
