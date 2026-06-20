@@ -30,7 +30,7 @@ r2d2_sqlite = "0.25"
 futures = "0.3"
 tokio-stream = "0.1"
 ort = { version = "2.0.0-rc.9", features = ["ndarray"] }
-tokenizers = "0.21"
+tokenizers = "0.23"
 ndarray = "0.16"
 parking_lot = "0.12"
 aes-gcm = "0.10"
