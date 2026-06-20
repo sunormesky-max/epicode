@@ -10,7 +10,9 @@ info:
 
 servers:
   - url: http://localhost:9111
-    description: Development
+    description: Local backend direct
+  - url: https://epicode.cn/api
+    description: Production reverse proxy
 
 security:
   - ApiKeyAuth: []
@@ -28,6 +30,8 @@ tags:
     description: Bulk ingest and digest content
   - name: Admin
     description: User management (requires admin key)
+  - name: System
+    description: Health and public service metadata
 
 paths:
   /health:
@@ -46,6 +50,23 @@ paths:
                   status: { type: string, example: ok }
                   version: { type: string, example: "1.0.0-cloud" }
                   success: { type: boolean, example: true }
+
+  /stats/public:
+    get:
+      tags: [System]
+      summary: Public marketing statistics
+      security: []
+      responses:
+        "200":
+          description: Public aggregate counters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_users: { type: integer }
+                  total_memories: { type: integer }
+                  total_skills: { type: integer }
 
   /register:
     post:
@@ -364,6 +385,52 @@ paths:
         "404":
           description: Not found
 
+  /v1/memories/{id}:
+    delete:
+      tags: [Memory]
+      summary: Delete a memory by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Memory deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  deleted: { type: integer }
+
+  /v1/memories/batch-delete:
+    post:
+      tags: [Memory]
+      summary: Delete multiple memories in one request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  items: { type: integer }
+      responses:
+        "200":
+          description: Memories deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  deleted_count: { type: integer }
+
   /v1/knowledge:
     post:
       tags: [Knowledge Graph]
@@ -396,6 +463,37 @@ paths:
                         target_id: { type: integer }
                         relation: { type: string }
                         strength: { type: number }
+
+  /v1/graph/export:
+    get:
+      tags: [Knowledge Graph]
+      summary: Export graph nodes, edges, concepts, and clusters
+      responses:
+        "200":
+          description: Graph export payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      type: object
+                  edges:
+                    type: array
+                    items:
+                      type: object
+                  concepts:
+                    type: array
+                    items:
+                      type: object
+                  clusters:
+                    type: array
+                    items:
+                      type: object
+                  total_nodes: { type: integer }
+                  total_edges: { type: integer }
 
   /v1/stats:
     get:

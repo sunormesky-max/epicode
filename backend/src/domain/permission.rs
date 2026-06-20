@@ -19,6 +19,7 @@ impl UserRole {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "owner" => Some(UserRole::Owner),
@@ -50,6 +51,7 @@ impl ResourceType {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "memory" => Some(ResourceType::Memory),
@@ -87,6 +89,7 @@ impl Action {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "create" => Some(Action::Create),

@@ -140,7 +140,7 @@ pub fn auto_fission(
         })
         .map(|(i, c)| (i, c.tetra_ids.len()))
         .collect();
-    sorted_clusters.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted_clusters.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     for (ci, size) in &sorted_clusters {
         let entropy = dynamics::compute_entropy_from_labels(&clusters[*ci].tetra_ids, labels_map);
@@ -382,6 +382,7 @@ pub fn evict_low_quality(
     evicted
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn perform_fission_from_snap(
     ctx: &AutoPipelineCtx,
     cluster_index: usize,
@@ -423,7 +424,7 @@ pub fn perform_fission_from_snap(
         }
     }
     let mut sorted_groups: Vec<(String, Vec<u64>)> = label_map.into_iter().collect();
-    sorted_groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    sorted_groups.sort_by_key(|b| std::cmp::Reverse(b.1.len()));
     if sorted_groups.len() < 2 {
         return None;
     }
@@ -493,7 +494,7 @@ pub fn fission_placement(
     let dy = smaller_centroid.y - larger_centroid.y;
     let dz = smaller_centroid.z - larger_centroid.z;
     let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-    let base_dist = EDGE_LENGTH * 10.0 * ((tetra_count as f64).sqrt().max(3.0).min(20.0));
+    let base_dist = EDGE_LENGTH * 10.0 * ((tetra_count as f64).sqrt().clamp(3.0, 20.0));
     let push_dist = base_dist.min(EDGE_LENGTH * 50.0);
     if dist < 1e-10 {
         return Point3::new(original.x + push_dist, original.y, original.z);

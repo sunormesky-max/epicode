@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn blob_roundtrip() {
-        let original: Vec<f64> = vec![1.0, -2.5, 3.14, 0.0, 1e-10];
+        let original: Vec<f64> = vec![1.0, -2.5, std::f64::consts::PI, 0.0, 1e-10];
         let blob = super::super::vector::VectorLayer::embedding_to_blob(&original);
         let restored = super::super::vector::VectorLayer::blob_to_embedding(&blob);
         assert_eq!(restored.len(), original.len());
