@@ -9,7 +9,7 @@ repository = "https://github.com/sunormesky-max/epicode"
 homepage = "https://epicode.cn"
 documentation = "https://epicode.cn/#/docs"
 readme = "../README.md"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "io-util"] }
