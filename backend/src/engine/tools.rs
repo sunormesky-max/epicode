@@ -164,7 +164,7 @@ impl ToolRegistry {
             "cluster_similarity" => self.cluster_similarity(args),
             "check_operation" => self.check_operation(args),
             "list_by_label" => self.list_by_label(args),
-            _ => Err(format!("unknown tool: {}", name)),
+            _ => Err(format!("unknown tool: {name}")),
         }
     }
 
@@ -174,7 +174,7 @@ impl ToolRegistry {
             .ctx
             .space
             .get_tetrahedron(id)
-            .ok_or(format!("tetra {} not found", id))?;
+            .ok_or(format!("tetra {id} not found"))?;
         let neighbors = self.ctx.knowledge.query_relations(id);
         Ok(serde_json::json!({
             "id": t.id,
@@ -241,7 +241,7 @@ impl ToolRegistry {
                 let content_lower = t.data.content.to_lowercase();
                 let label_text = t.data.labels.join(" ").to_lowercase();
                 let alias_text = t.data.aliases.join(" ").to_lowercase();
-                let searchable = format!("{} {} {}", content_lower, label_text, alias_text);
+                let searchable = format!("{content_lower} {label_text} {alias_text}");
                 let sim = if query_words.is_empty() {
                     0.0
                 } else {
@@ -276,8 +276,8 @@ impl ToolRegistry {
         let a = args["cluster_a"].as_u64().ok_or("missing cluster_a")? as usize;
         let b = args["cluster_b"].as_u64().ok_or("missing cluster_b")? as usize;
         let clusters = self.ctx.space.find_clusters();
-        let ca = clusters.get(a).ok_or(format!("cluster {} not found", a))?;
-        let cb = clusters.get(b).ok_or(format!("cluster {} not found", b))?;
+        let ca = clusters.get(a).ok_or(format!("cluster {a} not found"))?;
+        let cb = clusters.get(b).ok_or(format!("cluster {b} not found"))?;
 
         let labels_a: std::collections::HashSet<String> = ca
             .tetra_ids
@@ -326,7 +326,7 @@ impl ToolRegistry {
                 if let Some(idx) = params_idx {
                     if let Some(c) = clusters.get(idx as usize) {
                         let entropy = dynamics::compute_entropy(&self.ctx.space, c);
-                        checks.push(format!("entropy={:.3} (need>0.3)", entropy));
+                        checks.push(format!("entropy={entropy:.3} (need>0.3)"));
                         if entropy < 0.3 {
                             feasible = false;
                         }
@@ -335,7 +335,7 @@ impl ToolRegistry {
                             feasible = false;
                         }
                     } else {
-                        checks.push(format!("cluster {} not found", idx));
+                        checks.push(format!("cluster {idx} not found"));
                         feasible = false;
                     }
                 } else {
@@ -364,7 +364,7 @@ impl ToolRegistry {
                 }
             }
             _ => {
-                checks.push(format!("unknown operation: {}", op));
+                checks.push(format!("unknown operation: {op}"));
                 feasible = false;
             }
         }

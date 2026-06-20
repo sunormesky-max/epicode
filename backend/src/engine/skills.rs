@@ -201,7 +201,7 @@ impl SkillEngine {
             .lock()
             .expect("skills mutex poisoned in append_description");
         let skill = skills.get_mut(&id).ok_or("skill not found")?;
-        let desc_section = format!("\n\n## 中文描述\n\n{}", description);
+        let desc_section = format!("\n\n## 中文描述\n\n{description}");
         skill.skill_md.push_str(&desc_section);
         skill.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -415,7 +415,7 @@ impl SkillEngine {
         ];
         for (pattern, reason) in dangerous_patterns {
             if md.contains(pattern) {
-                return Err(format!("security check failed: {}", reason));
+                return Err(format!("security check failed: {reason}"));
             }
         }
         if md.len() > 10000 {

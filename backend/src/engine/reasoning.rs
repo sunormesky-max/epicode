@@ -113,7 +113,7 @@ impl ReasoningEngine {
 
         let orphans = clusters.iter().filter(|c| c.tetra_ids.len() == 1).count();
         if orphans > 0 {
-            patterns.push(format!("{} orphan tetras detected", orphans));
+            patterns.push(format!("{orphans} orphan tetras detected"));
         }
 
         if let Some(largest) = clusters.iter().max_by_key(|c| c.tetra_ids.len()) {

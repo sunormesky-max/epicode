@@ -696,7 +696,7 @@ impl GatewayCenter {
         self.knowledge
             .query_relations(id)
             .into_iter()
-            .map(|(tid, rt, s)| (tid, format!("{}", rt), s))
+            .map(|(tid, rt, s)| (tid, format!("{rt}"), s))
             .collect()
     }
 

@@ -82,7 +82,7 @@ fn run_single_user(data_dir: PathBuf) {
             tracing::warn!("slow request: {}ms", t.elapsed().as_millis());
         }
 
-        if let Err(e) = writeln!(stdout, "{}", response) {
+        if let Err(e) = writeln!(stdout, "{response}") {
             tracing::error!("stdout write error: {}", e);
             break;
         }
@@ -115,7 +115,7 @@ fn run_multi_user_server(data_dir: PathBuf) {
         .and_then(|s| s.parse().ok())
         .unwrap_or(19100);
     let bind_addr = std::env::var("TETRAMEM_BIND").unwrap_or_else(|_| "127.0.0.1".into());
-    let addr = format!("{}:{}", bind_addr, port);
+    let addr = format!("{bind_addr}:{port}");
 
     let listener = match std::net::TcpListener::bind(&addr) {
         Ok(l) => l,
@@ -195,7 +195,7 @@ fn handle_authenticated_connection(
                                 "jsonrpc": "2.0", "id": extract_id(trimmed),
                                 "result": {"status": "authenticated", "user_id": user_id}
                             });
-                            if let Err(e) = writeln!(writer, "{}", resp) {
+                            if let Err(e) = writeln!(writer, "{resp}") {
                                 tracing::warn!("write error to {}: {}", peer, e);
                                 break;
                             }
@@ -205,7 +205,7 @@ fn handle_authenticated_connection(
                             continue;
                         }
                         Err(resp_str) => {
-                            if let Err(_e) = writeln!(writer, "{}", resp_str) {
+                            if let Err(_e) = writeln!(writer, "{resp_str}") {
                                 break;
                             }
                             if writer.flush().is_err() {
@@ -230,7 +230,7 @@ fn handle_authenticated_connection(
                             t.elapsed().as_millis()
                         );
                     }
-                    if let Err(e) = writeln!(writer, "{}", response) {
+                    if let Err(e) = writeln!(writer, "{response}") {
                         tracing::warn!("write error to {}: {}", peer, e);
                         break;
                     }

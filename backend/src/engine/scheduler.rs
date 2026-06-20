@@ -189,7 +189,7 @@ impl SchedulerCenter {
             .map_err(|_| "labels validation failed".to_string())?;
         self.security
             .check_constitution_create(!content.is_empty())
-            .map_err(|r| format!("constitution violation: {:?}", r))?;
+            .map_err(|r| format!("constitution violation: {r:?}"))?;
 
         let intake = super::intake::MemoryIntake::process(content, &mut labels);
 
@@ -572,7 +572,7 @@ impl SchedulerCenter {
         let tetra = self
             .space
             .get_tetrahedron(id)
-            .ok_or_else(|| format!("memory {} not found", id))?;
+            .ok_or_else(|| format!("memory {id} not found"))?;
         self.storage.soft_delete_tetra(&tetra, 30)?;
         self.purge_tetra(id, false);
         Ok(id)
@@ -588,7 +588,7 @@ impl SchedulerCenter {
         let tetra = self
             .storage
             .restore_deleted_tetra(id)?
-            .ok_or_else(|| format!("deleted memory {} not found", id))?;
+            .ok_or_else(|| format!("deleted memory {id} not found"))?;
         let restored_id = self.gateway.restore_tetra(&tetra)?;
         self.persist_tetra(restored_id);
         Ok(restored_id)
@@ -1055,7 +1055,7 @@ impl SchedulerCenter {
                             result.data.visited_tetras.len(),
                             result.energy_cost
                         );
-                        self.log_event(format!("pulse({},{:?},{})", origin, pulse_type, ttl));
+                        self.log_event(format!("pulse({origin},{pulse_type:?},{ttl})"));
                     }
                     Err(e) => tracing::warn!("[LLM] pulse failed: {}", e),
                 }
@@ -1117,8 +1117,7 @@ impl SchedulerCenter {
                 }
 
                 let bridge_content = format!(
-                    "[bridge] cluster {} + cluster {} (label_sim={:.3})",
-                    cluster_a, cluster_b, label_sim
+                    "[bridge] cluster {cluster_a} + cluster {cluster_b} (label_sim={label_sim:.3})"
                 );
                 let ca_centroid = self.cluster_core_centroid(ca);
                 let cb_centroid = self.cluster_core_centroid(cb);
@@ -1152,7 +1151,7 @@ impl SchedulerCenter {
                     Ok(id) => {
                         tracing::info!("[LLM] fuse: bridge tetra #{} connecting cluster {}+{} (label_sim={:.3})", id, cluster_a, cluster_b, label_sim);
                         self.persist_tetra(id);
-                        self.log_event(format!("fuse({},{},{})", cluster_a, cluster_b, id));
+                        self.log_event(format!("fuse({cluster_a},{cluster_b},{id})"));
                     }
                     Err(e) => tracing::warn!("[LLM] fuse bridge failed: {}", e),
                 }
@@ -1213,7 +1212,7 @@ impl SchedulerCenter {
                     label_sim,
                     reason
                 );
-                self.log_event(format!("link({},{})", a, b));
+                self.log_event(format!("link({a},{b})"));
             }
             SchedulerAction::Consolidate { ids, keep, summary } => {
                 if !ids.contains(keep) {
@@ -1241,7 +1240,7 @@ impl SchedulerCenter {
                             summary,
                             ids.len(),
                             ids.iter()
-                                .map(|id| format!("#{}", id))
+                                .map(|id| format!("#{id}"))
                                 .collect::<Vec<_>>()
                                 .join(",")
                         ),
@@ -1281,7 +1280,7 @@ impl SchedulerCenter {
                     deleted,
                     summary.chars().take(80).collect::<String>()
                 );
-                self.log_event(format!("consolidate({},{})", keep, deleted));
+                self.log_event(format!("consolidate({keep},{deleted})"));
             }
             SchedulerAction::MarkJunk { ids, reason } => {
                 let mut marked = 0u64;
@@ -1388,7 +1387,7 @@ impl SchedulerCenter {
                 } else {
                     tracing::warn!("[LLM] relabel: id {} not found", id);
                 }
-                self.log_event(format!("relabel({})", id));
+                self.log_event(format!("relabel({id})"));
             }
             SchedulerAction::Reflect {
                 observation,
@@ -1771,7 +1770,7 @@ impl SchedulerCenter {
         if !top_labels.is_empty() {
             let summary: Vec<String> = top_labels
                 .iter()
-                .map(|(l, c)| format!("{}({})", l, c))
+                .map(|(l, c)| format!("{l}({c})"))
                 .collect();
             tracing::debug!(
                 "[Skills] top domains: {} — skill matching available",
@@ -2154,26 +2153,26 @@ impl SchedulerCenter {
         }
         for action in &limited_actions {
             let action_name = match action {
-                SchedulerAction::Pulse { origin, .. } => format!("pulse({})", origin),
-                SchedulerAction::Fission { cluster_index } => format!("fission({})", cluster_index),
+                SchedulerAction::Pulse { origin, .. } => format!("pulse({origin})"),
+                SchedulerAction::Fission { cluster_index } => format!("fission({cluster_index})"),
                 SchedulerAction::Fuse {
                     cluster_a,
                     cluster_b,
-                } => format!("fuse({},{})", cluster_a, cluster_b),
+                } => format!("fuse({cluster_a},{cluster_b})"),
                 SchedulerAction::Dream => "dream".to_string(),
-                SchedulerAction::Link { a, b, reason } => format!("link({},{},{})", a, b, reason),
+                SchedulerAction::Link { a, b, reason } => format!("link({a},{b},{reason})"),
                 SchedulerAction::Consolidate { ids, keep, .. } => {
-                    format!("consolidate({:?}->{})", ids, keep)
+                    format!("consolidate({ids:?}->{keep})")
                 }
-                SchedulerAction::MarkJunk { ids, .. } => format!("mark_junk({:?})", ids),
+                SchedulerAction::MarkJunk { ids, .. } => format!("mark_junk({ids:?})"),
                 SchedulerAction::Relabel {
                     id,
                     add_labels,
                     remove_labels,
                     ..
-                } => format!("relabel({}+{:?}-{:?})", id, add_labels, remove_labels),
+                } => format!("relabel({id}+{add_labels:?}-{remove_labels:?})"),
                 SchedulerAction::Reflect { .. } => "reflect".to_string(),
-                SchedulerAction::UseTool { tool, .. } => format!("use_tool({})", tool),
+                SchedulerAction::UseTool { tool, .. } => format!("use_tool({tool})"),
             };
             self.execute_action(action);
             self.record_decision(
@@ -2261,13 +2260,13 @@ impl SchedulerCenter {
                                 break;
                             }
                             Ok(EngineEvent::TetrahedronCreated(id)) => {
-                                self.log_event(format!("created({})", id));
+                                self.log_event(format!("created({id})"));
                                 if self.tick_count.load(Ordering::SeqCst).is_multiple_of(3) {
                                     self.auto_save();
                                 }
                             }
                             Ok(EngineEvent::TetrahedronMoved(id, _)) => {
-                                self.log_event(format!("moved({})", id));
+                                self.log_event(format!("moved({id})"));
                             }
                             Err(broadcast::error::RecvError::Closed) => {
                                 tracing::info!("[Scheduler] event bus closed, persisting state");
@@ -2672,7 +2671,7 @@ mod tests {
             add_tetra_to_space(
                 &space,
                 core,
-                &format!("physics topic {}", i),
+                &format!("physics topic {i}"),
                 vec!["physics".into()],
             );
         }
@@ -2715,8 +2714,7 @@ mod tests {
             dynamics::compute_entropy_from_labels(&snap.clusters[0].tetra_ids, &snap.labels_map);
         assert!(
             entropy > 0.5,
-            "diverse labels should have high entropy, got {}",
-            entropy
+            "diverse labels should have high entropy, got {entropy}"
         );
 
         sched.auto_fission(&snap);
@@ -2742,9 +2740,9 @@ mod tests {
         let (sched, space, _kg) = build_scheduler();
         // Create a diverse cluster at EDGE_LENGTH spacing
         for i in 0..8 {
-            let label = format!("label-{}", i);
+            let label = format!("label-{i}");
             let core = Point3::new(i as f64 * EDGE_LENGTH, 0.0, 0.0);
-            add_tetra_to_space(&space, core, &format!("content {}", i), vec![label]);
+            add_tetra_to_space(&space, core, &format!("content {i}"), vec![label]);
         }
 
         sched.tick_count.fetch_add(20, Ordering::SeqCst);
@@ -2780,8 +2778,7 @@ mod tests {
         let total_mass: f64 = final_tetras.iter().map(|t| t.mass).sum();
         assert!(
             total_mass >= 21.0,
-            "total mass should be at least 21.0 (initial), got {}",
-            total_mass
+            "total mass should be at least 21.0 (initial), got {total_mass}"
         );
 
         // Verify decision history was recorded (tick%5 triggers cognitive path)
@@ -2820,8 +2817,7 @@ mod tests {
         let dx = (rust_tetras[0].core.x - rust_tetras[1].core.x).abs();
         assert!(
             dx < 5.0,
-            "same-label memories should be placed nearby, dx={}",
-            dx
+            "same-label memories should be placed nearby, dx={dx}"
         );
     }
 
@@ -2835,7 +2831,7 @@ mod tests {
         for i in 0..20 {
             let label = format!("label-{}", i % 5);
             let core = Point3::new(i as f64 * EDGE_LENGTH, 0.0, 0.0);
-            add_tetra_to_space(&space, core, &format!("content {}", i), vec![label]);
+            add_tetra_to_space(&space, core, &format!("content {i}"), vec![label]);
         }
 
         // Run 50 ticks to trigger multiple fission cycles
@@ -2913,8 +2909,7 @@ mod tests {
             for &id in &cluster.tetra_ids {
                 assert!(
                     all_ids.contains(&id),
-                    "cluster references non-existent tetra {}",
-                    id
+                    "cluster references non-existent tetra {id}"
                 );
             }
         }
@@ -3000,7 +2995,7 @@ mod tests {
             add_tetra_to_space(
                 &space,
                 core,
-                &format!("Memory #{} about {}", i, cat),
+                &format!("Memory #{i} about {cat}"),
                 vec![cat.to_string()],
             );
         }

@@ -30,14 +30,14 @@ impl VectorLayer {
         }
 
         let session = Session::builder()
-            .map_err(|e| format!("session builder: {}", e))?
+            .map_err(|e| format!("session builder: {e}"))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| format!("optimization: {}", e))?
+            .map_err(|e| format!("optimization: {e}"))?
             .commit_from_file(&model_path)
-            .map_err(|e| format!("ONNX session: {}", e))?;
+            .map_err(|e| format!("ONNX session: {e}"))?;
 
         let tokenizer =
-            Tokenizer::from_file(&tokenizer_path).map_err(|e| format!("tokenizer load: {}", e))?;
+            Tokenizer::from_file(&tokenizer_path).map_err(|e| format!("tokenizer load: {e}"))?;
 
         let input_names: Vec<String> = session
             .inputs()
@@ -66,7 +66,7 @@ impl VectorLayer {
         let prefixed = if text.starts_with("query:") || text.starts_with("passage:") {
             text.to_string()
         } else {
-            format!("{}{}", EMBED_PREFIX, text)
+            format!("{EMBED_PREFIX}{text}")
         };
         let truncated: String = prefixed.chars().take(MAX_INPUT_CHARS).collect();
 
@@ -80,7 +80,7 @@ impl VectorLayer {
         let encoding = self
             .tokenizer
             .encode(truncated.as_str(), true)
-            .map_err(|e| format!("tokenize: {}", e))?;
+            .map_err(|e| format!("tokenize: {e}"))?;
 
         let ids = encoding.get_ids();
         let mask = encoding.get_attention_mask();
@@ -108,15 +108,15 @@ impl VectorLayer {
                 inputs.insert("token_type_ids", make_int64_tensor(type_ids, len)?);
             }
 
-            let outputs = session.run(inputs).map_err(|e| format!("ort run: {}", e))?;
+            let outputs = session.run(inputs).map_err(|e| format!("ort run: {e}"))?;
 
             let output_tensor = outputs
                 .get(&*first_output)
-                .ok_or_else(|| format!("no output: {}", first_output))?;
+                .ok_or_else(|| format!("no output: {first_output}"))?;
 
             let (_shape, data) = output_tensor
                 .try_extract_tensor::<f32>()
-                .map_err(|e| format!("extract tensor: {}", e))?;
+                .map_err(|e| format!("extract tensor: {e}"))?;
 
             data.to_vec()
         };
@@ -210,7 +210,7 @@ impl VectorLayer {
 fn make_int64_tensor(data: &[u32], len: usize) -> Result<ort::value::Value, String> {
     let v: Vec<i64> = data.iter().map(|&x| x as i64).collect();
     ort::value::Tensor::from_array(([1usize, len], v.into_boxed_slice()))
-        .map_err(|e| format!("tensor create: {}", e))
+        .map_err(|e| format!("tensor create: {e}"))
         .map(|t| t.into_dyn())
 }
 
@@ -338,16 +338,14 @@ mod tests {
         let norm: f64 = emb.iter().map(|x| x * x).sum::<f64>().sqrt();
         assert!(
             (norm - 1.0).abs() < 0.01,
-            "embedding should be normalized, norm={}",
-            norm
+            "embedding should be normalized, norm={norm}"
         );
 
         let emb2 = layer.embed("Rust ownership and borrowing").expect("embed2");
         let sim = VectorLayer::cosine_similarity(&emb, &emb2);
         assert!(
             sim < 0.9,
-            "unrelated texts should not be too similar: {}",
-            sim
+            "unrelated texts should not be too similar: {sim}"
         );
 
         let emb3 = layer
@@ -361,8 +359,7 @@ mod tests {
         let sim_related = VectorLayer::cosine_similarity(&emb, &emb4);
         assert!(
             sim_related > 0.5,
-            "similar texts should have high similarity: {}",
-            sim_related
+            "similar texts should have high similarity: {sim_related}"
         );
     }
 }

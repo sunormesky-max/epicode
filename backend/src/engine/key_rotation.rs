@@ -160,7 +160,7 @@ impl KeyRotation {
 
     pub fn revoke_key(&mut self, key_id: &str, reason: &str) -> Result<KeyEvent, String> {
         if !self.keys.contains_key(key_id) {
-            return Err(format!("Key {} not found", key_id));
+            return Err(format!("Key {key_id} not found"));
         }
 
         if key_id == self.current_key_id {
@@ -184,7 +184,7 @@ impl KeyRotation {
 
     pub fn restore_key(&mut self, key_id: &str) -> Result<KeyEvent, String> {
         if !self.keys.contains_key(key_id) {
-            return Err(format!("Key {} not found", key_id));
+            return Err(format!("Key {key_id} not found"));
         }
 
         if let Some((_, meta)) = self.keys.get_mut(key_id) {
@@ -192,7 +192,7 @@ impl KeyRotation {
                 meta.status = KeyStatus::Transitioning;
                 meta.revoked_at = None;
             } else {
-                return Err(format!("Key {} is not revoked", key_id));
+                return Err(format!("Key {key_id} is not revoked"));
             }
         }
 

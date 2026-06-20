@@ -111,7 +111,7 @@ fn main() {
                     count += 1;
                     println!("  [{}] {} → id={}", topic, &text[..30.min(text.len())], id);
                 }
-                Err(e) => println!("  FAIL: {} → {}", text, e),
+                Err(e) => println!("  FAIL: {text} → {e}"),
             }
         }
     }
@@ -140,7 +140,7 @@ fn main() {
             .label_distribution
             .iter()
             .max_by_key(|(_, &v)| v)
-            .map(|(k, v)| format!("{}:{}", k, v))
+            .map(|(k, v)| format!("{k}:{v}"))
             .unwrap_or("none".into());
         println!(
             "    簇{}: {}个 [{}] entropy={:.3} centroid=({:.1},{:.1},{:.1})",
@@ -239,7 +239,7 @@ fn main() {
             println!("  能量剩余: {:.0}", energy.available());
         }
         Err(e) => {
-            println!("\n  [ERROR] LLM调用失败: {}", e);
+            println!("\n  [ERROR] LLM调用失败: {e}");
         }
     }
 
