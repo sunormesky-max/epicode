@@ -4,51 +4,34 @@ use std::sync::Arc;
 use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{PasswordHash, SaltString};
 use argon2::{Algorithm, Argon2, Params, PasswordHasher, PasswordVerifier, Version};
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-use super::crypto::{constant_time_eq, constant_time_eq_bytes};
+use super::crypto::constant_time_eq;
 use super::vector::VectorLayer;
 use super::Engine;
 
-fn hash_password(password: &str) -> String {
+fn hash_password(password: &str) -> Result<String, String> {
     let salt = SaltString::generate(&mut OsRng);
-    let params = Params::new(65536, 3, 4, Some(32)).unwrap();
+    let params = Params::new(65536, 3, 4, Some(32))
+        .map_err(|e| format!("invalid argon2 params: {e}"))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let hash = argon2
+    argon2
         .hash_password(password.as_bytes(), &salt)
-        .expect("argon2 hash failed");
-    hash.to_string()
+        .map(|h| h.to_string())
+        .map_err(|e| format!("argon2 hash failed: {e}"))
 }
 
 fn verify_password(password: &str, stored: &str) -> bool {
     if stored.is_empty() {
         return false;
     }
-    if let Ok(parsed_hash) = PasswordHash::new(stored) {
-        return Argon2::default()
-            .verify_password(password.as_bytes(), &parsed_hash)
-            .is_ok();
-    }
-    let parts: Vec<&str> = stored.splitn(2, ':').collect();
-    if parts.len() != 2 {
+    let Ok(parsed_hash) = PasswordHash::new(stored) else {
         return false;
-    }
-    let salt = match B64.decode(parts[0]) {
-        Ok(s) => s,
-        Err(_) => return false,
     };
-    let expected = match B64.decode(parts[1]) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(&salt);
-    hasher.update(password.as_bytes());
-    let hash = hasher.finalize();
-    constant_time_eq_bytes(&hash, &expected)
+    Argon2::default()
+        .verify_password(password.as_bytes(), &parsed_hash)
+        .is_ok()
 }
 
 const MAX_USERS: usize = 1000;
@@ -346,10 +329,12 @@ impl UserManager {
             return Err("user limit reached".into());
         }
         let max_mem = plan.max_memories();
+        let password_hash = hash_password(password)
+            .map_err(|e| format!("failed to hash password: {e}"))?;
         let info = UserInfo {
             user_id: user_id.to_string(),
             api_key: api_key.to_string(),
-            password_hash: hash_password(password),
+            password_hash,
             plan,
             max_memories: max_mem,
             memories_used: 0,
@@ -423,7 +408,7 @@ impl UserManager {
     }
 
     pub fn set_password(&self, user_id: &str, password: &str) -> Result<(), String> {
-        if password.len() < 6 {
+        if password.len() < 8 {
             return Err("password must be at least 8 characters".into());
         }
         if password.len() > 128 {
@@ -431,7 +416,8 @@ impl UserManager {
         }
         let mut db = self.users_db.write();
         let info = db.get_mut(user_id).ok_or("user not found")?;
-        info.password_hash = hash_password(password);
+        info.password_hash = hash_password(password)
+            .map_err(|e| format!("failed to hash password: {e}"))?;
         let snapshot = db.clone();
         drop(db);
         self.save_users_db(&snapshot)
@@ -473,10 +459,12 @@ impl UserManager {
             return Err("maximum 10 sub-accounts per main account".into());
         }
         let api_key = format!("tm-{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
+        let password_hash = hash_password(password)
+            .map_err(|e| format!("failed to hash password: {e}"))?;
         let sub_info = UserInfo {
             user_id: sub_user_id.to_string(),
             api_key: api_key.clone(),
-            password_hash: hash_password(password),
+            password_hash,
             plan: UserPlan::Free,
             max_memories: 0,
             memories_used: 0,

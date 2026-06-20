@@ -4,18 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::tetra::MemoryPayload;
 use crate::engine::Engine;
-use crate::util::strip_html;
-
-fn truncate_str(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
+use crate::util::{strip_html, truncate_str};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct McpRequest {

@@ -1,8 +1,8 @@
 use crate::domain::tetra::TetraId;
 use crate::engine::storage::StorageManager;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum ReviewStatus {
@@ -63,12 +63,10 @@ impl SkillEngine {
             if let Ok(loaded) = serde_json::from_str::<Vec<Skill>>(&data) {
                 let mut skills = self
                     .skills
-                    .lock()
-                    .expect("skills mutex poisoned during load");
+                    .lock();
                 let mut next_id = self
                     .next_id
-                    .lock()
-                    .expect("next_id mutex poisoned during load");
+                    .lock();
                 for mut s in loaded {
                     if s.id >= *next_id {
                         *next_id = s.id + 1;
@@ -86,8 +84,7 @@ impl SkillEngine {
     fn persist(&self) {
         let skills = self
             .skills
-            .lock()
-            .expect("skills mutex poisoned during persist");
+            .lock();
         if let Ok(data) = serde_json::to_string(&skills.values().collect::<Vec<_>>()) {
             let _ = self.storage.set_meta("skills_data", &data);
         }
@@ -96,8 +93,7 @@ impl SkillEngine {
     fn alloc_id(&self) -> u64 {
         let mut next_id = self
             .next_id
-            .lock()
-            .expect("next_id mutex poisoned during alloc_id");
+            .lock();
         let id = *next_id;
         *next_id += 1;
         id
@@ -126,7 +122,7 @@ impl SkillEngine {
             created_at: now,
             updated_at: now,
         };
-        let mut skills = self.skills.lock().expect("skills mutex poisoned in create");
+        let mut skills = self.skills.lock();
         skills.insert(id, skill.clone());
         drop(skills);
         self.persist();
@@ -137,13 +133,12 @@ impl SkillEngine {
     pub fn get(&self, id: u64) -> Option<Skill> {
         self.skills
             .lock()
-            .expect("skills mutex poisoned in get")
             .get(&id)
             .cloned()
     }
 
     pub fn list(&self, owner: Option<&str>) -> Vec<Skill> {
-        let skills = self.skills.lock().expect("skills mutex poisoned in list");
+        let skills = self.skills.lock();
         skills
             .values()
             .filter(|s| owner.is_none_or(|o| s.owner == o))
@@ -154,7 +149,6 @@ impl SkillEngine {
     pub fn list_public(&self) -> Vec<Skill> {
         self.skills
             .lock()
-            .expect("skills mutex poisoned in list_public")
             .values()
             .filter(|s| s.is_public)
             .cloned()
@@ -164,7 +158,6 @@ impl SkillEngine {
     pub fn list_system(&self) -> Vec<Skill> {
         self.skills
             .lock()
-            .expect("skills mutex poisoned in list_system")
             .values()
             .filter(|s| s.is_system)
             .cloned()
@@ -177,7 +170,7 @@ impl SkillEngine {
         skill_md: Option<String>,
         version: Option<String>,
     ) -> Result<Skill, String> {
-        let mut skills = self.skills.lock().expect("skills mutex poisoned in update");
+        let mut skills = self.skills.lock();
         let skill = skills.get_mut(&id).ok_or("skill not found")?;
         if let Some(md) = skill_md {
             skill.skill_md = md;
@@ -198,8 +191,7 @@ impl SkillEngine {
     pub fn append_description(&self, id: u64, description: &str) -> Result<(), String> {
         let mut skills = self
             .skills
-            .lock()
-            .expect("skills mutex poisoned in append_description");
+            .lock();
         let skill = skills.get_mut(&id).ok_or("skill not found")?;
         let desc_section = format!("\n\n## 中文描述\n\n{description}");
         skill.skill_md.push_str(&desc_section);
@@ -214,7 +206,7 @@ impl SkillEngine {
 
     pub fn fork(&self, source: &Skill, new_owner: String) -> Skill {
         {
-            let skills = self.skills.lock().expect("skills mutex poisoned in fork");
+            let skills = self.skills.lock();
             if let Some(existing) = skills
                 .values()
                 .find(|s| s.evolved_from == Some(source.id) && s.owner == new_owner)
@@ -253,8 +245,7 @@ impl SkillEngine {
         };
         let mut skills = self
             .skills
-            .lock()
-            .expect("skills mutex poisoned in fork (insert)");
+            .lock();
         skills.insert(id, forked.clone());
         drop(skills);
         self.persist();
@@ -272,12 +263,10 @@ impl SkillEngine {
             >= *self
                 .next_id
                 .lock()
-                .expect("next_id mutex poisoned in insert_skill (check)")
         {
             let mut next_id = self
                 .next_id
-                .lock()
-                .expect("next_id mutex poisoned in insert_skill (update)");
+                .lock();
             *next_id = skill.id + 1;
             skill.id
         } else {
@@ -286,8 +275,7 @@ impl SkillEngine {
         let s = Skill { id, ..skill };
         let mut skills = self
             .skills
-            .lock()
-            .expect("skills mutex poisoned in insert_skill");
+            .lock();
         skills.insert(id, s.clone());
         drop(skills);
         self.persist();
@@ -296,7 +284,7 @@ impl SkillEngine {
     }
 
     pub fn take(&self, id: u64) -> Option<Skill> {
-        let mut skills = self.skills.lock().expect("skills mutex poisoned in take");
+        let mut skills = self.skills.lock();
         let s = skills.remove(&id);
         drop(skills);
         if s.is_some() {
@@ -307,7 +295,7 @@ impl SkillEngine {
     }
 
     pub fn delete(&self, id: u64) -> Result<(), String> {
-        let mut skills = self.skills.lock().expect("skills mutex poisoned in delete");
+        let mut skills = self.skills.lock();
         let skill = skills.get(&id).ok_or("skill not found")?;
         if skill.is_system {
             return Err("system skills cannot be deleted".to_string());
@@ -321,8 +309,7 @@ impl SkillEngine {
     pub fn submit_for_review(&self, id: u64) -> Result<Skill, String> {
         let mut skills = self
             .skills
-            .lock()
-            .expect("skills mutex poisoned in submit_for_review");
+            .lock();
         let skill = skills.get_mut(&id).ok_or("skill not found")?;
         if skill.is_public || skill.review_status == ReviewStatus::PendingReview {
             return Err("skill already published or pending review".to_string());
@@ -349,8 +336,7 @@ impl SkillEngine {
     pub fn approve_skill(&self, id: u64) -> Result<Skill, String> {
         let mut skills = self
             .skills
-            .lock()
-            .expect("skills mutex poisoned in approve_skill");
+            .lock();
         let skill = skills.get_mut(&id).ok_or("skill not found")?;
         if skill.review_status != ReviewStatus::PendingReview {
             return Err("skill is not pending review".to_string());
@@ -376,8 +362,7 @@ impl SkillEngine {
     pub fn reject_skill(&self, id: u64, reason: &str) -> Result<Skill, String> {
         let mut skills = self
             .skills
-            .lock()
-            .expect("skills mutex poisoned in reject_skill");
+            .lock();
         let skill = skills.get_mut(&id).ok_or("skill not found")?;
         if skill.review_status != ReviewStatus::PendingReview {
             return Err("skill is not pending review".to_string());
@@ -433,8 +418,7 @@ impl SkillEngine {
     pub fn review_pending(&self) -> Vec<Skill> {
         let skills = self
             .skills
-            .lock()
-            .expect("skills mutex poisoned in review_pending");
+            .lock();
         skills
             .values()
             .filter(|s| s.review_status == ReviewStatus::PendingReview)
@@ -445,8 +429,7 @@ impl SkillEngine {
     pub fn link_memory(&self, skill_id: u64, memory_id: TetraId) -> Result<(), String> {
         let mut skills = self
             .skills
-            .lock()
-            .expect("skills mutex poisoned in link_memory");
+            .lock();
         let skill = skills.get_mut(&skill_id).ok_or("skill not found")?;
         if !skill.memory_ids.contains(&memory_id) {
             skill.memory_ids.push(memory_id);
@@ -459,8 +442,7 @@ impl SkillEngine {
     pub fn purge_non_system(&self) -> usize {
         let mut skills = self
             .skills
-            .lock()
-            .expect("skills mutex poisoned in purge_non_system");
+            .lock();
         let before = skills.len();
         skills.retain(|_, s| s.is_system);
         let removed = before - skills.len();
@@ -475,8 +457,7 @@ impl SkillEngine {
     pub fn match_skills(&self, query: &str, owner: &str, limit: usize) -> Vec<Skill> {
         let skills = self
             .skills
-            .lock()
-            .expect("skills mutex poisoned in match_skills");
+            .lock();
         let query_lower = query.to_lowercase();
         let query_words: Vec<&str> = query_lower.split_whitespace().collect();
 

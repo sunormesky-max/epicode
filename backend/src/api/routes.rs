@@ -118,12 +118,12 @@ pub async fn remember(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<RememberRequest>,
 ) -> Json<serde_json::Value> {
-    if let Err(r) = engine.guard.validate_content(&req.content) {
+    if let Err(r) = engine.validate_content(&req.content) {
         return Json(
             serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
         );
     }
-    match engine.scheduler.api_remember(&req.content) {
+    match engine.remember(&req.content) {
         Ok((id, labels)) => Json(serde_json::json!({"success": true, "id": id, "labels": labels})),
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
@@ -133,13 +133,13 @@ pub async fn ask(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<AskRequest>,
 ) -> Json<serde_json::Value> {
-    if let Err(r) = engine.guard.validate_query(&req.question) {
+    if let Err(r) = engine.validate_query(&req.question) {
         return Json(
             serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
         );
     }
     let depth = req.depth.unwrap_or(2).min(10);
-    match engine.scheduler.api_ask(&req.question, depth) {
+    match engine.ask(&req.question, depth) {
         Ok(result) => Json(
             serde_json::json!({"success": true, "question": result["question"], "answer": result["answer"], "memories": result["memories"], "memory_count": result["memory_count"]}),
         ),
@@ -171,7 +171,7 @@ pub async fn constitution(State(_engine): State<Arc<Engine>>) -> Json<serde_json
 }
 
 pub async fn health(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let stats = engine.scheduler.api_stats();
+    let stats = engine.stats();
     let health_report = engine.space().cylinder_health();
     Json(serde_json::json!({
         "status": "ok", "version": env!("CARGO_PKG_VERSION"),
@@ -248,18 +248,18 @@ pub async fn create_node(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<CreateRequest>,
 ) -> Json<serde_json::Value> {
-    if let Err(r) = engine.guard.validate_content(&req.content) {
+    if let Err(r) = engine.validate_content(&req.content) {
         return Json(
             serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
         );
     }
     let user_labels = req.labels.clone().unwrap_or_default();
-    if let Err(r) = engine.guard.validate_labels(&user_labels) {
+    if let Err(r) = engine.validate_labels(&user_labels) {
         return Json(
             serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
         );
     }
-    match engine.scheduler.api_create_memory_with_time(
+    match engine.create_memory_with_time(
         &req.content,
         user_labels,
         req.timestamp
@@ -271,7 +271,7 @@ pub async fn create_node(
 }
 
 pub async fn list_nodes(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let all = engine.scheduler.api_list_nodes_limit(500);
+    let all = engine.list_nodes(500);
     let total = all.len();
     let nodes: Vec<serde_json::Value> = all
         .into_iter()
@@ -295,7 +295,7 @@ pub async fn get_node(
     State(engine): State<Arc<Engine>>,
     Path(id): Path<u64>,
 ) -> Json<serde_json::Value> {
-    match engine.scheduler.api_get_node(id) {
+    match engine.get_node(id) {
         Some(payload) => Json(serde_json::json!({
             "success": true, "id": id,
             "content": payload.content,
@@ -311,7 +311,7 @@ pub async fn delete_node(
     State(engine): State<Arc<Engine>>,
     Path(id): Path<u64>,
 ) -> Json<serde_json::Value> {
-    match engine.scheduler.api_delete_memory(id) {
+    match engine.delete_memory(id) {
         Ok(restored_id) => Json(
             serde_json::json!({"success": true, "deleted": restored_id, "mode": "soft_delete"}),
         ),
@@ -320,7 +320,7 @@ pub async fn delete_node(
 }
 
 pub async fn list_deleted_nodes(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    match engine.scheduler.api_list_deleted_memories() {
+    match engine.list_deleted_memories() {
         Ok(items) => {
             Json(serde_json::json!({"success": true, "items": items, "total": items.len()}))
         }
@@ -332,7 +332,7 @@ pub async fn restore_node(
     State(engine): State<Arc<Engine>>,
     Path(id): Path<u64>,
 ) -> Json<serde_json::Value> {
-    match engine.scheduler.api_restore_memory(id) {
+    match engine.restore_memory(id) {
         Ok(restored_id) => Json(serde_json::json!({"success": true, "restored": restored_id})),
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
@@ -342,7 +342,7 @@ pub async fn search(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<SearchRequest>,
 ) -> Json<serde_json::Value> {
-    if let Err(r) = engine.guard.validate_query(&req.query) {
+    if let Err(r) = engine.validate_query(&req.query) {
         return Json(
             serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
         );
@@ -354,7 +354,7 @@ pub async fn search(
         ..Default::default()
     };
     let has_filters = filters.since_ts.is_some() || filters.until_ts.is_some();
-    match engine.scheduler.api_search_filtered(
+    match engine.search_filtered(
         &req.query,
         limit,
         if has_filters { Some(&filters) } else { None },
@@ -376,7 +376,7 @@ pub async fn send_pulse(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<PulseRequest>,
 ) -> Json<serde_json::Value> {
-    match engine.scheduler.api_pulse(req.origin, req.ttl.unwrap_or(5)) {
+    match engine.pulse(req.origin, req.ttl.unwrap_or(5)) {
         Ok(result) => Json(serde_json::json!({
             "success": true,
             "origin": result.origin,
@@ -391,7 +391,7 @@ pub async fn send_pulse(
 }
 
 pub async fn stats(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let s = engine.scheduler.api_stats();
+    let s = engine.stats();
     Json(serde_json::json!({
         "success": true,
         "tetra_count": s.tetra_count,
@@ -407,13 +407,13 @@ pub async fn recall(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<RecallRequest>,
 ) -> Json<serde_json::Value> {
-    if let Err(r) = engine.guard.validate_query(&req.query) {
+    if let Err(r) = engine.validate_query(&req.query) {
         return Json(
             serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
         );
     }
     let max_depth = req.depth.unwrap_or(2).min(10);
-    match engine.scheduler.api_recall(&req.query, max_depth) {
+    match engine.recall(&req.query, max_depth) {
         Ok(result) => Json(serde_json::json!({
             "success": true,
             "query": result["query"],
@@ -438,7 +438,7 @@ pub async fn knowledge_relations(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<KGRelationRequest>,
 ) -> Json<serde_json::Value> {
-    let rels = engine.scheduler.api_get_relations(req.id);
+    let rels = engine.get_relations(req.id);
     let total = rels.len();
     let items: Vec<serde_json::Value> = rels
         .into_iter()
@@ -450,7 +450,7 @@ pub async fn knowledge_relations(
 }
 
 pub async fn concepts(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let concepts = engine.scheduler.api_get_concepts();
+    let concepts = engine.get_concepts();
     Json(serde_json::json!({
         "success": true,
         "concepts": concepts.into_iter().map(|(label, count)| {
@@ -462,7 +462,7 @@ pub async fn concepts(State(engine): State<Arc<Engine>>) -> Json<serde_json::Val
 // ── Dream ──
 
 pub async fn dream_cycle(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    match engine.scheduler.api_dream() {
+    match engine.dream() {
         Ok(report) => Json(serde_json::json!({"success": true, "report": report})),
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
@@ -486,7 +486,7 @@ pub async fn reasoning_analogies(
 }
 
 pub async fn reasoning_patterns(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let patterns = engine.scheduler.api_reason_patterns();
+    let patterns = engine.reason_patterns();
     Json(serde_json::json!({"success": true, "patterns": patterns}))
 }
 
@@ -611,7 +611,7 @@ pub async fn sse_stream(
     ))
     .map(move |_| {
         let tick = tick_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let stats = engine.scheduler.api_stats();
+        let stats = engine.stats();
         let db_tetra = engine.storage.tetra_count();
         let db_rel = engine.storage.relation_count();
         let cognitive_enabled = engine.cognitive.enabled();
@@ -815,7 +815,7 @@ pub async fn get_current_user_permissions(
 // ── Key Rotation ──
 
 pub async fn get_current_key(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let kr = engine.key_rotation.lock().unwrap();
+    let kr = engine.key_rotation.lock();
     let current_id = kr.get_current_key_id();
     Json(serde_json::json!({
         "success": true,
@@ -824,7 +824,7 @@ pub async fn get_current_key(State(engine): State<Arc<Engine>>) -> Json<serde_js
 }
 
 pub async fn list_keys(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let kr = engine.key_rotation.lock().unwrap();
+    let kr = engine.key_rotation.lock();
     let keys = kr.list_active_keys();
     let key_list: Vec<serde_json::Value> = keys
         .into_iter()
@@ -847,7 +847,7 @@ pub async fn list_keys(State(engine): State<Arc<Engine>>) -> Json<serde_json::Va
 }
 
 pub async fn rotate_key(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let mut kr = engine.key_rotation.lock().unwrap();
+    let mut kr = engine.key_rotation.lock();
     match kr.rotate_key() {
         Ok(event) => {
             let event_str = format!("{event:?}");
@@ -874,7 +874,7 @@ pub async fn revoke_key(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<RevokeKeyRequest>,
 ) -> Json<serde_json::Value> {
-    let mut kr = engine.key_rotation.lock().unwrap();
+    let mut kr = engine.key_rotation.lock();
     match kr.revoke_key(&req.key_id, &req.reason) {
         Ok(event) => {
             let event_str = format!("{event:?}");
@@ -892,7 +892,7 @@ pub async fn revoke_key(
 }
 
 pub async fn get_key_events(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let kr = engine.key_rotation.lock().unwrap();
+    let kr = engine.key_rotation.lock();
     let events = kr.get_events();
     let event_list: Vec<serde_json::Value> = events
         .into_iter()
@@ -909,7 +909,7 @@ pub async fn restore_key(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<RevokeKeyRequest>,
 ) -> Json<serde_json::Value> {
-    let mut kr = engine.key_rotation.lock().unwrap();
+    let mut kr = engine.key_rotation.lock();
     match kr.restore_key(&req.key_id) {
         Ok(event) => Json(serde_json::json!({
             "success": true,

@@ -10,6 +10,19 @@ pub fn strip_html(s: &str) -> String {
     html2text::from_read(s.as_bytes(), 10_000).unwrap_or_else(|_| s.to_string())
 }
 
+/// Truncate a string to at most `max_bytes` UTF-8 bytes without splitting a
+/// multi-byte character boundary.
+pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

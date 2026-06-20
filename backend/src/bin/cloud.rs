@@ -4,17 +4,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
-fn truncate_str(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
-
 use axum::extract::Path;
 use axum::http::HeaderValue;
 use axum::response::IntoResponse;
@@ -27,9 +16,9 @@ use axum::{
 };
 use parking_lot::Mutex;
 use serde::Deserialize;
-use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
+use epicode::api::server;
 use epicode::engine::digestion::DigestionEngine;
 use epicode::engine::mcp::McpHandler;
 use epicode::engine::search_engine::SearchFilters;
@@ -37,43 +26,11 @@ use epicode::engine::skills::SkillEngine;
 use epicode::engine::storage::StorageManager;
 use epicode::engine::user_manager::{UserInfo, UserManager, UserPlan};
 use epicode::engine::Engine;
-use epicode::util::strip_html;
+use epicode::util::{strip_html, truncate_str};
 
 struct RateBucket {
     count: usize,
     window_start: Instant,
-}
-
-async fn security_headers_middleware(
-    request: axum::extract::Request,
-    next: middleware::Next,
-) -> axum::response::Response {
-    let mut response = next.run(request).await;
-    let headers = response.headers_mut();
-    headers.insert(
-        "X-Content-Type-Options",
-        HeaderValue::from_static("nosniff"),
-    );
-    headers.insert("X-Frame-Options", HeaderValue::from_static("DENY"));
-    headers.insert(
-        "X-XSS-Protection",
-        HeaderValue::from_static("1; mode=block"),
-    );
-    headers.insert(
-        "Content-Security-Policy",
-        HeaderValue::from_static(
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'",
-        ),
-    );
-    headers.insert(
-        "Strict-Transport-Security",
-        HeaderValue::from_static("max-age=31536000; includeSubDomains"),
-    );
-    headers.insert(
-        "Referrer-Policy",
-        HeaderValue::from_static("strict-origin-when-cross-origin"),
-    );
-    response
 }
 
 #[derive(Clone)]
@@ -169,13 +126,6 @@ fn validate_query(query: &str) -> Result<(), String> {
         return Err("query must be under 2000 characters".into());
     }
     Ok(())
-}
-
-fn error_response(status: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        status,
-        Json(serde_json::json!({"success": false, "error": msg})),
-    )
 }
 
 #[tokio::main]
@@ -321,24 +271,10 @@ async fn main() {
         next.run(request).await
     };
 
-    let allowed_headers: Vec<axum::http::HeaderName> = vec![
-        axum::http::header::CONTENT_TYPE,
-        axum::http::HeaderName::from_static("x-api-key"),
-        axum::http::HeaderName::from_static("x-admin-key"),
-        axum::http::HeaderName::from_static("x-invite-code"),
-    ];
-    let cors = CorsLayer::new()
-        .allow_origin(
-            HeaderValue::from_str(&cors_origin)
-                .unwrap_or_else(|_| HeaderValue::from_static("http://localhost:3000")),
-        )
-        .allow_methods([
-            axum::http::Method::GET,
-            axum::http::Method::POST,
-            axum::http::Method::DELETE,
-            axum::http::Method::OPTIONS,
-        ])
-        .allow_headers(allowed_headers);
+    let cors = server::cors_layer(
+        &cors_origin,
+        server::cloud_cors_headers(),
+    );
 
     let app = Router::new()
         .route("/health", get(health))
@@ -404,7 +340,7 @@ async fn main() {
             state.clone(),
             auth_middleware,
         ))
-        .layer(middleware::from_fn(security_headers_middleware))
+        .layer(middleware::from_fn(server::security_headers_middleware))
         .layer(cors)
         .layer(TraceLayer::new_for_http());
 
@@ -691,7 +627,7 @@ async fn get_skill(
     };
     match engine.skills.get(id) {
         Some(skill) => (StatusCode::OK, Json(serde_json::json!({"skill": skill}))),
-        None => error_response(StatusCode::NOT_FOUND, "skill not found"),
+        None => server::error_response(StatusCode::NOT_FOUND, "skill not found"),
     }
 }
 
@@ -713,7 +649,7 @@ async fn update_skill(
     };
     match engine.skills.update(id, req.skill_md, req.version) {
         Ok(skill) => (StatusCode::OK, Json(serde_json::json!({"skill": skill}))),
-        Err(e) => error_response(StatusCode::NOT_FOUND, &e),
+        Err(e) => server::error_response(StatusCode::NOT_FOUND, &e),
     }
 }
 
@@ -731,7 +667,7 @@ async fn delete_skill(
             StatusCode::OK,
             Json(serde_json::json!({"status": "deleted"})),
         ),
-        Err(e) => error_response(StatusCode::NOT_FOUND, &e),
+        Err(e) => server::error_response(StatusCode::NOT_FOUND, &e),
     }
 }
 
@@ -746,10 +682,10 @@ async fn publish_skill(
     };
     let source = match engine.skills.get(id) {
         Some(s) => s,
-        None => return error_response(StatusCode::NOT_FOUND, "skill not found"),
+        None => return server::error_response(StatusCode::NOT_FOUND, "skill not found"),
     };
     if source.is_system {
-        return error_response(StatusCode::FORBIDDEN, "system skills cannot be published");
+        return server::error_response(StatusCode::FORBIDDEN, "system skills cannot be published");
     }
     let pub_skill = st.pub_skills.create(
         source.name.clone(),
@@ -798,7 +734,7 @@ async fn link_skill_memory(
             StatusCode::OK,
             Json(serde_json::json!({"status": "linked"})),
         ),
-        Err(e) => error_response(StatusCode::NOT_FOUND, &e),
+        Err(e) => server::error_response(StatusCode::NOT_FOUND, &e),
     }
 }
 
@@ -874,7 +810,7 @@ async fn pull_public_skill(
     };
     let source = match st.pub_skills.get(id) {
         Some(s) => s,
-        None => return error_response(StatusCode::NOT_FOUND, "public skill not found"),
+        None => return server::error_response(StatusCode::NOT_FOUND, "public skill not found"),
     };
     let skill = engine.skills.fork(&source, engine.user_id.clone());
     (StatusCode::OK, Json(serde_json::json!({"skill": skill})))
@@ -975,14 +911,14 @@ async fn register_user(
             return resp;
         }
     } else if let Err(e) = st.user_mgr.use_invite_code(invite_code) {
-        return error_response(StatusCode::FORBIDDEN, &e);
+        return server::error_response(StatusCode::FORBIDDEN, &e);
     }
 
     if let Err(e) = validate_user_id(&req.user_id) {
-        return error_response(StatusCode::BAD_REQUEST, &e);
+        return server::error_response(StatusCode::BAD_REQUEST, &e);
     }
     if req.password.len() < 6 {
-        return error_response(
+        return server::error_response(
             StatusCode::BAD_REQUEST,
             "password must be at least 6 characters",
         );
@@ -1012,7 +948,7 @@ async fn register_user(
                 })),
             )
         }
-        Err(e) => error_response(StatusCode::BAD_REQUEST, &e),
+        Err(e) => server::error_response(StatusCode::BAD_REQUEST, &e),
     }
 }
 
@@ -1104,10 +1040,10 @@ async fn digest_content(
     Json(req): Json<DigestRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if req.content.trim().is_empty() {
-        return error_response(StatusCode::BAD_REQUEST, "content must not be empty");
+        return server::error_response(StatusCode::BAD_REQUEST, "content must not be empty");
     }
     if req.content.len() > 30_000_000 {
-        return error_response(StatusCode::BAD_REQUEST, "content exceeds 30MB limit");
+        return server::error_response(StatusCode::BAD_REQUEST, "content exceeds 30MB limit");
     }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
@@ -1120,7 +1056,7 @@ async fn digest_content(
 
     let needed = req.content.len() / chunk_size + 1;
     if needed > 100 {
-        return error_response(
+        return server::error_response(
             StatusCode::BAD_REQUEST,
             &format!("too many chunks ({needed}). Max 100 per request. Use larger chunk_size."),
         );
@@ -1131,7 +1067,7 @@ async fn digest_content(
             .user_stats(&user.user_id)
             .map(|i| i.max_memories - i.memories_used)
             .unwrap_or(0);
-        return error_response(
+        return server::error_response(
             StatusCode::FORBIDDEN,
             &format!("not enough memory quota (need ~{needed}, have {available}): {e}"),
         );
@@ -1175,10 +1111,10 @@ async fn digest_content(
                 })),
             )
         }
-        Ok(Err(e)) => error_response(StatusCode::BAD_REQUEST, &e),
+        Ok(Err(e)) => server::error_response(StatusCode::BAD_REQUEST, &e),
         Err(e) => {
             tracing::error!("digest task error: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "digestion failed")
+            server::error_response(StatusCode::INTERNAL_SERVER_ERROR, "digestion failed")
         }
     }
 }
@@ -1194,11 +1130,11 @@ async fn remember(
     Json(req): Json<RememberRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if let Err(e) = validate_content(&req.content) {
-        return error_response(StatusCode::BAD_REQUEST, &e);
+        return server::error_response(StatusCode::BAD_REQUEST, &e);
     }
     let clean_content = strip_html(&req.content);
     if let Err(e) = st.user_mgr.check_and_increment_memory(&user.user_id) {
-        return error_response(StatusCode::FORBIDDEN, &e);
+        return server::error_response(StatusCode::FORBIDDEN, &e);
     }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
@@ -1214,7 +1150,7 @@ async fn remember(
         ),
         Err(e) => {
             tracing::error!("remember error: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            server::error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
         }
     }
 }
@@ -1235,7 +1171,7 @@ async fn search(
     Json(req): Json<SearchRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if let Err(e) = validate_query(&req.query) {
-        return error_response(StatusCode::BAD_REQUEST, &e);
+        return server::error_response(StatusCode::BAD_REQUEST, &e);
     }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
@@ -1269,11 +1205,11 @@ async fn search(
         }
         Ok(Err(e)) => {
             tracing::error!("search error: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            server::error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
         }
         Err(e) => {
             tracing::error!("search task error: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            server::error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
         }
     }
 }
@@ -1314,7 +1250,7 @@ async fn recall(
     Json(req): Json<RecallRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if let Err(e) = validate_query(&req.query) {
-        return error_response(StatusCode::BAD_REQUEST, &e);
+        return server::error_response(StatusCode::BAD_REQUEST, &e);
     }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
@@ -1337,11 +1273,11 @@ async fn recall(
         }
         Ok(Err(e)) => {
             tracing::error!("recall error: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            server::error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
         }
         Err(e) => {
             tracing::error!("recall task error: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            server::error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
         }
     }
 }
@@ -1358,7 +1294,7 @@ async fn ask(
     Json(req): Json<AskRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if let Err(e) = validate_query(&req.question) {
-        return error_response(StatusCode::BAD_REQUEST, &e);
+        return server::error_response(StatusCode::BAD_REQUEST, &e);
     }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
@@ -1379,11 +1315,11 @@ async fn ask(
         }
         Ok(Err(e)) => {
             tracing::error!("internal error: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            server::error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
         }
         Err(e) => {
             tracing::error!("spawn_blocking panicked: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            server::error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
         }
     }
 }
@@ -1401,10 +1337,10 @@ async fn create_node(
     Json(req): Json<CreateNodeRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if let Err(e) = validate_content(&req.content) {
-        return error_response(StatusCode::BAD_REQUEST, &e);
+        return server::error_response(StatusCode::BAD_REQUEST, &e);
     }
     if let Err(e) = st.user_mgr.check_and_increment_memory(&user.user_id) {
-        return error_response(StatusCode::FORBIDDEN, &e);
+        return server::error_response(StatusCode::FORBIDDEN, &e);
     }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
@@ -1413,7 +1349,7 @@ async fn create_node(
     let labels = req.labels.unwrap_or_default();
     for label in &labels {
         if label.len() > 64 || label.trim().is_empty() {
-            return error_response(StatusCode::BAD_REQUEST, "invalid label");
+            return server::error_response(StatusCode::BAD_REQUEST, "invalid label");
         }
     }
     let ts = req
@@ -1421,7 +1357,7 @@ async fn create_node(
         .unwrap_or_else(|| chrono::Utc::now().timestamp());
     let now = chrono::Utc::now().timestamp();
     if ts > 1700000000 && (ts < now - 31536000 || ts > now + 31536000) {
-        return error_response(StatusCode::BAD_REQUEST, "timestamp out of range");
+        return server::error_response(StatusCode::BAD_REQUEST, "timestamp out of range");
     }
     match engine
         .scheduler
@@ -1433,7 +1369,7 @@ async fn create_node(
         ),
         Err(e) => {
             tracing::error!("internal error: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            server::error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
         }
     }
 }
@@ -1454,7 +1390,7 @@ async fn get_node(
                 serde_json::json!({"success": true, "id": id, "content": p.content, "labels": p.labels}),
             ),
         ),
-        None => error_response(StatusCode::NOT_FOUND, "not found"),
+        None => server::error_response(StatusCode::NOT_FOUND, "not found"),
     }
 }
 
@@ -1743,7 +1679,7 @@ async fn confirm_identity(
     Json(req): Json<ConfirmIdentityRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if req.name.trim().is_empty() || req.mission.trim().is_empty() || req.author.trim().is_empty() {
-        return error_response(
+        return server::error_response(
             StatusCode::BAD_REQUEST,
             "name, mission, and author are required",
         );
@@ -1779,7 +1715,7 @@ async fn confirm_identity(
                     "warning": "Identity confirmed. Use Dashboard to recalibrate if needed."
                 })),
             ),
-            None => error_response(
+            None => server::error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "identity confirmation failed",
             ),
@@ -1800,7 +1736,7 @@ async fn confirm_identity(
                     })),
                 )
             } else {
-                error_response(
+                server::error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "identity confirmation failed",
                 )
@@ -1844,7 +1780,7 @@ async fn identity_step_http(
                 })),
             )
         }
-        Err(e) => error_response(StatusCode::BAD_REQUEST, &e),
+        Err(e) => server::error_response(StatusCode::BAD_REQUEST, &e),
     }
 }
 
@@ -1873,7 +1809,7 @@ async fn identity_finalize_http(
                 "message": "The covenant is sealed. Identity awakened."
             })),
         ),
-        Err(e) => error_response(StatusCode::BAD_REQUEST, &e),
+        Err(e) => server::error_response(StatusCode::BAD_REQUEST, &e),
     }
 }
 
@@ -1923,9 +1859,9 @@ async fn update_identity_http(
                     "message": "Identity recalibration complete."
                 })),
             ),
-            None => error_response(StatusCode::INTERNAL_SERVER_ERROR, "identity update failed"),
+            None => server::error_response(StatusCode::INTERNAL_SERVER_ERROR, "identity update failed"),
         },
-        Err(e) => error_response(StatusCode::BAD_REQUEST, &e),
+        Err(e) => server::error_response(StatusCode::BAD_REQUEST, &e),
     }
 }
 
@@ -2094,7 +2030,7 @@ async fn admin_user_detail(
 ) -> (StatusCode, Json<serde_json::Value>) {
     let u = match st.user_mgr.user_stats(&user_id) {
         Some(u) => u,
-        None => return error_response(StatusCode::NOT_FOUND, "user not found"),
+        None => return server::error_response(StatusCode::NOT_FOUND, "user not found"),
     };
     let identity = st.user_mgr.get_engine(&user_id).ok().and_then(|e| {
         e.space.identity_info().map(|info| {
@@ -2137,7 +2073,7 @@ async fn admin_reset_key(
                 "new_api_key": new_key,
             })),
         ),
-        Err(e) => error_response(StatusCode::NOT_FOUND, &e),
+        Err(e) => server::error_response(StatusCode::NOT_FOUND, &e),
     }
 }
 
@@ -2159,7 +2095,7 @@ async fn admin_set_password(
                 "message": format!("password set for user {}", user_id),
             })),
         ),
-        Err(e) => error_response(StatusCode::BAD_REQUEST, &e),
+        Err(e) => server::error_response(StatusCode::BAD_REQUEST, &e),
     }
 }
 
@@ -2178,7 +2114,7 @@ async fn admin_set_plan(
         "pro" => UserPlan::Pro,
         "enterprise" => UserPlan::Enterprise,
         _ => {
-            return error_response(
+            return server::error_response(
                 StatusCode::BAD_REQUEST,
                 "plan must be free, pro, or enterprise",
             )
@@ -2193,7 +2129,7 @@ async fn admin_set_plan(
                 "plan": req.plan,
             })),
         ),
-        Err(e) => error_response(StatusCode::BAD_REQUEST, &e),
+        Err(e) => server::error_response(StatusCode::BAD_REQUEST, &e),
     }
 }
 
@@ -2209,7 +2145,7 @@ async fn admin_delete_user(
                 "deleted": user_id,
             })),
         ),
-        Err(e) => error_response(StatusCode::BAD_REQUEST, &e),
+        Err(e) => server::error_response(StatusCode::BAD_REQUEST, &e),
     }
 }
 
@@ -2282,9 +2218,9 @@ async fn admin_backup_user(
                     "success": true, "user_id": user_id, "timestamp": ts,
                 })),
             ),
-            Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &e),
+            Err(e) => server::error_response(StatusCode::INTERNAL_SERVER_ERROR, &e),
         },
-        Err(e) => error_response(StatusCode::NOT_FOUND, &e),
+        Err(e) => server::error_response(StatusCode::NOT_FOUND, &e),
     }
 }
 
@@ -2453,7 +2389,7 @@ async fn list_subaccounts(
     user: axum::extract::Extension<UserInfo>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if user.parent.is_some() {
-        return error_response(
+        return server::error_response(
             StatusCode::FORBIDDEN,
             "sub-accounts cannot manage sub-accounts",
         );
@@ -2486,20 +2422,20 @@ async fn create_subaccount(
     Json(req): Json<CreateSubaccountRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if user.parent.is_some() {
-        return error_response(
+        return server::error_response(
             StatusCode::FORBIDDEN,
             "sub-accounts cannot create sub-accounts",
         );
     }
     if req.user_id.is_empty() || req.user_id.len() > 64 {
-        return error_response(StatusCode::BAD_REQUEST, "user_id must be 1-64 characters");
+        return server::error_response(StatusCode::BAD_REQUEST, "user_id must be 1-64 characters");
     }
     if !req
         .user_id
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
-        return error_response(
+        return server::error_response(
             StatusCode::BAD_REQUEST,
             "user_id: only a-z A-Z 0-9 - _ allowed",
         );
@@ -2517,7 +2453,7 @@ async fn create_subaccount(
                 "message": "Sub-account created. The agent must confirm its identity on first connection. Identity is permanent and cannot be changed.",
             })),
         ),
-        Err(e) => error_response(StatusCode::BAD_REQUEST, &e),
+        Err(e) => server::error_response(StatusCode::BAD_REQUEST, &e),
     }
 }
 
@@ -2527,7 +2463,7 @@ async fn revoke_subaccount(
     Path(sub_id): axum::extract::Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if user.parent.is_some() {
-        return error_response(
+        return server::error_response(
             StatusCode::FORBIDDEN,
             "sub-accounts cannot revoke sub-accounts",
         );
@@ -2540,7 +2476,7 @@ async fn revoke_subaccount(
                 "message": format!("sub-account {} revoked", sub_id),
             })),
         ),
-        Err(e) => error_response(StatusCode::BAD_REQUEST, &e),
+        Err(e) => server::error_response(StatusCode::BAD_REQUEST, &e),
     }
 }
 

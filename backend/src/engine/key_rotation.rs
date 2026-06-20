@@ -58,7 +58,7 @@ impl KeyRotation {
         rotation_days: u64,
         transition_days: u64,
         max_versions: usize,
-    ) -> Result<Self, String> {
+    ) -> Self {
         let initial_key_id = Uuid::new_v4().to_string();
         let mut keys = HashMap::new();
 
@@ -76,7 +76,7 @@ impl KeyRotation {
 
         keys.insert(initial_key_id.clone(), (key_data, metadata));
 
-        Ok(Self {
+        Self {
             current_key_id: initial_key_id,
             keys,
             rotation_interval: Duration::days(rotation_days as i64),
@@ -84,7 +84,7 @@ impl KeyRotation {
             transition_period: Duration::days(transition_days as i64),
             events: vec![],
             max_key_versions: max_versions,
-        })
+        }
     }
 
     pub fn get_current_key_id(&self) -> String {
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_key_rotation_initialization() {
-        let kr = KeyRotation::new(90, 30, 5).unwrap();
+        let kr = KeyRotation::new(90, 30, 5);
         assert_eq!(kr.get_current_key_id().len(), 36); // UUID length
         assert!(kr.get_current_key().is_some());
         assert_eq!(kr.list_active_keys().len(), 1);
@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn test_rotate_key() {
-        let mut kr = KeyRotation::new(90, 30, 5).unwrap();
+        let mut kr = KeyRotation::new(90, 30, 5);
         let old_id = kr.get_current_key_id();
         let old_key = kr.get_current_key().unwrap();
 
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_revoke_key() {
-        let mut kr = KeyRotation::new(90, 30, 5).unwrap();
+        let mut kr = KeyRotation::new(90, 30, 5);
         let old_id = kr.get_current_key_id();
 
         kr.rotate_key().unwrap();
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_revoke_current_key_fails() {
-        let mut kr = KeyRotation::new(90, 30, 5).unwrap();
+        let mut kr = KeyRotation::new(90, 30, 5);
         let current_id = kr.get_current_key_id();
 
         let result = kr.revoke_key(&current_id, "Try to revoke current");
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_restore_key() {
-        let mut kr = KeyRotation::new(90, 30, 5).unwrap();
+        let mut kr = KeyRotation::new(90, 30, 5);
         let old_id = kr.get_current_key_id();
 
         kr.rotate_key().unwrap();
@@ -362,13 +362,13 @@ mod tests {
 
     #[test]
     fn test_should_rotate() {
-        let kr = KeyRotation::new(90, 30, 5).unwrap();
+        let kr = KeyRotation::new(90, 30, 5);
         assert!(!kr.should_rotate());
     }
 
     #[test]
     fn test_get_events_since() {
-        let mut kr = KeyRotation::new(90, 30, 5).unwrap();
+        let mut kr = KeyRotation::new(90, 30, 5);
         let initial_time = Utc::now();
 
         tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn test_key_zeroization_on_drop() {
-        let kr = KeyRotation::new(90, 30, 5).unwrap();
+        let kr = KeyRotation::new(90, 30, 5);
         let key = kr.get_current_key().unwrap();
         assert!(key.iter().any(|b| *b != 0));
         // Key should be zeroed when kr is dropped
@@ -391,7 +391,7 @@ mod tests {
 
     #[test]
     fn test_multiple_rotations() {
-        let mut kr = KeyRotation::new(90, 30, 5).unwrap();
+        let mut kr = KeyRotation::new(90, 30, 5);
 
         for _ in 0..3 {
             kr.rotate_key().unwrap();
@@ -403,7 +403,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_old_keys() {
-        let mut kr = KeyRotation::new(90, 30, 2).unwrap();
+        let mut kr = KeyRotation::new(90, 30, 2);
 
         for _ in 0..5 {
             kr.rotate_key().unwrap();
@@ -415,7 +415,7 @@ mod tests {
 
     #[test]
     fn test_validate_key() {
-        let kr = KeyRotation::new(90, 30, 5).unwrap();
+        let kr = KeyRotation::new(90, 30, 5);
         let current_id = kr.get_current_key_id();
 
         assert!(kr.validate_key(&current_id));

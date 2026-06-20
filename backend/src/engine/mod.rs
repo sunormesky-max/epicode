@@ -40,7 +40,7 @@ pub mod user_manager;
 pub mod vector;
 
 use std::sync::Arc;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use tokio::task::JoinHandle;
 
 use crate::domain::space::Space;
@@ -206,8 +206,11 @@ impl Engine {
 
         let storage = Arc::new({
             let sm = StorageManager::new(&data_path).unwrap_or_else(|e| {
-                tracing::error!("FATAL: {}", e);
-                std::process::exit(1);
+                panic!(
+                    "FATAL: failed to initialize storage at {}: {}",
+                    data_path.display(),
+                    e
+                );
             });
             match self::crypto::CryptoEngine::from_env() {
                 Ok(crypto) => {
@@ -345,12 +348,7 @@ impl Engine {
         let skills = Arc::new(SkillEngine::new(storage.clone()));
         scheduler.set_skills(skills.clone());
 
-        let key_rotation = Arc::new(Mutex::new(
-            key_rotation::KeyRotation::new(90, 30, 5).unwrap_or_else(|e| {
-                tracing::error!("Failed to initialize key rotation: {}", e);
-                key_rotation::KeyRotation::new(90, 30, 5).unwrap()
-            }),
-        ));
+        let key_rotation = Arc::new(Mutex::new(key_rotation::KeyRotation::new(90, 30, 5)));
 
         let audit_logger = AuditLogger::new();
         let permission_repo = PermissionRepository::new();
@@ -668,6 +666,139 @@ impl Engine {
         crate::domain::permission::AuthzError,
     > {
         self.authz.get_audit_logs(offset, limit)
+    }
+
+    // High-level API facade methods -----------------------------------------------------------
+    // The methods below are thin delegations to scheduler/security subsystems. They exist to
+    // discourage API handlers from reaching directly into `engine.scheduler.*` and to make the
+    // public surface of Engine explicit. Over time, remaining direct field access should be
+    // migrated behind similar methods.
+
+    pub fn validate_content(&self, content: &str) -> Result<(), self::security::SecurityResult> {
+        self.guard.validate_content(content)
+    }
+
+    pub fn validate_query(&self, query: &str) -> Result<(), self::security::SecurityResult> {
+        self.guard.validate_query(query)
+    }
+
+    pub fn validate_labels(
+        &self,
+        labels: &[String],
+    ) -> Result<(), self::security::SecurityResult> {
+        self.guard.validate_labels(labels)
+    }
+
+    pub fn remember(&self, content: &str) -> Result<(crate::domain::tetra::TetraId, Vec<String>), String> {
+        self.scheduler.api_remember(content)
+    }
+
+    pub fn ask(
+        &self,
+        question: &str,
+        depth: usize,
+    ) -> Result<serde_json::Value, String> {
+        self.scheduler.api_ask(question, depth)
+    }
+
+    pub fn recall(&self, query: &str, depth: usize) -> Result<serde_json::Value, String> {
+        self.scheduler.api_recall(query, depth)
+    }
+
+    pub fn search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(crate::domain::tetra::TetraId, f64, f64, crate::domain::tetra::MemoryPayload)>, String> {
+        self.scheduler.api_search(query, limit)
+    }
+
+    pub fn search_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        filters: Option<&self::search_engine::SearchFilters>,
+    ) -> Result<Vec<(crate::domain::tetra::TetraId, f64, f64, crate::domain::tetra::MemoryPayload)>, String> {
+        self.scheduler.api_search_filtered(query, limit, filters)
+    }
+
+    pub fn create_memory_with_time(
+        &self,
+        content: &str,
+        labels: Vec<String>,
+        timestamp: i64,
+    ) -> Result<crate::domain::tetra::TetraId, String> {
+        self.scheduler
+            .api_create_memory_with_time(content, labels, timestamp)
+    }
+
+    pub fn list_nodes(
+        &self,
+        limit: usize,
+    ) -> Vec<(crate::domain::tetra::TetraId, crate::domain::tetra::MemoryPayload)> {
+        self.scheduler.api_list_nodes_limit(limit)
+    }
+
+    pub fn get_node(
+        &self,
+        id: crate::domain::tetra::TetraId,
+    ) -> Option<crate::domain::tetra::MemoryPayload> {
+        self.scheduler.api_get_node(id)
+    }
+
+    pub fn delete_memory(
+        &self,
+        id: crate::domain::tetra::TetraId,
+    ) -> Result<crate::domain::tetra::TetraId, String> {
+        self.scheduler.api_delete_memory(id)
+    }
+
+    pub fn restore_memory(
+        &self,
+        id: crate::domain::tetra::TetraId,
+    ) -> Result<crate::domain::tetra::TetraId, String> {
+        self.scheduler.api_restore_memory(id)
+    }
+
+    pub fn list_deleted_memories(
+        &self,
+    ) -> Result<Vec<self::storage::DeletedMemoryInfo>, String> {
+        self.scheduler.api_list_deleted_memories()
+    }
+
+    pub fn pulse(
+        &self,
+        origin: crate::domain::tetra::TetraId,
+        ttl: u32,
+    ) -> Result<crate::domain::pulse::PulseResult, String> {
+        self.scheduler.api_pulse(origin, ttl)
+    }
+
+    pub fn dream(&self) -> Result<String, String> {
+        self.scheduler.api_dream()
+    }
+
+    pub fn stats(&self) -> self::gateway::SpaceStats {
+        self.scheduler.api_stats()
+    }
+
+    pub fn get_relations(
+        &self,
+        id: crate::domain::tetra::TetraId,
+    ) -> Vec<(crate::domain::tetra::TetraId, String, f64)> {
+        self.scheduler.api_get_relations(id)
+    }
+
+    pub fn get_concepts(&self) -> Vec<(String, usize)> {
+        self.scheduler.api_get_concepts()
+    }
+
+    pub fn reason_analogies(&self, min_confidence: f64) -> Vec<serde_json::Value> {
+        self.scheduler.api_reason_analogies(min_confidence)
+    }
+
+    pub fn reason_patterns(&self) -> Vec<String> {
+        self.scheduler.api_reason_patterns()
     }
 
     pub async fn shutdown(mut self) {
