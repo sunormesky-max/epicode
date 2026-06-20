@@ -87,11 +87,12 @@ impl LifecycleGovernor {
                 for j in (i + 1)..check_limit {
                     let ci = &tetras[i].data.content;
                     let cj = &tetras[j].data.content;
-                    if ci.len() > 20 && cj.len() > 20 {
-                        if ci == cj || Self::fuzzy_content_match(ci, cj) {
-                            has_duplicates = true;
-                            break;
-                        }
+                    if ci.len() > 20
+                        && cj.len() > 20
+                        && (ci == cj || Self::fuzzy_content_match(ci, cj))
+                    {
+                        has_duplicates = true;
+                        break;
                     }
                 }
                 if has_duplicates {
@@ -158,7 +159,7 @@ impl LifecycleGovernor {
                 contradictions.len()
             );
             for &(a, b, sim) in &contradictions {
-                let _ = knowledge.add_relation(
+                knowledge.add_relation(
                     a,
                     b,
                     crate::engine::knowledge::RelationType::Contradicts,

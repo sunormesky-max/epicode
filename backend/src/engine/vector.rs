@@ -211,7 +211,7 @@ fn make_int64_tensor(data: &[u32], len: usize) -> Result<ort::value::Value, Stri
     let v: Vec<i64> = data.iter().map(|&x| x as i64).collect();
     ort::value::Tensor::from_array(([1usize, len], v.into_boxed_slice()))
         .map_err(|e| format!("tensor create: {}", e))
-        .map(|t| t.into_dyn().into())
+        .map(|t| t.into_dyn())
 }
 
 fn mean_pool(raw: &[f32], mask: &[u32], seq_len: usize, dim: usize) -> Vec<f64> {
@@ -327,7 +327,7 @@ mod tests {
     fn embed_loads_and_runs() {
         let model_dir = std::path::Path::new("models");
         if !model_dir.join("model.onnx").exists() {
-            eprintln!("skipping embed test: no model.onnx");
+            tracing::debug!("skipping embed test: no model.onnx");
             return;
         }
         let layer = VectorLayer::load(model_dir).expect("VectorLayer load");

@@ -413,8 +413,8 @@ mod tests {
         let result = DreamEngine::cycle(&space, 0.5, 5);
         let has_cluster = result.insights.iter().any(|i| i.contains("cluster"));
         if !has_cluster {
-            eprintln!(
-                "WARN: dream cycle produced {} insights but none mention 'cluster': {:?}",
+            tracing::warn!(
+                "dream cycle produced {} insights but none mention 'cluster': {:?}",
                 result.insights.len(),
                 result.insights
             );

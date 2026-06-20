@@ -289,6 +289,12 @@ pub struct Cylinder {
     pub pending_identity: PendingIdentity,
 }
 
+impl Default for Cylinder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Cylinder {
     pub fn new() -> Self {
         let inner_radius = INITIAL_RADIUS * INNER_RADIUS_RATIO;

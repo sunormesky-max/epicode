@@ -76,10 +76,10 @@ impl ContextAssembler {
         for m in memories {
             let labels: HashSet<&str> = m.1.labels.iter().map(|s| s.as_str()).collect();
 
-            if labels.contains("session-summary") || labels.contains("session") {
-                if latest_session.is_none() || m.1.timestamp > latest_session.unwrap().1.timestamp {
-                    latest_session = Some(m);
-                }
+            if (labels.contains("session-summary") || labels.contains("session"))
+                && (latest_session.is_none() || m.1.timestamp > latest_session.unwrap().1.timestamp)
+            {
+                latest_session = Some(m);
             }
             if labels.contains("decision") && (now - m.1.timestamp) < day_secs * 14 {
                 recent_decisions.push(m);

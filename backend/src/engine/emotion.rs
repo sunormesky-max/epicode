@@ -92,7 +92,7 @@ impl EmotionState {
         "neutral"
     }
 
-    pub fn analyze_texts<'a>(texts: &[&'a str]) -> Self {
+    pub fn analyze_texts(texts: &[&str]) -> Self {
         let mut scores: HashMap<&str, (f64, f64, f64)> = HashMap::new();
         scores.insert("create", (0.3, 0.2, 0.1));
         scores.insert("new", (0.2, 0.3, 0.0));

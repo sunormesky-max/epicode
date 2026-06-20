@@ -110,7 +110,7 @@ pub fn reclassify_memories(ctx: &CognitiveHooksCtx, round: usize, tetras: &[Tetr
             continue;
         }
 
-        if let Some(new_labels) = ctx.cognitive.classify_content(&t.data.content).ok() {
+        if let Ok(new_labels) = ctx.cognitive.classify_content(&t.data.content) {
             if new_labels != old_labels {
                 if let Err(e) = ctx.space.update_labels(id, new_labels.clone()) {
                     tracing::warn!("[Reclassify] update labels failed for {}: {}", id, e);

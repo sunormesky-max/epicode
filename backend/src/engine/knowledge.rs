@@ -56,6 +56,12 @@ pub struct KnowledgeGraph {
     dirty: std::sync::atomic::AtomicBool,
 }
 
+impl Default for KnowledgeGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KnowledgeGraph {
     pub fn new() -> Self {
         Self {
@@ -67,12 +73,12 @@ impl KnowledgeGraph {
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.dirty.load(std::sync::atomic::Ordering::Relaxed)
+        self.dirty.load(std::sync::atomic::Ordering::Acquire)
     }
 
     pub fn clear_dirty(&self) {
         self.dirty
-            .store(false, std::sync::atomic::Ordering::Relaxed);
+            .store(false, std::sync::atomic::Ordering::Release);
     }
 
     fn rebuild_adj_index(&self, relations: &[Relation]) -> HashMap<TetraId, Vec<usize>> {
@@ -126,7 +132,7 @@ impl KnowledgeGraph {
             created_tick: tick,
         });
         *self.adj_index.write() = self.rebuild_adj_index(&relations);
-        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.dirty.store(true, std::sync::atomic::Ordering::Release);
     }
 
     pub fn remove_relations_for(&self, id: TetraId) {
@@ -135,7 +141,7 @@ impl KnowledgeGraph {
         relations.retain(|r| r.source != id && r.target != id);
         if relations.len() < before {
             *self.adj_index.write() = self.rebuild_adj_index(&relations);
-            self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.dirty.store(true, std::sync::atomic::Ordering::Release);
         }
     }
 
@@ -233,7 +239,7 @@ impl KnowledgeGraph {
         let removed = before - relations.len();
         if removed > 0 {
             *self.adj_index.write() = self.rebuild_adj_index(&relations);
-            self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.dirty.store(true, std::sync::atomic::Ordering::Release);
         }
         removed
     }
@@ -329,7 +335,7 @@ impl KnowledgeGraph {
                 }
             }
         }
-        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.dirty.store(true, std::sync::atomic::Ordering::Release);
     }
 
     pub fn get_concepts(&self) -> Vec<ConceptPrototype> {
@@ -452,7 +458,7 @@ impl KnowledgeGraph {
         }
 
         GraphExport {
-            nodes: node_map.into_iter().map(|(_, v)| v).collect(),
+            nodes: node_map.into_values().collect(),
             edges: edge_exports,
             inter_cluster_edges,
             concepts: concept_exports,
@@ -608,7 +614,7 @@ fn label_jaccard(
         return 0.0;
     }
     if labels.len() == 1 {
-        return if concept_member_ids.len() > 0 {
+        return if !concept_member_ids.is_empty() {
             0.6
         } else {
             0.0

@@ -158,6 +158,22 @@ export interface TimelineEvent {
   timestamp: number;
 }
 
+export interface PublicStats {
+  total_memories: number;
+  total_skills: number;
+  total_users: number;
+}
+
+export interface GraphAnalysis {
+  total_memories: number;
+  relation_count: number;
+  cluster_count: number;
+  concept_count: number;
+  top_labels: { label: string; count: number }[];
+  cluster_analysis: { size: number; top_labels: { label: string; count: number }[] }[];
+  age_distribution: { labels: string[]; values: number[] };
+}
+
 export interface IdentityInfo {
   name: string;
   mission: string;
@@ -260,8 +276,8 @@ export function getStats(): Promise<StatsData> {
   return request<StatsData>('/v1/stats');
 }
 
-export function getPublicStats(): Promise<Record<string, unknown>> {
-  return request<Record<string, unknown>>('/stats/public', { public: true });
+export function getPublicStats(): Promise<PublicStats> {
+  return request<PublicStats>('/stats/public', { public: true });
 }
 
 // ── Memory API ──
@@ -346,8 +362,8 @@ export function getNodeRelations(id: number): Promise<{ success: boolean; id: nu
   });
 }
 
-export function getGraphAnalysis(): Promise<Record<string, unknown>> {
-  return request('/v1/graph/analysis');
+export function getGraphAnalysis(): Promise<GraphAnalysis> {
+  return request<GraphAnalysis>('/v1/graph/analysis');
 }
 
 export function getGraphExport(): Promise<{
