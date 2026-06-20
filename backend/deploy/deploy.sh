@@ -29,7 +29,7 @@ dnf install -y gcc gcc-c++ make openssl-devel pkg-config git curl 2>/dev/null ||
 # ---- Step 2: Install Rust ----
 if ! command -v cargo &>/dev/null; then
     echo "[2/8] Installing Rust toolchain..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.85.0
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88.0
     source "$HOME/.cargo/env"
     echo "Rust $(rustc --version) installed."
 else
@@ -125,4 +125,4 @@ echo ""
 echo "Then run:"
 echo "  systemctl enable epicode"
 echo "  systemctl start epicode"
-echo "  journalctl -u tetramem -f"
+echo "  journalctl -u epicode -f"
