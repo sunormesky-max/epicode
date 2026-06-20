@@ -304,7 +304,7 @@ mod tests {
         let r =
             PulseEngine::send(&space, &kg, PulseType::Reinforcing { boost: 0.3 }, 0, 3).unwrap();
         assert!(
-            r.data.visited_tetras.len() >= 1,
+            !r.data.visited_tetras.is_empty(),
             "pulse should visit at least origin"
         );
     }
@@ -314,7 +314,7 @@ mod tests {
         let (space, kg) = setup();
         let r = PulseEngine::send(&space, &kg, PulseType::Exploratory { curiosity: 0.5 }, 0, 3)
             .unwrap();
-        assert!(r.data.visited_tetras.len() >= 1);
+        assert!(!r.data.visited_tetras.is_empty());
     }
 
     #[test]
@@ -322,6 +322,6 @@ mod tests {
         let (space, kg) = setup();
         let r =
             PulseEngine::send(&space, &kg, PulseType::Cascade { branch_limit: 2 }, 0, 5).unwrap();
-        assert!(r.data.visited_tetras.len() >= 1);
+        assert!(!r.data.visited_tetras.is_empty());
     }
 }
