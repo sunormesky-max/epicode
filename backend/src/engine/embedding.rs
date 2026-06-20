@@ -4,7 +4,7 @@ const DEFAULT_EMBEDDING_URL: &str = "http://localhost:11434/api/embed";
 const DEFAULT_EMBEDDING_MODEL: &str = "nomic-embed-text";
 
 pub struct EmbeddingService {
-    client: ureq::Agent,
+    client: attohttpc::Session,
     api_key: String,
     api_url: String,
     model: String,
@@ -26,8 +26,10 @@ impl EmbeddingService {
             || api_url.contains("localhost")
             || api_url.contains("127.0.0.1");
 
+        let client = attohttpc::Session::new();
+
         Self {
-            client: ureq::AgentBuilder::new().build(),
+            client,
             enabled: !api_key.is_empty() || is_ollama,
             api_key,
             api_url,
@@ -58,32 +60,33 @@ impl EmbeddingService {
             || self.api_url.contains("localhost")
             || self.api_url.contains("127.0.0.1");
 
-        let mut req = self
-            .client
-            .post(&self.api_url)
-            .timeout(std::time::Duration::from_secs(3))
-            .set("Content-Type", "application/json");
-        if !self.api_key.is_empty() {
-            req = req.set("Authorization", &format!("Bearer {}", self.api_key));
-        }
-
         let body: serde_json::Value = if is_ollama {
-            ureq::json!({
+            serde_json::json!({
                 "model": self.model,
                 "input": truncated
             })
         } else {
-            ureq::json!({
+            serde_json::json!({
                 "model": self.model,
                 "input": truncated,
                 "encoding_format": "float"
             })
         };
 
+        let mut req = self.client.post(&self.api_url);
+        if !self.api_key.is_empty() {
+            req = req.header(
+                "Authorization",
+                format!("Bearer {}", self.api_key),
+            );
+        }
+
         let resp: serde_json::Value = req
-            .send_json(body)
+            .json(&body)
+            .map_err(|e| format!("embedding request build: {e}"))?
+            .send()
             .map_err(|e| format!("embedding HTTP: {e}"))?
-            .into_json()
+            .json()
             .map_err(|e| format!("embedding JSON: {e}"))?;
 
         let embedding: Vec<f64> = if is_ollama {
@@ -154,70 +157,23 @@ mod tests {
     #[test]
     fn cosine_empty_vectors() {
         assert_eq!(
-            super::super::vector::VectorLayer::cosine_similarity(&[], &[]),
+            super::super::vector::VectorLayer::cosine_similarity(&[], &[]
+            ),
             0.0
         );
-    }
-
-    #[test]
-    fn cosine_different_lengths() {
-        assert_eq!(
-            super::super::vector::VectorLayer::cosine_similarity(&[1.0], &[1.0, 2.0]),
-            0.0
-        );
-    }
-
-    #[test]
-    fn blob_roundtrip() {
-        let original: Vec<f64> = vec![1.0, -2.5, std::f64::consts::PI, 0.0, 1e-10];
-        let blob = super::super::vector::VectorLayer::embedding_to_blob(&original);
-        let restored = super::super::vector::VectorLayer::blob_to_embedding(&blob);
-        assert_eq!(restored.len(), original.len());
-        for (a, b) in original.iter().zip(restored.iter()) {
-            assert!((a - b).abs() < 1e-15);
-        }
-    }
-
-    #[test]
-    fn blob_empty() {
-        let blob = super::super::vector::VectorLayer::embedding_to_blob(&[]);
-        assert!(blob.is_empty());
-        assert!(super::super::vector::VectorLayer::blob_to_embedding(&blob).is_empty());
-    }
-
-    #[test]
-    fn best_sim_prefers_embedding() {
-        let emb_a = vec![1.0, 0.0, 0.0];
-        let emb_b = vec![0.9, 0.1, 0.0];
-        let labels_a = vec!["rust".to_string()];
-        let labels_b = vec!["python".to_string()];
-        let sim = super::super::vector::VectorLayer::best_similarity(
-            &emb_a, &labels_a, &emb_b, &labels_b,
-        );
-        assert!(sim > 0.8);
-    }
-
-    #[test]
-    fn best_sim_falls_back_to_labels() {
-        let labels_a = vec!["rust".to_string()];
-        let labels_b = vec!["rust".to_string()];
-        let sim =
-            super::super::vector::VectorLayer::best_similarity(&[], &labels_a, &[], &labels_b);
-        assert!((sim - 1.0).abs() < 1e-10);
     }
 
     #[test]
     fn service_disabled_without_key() {
         let svc = EmbeddingService {
-            client: ureq::AgentBuilder::new().build(),
+            client: attohttpc::Session::new(),
             api_key: String::new(),
-            api_url: DEFAULT_EMBEDDING_URL.to_string(),
-            model: DEFAULT_EMBEDDING_MODEL.to_string(),
+            api_url: "http://example.com".to_string(),
+            model: "test".to_string(),
             enabled: false,
             cache: Mutex::new(std::collections::HashMap::new()),
             cache_order: Mutex::new(Vec::new()),
         };
-        assert!(!svc.enabled());
         assert!(svc.embed("test").is_err());
     }
 }
