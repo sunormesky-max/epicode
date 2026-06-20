@@ -4,6 +4,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
+use tokio::sync::Semaphore;
+
 use axum::extract::Path;
 use axum::http::HeaderValue;
 use axum::response::IntoResponse;
@@ -52,10 +54,23 @@ fn require_admin(
     admin_key: &str,
     headers: &axum::http::HeaderMap,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-    let provided = headers
-        .get("X-Admin-Key")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+    if admin_key.is_empty() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"success": false, "error": "admin authentication disabled"})),
+        ));
+    }
+
+    let provided = match headers.get("X-Admin-Key").and_then(|v| v.to_str().ok()) {
+        Some(v) if !v.is_empty() => v,
+        _ => {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"success": false, "error": "admin key required"})),
+            ));
+        }
+    };
+
     if !epicode::engine::crypto::constant_time_eq(provided, admin_key) {
         return Err((
             StatusCode::FORBIDDEN,
@@ -143,6 +158,11 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    if let Err(e) = epicode::engine::security::SecurityConfig::try_from_env() {
+        tracing::error!("FATAL: {e}");
+        std::process::exit(1);
+    }
 
     let listen_addr =
         std::env::var("TETRAMEM_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9111".into());
@@ -271,10 +291,7 @@ async fn main() {
         next.run(request).await
     };
 
-    let cors = server::cors_layer(
-        &cors_origin,
-        server::cloud_cors_headers(),
-    );
+    let cors = server::cors_layer(&cors_origin, server::cloud_cors_headers());
 
     let app = Router::new()
         .route("/health", get(health))
@@ -369,15 +386,15 @@ async fn main() {
     let tcp_bind = std::env::var("TETRAMEM_TCP_BIND").unwrap_or_else(|_| "127.0.0.1".into());
 
     let shutdown_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let tcp_semaphore = Arc::new(Semaphore::new(100));
 
     if let Some(port) = tcp_port {
         let tcp_addr = format!("{tcp_bind}:{port}");
         let mgr = user_mgr.clone();
         let sf = shutdown_flag.clone();
-        let rt_handle = tokio::runtime::Handle::current();
-        let _tcp_thread = std::thread::spawn(move || {
-            let _guard = rt_handle.enter();
-            run_tcp_server(&tcp_addr, &mgr, &sf);
+        let sem = tcp_semaphore.clone();
+        tokio::task::spawn_blocking(move || {
+            run_tcp_server(&tcp_addr, &mgr, &sf, &sem);
         });
     }
 
@@ -451,6 +468,7 @@ fn run_tcp_server(
     addr: &str,
     user_mgr: &Arc<UserManager>,
     shutdown: &Arc<std::sync::atomic::AtomicBool>,
+    semaphore: &Arc<Semaphore>,
 ) {
     let listener = match std::net::TcpListener::bind(addr) {
         Ok(l) => l,
@@ -465,6 +483,13 @@ fn run_tcp_server(
     while !shutdown.load(std::sync::atomic::Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, _addr)) => {
+                let permit = match semaphore.clone().try_acquire_owned() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        tracing::warn!("TCP connection limit reached, dropping connection");
+                        continue;
+                    }
+                };
                 let peer = stream
                     .peer_addr()
                     .map(|a| a.to_string())
@@ -472,6 +497,7 @@ fn run_tcp_server(
                 tracing::info!("TCP client connected: {}", peer);
                 let mgr = user_mgr.clone();
                 std::thread::spawn(move || {
+                    let _permit = permit;
                     handle_tcp_connection(stream, &mgr, &peer);
                     tracing::info!("TCP client disconnected: {}", peer);
                 });
@@ -1859,7 +1885,9 @@ async fn update_identity_http(
                     "message": "Identity recalibration complete."
                 })),
             ),
-            None => server::error_response(StatusCode::INTERNAL_SERVER_ERROR, "identity update failed"),
+            None => {
+                server::error_response(StatusCode::INTERNAL_SERVER_ERROR, "identity update failed")
+            }
         },
         Err(e) => server::error_response(StatusCode::BAD_REQUEST, &e),
     }

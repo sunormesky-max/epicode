@@ -18,7 +18,7 @@ use super::dynamics;
 use super::energy::EnergyCenter;
 use super::knowledge::KnowledgeGraph;
 use super::outcome::{ActionOutcome, ActionType, OutcomeTracker};
-use super::security::SecurityGuard;
+use super::security::{SecurityConfig, SecurityGuard};
 
 struct CognitiveThought {
     tick: u64,
@@ -96,7 +96,15 @@ impl SchedulerCenter {
             _rx,
             tick_interval_ms,
             max_energy,
-            Arc::new(SecurityGuard::from_env()),
+            Arc::new(SecurityGuard::new(SecurityConfig {
+                enabled: false,
+                api_keys: vec![],
+                rate_limit_per_minute: 120,
+                max_content_length: 10000,
+                max_query_length: 2000,
+                max_labels: 10,
+                audit_log_size: 200,
+            })),
             Arc::new(
                 super::storage::StorageManager::new(std::path::Path::new("data"))
                     .expect("storage init failed"),

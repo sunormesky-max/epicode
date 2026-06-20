@@ -23,8 +23,10 @@ pub struct SecurityConfig {
     pub audit_log_size: usize,
 }
 
-impl Default for SecurityConfig {
-    fn default() -> Self {
+impl SecurityConfig {
+    /// Try to build a `SecurityConfig` from environment variables.
+    /// Returns `Err` if `TETRAMEM_API_KEY` is not set and insecure auth is not allowed.
+    pub fn try_from_env() -> Result<Self, String> {
         let key = std::env::var("TETRAMEM_API_KEY")
             .ok()
             .filter(|k| !k.is_empty());
@@ -42,12 +44,13 @@ impl Default for SecurityConfig {
                 (false, vec![])
             }
             None => {
-                panic!(
-                    "FATAL: TETRAMEM_API_KEY must be set. Generate one with: openssl rand -base64 32"
+                return Err(
+                    "TETRAMEM_API_KEY must be set. Generate one with: openssl rand -base64 32"
+                        .to_string(),
                 );
             }
         };
-        Self {
+        Ok(Self {
             enabled,
             api_keys,
             rate_limit_per_minute: RATE_LIMIT_MAX_REQUESTS,
@@ -55,7 +58,15 @@ impl Default for SecurityConfig {
             max_query_length: MAX_QUERY_LENGTH,
             max_labels: MAX_LABELS_PER_MEMORY,
             audit_log_size: 200,
-        }
+        })
+    }
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self::try_from_env().unwrap_or_else(|e| {
+            panic!("FATAL: {e}");
+        })
     }
 }
 
@@ -115,6 +126,11 @@ impl SecurityGuard {
 
     pub fn from_env() -> Self {
         Self::new(SecurityConfig::default())
+    }
+
+    /// Fallible version that returns `Err` instead of panicking.
+    pub fn try_from_env() -> Result<Self, String> {
+        Ok(Self::new(SecurityConfig::try_from_env()?))
     }
 
     pub fn authenticate(&self, api_key: &str) -> Result<String, SecurityResult> {

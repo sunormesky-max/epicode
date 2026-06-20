@@ -8,22 +8,18 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 /// thread pool. Use this for Engine calls that may perform I/O (SQLite, HTTP
 /// embedding fallback) or CPU-heavy work (ONNX inference) so that tokio worker
 /// threads stay responsive.
-pub async fn blocking<F, T>(f: F) -> T
+pub async fn blocking<F, T>(f: F) -> Result<T, String>
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    match tokio::task::spawn_blocking(f).await {
-        Ok(v) => v,
-        Err(e) => panic!("blocking task panicked: {e}"),
-    }
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| format!("blocking task failed: {e}"))
 }
 
 /// Standard error response shape used across all server modes.
-pub fn error_response(
-    status: StatusCode,
-    msg: &str,
-) -> (StatusCode, Json<serde_json::Value>) {
+pub fn error_response(status: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
     (
         status,
         Json(serde_json::json!({"success": false, "error": msg})),
@@ -84,8 +80,7 @@ pub fn cors_layer(origin: &str, allowed_headers: Vec<HeaderName>) -> CorsLayer {
 
 /// Default CORS origin for single-tenant mode.
 pub fn default_cors_origin() -> String {
-    std::env::var("TETRAMEM_CORS_ORIGIN")
-        .unwrap_or_else(|_| "http://localhost:3000".to_string())
+    std::env::var("TETRAMEM_CORS_ORIGIN").unwrap_or_else(|_| "http://localhost:3000".to_string())
 }
 
 /// Default allowed headers for single-tenant mode.

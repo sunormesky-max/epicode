@@ -39,8 +39,8 @@ pub mod tools;
 pub mod user_manager;
 pub mod vector;
 
-use std::sync::Arc;
 use parking_lot::Mutex;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 
 use crate::domain::space::Space;
@@ -682,22 +682,18 @@ impl Engine {
         self.guard.validate_query(query)
     }
 
-    pub fn validate_labels(
-        &self,
-        labels: &[String],
-    ) -> Result<(), self::security::SecurityResult> {
+    pub fn validate_labels(&self, labels: &[String]) -> Result<(), self::security::SecurityResult> {
         self.guard.validate_labels(labels)
     }
 
-    pub fn remember(&self, content: &str) -> Result<(crate::domain::tetra::TetraId, Vec<String>), String> {
+    pub fn remember(
+        &self,
+        content: &str,
+    ) -> Result<(crate::domain::tetra::TetraId, Vec<String>), String> {
         self.scheduler.api_remember(content)
     }
 
-    pub fn ask(
-        &self,
-        question: &str,
-        depth: usize,
-    ) -> Result<serde_json::Value, String> {
+    pub fn ask(&self, question: &str, depth: usize) -> Result<serde_json::Value, String> {
         self.scheduler.api_ask(question, depth)
     }
 
@@ -709,7 +705,15 @@ impl Engine {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<(crate::domain::tetra::TetraId, f64, f64, crate::domain::tetra::MemoryPayload)>, String> {
+    ) -> Result<
+        Vec<(
+            crate::domain::tetra::TetraId,
+            f64,
+            f64,
+            crate::domain::tetra::MemoryPayload,
+        )>,
+        String,
+    > {
         self.scheduler.api_search(query, limit)
     }
 
@@ -718,7 +722,15 @@ impl Engine {
         query: &str,
         limit: usize,
         filters: Option<&self::search_engine::SearchFilters>,
-    ) -> Result<Vec<(crate::domain::tetra::TetraId, f64, f64, crate::domain::tetra::MemoryPayload)>, String> {
+    ) -> Result<
+        Vec<(
+            crate::domain::tetra::TetraId,
+            f64,
+            f64,
+            crate::domain::tetra::MemoryPayload,
+        )>,
+        String,
+    > {
         self.scheduler.api_search_filtered(query, limit, filters)
     }
 
@@ -735,7 +747,10 @@ impl Engine {
     pub fn list_nodes(
         &self,
         limit: usize,
-    ) -> Vec<(crate::domain::tetra::TetraId, crate::domain::tetra::MemoryPayload)> {
+    ) -> Vec<(
+        crate::domain::tetra::TetraId,
+        crate::domain::tetra::MemoryPayload,
+    )> {
         self.scheduler.api_list_nodes_limit(limit)
     }
 
@@ -760,9 +775,7 @@ impl Engine {
         self.scheduler.api_restore_memory(id)
     }
 
-    pub fn list_deleted_memories(
-        &self,
-    ) -> Result<Vec<self::storage::DeletedMemoryInfo>, String> {
+    pub fn list_deleted_memories(&self) -> Result<Vec<self::storage::DeletedMemoryInfo>, String> {
         self.scheduler.api_list_deleted_memories()
     }
 
@@ -880,10 +893,7 @@ impl Engine {
         self.storage.get_meta(key)
     }
 
-    pub fn storage_set_meta_batch(
-        &self,
-        refs: &[(&str, &str)],
-    ) -> Result<(), String> {
+    pub fn storage_set_meta_batch(&self, refs: &[(&str, &str)]) -> Result<(), String> {
         self.storage.set_meta_batch(refs)
     }
 
@@ -903,7 +913,7 @@ impl Engine {
         content: &str,
     ) -> Result<(crate::domain::tetra::TetraId, Vec<String>), String> {
         let content = content.to_string();
-        crate::api::server::blocking(move || self.remember(&content)).await
+        crate::api::server::blocking(move || self.remember(&content)).await?
     }
 
     pub async fn ask_async(
@@ -912,7 +922,7 @@ impl Engine {
         depth: usize,
     ) -> Result<serde_json::Value, String> {
         let question = question.to_string();
-        crate::api::server::blocking(move || self.ask(&question, depth)).await
+        crate::api::server::blocking(move || self.ask(&question, depth)).await?
     }
 
     pub async fn recall_async(
@@ -921,16 +931,24 @@ impl Engine {
         depth: usize,
     ) -> Result<serde_json::Value, String> {
         let query = query.to_string();
-        crate::api::server::blocking(move || self.recall(&query, depth)).await
+        crate::api::server::blocking(move || self.recall(&query, depth)).await?
     }
 
     pub async fn search_async(
         self: Arc<Self>,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<(crate::domain::tetra::TetraId, f64, f64, crate::domain::tetra::MemoryPayload)>, String> {
+    ) -> Result<
+        Vec<(
+            crate::domain::tetra::TetraId,
+            f64,
+            f64,
+            crate::domain::tetra::MemoryPayload,
+        )>,
+        String,
+    > {
         let query = query.to_string();
-        crate::api::server::blocking(move || self.search(&query, limit)).await
+        crate::api::server::blocking(move || self.search(&query, limit)).await?
     }
 
     pub async fn search_filtered_async(
@@ -938,10 +956,17 @@ impl Engine {
         query: String,
         limit: usize,
         filters: Option<self::search_engine::SearchFilters>,
-    ) -> Result<Vec<(crate::domain::tetra::TetraId, f64, f64, crate::domain::tetra::MemoryPayload)>, String> {
-        crate::api::server::blocking(move || {
-            self.search_filtered(&query, limit, filters.as_ref())
-        }).await
+    ) -> Result<
+        Vec<(
+            crate::domain::tetra::TetraId,
+            f64,
+            f64,
+            crate::domain::tetra::MemoryPayload,
+        )>,
+        String,
+    > {
+        crate::api::server::blocking(move || self.search_filtered(&query, limit, filters.as_ref()))
+            .await?
     }
 
     pub async fn create_memory_with_time_async(
@@ -950,21 +975,24 @@ impl Engine {
         labels: Vec<String>,
         timestamp: i64,
     ) -> Result<crate::domain::tetra::TetraId, String> {
-        crate::api::server::blocking(move || self.create_memory_with_time(&content, labels, timestamp)).await
+        crate::api::server::blocking(move || {
+            self.create_memory_with_time(&content, labels, timestamp)
+        })
+        .await?
     }
 
     pub async fn delete_memory_async(
         self: Arc<Self>,
         id: crate::domain::tetra::TetraId,
     ) -> Result<crate::domain::tetra::TetraId, String> {
-        crate::api::server::blocking(move || self.delete_memory(id)).await
+        crate::api::server::blocking(move || self.delete_memory(id)).await?
     }
 
     pub async fn restore_memory_async(
         self: Arc<Self>,
         id: crate::domain::tetra::TetraId,
     ) -> Result<crate::domain::tetra::TetraId, String> {
-        crate::api::server::blocking(move || self.restore_memory(id)).await
+        crate::api::server::blocking(move || self.restore_memory(id)).await?
     }
 
     pub async fn pulse_async(
@@ -972,21 +1000,21 @@ impl Engine {
         origin: crate::domain::tetra::TetraId,
         ttl: u32,
     ) -> Result<crate::domain::pulse::PulseResult, String> {
-        crate::api::server::blocking(move || self.pulse(origin, ttl)).await
+        crate::api::server::blocking(move || self.pulse(origin, ttl)).await?
     }
 
     pub async fn dream_async(self: Arc<Self>) -> Result<String, String> {
-        crate::api::server::blocking(move || self.dream()).await
+        crate::api::server::blocking(move || self.dream()).await?
     }
 
     pub async fn reason_analogies_async(
         self: Arc<Self>,
         min_confidence: f64,
-    ) -> Vec<serde_json::Value> {
+    ) -> Result<Vec<serde_json::Value>, String> {
         crate::api::server::blocking(move || self.reason_analogies(min_confidence)).await
     }
 
-    pub async fn reason_patterns_async(self: Arc<Self>) -> Vec<String> {
+    pub async fn reason_patterns_async(self: Arc<Self>) -> Result<Vec<String>, String> {
         crate::api::server::blocking(move || self.reason_patterns()).await
     }
 

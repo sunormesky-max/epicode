@@ -241,7 +241,9 @@ pub async fn confirm_identity(
         req.author,
         req.extra.unwrap_or_default(),
     ) {
-        Ok(()) => Json(serde_json::json!({"success": true, "message": "identity confirmed and sealed"})),
+        Ok(()) => {
+            Json(serde_json::json!({"success": true, "message": "identity confirmed and sealed"}))
+        }
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
 }
@@ -261,12 +263,15 @@ pub async fn create_node(
             serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
         );
     }
-    match engine.create_memory_with_time_async(
-        req.content.clone(),
-        user_labels,
-        req.timestamp
-            .unwrap_or_else(|| chrono::Utc::now().timestamp()),
-    ).await {
+    match engine
+        .create_memory_with_time_async(
+            req.content.clone(),
+            user_labels,
+            req.timestamp
+                .unwrap_or_else(|| chrono::Utc::now().timestamp()),
+        )
+        .await
+    {
         Ok(id) => Json(serde_json::json!({"success": true, "id": id, "status": "created"})),
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
@@ -491,8 +496,10 @@ pub async fn reasoning_analogies(
 }
 
 pub async fn reasoning_patterns(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let patterns = engine.reason_patterns_async().await;
-    Json(serde_json::json!({"success": true, "patterns": patterns}))
+    match engine.reason_patterns_async().await {
+        Ok(patterns) => Json(serde_json::json!({"success": true, "patterns": patterns})),
+        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
+    }
 }
 
 // ── MCP ──
