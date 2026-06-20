@@ -57,6 +57,7 @@ impl DigestionEngine {
         Ok(self.flatten_json_value(&val, 0))
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn flatten_json_value(&self, val: &serde_json::Value, depth: usize) -> String {
         match val {
             serde_json::Value::String(s) => s.clone(),
