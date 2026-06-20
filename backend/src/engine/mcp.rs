@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::tetra::MemoryPayload;
 use crate::engine::Engine;
+use crate::util::strip_html;
 
 fn truncate_str(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
@@ -2083,22 +2084,6 @@ impl McpHandler {
         let resp = self.handle(req);
         serde_json::to_string(&resp).unwrap_or_default()
     }
-}
-
-fn strip_html(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut in_tag = false;
-    for ch in s.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => {
-                in_tag = false;
-            }
-            _ if !in_tag => result.push(ch),
-            _ => {}
-        }
-    }
-    result
 }
 
 fn sanitize_label(s: &str) -> String {

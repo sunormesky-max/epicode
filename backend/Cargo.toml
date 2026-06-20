@@ -43,6 +43,7 @@ moka = { version = "0.12", features = ["future"] }
 redis = "0.24"
 hex = "0.4"
 bincode = "1.3"
+html2text = "0.17.1"
 
 [profile.release]
 strip = true

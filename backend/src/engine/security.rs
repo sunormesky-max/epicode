@@ -80,7 +80,8 @@ pub enum SecurityResult {
 
 #[derive(Debug, Clone)]
 struct RateBucket {
-    timestamps: Vec<std::time::Instant>,
+    window_start: Instant,
+    count: u64,
 }
 
 pub struct SecurityGuard {
@@ -150,28 +151,27 @@ impl SecurityGuard {
         let mut buckets = self.rate_buckets.lock();
         let now = Instant::now();
         let limit = self.config.rate_limit_per_minute;
+        let window = std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS);
 
         if buckets.len() > 10000 {
-            buckets.retain(|_, b| {
-                b.timestamps
-                    .last()
-                    .map(|t| now.duration_since(*t).as_secs() < RATE_LIMIT_WINDOW_SECS)
-                    .unwrap_or(false)
-            });
+            buckets.retain(|_, b| now.saturating_duration_since(b.window_start) < window);
         }
 
         let bucket = buckets.entry(rate_key).or_insert(RateBucket {
-            timestamps: Vec::new(),
+            window_start: now,
+            count: 0,
         });
 
-        let cutoff = now - std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS);
-        bucket.timestamps.retain(|t| *t > cutoff);
+        if now.saturating_duration_since(bucket.window_start) >= window {
+            bucket.window_start = now;
+            bucket.count = 0;
+        }
 
-        if bucket.timestamps.len() >= limit as usize {
+        if bucket.count >= limit {
             return Err(SecurityResult::DeniedRateLimit);
         }
 
-        bucket.timestamps.push(now);
+        bucket.count += 1;
         Ok(())
     }
 

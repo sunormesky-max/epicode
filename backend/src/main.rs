@@ -7,7 +7,7 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
 use tokio::net::TcpListener;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use epicode::api::routes;
@@ -180,8 +180,16 @@ async fn main() {
                     )
                     .unwrap_or_else(|_| HeaderValue::from_static("http://localhost:3000")),
                 )
-                .allow_methods(Any)
-                .allow_headers(Any),
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                    axum::http::Method::DELETE,
+                    axum::http::Method::OPTIONS,
+                ])
+                .allow_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::HeaderName::from_static("x-api-key"),
+                ]),
         )
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
