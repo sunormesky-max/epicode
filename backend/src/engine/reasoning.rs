@@ -47,11 +47,11 @@ impl ReasoningEngine {
                 }
             }
         } else {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             for _ in 0..(max_pairs * 2) {
-                use rand::Rng;
-                let i = rng.gen_range(0..tetras.len());
-                let j = rng.gen_range(0..tetras.len());
+                use rand::RngExt;
+                let i = rng.random_range(0..tetras.len());
+                let j = rng.random_range(0..tetras.len());
                 if i >= j {
                     continue;
                 }

@@ -167,11 +167,11 @@ impl DreamEngine {
                 }
             }
         } else {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             for _ in 0..max_scan {
-                use rand::Rng;
-                let wi = rng.gen_range(0..non_meta.len());
-                let wj = rng.gen_range(0..non_meta.len());
+                use rand::RngExt;
+                let wi = rng.random_range(0..non_meta.len());
+                let wj = rng.random_range(0..non_meta.len());
                 if wi == wj {
                     continue;
                 }
@@ -265,11 +265,11 @@ impl DreamEngine {
                 }
             }
         } else {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             for _ in 0..max_scan {
-                use rand::Rng;
-                let wi = rng.gen_range(0..non_meta.len());
-                let wj = rng.gen_range(0..non_meta.len());
+                use rand::RngExt;
+                let wi = rng.random_range(0..non_meta.len());
+                let wj = rng.random_range(0..non_meta.len());
                 if wi == wj {
                     continue;
                 }
