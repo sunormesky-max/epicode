@@ -801,6 +801,195 @@ impl Engine {
         self.scheduler.api_reason_patterns()
     }
 
+    // Space / cylinder / identity accessors --------------------------------------------------
+
+    pub fn cylinder_health(&self) -> crate::domain::cylinder::HealthReport {
+        self.space.cylinder_health()
+    }
+
+    pub fn cylinder_radius(&self) -> f64 {
+        self.space.cylinder_radius()
+    }
+
+    pub fn cylinder_height(&self) -> f64 {
+        self.space.cylinder_height()
+    }
+
+    pub fn cylinder_port_count(&self) -> usize {
+        self.space.cylinder_port_count()
+    }
+
+    pub fn is_identity_confirmed(&self) -> bool {
+        self.space.is_identity_confirmed()
+    }
+
+    pub fn identity_info(&self) -> Option<crate::domain::cylinder::IdentityInfo> {
+        self.space.identity_info()
+    }
+
+    pub fn find_clusters(&self) -> Vec<crate::domain::space::Cluster> {
+        self.space.find_clusters()
+    }
+
+    pub fn get_tetrahedron(
+        &self,
+        id: crate::domain::tetra::TetraId,
+    ) -> Option<crate::domain::tetra::Tetrahedron> {
+        self.space.get_tetrahedron(id)
+    }
+
+    // Security / guard accessors ---------------------------------------------------------------
+
+    pub fn guard_stats(&self) -> self::security::SecurityStats {
+        self.guard.stats()
+    }
+
+    pub fn guard_audit_log(&self, limit: usize) -> Vec<self::security::AuditEntry> {
+        self.guard.audit_log(limit)
+    }
+
+    pub fn guard_config(&self) -> &self::security::SecurityConfig {
+        &self.guard.config
+    }
+
+    // Gateway / cache accessors ----------------------------------------------------------------
+
+    pub fn cache_stats_snapshot(&self) -> (u64, u64, u64, u64, u64, f64, f64, f64) {
+        self.gateway.cache_stats_snapshot()
+    }
+
+    pub fn clear_query_cache(&self) {
+        self.gateway.clear_query_cache()
+    }
+
+    // Storage accessors ------------------------------------------------------------------------
+
+    pub fn storage_list_backups(&self) -> Vec<self::storage::BackupInfo> {
+        self.storage.list_backups()
+    }
+
+    pub fn storage_tetra_count(&self) -> usize {
+        self.storage.tetra_count()
+    }
+
+    pub fn storage_relation_count(&self) -> usize {
+        self.storage.relation_count()
+    }
+
+    pub fn storage_get_meta(&self, key: &str) -> Option<String> {
+        self.storage.get_meta(key)
+    }
+
+    pub fn storage_set_meta_batch(
+        &self,
+        refs: &[(&str, &str)],
+    ) -> Result<(), String> {
+        self.storage.set_meta_batch(refs)
+    }
+
+    // Cognitive accessors ----------------------------------------------------------------------
+
+    pub fn cognitive_enabled(&self) -> bool {
+        self.cognitive.enabled()
+    }
+
+    // Async wrappers for potentially blocking operations ---------------------------------------
+    // These offload the underlying synchronous Engine work to tokio's blocking thread pool so
+    // that HTTP handlers in routes.rs do not block tokio worker threads during SQLite I/O,
+    // ONNX inference, or synchronous HTTP embedding fallback calls.
+
+    pub async fn remember_async(
+        self: Arc<Self>,
+        content: &str,
+    ) -> Result<(crate::domain::tetra::TetraId, Vec<String>), String> {
+        let content = content.to_string();
+        crate::api::server::blocking(move || self.remember(&content)).await
+    }
+
+    pub async fn ask_async(
+        self: Arc<Self>,
+        question: &str,
+        depth: usize,
+    ) -> Result<serde_json::Value, String> {
+        let question = question.to_string();
+        crate::api::server::blocking(move || self.ask(&question, depth)).await
+    }
+
+    pub async fn recall_async(
+        self: Arc<Self>,
+        query: &str,
+        depth: usize,
+    ) -> Result<serde_json::Value, String> {
+        let query = query.to_string();
+        crate::api::server::blocking(move || self.recall(&query, depth)).await
+    }
+
+    pub async fn search_async(
+        self: Arc<Self>,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(crate::domain::tetra::TetraId, f64, f64, crate::domain::tetra::MemoryPayload)>, String> {
+        let query = query.to_string();
+        crate::api::server::blocking(move || self.search(&query, limit)).await
+    }
+
+    pub async fn search_filtered_async(
+        self: Arc<Self>,
+        query: String,
+        limit: usize,
+        filters: Option<self::search_engine::SearchFilters>,
+    ) -> Result<Vec<(crate::domain::tetra::TetraId, f64, f64, crate::domain::tetra::MemoryPayload)>, String> {
+        crate::api::server::blocking(move || {
+            self.search_filtered(&query, limit, filters.as_ref())
+        }).await
+    }
+
+    pub async fn create_memory_with_time_async(
+        self: Arc<Self>,
+        content: String,
+        labels: Vec<String>,
+        timestamp: i64,
+    ) -> Result<crate::domain::tetra::TetraId, String> {
+        crate::api::server::blocking(move || self.create_memory_with_time(&content, labels, timestamp)).await
+    }
+
+    pub async fn delete_memory_async(
+        self: Arc<Self>,
+        id: crate::domain::tetra::TetraId,
+    ) -> Result<crate::domain::tetra::TetraId, String> {
+        crate::api::server::blocking(move || self.delete_memory(id)).await
+    }
+
+    pub async fn restore_memory_async(
+        self: Arc<Self>,
+        id: crate::domain::tetra::TetraId,
+    ) -> Result<crate::domain::tetra::TetraId, String> {
+        crate::api::server::blocking(move || self.restore_memory(id)).await
+    }
+
+    pub async fn pulse_async(
+        self: Arc<Self>,
+        origin: crate::domain::tetra::TetraId,
+        ttl: u32,
+    ) -> Result<crate::domain::pulse::PulseResult, String> {
+        crate::api::server::blocking(move || self.pulse(origin, ttl)).await
+    }
+
+    pub async fn dream_async(self: Arc<Self>) -> Result<String, String> {
+        crate::api::server::blocking(move || self.dream()).await
+    }
+
+    pub async fn reason_analogies_async(
+        self: Arc<Self>,
+        min_confidence: f64,
+    ) -> Vec<serde_json::Value> {
+        crate::api::server::blocking(move || self.reason_analogies(min_confidence)).await
+    }
+
+    pub async fn reason_patterns_async(self: Arc<Self>) -> Vec<String> {
+        crate::api::server::blocking(move || self.reason_patterns()).await
+    }
+
     pub async fn shutdown(mut self) {
         tracing::info!("Engine shutting down — saving all data...");
         let kg = self.scheduler.kg_handle();
