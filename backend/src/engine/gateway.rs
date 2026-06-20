@@ -36,6 +36,7 @@ pub struct GatewayCenter {
 }
 
 impl GatewayCenter {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         space: Arc<Space>,
         energy: Arc<EnergyCenter>,
@@ -802,7 +803,7 @@ impl GatewayCenter {
             }
         }
         drop(label_idx);
-        results.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
+        results.sort_by_key(|b| std::cmp::Reverse(b.1.timestamp));
         results.truncate(limit);
         results
     }
@@ -814,7 +815,7 @@ impl GatewayCenter {
             .into_iter()
             .map(|t| (t.id, t.data))
             .collect();
-        all.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
+        all.sort_by_key(|b| std::cmp::Reverse(b.1.timestamp));
         all.into_iter().skip(offset).take(limit).collect()
     }
 
@@ -825,7 +826,7 @@ impl GatewayCenter {
             .filter(|(label, _)| label.starts_with("project:"))
             .map(|(label, ids)| (label.clone(), ids.len()))
             .collect();
-        projects.sort_by(|a, b| b.1.cmp(&a.1));
+        projects.sort_by_key(|b| std::cmp::Reverse(b.1));
         projects
     }
 
@@ -841,7 +842,7 @@ impl GatewayCenter {
                 .iter()
                 .map(|(k, &v)| (k.clone(), v))
                 .collect();
-            v.sort_by(|a, b| b.1.cmp(&a.1));
+            v.sort_by_key(|b| std::cmp::Reverse(b.1));
             v.truncate(10);
             v
         };
@@ -853,7 +854,7 @@ impl GatewayCenter {
                 .iter()
                 .map(|(&k, &v)| (k, v))
                 .collect();
-            v.sort_by(|a, b| b.1.cmp(&a.1));
+            v.sort_by_key(|b| std::cmp::Reverse(b.1));
             v.truncate(10);
             v
         };

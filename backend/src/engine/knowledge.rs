@@ -348,7 +348,7 @@ impl KnowledgeGraph {
             .iter()
             .map(|c| (c.label.clone(), c.member_count))
             .collect();
-        labeled.sort_by(|a, b| b.1.cmp(&a.1));
+        labeled.sort_by_key(|b| std::cmp::Reverse(b.1));
         labeled.truncate(limit);
         labeled
     }
@@ -403,7 +403,7 @@ impl KnowledgeGraph {
             .into_iter()
             .filter(|(l, _)| !l.starts_with("meta-") && !l.starts_with("entity:"))
             .collect();
-        top_labels.sort_by(|a, b| b.1.cmp(&a.1));
+        top_labels.sort_by_key(|b| std::cmp::Reverse(b.1));
         top_labels.truncate(30);
 
         let clusters = space.find_clusters();
@@ -421,7 +421,7 @@ impl KnowledgeGraph {
                         acc
                     });
                 let mut sorted: Vec<(String, usize)> = cluster_labels.into_iter().collect();
-                sorted.sort_by(|a, b| b.1.cmp(&a.1));
+                sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
                 ClusterExport {
                     size: c.tetra_ids.len(),
                     member_ids: c.tetra_ids.clone(),

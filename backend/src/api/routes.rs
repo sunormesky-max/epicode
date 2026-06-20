@@ -348,9 +348,11 @@ pub async fn search(
         );
     }
     let limit = req.limit.unwrap_or(20).min(200);
-    let mut filters = crate::engine::search_engine::SearchFilters::default();
-    filters.since_ts = req.from_time;
-    filters.until_ts = req.to_time;
+    let filters = crate::engine::search_engine::SearchFilters {
+        since_ts: req.from_time,
+        until_ts: req.to_time,
+        ..Default::default()
+    };
     let has_filters = filters.since_ts.is_some() || filters.until_ts.is_some();
     match engine.scheduler.api_search_filtered(
         &req.query,
@@ -615,7 +617,7 @@ pub async fn sse_stream(
         let cognitive_enabled = engine.cognitive.enabled();
         let sec = engine.guard.stats();
 
-        let cluster_data: Vec<serde_json::Value> = if tick % 5 == 0 {
+        let cluster_data: Vec<serde_json::Value> = if tick.is_multiple_of(5) {
             let clusters = engine.space().find_clusters();
             clusters
                 .iter()

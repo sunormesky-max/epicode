@@ -186,17 +186,15 @@ impl CacheLayer {
 
         if let Some(client) = self.l2_client.as_ref() {
             if let Ok(mut conn) = client.get_connection() {
-                if let Ok(serialized) = redis::cmd("GET")
+                if let Ok(Some(data)) = redis::cmd("GET")
                     .arg(key)
                     .query::<Option<Vec<u8>>>(&mut conn)
                 {
-                    if let Some(data) = serialized {
-                        if let Ok(value) = bincode::deserialize::<CacheValue>(&data) {
-                            self.stats.l2_hits.fetch_add(1, Ordering::Relaxed);
-                            let _ = self.l1_cache.insert(key.to_string(), value.clone()).await;
-                            tracing::debug!("L2 cache hit for key: {}", key);
-                            return Some(value);
-                        }
+                    if let Ok(value) = bincode::deserialize::<CacheValue>(&data) {
+                        self.stats.l2_hits.fetch_add(1, Ordering::Relaxed);
+                        let _ = self.l1_cache.insert(key.to_string(), value.clone()).await;
+                        tracing::debug!("L2 cache hit for key: {}", key);
+                        return Some(value);
                     }
                 }
             }

@@ -782,7 +782,7 @@ impl StorageManager {
                 }
             }
         }
-        backups.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        backups.sort_by_key(|b| std::cmp::Reverse(b.timestamp.clone()));
         backups
     }
 
@@ -1084,7 +1084,7 @@ impl StorageManager {
                 backups.push((name, entry.path()));
             }
         }
-        backups.sort_by(|a, b| b.0.cmp(&a.0));
+        backups.sort_by_key(|b| std::cmp::Reverse(b.0.clone()));
         for (_, path) in backups.iter().skip(5) {
             let _ = fs::remove_file(path);
         }
@@ -1259,7 +1259,7 @@ mod tests {
         let t = make_tetra(10, "test", 1.0);
         storage.upsert_tetra(&t).unwrap();
 
-        storage.update_mass(10, 3.14).unwrap();
+        storage.update_mass(10, std::f64::consts::PI).unwrap();
         storage
             .update_aliases(10, &["alias_a".into(), "alias_b".into()])
             .unwrap();
@@ -1267,7 +1267,7 @@ mod tests {
         let space = Space::new();
         storage.load_all(&space, &KnowledgeGraph::new());
         let loaded = space.get_tetrahedron(10).unwrap();
-        assert!((loaded.mass - 3.14).abs() < 0.01);
+        assert!((loaded.mass - std::f64::consts::PI).abs() < 0.01);
         assert_eq!(loaded.data.aliases, vec!["alias_a", "alias_b"]);
     }
 

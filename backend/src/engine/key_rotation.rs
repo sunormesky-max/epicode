@@ -163,7 +163,7 @@ impl KeyRotation {
             return Err(format!("Key {} not found", key_id));
         }
 
-        if key_id == &self.current_key_id {
+        if key_id == self.current_key_id {
             return Err("Cannot revoke the current active key".to_string());
         }
 
@@ -378,7 +378,7 @@ mod tests {
         kr.rotate_key().unwrap();
 
         let events = kr.get_events_since(initial_time);
-        assert!(events.len() > 0);
+        assert!(!events.is_empty());
     }
 
     #[test]
@@ -396,7 +396,7 @@ mod tests {
         for _ in 0..3 {
             kr.rotate_key().unwrap();
             let active_keys = kr.list_active_keys();
-            assert!(active_keys.len() >= 1);
+            assert!(!active_keys.is_empty());
             assert!(active_keys.len() <= 5);
         }
     }
