@@ -6,11 +6,13 @@ services:
     container_name: epicode
     restart: unless-stopped
     ports:
-      - "127.0.0.1:9110:9110"
+      - "127.0.0.1:9111:9111"
     environment:
       - TETRAMEM_ADMIN_KEY=${TETRAMEM_ADMIN_KEY}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - TETRAMEM_LISTEN_ADDR=0.0.0.0:9111
       - RUST_LOG=info
+      - REDIS_URL=${REDIS_URL:-}
     volumes:
       - epicode_data:/app/data
     security_opt:
