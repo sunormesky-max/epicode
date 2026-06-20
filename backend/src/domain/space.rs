@@ -212,7 +212,7 @@ impl Space {
         let tetra = inner
             .tetrahedrons
             .remove(&id)
-            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+            .ok_or_else(|| format!("tetrahedron {id} not found"))?;
 
         for &vid in &tetra.vertex_ids {
             if let Some(ids) = inner.vertex_to_tetras.get_mut(&vid) {
@@ -263,7 +263,7 @@ impl Space {
         let tetra = inner
             .tetrahedrons
             .get_mut(&id)
-            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+            .ok_or_else(|| format!("tetrahedron {id} not found"))?;
         tetra.mass = (tetra.mass + delta).clamp(0.1, 100.0);
         Ok(())
     }
@@ -273,7 +273,7 @@ impl Space {
         let tetra = inner
             .tetrahedrons
             .get_mut(&id)
-            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+            .ok_or_else(|| format!("tetrahedron {id} not found"))?;
         tetra.data.aliases = aliases;
         Ok(())
     }
@@ -287,7 +287,7 @@ impl Space {
         let tetra = inner
             .tetrahedrons
             .get_mut(&id)
-            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+            .ok_or_else(|| format!("tetrahedron {id} not found"))?;
         tetra.data = payload;
         Ok(())
     }
@@ -297,7 +297,7 @@ impl Space {
         let tetra = inner
             .tetrahedrons
             .get_mut(&id)
-            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+            .ok_or_else(|| format!("tetrahedron {id} not found"))?;
         tetra.data.labels = labels;
         Ok(())
     }
@@ -307,7 +307,7 @@ impl Space {
         let tetra = inner
             .tetrahedrons
             .get_mut(&id)
-            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+            .ok_or_else(|| format!("tetrahedron {id} not found"))?;
         tetra.data.enforced = enforced;
         Ok(())
     }
@@ -317,7 +317,7 @@ impl Space {
         let tetra = inner
             .tetrahedrons
             .get_mut(&id)
-            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+            .ok_or_else(|| format!("tetrahedron {id} not found"))?;
         tetra.vertex_ids = vertex_ids;
         Ok(())
     }
@@ -549,7 +549,7 @@ impl Space {
         let removed = inner
             .tetrahedrons
             .remove(&id)
-            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+            .ok_or_else(|| format!("tetrahedron {id} not found"))?;
 
         for &vid in &removed.vertex_ids {
             if let Some(ids) = inner.vertex_to_tetras.get_mut(&vid) {

@@ -82,9 +82,9 @@ impl EmbeddingService {
 
         let resp: serde_json::Value = req
             .send_json(body)
-            .map_err(|e| format!("embedding HTTP: {}", e))?
+            .map_err(|e| format!("embedding HTTP: {e}"))?
             .into_json()
-            .map_err(|e| format!("embedding JSON: {}", e))?;
+            .map_err(|e| format!("embedding JSON: {e}"))?;
 
         let embedding: Vec<f64> = if is_ollama {
             resp["embeddings"][0]

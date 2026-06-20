@@ -450,7 +450,7 @@ async fn main() {
     let shutdown_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     if let Some(port) = tcp_port {
-        let tcp_addr = format!("{}:{}", tcp_bind, port);
+        let tcp_addr = format!("{tcp_bind}:{port}");
         let mgr = user_mgr.clone();
         let sf = shutdown_flag.clone();
         let rt_handle = tokio::runtime::Handle::current();
@@ -601,7 +601,7 @@ fn handle_tcp_connection(stream: std::net::TcpStream, user_mgr: &UserManager, pe
                                 "jsonrpc": "2.0", "id": tcp_extract_id(trimmed),
                                 "result": {"status": "authenticated", "user_id": user_id}
                             });
-                            if writeln!(writer, "{}", resp).is_err() {
+                            if writeln!(writer, "{resp}").is_err() {
                                 break;
                             }
                             if writer.flush().is_err() {
@@ -610,7 +610,7 @@ fn handle_tcp_connection(stream: std::net::TcpStream, user_mgr: &UserManager, pe
                             continue;
                         }
                         Err(resp_str) => {
-                            if writeln!(writer, "{}", resp_str).is_err() {
+                            if writeln!(writer, "{resp_str}").is_err() {
                                 break;
                             }
                             if writer.flush().is_err() {
@@ -635,7 +635,7 @@ fn handle_tcp_connection(stream: std::net::TcpStream, user_mgr: &UserManager, pe
                             t.elapsed().as_millis()
                         );
                     }
-                    if writeln!(writer, "{}", response).is_err() {
+                    if writeln!(writer, "{response}").is_err() {
                         break;
                     }
                     if writer.flush().is_err() {
@@ -989,10 +989,8 @@ async fn register_user(
         if let Err(resp) = require_admin(&st.admin_key, &headers) {
             return resp;
         }
-    } else {
-        if let Err(e) = st.user_mgr.use_invite_code(invite_code) {
-            return error_response(StatusCode::FORBIDDEN, &e);
-        }
+    } else if let Err(e) = st.user_mgr.use_invite_code(invite_code) {
+        return error_response(StatusCode::FORBIDDEN, &e);
     }
 
     if let Err(e) = validate_user_id(&req.user_id) {
@@ -1139,10 +1137,7 @@ async fn digest_content(
     if needed > 100 {
         return error_response(
             StatusCode::BAD_REQUEST,
-            &format!(
-                "too many chunks ({}). Max 100 per request. Use larger chunk_size.",
-                needed
-            ),
+            &format!("too many chunks ({needed}). Max 100 per request. Use larger chunk_size."),
         );
     }
     if let Err(e) = st.user_mgr.check_memory_limit(&user.user_id) {
@@ -1153,10 +1148,7 @@ async fn digest_content(
             .unwrap_or(0);
         return error_response(
             StatusCode::FORBIDDEN,
-            &format!(
-                "not enough memory quota (need ~{}, have {}): {}",
-                needed, available, e
-            ),
+            &format!("not enough memory quota (need ~{needed}, have {available}): {e}"),
         );
     }
 

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{PasswordHash, SaltString};
 use argon2::{Algorithm, Argon2, Params, PasswordHasher, PasswordVerifier, Version};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
@@ -12,7 +13,7 @@ use super::vector::VectorLayer;
 use super::Engine;
 
 fn hash_password(password: &str) -> String {
-    let salt = SaltString::generate(&mut rand::rngs::OsRng);
+    let salt = SaltString::generate(&mut OsRng);
     let params = Params::new(65536, 3, 4, Some(32)).unwrap();
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let hash = argon2
@@ -146,11 +147,11 @@ impl UserManager {
     }
 
     fn generate_invite_code() -> String {
-        use rand::Rng;
+        use rand::RngExt;
         let chars: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         (0..32)
-            .map(|_| chars[rng.gen_range(0..chars.len())] as char)
+            .map(|_| chars[rng.random_range(0..chars.len())] as char)
             .collect()
     }
 
@@ -363,7 +364,7 @@ impl UserManager {
         if let Err(e) = self.save_users_db(&snapshot) {
             let mut db = self.users_db.write();
             db.remove(user_id);
-            return Err(format!("failed to persist registration: {}", e));
+            return Err(format!("failed to persist registration: {e}"));
         }
         tracing::info!(
             "[UserManager] registered user {} plan={:?} max_memories={}",
@@ -411,7 +412,7 @@ impl UserManager {
         let snapshot = db.clone();
         drop(db);
         self.save_users_db(&snapshot)
-            .map_err(|e| format!("failed to persist plan: {}", e))?;
+            .map_err(|e| format!("failed to persist plan: {e}"))?;
         tracing::info!(
             "[UserManager] plan set for user {} -> {:?} (max_memories={})",
             user_id,
@@ -434,7 +435,7 @@ impl UserManager {
         let snapshot = db.clone();
         drop(db);
         self.save_users_db(&snapshot)
-            .map_err(|e| format!("failed to persist password: {}", e))?;
+            .map_err(|e| format!("failed to persist password: {e}"))?;
         tracing::info!("[UserManager] password set for user {}", user_id);
         Ok(())
     }
@@ -496,7 +497,7 @@ impl UserManager {
             if let Some(p) = db.get_mut(parent_id) {
                 p.sub_accounts.retain(|s| s != sub_user_id);
             }
-            return Err(format!("failed to persist sub-account: {}", e));
+            return Err(format!("failed to persist sub-account: {e}"));
         }
         tracing::info!(
             "[UserManager] created sub-account {} under parent {}",
@@ -531,7 +532,7 @@ impl UserManager {
         let snapshot = db.clone();
         drop(db);
         self.save_users_db(&snapshot)
-            .map_err(|e| format!("failed to persist: {}", e))?;
+            .map_err(|e| format!("failed to persist: {e}"))?;
         tracing::info!(
             "[UserManager] revoked sub-account {} from parent {}",
             sub_user_id,
@@ -709,7 +710,7 @@ impl UserManager {
             if let Some(info) = db.get_mut(user_id) {
                 info.memories_used -= 1;
             }
-            return Err(format!("failed to persist memory count: {}", e));
+            return Err(format!("failed to persist memory count: {e}"));
         }
         Ok(())
     }
@@ -805,9 +806,7 @@ impl UserManager {
             return;
         }
         let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
-        let dst = self
-            .base_data_dir
-            .join(format!("users_meta_{}.json.bak", ts));
+        let dst = self.base_data_dir.join(format!("users_meta_{ts}.json.bak"));
         if let Err(e) = std::fs::copy(&src, &dst) {
             tracing::error!("[BackupMeta] failed: {}", e);
             return;
@@ -858,7 +857,7 @@ impl UserManager {
                 if let Some(info) = db.get_mut(user_id) {
                     info.api_key = old_key;
                 }
-                return Err(format!("failed to persist API key reset: {}", e));
+                return Err(format!("failed to persist API key reset: {e}"));
             }
             tracing::info!("[UserManager] reset API key for user {}", user_id);
             Ok(new_key)
@@ -939,7 +938,7 @@ impl UserManager {
         }
         let user_dir = self.base_data_dir.join("users").join(user_id);
         if user_dir.exists() {
-            std::fs::remove_dir_all(&user_dir).map_err(|e| format!("rm dir: {}", e))?;
+            std::fs::remove_dir_all(&user_dir).map_err(|e| format!("rm dir: {e}"))?;
         }
         tracing::info!("[UserManager] deleted user {}", user_id);
         Ok(())
@@ -948,17 +947,17 @@ impl UserManager {
     fn save_users_db(&self, db: &HashMap<String, UserInfo>) -> Result<(), String> {
         let db_path = self.base_data_dir.join("users_meta.json");
         let tmp_path = self.base_data_dir.join("users_meta.json.tmp");
-        let json = serde_json::to_string_pretty(db).map_err(|e| format!("serialize: {}", e))?;
+        let json = serde_json::to_string_pretty(db).map_err(|e| format!("serialize: {e}"))?;
         let output = if let Some(ref crypto) = self.meta_crypto {
             let enc = crypto
                 .encrypt_content(&json, "__meta_db__")
-                .map_err(|e| format!("encrypt users_meta: {}", e))?;
+                .map_err(|e| format!("encrypt users_meta: {e}"))?;
             serde_json::json!({"__enc": enc}).to_string()
         } else {
             json
         };
-        std::fs::write(&tmp_path, &output).map_err(|e| format!("write tmp: {}", e))?;
-        std::fs::rename(&tmp_path, &db_path).map_err(|e| format!("rename: {}", e))?;
+        std::fs::write(&tmp_path, &output).map_err(|e| format!("write tmp: {e}"))?;
+        std::fs::rename(&tmp_path, &db_path).map_err(|e| format!("rename: {e}"))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

@@ -122,7 +122,7 @@ impl ContextAssembler {
             let time_desc = format_time_ago(age_hours);
             sections.push(Section {
                 kind: SectionKind::LatestSession,
-                title: format!("## Latest Session ({})", time_desc),
+                title: format!("## Latest Session ({time_desc})"),
                 body: truncate(&session.1.content, 800),
                 token_estimate: estimate_tokens(&session.1.content, 800),
             });
@@ -270,7 +270,7 @@ fn format_time_ago(age_hours: i64) -> String {
     if age_hours < 1 {
         "just now".to_string()
     } else if age_hours < 24 {
-        format!("{}h ago", age_hours)
+        format!("{age_hours}h ago")
     } else {
         format!("{}d ago", age_hours / 24)
     }
@@ -362,8 +362,7 @@ mod tests {
         let count = result.matches("Important session").count();
         assert!(
             count <= 1,
-            "content should not appear more than once, got {} times",
-            count
+            "content should not appear more than once, got {count} times"
         );
     }
 

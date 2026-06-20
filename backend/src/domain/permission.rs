@@ -206,21 +206,20 @@ impl std::fmt::Display for AuthzError {
             } => {
                 write!(
                     f,
-                    "Permission denied for user {} to {} on resource {}",
-                    user_id, action, resource_id
+                    "Permission denied for user {user_id} to {action} on resource {resource_id}"
                 )
             }
             AuthzError::ResourceNotFound { resource_id } => {
-                write!(f, "Resource not found: {}", resource_id)
+                write!(f, "Resource not found: {resource_id}")
             }
             AuthzError::UserNotFound { user_id } => {
-                write!(f, "User not found: {}", user_id)
+                write!(f, "User not found: {user_id}")
             }
             AuthzError::InvalidRole { role } => {
-                write!(f, "Invalid role: {}", role)
+                write!(f, "Invalid role: {role}")
             }
             AuthzError::InternalError { message } => {
-                write!(f, "Internal error: {}", message)
+                write!(f, "Internal error: {message}")
             }
         }
     }

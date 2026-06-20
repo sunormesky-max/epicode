@@ -359,7 +359,7 @@ impl SecurityGuard {
             h ^= b as u64;
             h = h.wrapping_mul(1099511628211);
         }
-        format!("rl:{:016x}", h)
+        format!("rl:{h:016x}")
     }
 }
 
@@ -473,7 +473,7 @@ mod tests {
     #[test]
     fn validate_labels_too_many() {
         let guard = test_guard();
-        let labels: Vec<String> = (0..6).map(|i| format!("label{}", i)).collect();
+        let labels: Vec<String> = (0..6).map(|i| format!("label{i}")).collect();
         assert_eq!(
             guard.validate_labels(&labels).unwrap_err(),
             SecurityResult::DeniedValidation

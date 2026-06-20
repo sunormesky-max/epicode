@@ -567,7 +567,7 @@ impl CognitiveEngine {
     }
 
     fn classify_via_llm(&self, content: &str) -> Result<Vec<String>, String> {
-        let url = format!("{}/v1/chat/completions", DEEPSEEK_BASE);
+        let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let resp: serde_json::Value = self.client
             .post(&url)
             .timeout(std::time::Duration::from_secs(8))
@@ -583,16 +583,16 @@ impl CognitiveEngine {
                 "max_tokens": 64,
                 "response_format": {"type": "json_object"}
             }))
-            .map_err(|e| format!("classify HTTP: {}", e))?
+            .map_err(|e| format!("classify HTTP: {e}"))?
             .into_json()
-            .map_err(|e| format!("classify JSON: {}", e))?;
+            .map_err(|e| format!("classify JSON: {e}"))?;
 
         let body = resp["choices"][0]["message"]["content"]
             .as_str()
             .ok_or("no content in classify response")?;
 
         let parsed: serde_json::Value =
-            serde_json::from_str(body).map_err(|e| format!("parse classify: {}", e))?;
+            serde_json::from_str(body).map_err(|e| format!("parse classify: {e}"))?;
 
         parsed["labels"]
             .as_array()
@@ -609,7 +609,7 @@ impl CognitiveEngine {
             return Err("cognitive engine disabled".into());
         }
 
-        let url = format!("{}/v1/chat/completions", DEEPSEEK_BASE);
+        let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let resp: serde_json::Value = self.client
             .post(&url)
             .timeout(std::time::Duration::from_secs(30))
@@ -624,9 +624,9 @@ impl CognitiveEngine {
                 "temperature": 0.3,
                 "max_tokens": 1024
             }))
-            .map_err(|e| format!("answer HTTP: {}", e))?
+            .map_err(|e| format!("answer HTTP: {e}"))?
             .into_json()
-            .map_err(|e| format!("answer JSON: {}", e))?;
+            .map_err(|e| format!("answer JSON: {e}"))?;
 
         resp["choices"][0]["message"]["content"]
             .as_str()
@@ -639,7 +639,7 @@ impl CognitiveEngine {
             return Err("cognitive engine disabled".into());
         }
 
-        let url = format!("{}/v1/chat/completions", DEEPSEEK_BASE);
+        let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let resp: serde_json::Value = self.client
             .post(&url)
             .set("Authorization", &format!("Bearer {}", self.api_key))
@@ -654,9 +654,9 @@ impl CognitiveEngine {
                 "max_tokens": 128,
                 "response_format": {"type": "json_object"}
             }))
-            .map_err(|e| format!("rerank HTTP: {}", e))?
+            .map_err(|e| format!("rerank HTTP: {e}"))?
             .into_json()
-            .map_err(|e| format!("rerank JSON: {}", e))?;
+            .map_err(|e| format!("rerank JSON: {e}"))?;
 
         let content = resp["choices"][0]["message"]["content"]
             .as_str()
@@ -685,14 +685,14 @@ impl CognitiveEngine {
 
         {
             let cache = self.translate_cache.lock();
-            if let Some(cached) = cache.get(&format!("te:{}", query)) {
+            if let Some(cached) = cache.get(&format!("te:{query}")) {
                 tracing::debug!("[Cognitive] translate_and_expand cache hit: '{}'", query);
                 return Ok((cached.clone(), cached != query));
             }
         }
 
         if !has_cjk {
-            let key = format!("te:{}", query);
+            let key = format!("te:{query}");
             let mut cache = self.translate_cache.lock();
             let mut order = self.translate_cache_order.lock();
             cache.insert(key.clone(), query.to_string());
@@ -702,7 +702,7 @@ impl CognitiveEngine {
 
         let system_prompt = "Translate this Chinese query to English for semantic search. If it's a short/ambiguous query, expand into a descriptive sentence (1-2 sentences). Return JSON: {\"result\": \"...\"}";
 
-        let url = format!("{}/v1/chat/completions", DEEPSEEK_BASE);
+        let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let resp: serde_json::Value = self
             .client
             .post(&url)
@@ -718,16 +718,16 @@ impl CognitiveEngine {
                 "max_tokens": 200,
                 "response_format": {"type": "json_object"}
             }))
-            .map_err(|e| format!("translate_expand HTTP: {}", e))?
+            .map_err(|e| format!("translate_expand HTTP: {e}"))?
             .into_json()
-            .map_err(|e| format!("translate_expand JSON: {}", e))?;
+            .map_err(|e| format!("translate_expand JSON: {e}"))?;
 
         let content = resp["choices"][0]["message"]["content"]
             .as_str()
             .ok_or("no content in translate_expand response")?;
 
         let parsed: serde_json::Value =
-            serde_json::from_str(content).map_err(|e| format!("parse translate_expand: {}", e))?;
+            serde_json::from_str(content).map_err(|e| format!("parse translate_expand: {e}"))?;
 
         let result = parsed["result"]
             .as_str()
@@ -737,7 +737,7 @@ impl CognitiveEngine {
         let was_translated = has_cjk && result != query;
 
         {
-            let key = format!("te:{}", query);
+            let key = format!("te:{query}");
             let mut cache = self.translate_cache.lock();
             let mut order = self.translate_cache_order.lock();
             cache.insert(key.clone(), result.clone());
@@ -776,12 +776,12 @@ impl CognitiveEngine {
             .map(|(i, (_, content, labels))| {
                 let preview: String = content.chars().take(100).collect();
                 let label_str = labels.join(",");
-                format!("  #{}: [{}] {}", i, label_str, preview)
+                format!("  #{i}: [{label_str}] {preview}")
             })
             .collect::<Vec<_>>()
             .join("\n");
 
-        let url = format!("{}/v1/chat/completions", DEEPSEEK_BASE);
+        let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let resp: serde_json::Value = self.client
             .post(&url)
             .timeout(std::time::Duration::from_secs(20))
@@ -797,9 +797,9 @@ impl CognitiveEngine {
                 "max_tokens": 512,
                 "response_format": {"type": "json_object"}
             }))
-            .map_err(|e| format!("alias HTTP: {}", e))?
+            .map_err(|e| format!("alias HTTP: {e}"))?
             .into_json()
-            .map_err(|e| format!("alias JSON: {}", e))?;
+            .map_err(|e| format!("alias JSON: {e}"))?;
 
         let content = resp["choices"][0]["message"]["content"]
             .as_str()
@@ -844,12 +844,12 @@ impl CognitiveEngine {
             .enumerate()
             .map(|(i, (_, content))| {
                 let preview: String = content.chars().take(120).collect();
-                format!("  #{}: {}", i, preview)
+                format!("  #{i}: {preview}")
             })
             .collect::<Vec<_>>()
             .join("\n");
 
-        let url = format!("{}/v1/chat/completions", DEEPSEEK_BASE);
+        let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let resp: serde_json::Value = self.client
             .post(&url)
             .timeout(std::time::Duration::from_secs(20))
@@ -865,9 +865,9 @@ impl CognitiveEngine {
                 "max_tokens": 512,
                 "response_format": {"type": "json_object"}
             }))
-            .map_err(|e| format!("entity HTTP: {}", e))?
+            .map_err(|e| format!("entity HTTP: {e}"))?
             .into_json()
-            .map_err(|e| format!("entity JSON: {}", e))?;
+            .map_err(|e| format!("entity JSON: {e}"))?;
 
         let content = resp["choices"][0]["message"]["content"]
             .as_str()
@@ -906,7 +906,7 @@ impl CognitiveEngine {
         }
 
         let preview: String = content.chars().take(500).collect();
-        let url = format!("{}/v1/chat/completions", DEEPSEEK_BASE);
+        let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let resp: serde_json::Value = self.client
             .post(&url)
             .timeout(std::time::Duration::from_secs(15))
@@ -921,9 +921,9 @@ impl CognitiveEngine {
                 "temperature": 0.3,
                 "max_tokens": 256
             }))
-            .map_err(|e| format!("skill desc HTTP: {}", e))?
+            .map_err(|e| format!("skill desc HTTP: {e}"))?
             .into_json()
-            .map_err(|e| format!("skill desc JSON: {}", e))?;
+            .map_err(|e| format!("skill desc JSON: {e}"))?;
 
         let desc = resp["choices"][0]["message"]["content"]
             .as_str()
@@ -955,7 +955,7 @@ impl CognitiveEngine {
             *last = user_prompt[..safe].to_string();
         }
 
-        let url = format!("{}/v1/chat/completions", DEEPSEEK_BASE);
+        let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let tools_arc = self.tools.lock().clone();
         let mut prompt = user_prompt;
 
@@ -975,9 +975,9 @@ impl CognitiveEngine {
                     "temperature": 0.3,
                     "max_tokens": 8192,
                 }))
-                .map_err(|e| format!("LLM round{}: {}", round, e))?
+                .map_err(|e| format!("LLM round{round}: {e}"))?
                 .into_string()
-                .map_err(|e| format!("LLM body round{}: {}", round, e))?;
+                .map_err(|e| format!("LLM body round{round}: {e}"))?;
 
             let resp: serde_json::Value = serde_json::from_str(&resp_body).map_err(|e| {
                 format!(
@@ -1158,12 +1158,12 @@ impl CognitiveEngine {
                         tracing::info!("[LLM tool] round{} calling {}({})", round, tool, args);
                         let result = provider
                             .execute_tool(tool, args)
-                            .unwrap_or_else(|e| format!("error: {}", e));
+                            .unwrap_or_else(|e| format!("error: {e}"));
                         tracing::info!(
                             "[LLM tool] -> {}",
                             result.chars().take(200).collect::<String>()
                         );
-                        tool_results.push(format!("工具 {} 返回:\n{}", tool, result));
+                        tool_results.push(format!("工具 {tool} 返回:\n{result}"));
                     }
                 }
                 if !tool_results.is_empty() {
@@ -1215,13 +1215,13 @@ impl CognitiveEngine {
                 sm.hit_count,
                 sm.hit_rate * 100.0,
                 if sm.miss_queries.is_empty() { "none".to_string() } else {
-                    sm.miss_queries.iter().take(10).map(|q| format!("\"{}\"", q)).collect::<Vec<_>>().join(", ")
+                    sm.miss_queries.iter().take(10).map(|q| format!("\"{q}\"")).collect::<Vec<_>>().join(", ")
                 },
                 if sm.top_labels.is_empty() { "none".to_string() } else {
-                    sm.top_labels.iter().take(8).map(|(l, c)| format!("{}({})", l, c)).collect::<Vec<_>>().join(", ")
+                    sm.top_labels.iter().take(8).map(|(l, c)| format!("{l}({c})")).collect::<Vec<_>>().join(", ")
                 },
                 if sm.hot_memories.is_empty() { "none".to_string() } else {
-                    sm.hot_memories.iter().take(5).map(|(id, c)| format!("#{}({}x)", id, c)).collect::<Vec<_>>().join(", ")
+                    sm.hot_memories.iter().take(5).map(|(id, c)| format!("#{id}({c}x)")).collect::<Vec<_>>().join(", ")
                 }
             ));
             if !sm.miss_queries.is_empty() {
@@ -1243,7 +1243,7 @@ impl CognitiveEngine {
                 if kg.disconnected_components.is_empty() { "none (fully connected)".to_string() } else {
                     format!("{} islands: sizes={}", kg.disconnected_components.len(), kg.disconnected_components.iter().take(5).map(|s| s.to_string()).collect::<Vec<_>>().join(","))
                 },
-                kg.relation_type_counts.iter().map(|(k, v)| format!("{}:{}", k, v)).collect::<Vec<_>>().join(", ")
+                kg.relation_type_counts.iter().map(|(k, v)| format!("{k}:{v}")).collect::<Vec<_>>().join(", ")
             ));
             if kg.orphan_count > 0 {
                 sections.push("  → ACTION HINT: orphans are INVISIBLE to multi-hop search. Link them to related memories.".to_string());
@@ -1258,7 +1258,7 @@ impl CognitiveEngine {
             let labels_str = c
                 .label_distribution
                 .iter()
-                .map(|(k, v)| format!("{}:{}", k, v))
+                .map(|(k, v)| format!("{k}:{v}"))
                 .collect::<Vec<_>>()
                 .join(" ");
             let samples: Vec<String> = state
@@ -1300,8 +1300,7 @@ impl CognitiveEngine {
                     let li = ci.member_labels.first().map(|s| s.as_str()).unwrap_or("?");
                     let lj = cj.member_labels.first().map(|s| s.as_str()).unwrap_or("?");
                     sections.push(format!(
-                        "- Cluster {}[{}] ↔ Cluster {}[{}]: distance={:.2}",
-                        i, li, j, lj, dist
+                        "- Cluster {i}[{li}] ↔ Cluster {j}[{lj}]: distance={dist:.2}"
                     ));
                 }
             }
@@ -1323,7 +1322,7 @@ impl CognitiveEngine {
         if !state.recent_events.is_empty() {
             sections.push("\n## Recent Events".to_string());
             for e in state.recent_events.iter().rev().take(8) {
-                sections.push(format!("- {}", e));
+                sections.push(format!("- {e}"));
             }
         }
 

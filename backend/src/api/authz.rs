@@ -23,7 +23,7 @@ impl PermissionRepository {
                 perms.push(permission);
                 Ok(())
             }
-            Err(e) => Err(format!("Failed to acquire lock: {}", e)),
+            Err(e) => Err(format!("Failed to acquire lock: {e}")),
         }
     }
 
@@ -44,7 +44,7 @@ impl PermissionRepository {
                         && p.revoked_at.is_none()
                 })
                 .cloned()),
-            Err(e) => Err(format!("Failed to acquire lock: {}", e)),
+            Err(e) => Err(format!("Failed to acquire lock: {e}")),
         }
     }
 
@@ -56,7 +56,7 @@ impl PermissionRepository {
                 .filter(|p| p.user_id == user_id && p.revoked_at.is_none())
                 .cloned()
                 .collect()),
-            Err(e) => Err(format!("Failed to acquire lock: {}", e)),
+            Err(e) => Err(format!("Failed to acquire lock: {e}")),
         }
     }
 
@@ -76,7 +76,7 @@ impl PermissionRepository {
                 })
                 .cloned()
                 .collect()),
-            Err(e) => Err(format!("Failed to acquire lock: {}", e)),
+            Err(e) => Err(format!("Failed to acquire lock: {e}")),
         }
     }
 
@@ -91,7 +91,7 @@ impl PermissionRepository {
                     Err("Permission not found".to_string())
                 }
             }
-            Err(e) => Err(format!("Failed to acquire lock: {}", e)),
+            Err(e) => Err(format!("Failed to acquire lock: {e}")),
         }
     }
 
@@ -103,7 +103,7 @@ impl PermissionRepository {
                 perms.clear();
                 Ok(())
             }
-            Err(e) => Err(format!("Failed to acquire lock: {}", e)),
+            Err(e) => Err(format!("Failed to acquire lock: {e}")),
         }
     }
 }
@@ -192,10 +192,7 @@ impl AuthorizationChecker {
                 resource_type.as_str().to_string(),
                 resource_id.to_string(),
                 AuditResult::PermissionDenied,
-                Some(format!(
-                    "Role {:?} cannot perform action {:?}",
-                    role, action
-                )),
+                Some(format!("Role {role:?} cannot perform action {action:?}")),
                 tenant_id.to_string(),
                 None,
             );
@@ -306,9 +303,9 @@ mod tests {
         let repo = PermissionRepository::new();
         for i in 0..3 {
             let perm = Permission {
-                id: format!("perm{}", i),
+                id: format!("perm{i}"),
                 user_id: "user1".to_string(),
-                resource_id: format!("resource{}", i),
+                resource_id: format!("resource{i}"),
                 resource_type: ResourceType::Memory,
                 role: UserRole::Viewer,
                 granted_at: Utc::now(),

@@ -183,11 +183,7 @@ mod tests {
             let d = pos[i].distance_to(&pos[j]);
             assert!(
                 (d - EDGE_LENGTH).abs() < 1e-10,
-                "edge ({},{}) = {}, expected {}",
-                i,
-                j,
-                d,
-                EDGE_LENGTH
+                "edge ({i},{j}) = {d}, expected {EDGE_LENGTH}"
             );
         }
     }
@@ -218,9 +214,7 @@ mod tests {
             let d = p.distance_to(&Point3::zero());
             assert!(
                 (d - expected).abs() < 1e-10,
-                "vertex-center dist = {}, expected {}",
-                d,
-                expected
+                "vertex-center dist = {d}, expected {expected}"
             );
         }
     }

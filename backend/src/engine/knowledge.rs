@@ -324,7 +324,7 @@ impl KnowledgeGraph {
                     let label = labels
                         .first()
                         .cloned()
-                        .unwrap_or_else(|| format!("concept_{}", next_id));
+                        .unwrap_or_else(|| format!("concept_{next_id}"));
                     concepts.push(ConceptPrototype {
                         id: next_id,
                         centroid: vec![],

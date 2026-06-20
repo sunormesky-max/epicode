@@ -32,7 +32,7 @@ pub async fn security_layer(
 
     let path = request.uri().path().to_string();
     let method = request.method().clone().to_string();
-    let action = format!("{} {}", method, path);
+    let action = format!("{method} {path}");
 
     let api_key = headers
         .get("X-API-Key")

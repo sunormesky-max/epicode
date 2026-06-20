@@ -850,7 +850,7 @@ pub async fn rotate_key(State(engine): State<Arc<Engine>>) -> Json<serde_json::V
     let mut kr = engine.key_rotation.lock().unwrap();
     match kr.rotate_key() {
         Ok(event) => {
-            let event_str = format!("{:?}", event);
+            let event_str = format!("{event:?}");
             Json(serde_json::json!({
                 "success": true,
                 "message": "Key rotated successfully",
@@ -877,7 +877,7 @@ pub async fn revoke_key(
     let mut kr = engine.key_rotation.lock().unwrap();
     match kr.revoke_key(&req.key_id, &req.reason) {
         Ok(event) => {
-            let event_str = format!("{:?}", event);
+            let event_str = format!("{event:?}");
             Json(serde_json::json!({
                 "success": true,
                 "message": "Key revoked successfully",

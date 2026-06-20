@@ -121,7 +121,7 @@ impl DreamEngine {
         }
 
         if junk_evicted > 0 {
-            insights.push(format!("evicted {} junk/low-mass memories", junk_evicted));
+            insights.push(format!("evicted {junk_evicted} junk/low-mass memories"));
         }
 
         // Refresh after eviction
@@ -167,11 +167,11 @@ impl DreamEngine {
                 }
             }
         } else {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             for _ in 0..max_scan {
-                use rand::Rng;
-                let wi = rng.gen_range(0..non_meta.len());
-                let wj = rng.gen_range(0..non_meta.len());
+                use rand::RngExt;
+                let wi = rng.random_range(0..non_meta.len());
+                let wj = rng.random_range(0..non_meta.len());
                 if wi == wj {
                     continue;
                 }
@@ -229,10 +229,7 @@ impl DreamEngine {
         }
 
         if duplicates_merged > 0 {
-            insights.push(format!(
-                "consolidated {} duplicate pairs",
-                duplicates_merged
-            ));
+            insights.push(format!("consolidated {duplicates_merged} duplicate pairs"));
         }
 
         // Phase 3: Form connections for moderately similar pairs
@@ -265,11 +262,11 @@ impl DreamEngine {
                 }
             }
         } else {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             for _ in 0..max_scan {
-                use rand::Rng;
-                let wi = rng.gen_range(0..non_meta.len());
-                let wj = rng.gen_range(0..non_meta.len());
+                use rand::RngExt;
+                let wi = rng.random_range(0..non_meta.len());
+                let wj = rng.random_range(0..non_meta.len());
                 if wi == wj {
                     continue;
                 }
@@ -309,8 +306,7 @@ impl DreamEngine {
 
         if connections_formed > 0 {
             insights.push(format!(
-                "found {} similar pairs (>{:.1} threshold), largest cluster: {}",
-                connections_formed, replay_strength, largest_cluster
+                "found {connections_formed} similar pairs (>{replay_strength:.1} threshold), largest cluster: {largest_cluster}"
             ));
         }
 
