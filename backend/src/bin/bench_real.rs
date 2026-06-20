@@ -111,7 +111,7 @@ async fn main() {
     );
 
     // Phase 2: Search
-    let queries = vec![
+    let queries = [
         "memory leak connection pool",
         "microservices architecture pattern",
         "database selection decision",
