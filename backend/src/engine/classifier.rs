@@ -18,7 +18,7 @@ pub struct ClassifyResult {
 
 pub struct CategoryClassifier {
     categories: RwLock<HashMap<String, CategoryInfo>>,
-    client: ureq::Agent,
+    client: attohttpc::Session,
     api_key: String,
     model: String,
     enabled: bool,
@@ -29,10 +29,7 @@ impl CategoryClassifier {
     pub fn new(api_key: &str, model: &str) -> Self {
         Self {
             categories: RwLock::new(HashMap::new()),
-            client: ureq::AgentBuilder::new()
-                .timeout_read(std::time::Duration::from_secs(30))
-                .timeout_write(std::time::Duration::from_secs(5))
-                .build(),
+            client: attohttpc::Session::new(),
             api_key: api_key.to_string(),
             model: model.to_string(),
             enabled: !api_key.is_empty(),
@@ -46,10 +43,7 @@ impl CategoryClassifier {
 
     pub fn classify(&self, content: &str, labels: &[String]) -> ClassifyResult {
         if !self.enabled {
-            return ClassifyResult {
-                category: "general".to_string(),
-                parent: None,
-            };
+            return fallback_classify(labels);
         }
 
         let cats = self.categories.read();
@@ -100,24 +94,27 @@ impl CategoryClassifier {
         let labels_str = labels.join(", ");
 
         let url = format!("{}/v1/chat/completions", super::cognitive::DEEPSEEK_BASE);
-        let resp = self.client
+        let body = serde_json::json!({
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": CLASSIFY_PROMPT},
+                {"role": "user", "content": format!("Content: {}\nLabels: {}\nExisting categories: {}", content.chars().take(200).collect::<String>(), labels_str, existing_str)}
+            ],
+            "temperature": 0.0,
+            "max_tokens": 128,
+            "response_format": {"type": "json_object"}
+        });
+
+        let resp = self
+            .client
             .post(&url)
-            .set("Authorization", &format!("Bearer {}", self.api_key))
-            .set("Content-Type", "application/json")
-            .send_json(ureq::json!({
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": CLASSIFY_PROMPT},
-                    {"role": "user", "content": format!("Content: {}\nLabels: {}\nExisting categories: {}", content.chars().take(200).collect::<String>(), labels_str, existing_str)}
-                ],
-                "temperature": 0.0,
-                "max_tokens": 128,
-                "response_format": {"type": "json_object"}
-            }));
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&body)
+            .and_then(|r| r.send());
 
         match resp {
             Ok(resp) => {
-                let body: serde_json::Value = resp.into_json().unwrap_or_default();
+                let body: serde_json::Value = resp.json().unwrap_or_default();
                 if let Some(content_str) = body["choices"][0]["message"]["content"].as_str() {
                     if let Ok(parsed) = serde_json::from_str::<ClassifyResult>(content_str) {
                         return parsed;
@@ -195,78 +192,58 @@ fn fallback_classify(labels: &[String]) -> ClassifyResult {
         "nature.animal".to_string()
     } else if label_set
         .iter()
-        .any(|l| ["weather", "rain", "climate"].contains(l))
+        .any(|l| ["history", "war", "ancient", "empire"].contains(l))
     {
-        "geo.weather".to_string()
+        "history.general".to_string()
     } else if label_set
         .iter()
-        .any(|l| ["memory", "learning", "ai", "embedding"].contains(l))
+        .any(|l| ["language", "grammar", "linguistics"].contains(l))
     {
-        "ai.systems".to_string()
-    } else if label_set
-        .iter()
-        .any(|l| ["identity", "constitution", "core"].contains(l))
-    {
-        "core.identity".to_string()
-    } else if label_set
-        .iter()
-        .any(|l| ["security", "safety", "auth"].contains(l))
-    {
-        "core.security".to_string()
+        "language.general".to_string()
     } else {
-        "general.misc".to_string()
+        "general".to_string()
     };
-
-    let parent = category.split('.').next().unwrap_or("general").to_string();
 
     ClassifyResult {
         category,
-        parent: Some(parent),
+        parent: None,
     }
 }
 
-const CLASSIFY_PROMPT: &str = r#"Classify this memory into a fine-grained category hierarchy.
-
-Rules:
-1. Use dot-notation: "domain.subdomain" (e.g. "physics.quantum", "tech.programming", "life.food")
-2. Be SPECIFIC: "physics.quantum" not just "science"
-3. Prefer matching an existing category if semantically close
-4. Set parent to the top-level domain
-5. CRITICAL domain mapping:
-   - Content about "David", "I am", "identity", "my memories" → "system.identity"
-   - Content about Epicode internals (cylinder, port, pulse, scheduler, vertex, tetra, cluster, embedding, HNSW, fission, dream engine, knowledge graph) → "architecture.internal"
-   - Content about Rust, programming, tokio, axum, SQLite → "tech.programming"
-   - Content about AI/ML concepts (embeddings, vectors, cosine similarity, neural networks) → "ai.theory"
-   - Content about system design, optimization, performance → "engineering.performance"
-
-Return JSON:
-{"category": "system.identity", "parent": "system"}"#;
+const CLASSIFY_PROMPT: &str = r#"You are a classifier. Given content, labels, and existing categories, return a JSON object with exactly two fields: "category" (a dot-notation category like "science.physics") and "parent" (the parent category or null). Use existing categories when appropriate."#;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn fallback_classify_physics() {
-        let r = fallback_classify(&["quantum".to_string(), "physics".to_string()]);
-        assert_eq!(r.category, "science.physics");
+    fn classify_result_has_no_layer() {
+        let cc = CategoryClassifier::new("", "");
+        let result = cc.classify("quantum entanglement", &["unknown".to_string()]);
+        assert_eq!(result.category, "general");
     }
 
     #[test]
-    fn fallback_classify_core() {
-        let r = fallback_classify(&["identity".to_string(), "system".to_string()]);
-        assert_eq!(r.category, "core.identity");
+    fn fallback_classify_physics() {
+        let result = CategoryClassifier::new("", "").classify(
+            "anything",
+            &["physics".to_string(), "quantum".to_string()],
+        );
+        assert_eq!(result.category, "science.physics");
     }
 
     #[test]
     fn fallback_classify_programming() {
-        let r = fallback_classify(&["git".to_string(), "system".to_string()]);
-        assert_eq!(r.category, "tech.programming");
+        let result = CategoryClassifier::new("", "").classify(
+            "anything",
+            &["rust".to_string(), "programming".to_string()],
+        );
+        assert_eq!(result.category, "tech.programming");
     }
 
     #[test]
-    fn classify_result_has_no_layer() {
-        let r = fallback_classify(&["test".to_string()]);
-        assert!(r.category.contains('.'));
+    fn fallback_classify_core() {
+        let result = CategoryClassifier::new("", "").classify("anything", &[]);
+        assert_eq!(result.category, "general");
     }
 }

@@ -153,7 +153,7 @@ pub trait ToolProvider: Send + Sync {
 }
 
 pub struct CognitiveEngine {
-    client: ureq::Agent,
+    client: attohttpc::Session,
     api_key: String,
     model: String,
     enabled: bool,
@@ -166,11 +166,9 @@ pub struct CognitiveEngine {
 
 impl CognitiveEngine {
     pub fn new(api_key: &str, model: &str) -> Self {
+        let client = attohttpc::Session::new();
         Self {
-            client: ureq::AgentBuilder::new()
-                .timeout_read(std::time::Duration::from_secs(30))
-                .timeout_write(std::time::Duration::from_secs(30))
-                .build(),
+            client,
             api_key: api_key.to_string(),
             model: model.to_string(),
             enabled: !api_key.is_empty(),
@@ -560,10 +558,8 @@ impl CognitiveEngine {
         let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let resp: serde_json::Value = self.client
             .post(&url)
-            .timeout(std::time::Duration::from_secs(8))
-            .set("Authorization", &format!("Bearer {}", self.api_key))
-            .set("Content-Type", "application/json")
-            .send_json(ureq::json!({
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&serde_json::json!({
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": "You classify memory content for a spatial AI memory system named Epicode, whose AI identity is David.\n\nDomain-specific rules:\n- Content about David's identity, self-description, or the system itself → [\"identity\", \"system\"]\n- Content about Epicode internals (scheduler, space, cylinder, pulse, tetrahedron, fission, snapshot, locks) → [\"system\", \"architecture\"]\n- Content about optimization, performance, refactoring, concurrency → [\"engineering\", \"optimization\"]\n- Content about Rust, programming languages, frameworks → [\"programming\", <language>]\n- Content about AI, ML, embeddings, neural networks, LLM → [\"ai\", \"ml\"]\n- Content about databases, storage, persistence → [\"database\", \"storage\"]\n- Content about biology, life sciences → [\"biology\", \"life\"]\n- Content about physics, math → [\"science\", <subfield>]\n- Otherwise pick 2 specific labels that best describe the DOMAIN (not the format).\n\nCRITICAL: Do NOT label identity/system content as \"ai\" or \"ml\". Only use those for actual AI/ML technique content.\n\nReturn JSON: {\"labels\": [\"label1\", \"label2\"]}"},
@@ -573,8 +569,10 @@ impl CognitiveEngine {
                 "max_tokens": 64,
                 "response_format": {"type": "json_object"}
             }))
+            .map_err(|e| format!("request body: {e}"))?
+            .send()
             .map_err(|e| format!("classify HTTP: {e}"))?
-            .into_json()
+            .json()
             .map_err(|e| format!("classify JSON: {e}"))?;
 
         let body = resp["choices"][0]["message"]["content"]
@@ -602,10 +600,8 @@ impl CognitiveEngine {
         let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let resp: serde_json::Value = self.client
             .post(&url)
-            .timeout(std::time::Duration::from_secs(30))
-            .set("Authorization", &format!("Bearer {}", self.api_key))
-            .set("Content-Type", "application/json")
-            .send_json(ureq::json!({
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&serde_json::json!({
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": "You are David, the AI identity of Epicode, a spatial memory system.\n\nRules:\n1. Answer based ONLY on the provided memory fragments. Never fabricate information.\n2. Synthesize a coherent answer from multiple memories when they relate to the question.\n3. Each memory has an ID in the format \"[#ID]\". Reference key memories by their #ID when making specific claims.\n4. If memories are insufficient, say so honestly instead of guessing.\n5. Respond in the same language as the question.\n6. For complex questions, structure answers with clear sections. For simple questions, keep concise.\n7. When multiple memories overlap, synthesize rather than list them individually.\n8. Highlight contradictions between memories if they exist."},
@@ -614,8 +610,10 @@ impl CognitiveEngine {
                 "temperature": 0.3,
                 "max_tokens": 1024
             }))
+            .map_err(|e| format!("request body: {e}"))?
+            .send()
             .map_err(|e| format!("answer HTTP: {e}"))?
-            .into_json()
+            .json()
             .map_err(|e| format!("answer JSON: {e}"))?;
 
         resp["choices"][0]["message"]["content"]
@@ -632,9 +630,8 @@ impl CognitiveEngine {
         let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let resp: serde_json::Value = self.client
             .post(&url)
-            .set("Authorization", &format!("Bearer {}", self.api_key))
-            .set("Content-Type", "application/json")
-            .send_json(ureq::json!({
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&serde_json::json!({
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": "Rank candidates by SEMANTIC relevance to the query. Focus on the USER'S INTENT, not keyword overlap. A query about 'preventing concurrent access' wants the SOLUTION (single writer pattern), not the BUG. A query about 'why cant we move tetrahedrons' wants the REASON (fission breaks topology), not the DESCRIPTION. For Chinese queries, translate first. Return ONLY 0-based position indices sorted by relevance. JSON: {\"ranking\": [0, 3, 1]}"},
@@ -644,8 +641,10 @@ impl CognitiveEngine {
                 "max_tokens": 128,
                 "response_format": {"type": "json_object"}
             }))
+            .map_err(|e| format!("request body: {e}"))?
+            .send()
             .map_err(|e| format!("rerank HTTP: {e}"))?
-            .into_json()
+            .json()
             .map_err(|e| format!("rerank JSON: {e}"))?;
 
         let content = resp["choices"][0]["message"]["content"]
@@ -696,9 +695,8 @@ impl CognitiveEngine {
         let resp: serde_json::Value = self
             .client
             .post(&url)
-            .set("Authorization", &format!("Bearer {}", self.api_key))
-            .set("Content-Type", "application/json")
-            .send_json(ureq::json!({
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&serde_json::json!({
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
@@ -708,8 +706,10 @@ impl CognitiveEngine {
                 "max_tokens": 200,
                 "response_format": {"type": "json_object"}
             }))
+            .map_err(|e| format!("request body: {e}"))?
+            .send()
             .map_err(|e| format!("translate_expand HTTP: {e}"))?
-            .into_json()
+            .json()
             .map_err(|e| format!("translate_expand JSON: {e}"))?;
 
         let content = resp["choices"][0]["message"]["content"]
@@ -774,10 +774,8 @@ impl CognitiveEngine {
         let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let resp: serde_json::Value = self.client
             .post(&url)
-            .timeout(std::time::Duration::from_secs(20))
-            .set("Authorization", &format!("Bearer {}", self.api_key))
-            .set("Content-Type", "application/json")
-            .send_json(ureq::json!({
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&serde_json::json!({
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": "Generate 3 search aliases per item. Rules: use different words from source, include synonyms and question forms, expand acronyms. Return JSON: {\"aliases\": [{\"id\": 0, \"aliases\": [\"alias1\", \"alias2\", \"alias3\"]}]}"},
@@ -787,8 +785,10 @@ impl CognitiveEngine {
                 "max_tokens": 512,
                 "response_format": {"type": "json_object"}
             }))
+            .map_err(|e| format!("request body: {e}"))?
+            .send()
             .map_err(|e| format!("alias HTTP: {e}"))?
-            .into_json()
+            .json()
             .map_err(|e| format!("alias JSON: {e}"))?;
 
         let content = resp["choices"][0]["message"]["content"]
@@ -842,10 +842,8 @@ impl CognitiveEngine {
         let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let resp: serde_json::Value = self.client
             .post(&url)
-            .timeout(std::time::Duration::from_secs(20))
-            .set("Authorization", &format!("Bearer {}", self.api_key))
-            .set("Content-Type", "application/json")
-            .send_json(ureq::json!({
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&serde_json::json!({
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": "Extract named entities from each text. Only extract proper nouns, specific names, project names, product names, tool names, organization names, place names, or named concepts.\nRules:\n1. Each entity becomes a label prefixed with \"entity:\" — e.g. entity:Rust, entity:OpenAI, entity:Epicode\n2. Normalize: lowercase only the prefix, keep the entity name in original case\n3. Maximum 5 entities per text. Only extract entities that are specific and named, not generic words.\n4. If no named entities found, return empty array for that item.\nReturn JSON: {\"items\": [{\"id\": 0, \"entities\": [\"entity:Name1\", \"entity:Name2\"]}]}"},
@@ -855,8 +853,10 @@ impl CognitiveEngine {
                 "max_tokens": 512,
                 "response_format": {"type": "json_object"}
             }))
+            .map_err(|e| format!("request body: {e}"))?
+            .send()
             .map_err(|e| format!("entity HTTP: {e}"))?
-            .into_json()
+            .json()
             .map_err(|e| format!("entity JSON: {e}"))?;
 
         let content = resp["choices"][0]["message"]["content"]
@@ -899,10 +899,8 @@ impl CognitiveEngine {
         let url = format!("{DEEPSEEK_BASE}/v1/chat/completions");
         let resp: serde_json::Value = self.client
             .post(&url)
-            .timeout(std::time::Duration::from_secs(15))
-            .set("Authorization", &format!("Bearer {}", self.api_key))
-            .set("Content-Type", "application/json")
-            .send_json(ureq::json!({
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&serde_json::json!({
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": "你是一个技术文档翻译专家。根据技能的英文名称和内容，生成一段简洁的中文描述（2-3句话），说明这个技能的用途和核心要点。只返回中文描述文本，不要加标题、不要加引号、不要加markdown。"},
@@ -911,8 +909,10 @@ impl CognitiveEngine {
                 "temperature": 0.3,
                 "max_tokens": 256
             }))
+            .map_err(|e| format!("request body: {e}"))?
+            .send()
             .map_err(|e| format!("skill desc HTTP: {e}"))?
-            .into_json()
+            .json()
             .map_err(|e| format!("skill desc JSON: {e}"))?;
 
         let desc = resp["choices"][0]["message"]["content"]
@@ -953,10 +953,8 @@ impl CognitiveEngine {
             let resp_body = self
                 .client
                 .post(&url)
-                .set("Authorization", &format!("Bearer {}", self.api_key))
-                .set("Content-Type", "application/json")
-                .timeout(std::time::Duration::from_secs(120))
-                .send_json(ureq::json!({
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .json(&serde_json::json!({
                     "model": self.model,
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
@@ -965,8 +963,10 @@ impl CognitiveEngine {
                     "temperature": 0.3,
                     "max_tokens": 8192,
                 }))
+            .map_err(|e| format!("request body: {e}"))?
+            .send()
                 .map_err(|e| format!("LLM round{round}: {e}"))?
-                .into_string()
+                .text()
                 .map_err(|e| format!("LLM body round{round}: {e}"))?;
 
             let resp: serde_json::Value = serde_json::from_str(&resp_body).map_err(|e| {
