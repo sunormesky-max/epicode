@@ -161,16 +161,16 @@ impl StorageManager {
             .connection_timeout(std::time::Duration::from_secs(5))
             .idle_timeout(Some(std::time::Duration::from_secs(60)))
             .build(manager)
-            .map_err(|e| format!("failed to build connection pool: {}", e))?;
+            .map_err(|e| format!("failed to build connection pool: {e}"))?;
 
         // Initialize schema using one connection from the pool
         {
-            let conn = pool.get().map_err(|e| {
-                format!("failed to get connection from pool for schema init: {}", e)
-            })?;
+            let conn = pool
+                .get()
+                .map_err(|e| format!("failed to get connection from pool for schema init: {e}"))?;
 
             conn.execute_batch(SCHEMA)
-                .map_err(|e| format!("failed to initialize schema: {}", e))?;
+                .map_err(|e| format!("failed to initialize schema: {e}"))?;
             if let Err(e) = conn.execute_batch(MIGRATION_ADD_EMBEDDING) {
                 tracing::debug!(
                     "[Storage] embedding migration skipped (likely already applied): {}",
@@ -242,7 +242,7 @@ impl StorageManager {
                         self.crypto_user,
                         e
                     );
-                    format!("encrypt failed: {}", e)
+                    format!("encrypt failed: {e}")
                 })
         } else {
             Ok(content.to_string())
@@ -374,7 +374,7 @@ impl StorageManager {
     pub fn delete_tetra(&self, id: TetraId) -> Result<(), String> {
         let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM tetrahedrons WHERE id = ?1", params![id])
-            .map_err(|e| format!("delete tetra {}: {}", id, e))?;
+            .map_err(|e| format!("delete tetra {id}: {e}"))?;
         Ok(())
     }
 
@@ -388,7 +388,7 @@ impl StorageManager {
         let deleted_at = chrono::Utc::now().timestamp();
         let expires_at = deleted_at + retention_days * 86_400;
         let tetra_json =
-            serde_json::to_string(tetra).map_err(|e| format!("serialize deleted tetra: {}", e))?;
+            serde_json::to_string(tetra).map_err(|e| format!("serialize deleted tetra: {e}"))?;
         tx.execute(
             "INSERT OR REPLACE INTO deleted_memories (id, tetra_json, deleted_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
             params![tetra.id, tetra_json, deleted_at, expires_at],
@@ -416,7 +416,7 @@ impl StorageManager {
         };
 
         let tetra: Tetrahedron =
-            serde_json::from_str(&tetra_json).map_err(|e| format!("restore parse tetra: {}", e))?;
+            serde_json::from_str(&tetra_json).map_err(|e| format!("restore parse tetra: {e}"))?;
         let labels_json = self.encrypt_field(
             &serde_json::to_string(&tetra.data.labels).unwrap_or_else(|_| "[]".into()),
         )?;
@@ -455,7 +455,7 @@ impl StorageManager {
         )
         .map_err(|e| format!("restore tetra {}: {}", tetra.id, e))?;
         tx.execute("DELETE FROM deleted_memories WHERE id = ?1", params![id])
-            .map_err(|e| format!("remove deleted archive {}: {}", id, e))?;
+            .map_err(|e| format!("remove deleted archive {id}: {e}"))?;
         tx.commit().map_err(|e| e.to_string())?;
         Ok(Some(tetra))
     }
@@ -481,7 +481,7 @@ impl StorageManager {
             let (id, tetra_json, deleted_at, expires_at) =
                 row.map_err(|e: rusqlite::Error| e.to_string())?;
             let tetra: Tetrahedron = serde_json::from_str(&tetra_json)
-                .map_err(|e| format!("list deleted parse tetra {}: {}", id, e))?;
+                .map_err(|e| format!("list deleted parse tetra {id}: {e}"))?;
             items.push(DeletedMemoryInfo {
                 id,
                 content: tetra.data.content,
@@ -502,7 +502,7 @@ impl StorageManager {
                 "DELETE FROM deleted_memories WHERE expires_at <= ?1",
                 params![now],
             )
-            .map_err(|e| format!("purge expired deleted memories: {}", e))?;
+            .map_err(|e| format!("purge expired deleted memories: {e}"))?;
         Ok(deleted)
     }
 
@@ -664,7 +664,7 @@ impl StorageManager {
                         tetra.data.importance,
                         tetra.data.enforced as i32,
                     ],
-                ).map_err(|e| format!("batch upsert {}: {}", id, e))?;
+                ).map_err(|e| format!("batch upsert {id}: {e}"))?;
                 count += 1;
             }
         }
@@ -706,7 +706,7 @@ impl StorageManager {
                 "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
                 params![key, value],
             )
-            .map_err(|e| format!("set_meta_batch({}): {}", key, e))?;
+            .map_err(|e| format!("set_meta_batch({key}): {e}"))?;
         }
         tx.commit().map_err(|e| e.to_string())?;
         Ok(())
@@ -715,7 +715,7 @@ impl StorageManager {
     pub fn checkpoint(&self) -> Result<(), String> {
         let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
-            .map_err(|e| format!("checkpoint failed: {}", e))?;
+            .map_err(|e| format!("checkpoint failed: {e}"))?;
         Ok(())
     }
 
@@ -749,14 +749,14 @@ impl StorageManager {
 
     pub fn backup(&self) -> Result<String, String> {
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
-        let backup_path = self.backup_dir.join(format!("epicode_{}.db", timestamp));
+        let backup_path = self.backup_dir.join(format!("epicode_{timestamp}.db"));
         let backup_str = backup_path
             .to_str()
             .ok_or_else(|| "backup path is not valid UTF-8".to_string())?;
 
         let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.execute("VACUUM INTO ?1", params![backup_str])
-            .map_err(|e| format!("backup failed: {}", e))?;
+            .map_err(|e| format!("backup failed: {e}"))?;
 
         self.cleanup_old_backups()?;
         Ok(timestamp)
@@ -1135,7 +1135,7 @@ mod tests {
     use super::*;
 
     fn tmp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("epicode_test_{}", name));
+        let dir = std::env::temp_dir().join(format!("epicode_test_{name}"));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -1177,7 +1177,7 @@ mod tests {
         let kg = KnowledgeGraph::new();
 
         for i in 0..5u64 {
-            let t = make_tetra(i, &format!("mem_{}", i), 1.0 + i as f64 * 0.5);
+            let t = make_tetra(i, &format!("mem_{i}"), 1.0 + i as f64 * 0.5);
             let pos = Tetrahedron::compute_vertices(t.core);
             space.add_tetrahedron(&t, &pos).unwrap();
         }
@@ -1198,7 +1198,7 @@ mod tests {
         for i in 0..5u64 {
             let t = space2.get_tetrahedron(i).unwrap();
             assert_eq!(t.id, i);
-            assert_eq!(t.data.content, format!("mem_{}", i));
+            assert_eq!(t.data.content, format!("mem_{i}"));
             assert_eq!(t.data.content_hash, i * 100);
             assert!((t.mass - (1.0 + i as f64 * 0.5)).abs() < 0.01);
         }

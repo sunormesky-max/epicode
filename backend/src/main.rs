@@ -78,7 +78,7 @@ async fn main() {
         let guard = engine.guard.clone();
         let path = request.uri().path().to_string();
         let method = request.method().clone().to_string();
-        let action = format!("{} {}", method, path);
+        let action = format!("{method} {path}");
 
         if path == "/" || path == "/dashboard" || path.starts_with("/health") {
             return next.run(request).await;

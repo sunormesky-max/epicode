@@ -26,7 +26,7 @@ async fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(100);
 
-    eprintln!("=== Epicode Benchmark: {} memories ===", mem_count);
+    eprintln!("=== Epicode Benchmark: {mem_count} memories ===");
 
     // Phase 1: Create memories
     let categories = [
@@ -71,8 +71,7 @@ async fn main() {
     for i in 0..mem_count {
         let (cat, template) = &categories[i % categories.len()];
         let content = format!(
-            "[{}] {} — instance #{} with unique context about {} operations",
-            cat, template, i, cat
+            "[{cat}] {template} — instance #{i} with unique context about {cat} operations"
         );
         let labels = vec![cat.to_string(), format!("bench-{}", i % 10)];
 
@@ -190,7 +189,7 @@ async fn main() {
     let resp = handler.process_json(stats_raw);
     if let Ok(p) = serde_json::from_str::<serde_json::Value>(&resp) {
         if let Some(inner) = p["result"]["content"][0]["text"].as_str() {
-            eprintln!("Stats: {}", inner);
+            eprintln!("Stats: {inner}");
         }
     }
 
@@ -210,7 +209,7 @@ async fn main() {
     let resp = handler.process_json(observe_raw);
     if let Ok(p) = serde_json::from_str::<serde_json::Value>(&resp) {
         if let Some(inner) = p["result"]["content"][0]["text"].as_str() {
-            eprintln!("context_observe: {}", inner);
+            eprintln!("context_observe: {inner}");
         }
     }
 

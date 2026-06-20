@@ -23,7 +23,7 @@ async fn main() {
             write_times.push(elapsed.as_micros() as f64 / 1000.0);
         }
         if result.is_err() && i < 5 {
-            eprintln!("ERROR at {}: {:?}", i, result);
+            eprintln!("ERROR at {i}: {result:?}");
         }
     }
     print_stats("Remember", &write_times, total_memories);
@@ -106,13 +106,13 @@ async fn main() {
         let content = "x".repeat(len);
         let mut times = Vec::new();
         for i in 0..20 {
-            let c = format!("{}{}", content, i);
+            let c = format!("{content}{i}");
             let start = Instant::now();
             let _ = engine.scheduler.api_remember(&c);
             let elapsed = start.elapsed();
             times.push(elapsed.as_micros() as f64 / 1000.0);
         }
-        print_stats(&format!("Write {}chars", len), &times, 20);
+        print_stats(&format!("Write {len}chars"), &times, 20);
     }
 
     // Phase 8: Search with varying result limits
@@ -126,7 +126,7 @@ async fn main() {
             let elapsed = start.elapsed();
             times.push(elapsed.as_micros() as f64 / 1000.0);
         }
-        print_stats(&format!("Search limit={}", limit), &times, 10);
+        print_stats(&format!("Search limit={limit}"), &times, 10);
     }
 
     let stats = engine.scheduler.api_stats();
@@ -151,7 +151,6 @@ fn print_stats(name: &str, times: &[f64], count: usize) {
     let min = sorted[0];
     let max = sorted[sorted.len() - 1];
     println!(
-        "{} (n={}) avg={:.1}ms p50={:.1}ms p95={:.1}ms p99={:.1}ms min={:.1}ms max={:.1}ms",
-        name, count, avg, p50, p95, p99, min, max
+        "{name} (n={count}) avg={avg:.1}ms p50={p50:.1}ms p95={p95:.1}ms p99={p99:.1}ms min={min:.1}ms max={max:.1}ms"
     );
 }

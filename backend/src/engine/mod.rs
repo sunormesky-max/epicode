@@ -407,8 +407,8 @@ impl Engine {
             "confirmed_at": chrono::Utc::now().timestamp(),
             "immutable": true,
         });
-        let json = serde_json::to_string_pretty(&data).map_err(|e| format!("serialize: {}", e))?;
-        std::fs::write(&identity_path, &json).map_err(|e| format!("write: {}", e))?;
+        let json = serde_json::to_string_pretty(&data).map_err(|e| format!("serialize: {e}"))?;
+        std::fs::write(&identity_path, &json).map_err(|e| format!("write: {e}"))?;
         tracing::info!(
             "[{}] identity confirmed and persisted: {}",
             self.user_id,
@@ -438,8 +438,8 @@ impl Engine {
             "extra": info.extra,
             "confirmed_at": chrono::Utc::now().timestamp(),
         });
-        let json = serde_json::to_string_pretty(&data).map_err(|e| format!("serialize: {}", e))?;
-        std::fs::write(&identity_path, &json).map_err(|e| format!("write: {}", e))?;
+        let json = serde_json::to_string_pretty(&data).map_err(|e| format!("serialize: {e}"))?;
+        std::fs::write(&identity_path, &json).map_err(|e| format!("write: {e}"))?;
         tracing::info!("[{}] identity updated", self.user_id);
         Ok(())
     }
@@ -469,8 +469,8 @@ impl Engine {
             "personality": pending.personality,
             "language": pending.language,
         }))
-        .map_err(|e| format!("serialize: {}", e))?;
-        std::fs::write(&identity_path, &json).map_err(|e| format!("write: {}", e))?;
+        .map_err(|e| format!("serialize: {e}"))?;
+        std::fs::write(&identity_path, &json).map_err(|e| format!("write: {e}"))?;
         Ok(pending_clone)
     }
 
@@ -501,8 +501,8 @@ impl Engine {
             "confirmed_at": chrono::Utc::now().timestamp(),
             "immutable": true,
         });
-        let json = serde_json::to_string_pretty(&data).map_err(|e| format!("serialize: {}", e))?;
-        std::fs::write(&identity_path, &json).map_err(|e| format!("write: {}", e))?;
+        let json = serde_json::to_string_pretty(&data).map_err(|e| format!("serialize: {e}"))?;
+        std::fs::write(&identity_path, &json).map_err(|e| format!("write: {e}"))?;
         let _ = std::fs::remove_file(self.data_path.join("identity_pending.json"));
         tracing::info!(
             "[{}] identity ritual complete: {}",

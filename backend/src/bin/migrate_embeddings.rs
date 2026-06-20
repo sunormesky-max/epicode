@@ -25,7 +25,7 @@ fn main() {
     let vector = match epicode::engine::vector::VectorLayer::load(&model_dir) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("FATAL: cannot load VectorLayer: {}", e);
+            eprintln!("FATAL: cannot load VectorLayer: {e}");
             std::process::exit(1);
         }
     };
@@ -43,7 +43,7 @@ fn main() {
     let entries = match std::fs::read_dir(&users_dir) {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("Cannot read users dir: {}", e);
+            eprintln!("Cannot read users dir: {e}");
             std::process::exit(1);
         }
     };
@@ -59,7 +59,7 @@ fn main() {
         }
 
         total_users += 1;
-        print!("[{}] ", user_id);
+        print!("[{user_id}] ");
 
         let conn = match rusqlite::Connection::open_with_flags(
             &db_path,
@@ -67,7 +67,7 @@ fn main() {
         ) {
             Ok(c) => c,
             Err(e) => {
-                println!("SKIP (cannot open db: {})", e);
+                println!("SKIP (cannot open db: {e})");
                 continue;
             }
         };
@@ -75,7 +75,7 @@ fn main() {
         let mut stmt = match conn.prepare("SELECT id, content FROM tetrahedrons ORDER BY id") {
             Ok(s) => s,
             Err(e) => {
-                println!("SKIP (cannot prepare: {})", e);
+                println!("SKIP (cannot prepare: {e})");
                 continue;
             }
         };
@@ -87,7 +87,7 @@ fn main() {
         }) {
             Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
             Err(e) => {
-                println!("SKIP (query failed: {})", e);
+                println!("SKIP (query failed: {e})");
                 continue;
             }
         };
@@ -112,13 +112,13 @@ fn main() {
                     ) {
                         Ok(_) => updated += 1,
                         Err(e) => {
-                            eprintln!("  update failed for {}: {}", id, e);
+                            eprintln!("  update failed for {id}: {e}");
                             failed += 1;
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("  embed failed for {}: {}", id, e);
+                    eprintln!("  embed failed for {id}: {e}");
                     failed += 1;
                 }
             }
@@ -126,10 +126,10 @@ fn main() {
 
         drop(conn);
         total_migrated += updated;
-        println!("{} migrated, {} failed", updated, failed);
+        println!("{updated} migrated, {failed} failed");
     }
 
     println!("\n=== Migration Complete ===");
-    println!("Users: {}", total_users);
-    println!("Total memories migrated: {}", total_migrated);
+    println!("Users: {total_users}");
+    println!("Total memories migrated: {total_migrated}");
 }

@@ -435,9 +435,9 @@ impl Cylinder {
             .ports
             .iter_mut()
             .find(|p| p.id == port_id)
-            .ok_or_else(|| format!("port {} not found", port_id))?;
+            .ok_or_else(|| format!("port {port_id} not found"))?;
         if !port.is_free() {
-            return Err(format!("port {} is not free", port_id));
+            return Err(format!("port {port_id} is not free"));
         }
         port.assign(tetra_id);
         Ok(())
@@ -739,8 +739,7 @@ mod tests {
             if layer.has_ports() {
                 assert!(
                     c.free_port_count(*layer) > 0,
-                    "{:?} should have free ports",
-                    layer
+                    "{layer:?} should have free ports"
                 );
             }
         }

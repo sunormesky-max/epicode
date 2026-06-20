@@ -47,7 +47,7 @@ impl AuditLogger {
                 logs.push(entry);
                 Ok(id)
             }
-            Err(e) => Err(format!("Failed to acquire lock: {}", e)),
+            Err(e) => Err(format!("Failed to acquire lock: {e}")),
         }
     }
 
@@ -55,7 +55,7 @@ impl AuditLogger {
     pub fn get_all(&self) -> Result<Vec<AuditLogEntry>, String> {
         match self.logs.lock() {
             Ok(logs) => Ok(logs.clone()),
-            Err(e) => Err(format!("Failed to acquire lock: {}", e)),
+            Err(e) => Err(format!("Failed to acquire lock: {e}")),
         }
     }
 
@@ -71,7 +71,7 @@ impl AuditLogger {
                 let items = logs.iter().skip(offset).take(limit).cloned().collect();
                 Ok((items, total))
             }
-            Err(e) => Err(format!("Failed to acquire lock: {}", e)),
+            Err(e) => Err(format!("Failed to acquire lock: {e}")),
         }
     }
 
@@ -93,7 +93,7 @@ impl AuditLogger {
                     .collect();
                 Ok(items)
             }
-            Err(e) => Err(format!("Failed to acquire lock: {}", e)),
+            Err(e) => Err(format!("Failed to acquire lock: {e}")),
         }
     }
 
@@ -108,7 +108,7 @@ impl AuditLogger {
                     .collect();
                 Ok(items)
             }
-            Err(e) => Err(format!("Failed to acquire lock: {}", e)),
+            Err(e) => Err(format!("Failed to acquire lock: {e}")),
         }
     }
 
@@ -129,7 +129,7 @@ impl AuditLogger {
                     .collect();
                 Ok(items)
             }
-            Err(e) => Err(format!("Failed to acquire lock: {}", e)),
+            Err(e) => Err(format!("Failed to acquire lock: {e}")),
         }
     }
 
@@ -141,7 +141,7 @@ impl AuditLogger {
                 logs.clear();
                 Ok(())
             }
-            Err(e) => Err(format!("Failed to acquire lock: {}", e)),
+            Err(e) => Err(format!("Failed to acquire lock: {e}")),
         }
     }
 }
@@ -236,10 +236,10 @@ mod tests {
         for i in 0..5 {
             logger
                 .log(
-                    format!("user{}", i),
+                    format!("user{i}"),
                     "read".to_string(),
                     "memory".to_string(),
-                    format!("resource{}", i),
+                    format!("resource{i}"),
                     AuditResult::Success,
                     None,
                     "tenant1".to_string(),

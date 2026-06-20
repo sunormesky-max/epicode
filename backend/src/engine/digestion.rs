@@ -53,7 +53,7 @@ impl DigestionEngine {
 
     fn extract_json(&self, raw: &str) -> Result<String, String> {
         let val: serde_json::Value =
-            serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {}", e))?;
+            serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {e}"))?;
         Ok(self.flatten_json_value(&val, 0))
     }
 
@@ -75,9 +75,9 @@ impl DigestionEngine {
                     .map(|(k, v)| {
                         let child = self.flatten_json_value(v, depth + 1);
                         if child.contains('\n') {
-                            format!("{}{}:\n{}", indent, k, child)
+                            format!("{indent}{k}:\n{child}")
                         } else {
-                            format!("{}{}: {}", indent, k, child)
+                            format!("{indent}{k}: {child}")
                         }
                     })
                     .collect::<Vec<_>>()
@@ -100,7 +100,7 @@ impl DigestionEngine {
             for (i, field) in fields.iter().enumerate() {
                 if let Some(header) = headers.get(i) {
                     if !field.is_empty() {
-                        parts.push(format!("{}: {}", header, field));
+                        parts.push(format!("{header}: {field}"));
                     }
                 }
             }
@@ -152,7 +152,7 @@ impl DigestionEngine {
             let labels = self.classify_chunk(&text);
 
             let enriched = if !source.is_empty() {
-                format!("{}\n[source: {}]", text, source)
+                format!("{text}\n[source: {source}]")
             } else {
                 text.clone()
             };

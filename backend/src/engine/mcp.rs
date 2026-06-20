@@ -657,7 +657,7 @@ impl McpHandler {
             "skills_sync" => self.tool_skills_sync(&args),
             "enforced_rules" => self.tool_enforced_rules(&args),
             "project_list" => self.tool_project_list(),
-            _ => return self.error(id, -32601, &format!("unknown tool: {}", name)),
+            _ => return self.error(id, -32601, &format!("unknown tool: {name}")),
         };
 
         McpResponse {
@@ -1018,7 +1018,7 @@ impl McpHandler {
             let query = if project.is_empty() {
                 task.to_string()
             } else {
-                format!("{} {}", project, task)
+                format!("{project} {task}")
             };
 
             let intent = super::retrieval::RetrievalEngine::parse_intent(&query);
@@ -1178,11 +1178,11 @@ impl McpHandler {
 
         let mut content_parts = vec![format!("[{}]", category)];
         if !project.is_empty() {
-            content_parts.push(format!("project: {}", project));
+            content_parts.push(format!("project: {project}"));
         }
         content_parts.push(summary.to_string());
         if !details.is_empty() {
-            content_parts.push(format!("details: {}", details));
+            content_parts.push(format!("details: {details}"));
         }
         let content = content_parts.join(" | ");
 
@@ -1211,29 +1211,29 @@ impl McpHandler {
 
         let mut content_parts = vec!["[pattern]".to_string()];
         if !language.is_empty() {
-            content_parts.push(format!("lang: {}", language));
+            content_parts.push(format!("lang: {language}"));
         }
         if !project.is_empty() {
-            content_parts.push(format!("project: {}", project));
+            content_parts.push(format!("project: {project}"));
         }
-        content_parts.push(format!("rule: {}", pattern));
+        content_parts.push(format!("rule: {pattern}"));
         if !when.is_empty() {
-            content_parts.push(format!("when: {}", when));
+            content_parts.push(format!("when: {when}"));
         }
         if !steps.is_empty() {
-            content_parts.push(format!("steps: {}", steps));
+            content_parts.push(format!("steps: {steps}"));
         }
         if !example.is_empty() {
-            content_parts.push(format!("example: {}", example));
+            content_parts.push(format!("example: {example}"));
         }
         if !pitfalls.is_empty() {
-            content_parts.push(format!("pitfalls: {}", pitfalls));
+            content_parts.push(format!("pitfalls: {pitfalls}"));
         }
         let content = content_parts.join(" | ");
 
         let mut labels = vec!["pattern".to_string(), "convention".to_string()];
         if !language.is_empty() {
-            labels.push(format!("lang-{}", language));
+            labels.push(format!("lang-{language}"));
         }
         if !project.is_empty() {
             labels.push(sanitize_label(project));
@@ -1253,12 +1253,12 @@ impl McpHandler {
         let language = args["language"].as_str().unwrap_or("");
         let project = args["project"].as_str().unwrap_or("");
 
-        let mut query = format!("pattern convention {}", context);
+        let mut query = format!("pattern convention {context}");
         if !language.is_empty() {
-            query = format!("{} lang-{}", query, language);
+            query = format!("{query} lang-{language}");
         }
         if !project.is_empty() {
-            query = format!("{} {}", query, project);
+            query = format!("{query} {project}");
         }
 
         match self.engine.scheduler.api_search(&query, 10) {
@@ -1349,14 +1349,14 @@ impl McpHandler {
         let project = args["project"].as_str().unwrap_or("");
 
         let mut content_parts = vec!["[decision]".to_string()];
-        content_parts.push(format!("title: {}", title));
-        content_parts.push(format!("chosen: {}", chosen));
+        content_parts.push(format!("title: {title}"));
+        content_parts.push(format!("chosen: {chosen}"));
         if !alternatives.is_empty() {
-            content_parts.push(format!("rejected: {}", alternatives));
+            content_parts.push(format!("rejected: {alternatives}"));
         }
-        content_parts.push(format!("rationale: {}", rationale));
+        content_parts.push(format!("rationale: {rationale}"));
         if !project.is_empty() {
-            content_parts.push(format!("project: {}", project));
+            content_parts.push(format!("project: {project}"));
         }
         let content = content_parts.join(" | ");
 
@@ -1384,14 +1384,14 @@ impl McpHandler {
         let project = args["project"].as_str().unwrap_or("");
 
         let mut content_parts = vec!["[bug]".to_string()];
-        content_parts.push(format!("symptoms: {}", symptoms));
-        content_parts.push(format!("root_cause: {}", root_cause));
-        content_parts.push(format!("fix: {}", fix));
+        content_parts.push(format!("symptoms: {symptoms}"));
+        content_parts.push(format!("root_cause: {root_cause}"));
+        content_parts.push(format!("fix: {fix}"));
         if !module.is_empty() {
-            content_parts.push(format!("module: {}", module));
+            content_parts.push(format!("module: {module}"));
         }
         if !project.is_empty() {
-            content_parts.push(format!("project: {}", project));
+            content_parts.push(format!("project: {project}"));
         }
         let content = content_parts.join(" | ");
 
@@ -1419,13 +1419,13 @@ impl McpHandler {
         let project = args["project"].as_str().unwrap_or("");
 
         let mut content_parts = vec!["[session]".to_string()];
-        content_parts.push(format!("accomplished: {}", accomplished));
-        content_parts.push(format!("next_steps: {}", next_steps));
+        content_parts.push(format!("accomplished: {accomplished}"));
+        content_parts.push(format!("next_steps: {next_steps}"));
         if !blockers.is_empty() {
-            content_parts.push(format!("blockers: {}", blockers));
+            content_parts.push(format!("blockers: {blockers}"));
         }
         if !project.is_empty() {
-            content_parts.push(format!("project: {}", project));
+            content_parts.push(format!("project: {project}"));
         }
         let content = content_parts.join(" | ");
 
@@ -1929,8 +1929,7 @@ impl McpHandler {
 
         if !notes.is_empty() || !query.is_empty() {
             let feedback_content = format!(
-                "[feedback] query: {} | relevance: {} | outcome: {} | correction: {} | notes: {} | affected_ids: {:?}",
-                query, relevance, outcome, correction, notes, ids
+                "[feedback] query: {query} | relevance: {relevance} | outcome: {outcome} | correction: {correction} | notes: {notes} | affected_ids: {ids:?}"
             );
             let labels = vec!["feedback".to_string(), "agent-signal".to_string()];
             if let Err(e) = self
@@ -2075,7 +2074,7 @@ impl McpHandler {
                     result: None,
                     error: Some(McpError {
                         code: -32700,
-                        message: format!("parse error: {}", e),
+                        message: format!("parse error: {e}"),
                     }),
                 };
                 return serde_json::to_string(&resp).unwrap_or_default();
@@ -2329,7 +2328,7 @@ fn extract_fallback(context: &str, project: &str, role: &str, results: &mut Vec<
     }
 
     let role_label = if role.is_empty() { "general" } else { role };
-    let content = format!("[{}] session context: {}", role_label, summary);
+    let content = format!("[{role_label}] session context: {summary}");
     let mut labels = vec!["auto-extracted".to_string(), format!("role-{}", role_label)];
     if !project.is_empty() {
         labels.push(sanitize_label(project));
@@ -2463,8 +2462,7 @@ mod tests {
         h.process_json(init_raw);
         for step in 2..=5 {
             let raw = format!(
-                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"test"}}}}}}"#,
-                step
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{step},"value":"test"}}}}}}"#
             );
             h.process_json(&raw);
         }
@@ -2472,7 +2470,7 @@ mod tests {
         h.process_json(finalize_raw);
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"hello world","labels":["test"]}}}"#;
         let output = h.process_json(raw);
-        assert!(output.contains("created"), "output was: {}", output);
+        assert!(output.contains("created"), "output was: {output}");
     }
 
     #[tokio::test]
@@ -2553,8 +2551,7 @@ mod tests {
         for step in 1..=5 {
             let val = if step == 1 { "TestAgent" } else { "test" };
             let raw = format!(
-                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
-                step, val
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{step},"value":"{val}"}}}}}}"#
             );
             h.process_json(&raw);
         }
@@ -2567,8 +2564,7 @@ mod tests {
         let search_output = h.process_json(search_raw);
         assert!(
             search_output.contains("ownership model"),
-            "output was: {}",
-            search_output
+            "output was: {search_output}"
         );
         assert!(search_output.contains("content"));
     }

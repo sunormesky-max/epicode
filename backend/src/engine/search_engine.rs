@@ -294,10 +294,7 @@ pub fn search(
                     let a: Vec<String> = payload.aliases.iter().take(3).cloned().collect();
                     format!(" [{}]", a.join("; "))
                 };
-                format!(
-                    "[{}] [{}] sim={:.3}{} {}",
-                    i, labels, sim, alias_str, preview
-                )
+                format!("[{i}] [{labels}] sim={sim:.3}{alias_str} {preview}")
             })
             .collect();
         let cand_joined = cand_text.join("\n");
@@ -382,7 +379,7 @@ fn passes_filters(t: &crate::domain::tetra::Tetrahedron, filters: Option<&Search
             .data
             .labels
             .iter()
-            .any(|l| l == project || l.starts_with(&format!("project:{}", project)));
+            .any(|l| l == project || l.starts_with(&format!("project:{project}")));
         if !has_project {
             return false;
         }
@@ -430,7 +427,7 @@ fn keyword_score(query: &str, payload: &MemoryPayload) -> f64 {
     }
     let content_lower = payload.content.to_lowercase();
     let alias_text = payload.aliases.join(" ").to_lowercase();
-    let searchable = format!("{} {}", content_lower, alias_text);
+    let searchable = format!("{content_lower} {alias_text}");
     let matched = query_tokens
         .iter()
         .filter(|w| searchable.contains(w.as_str()))
@@ -487,7 +484,7 @@ fn bm25_score(
     let content_lower = payload.content.to_lowercase();
     let alias_text = payload.aliases.join(" ").to_lowercase();
     let labels_text = payload.labels.join(" ").to_lowercase();
-    let doc_text = format!("{} {} {}", content_lower, alias_text, labels_text);
+    let doc_text = format!("{content_lower} {alias_text} {labels_text}");
     let doc_tokens = tokenize(&doc_text);
     let dl = doc_tokens.len() as f64;
 
@@ -519,7 +516,7 @@ fn build_df_map(
         let content_lower = t.data.content.to_lowercase();
         let alias_text = t.data.aliases.join(" ").to_lowercase();
         let labels_text = t.data.labels.join(" ").to_lowercase();
-        let doc_text = format!("{} {} {}", content_lower, alias_text, labels_text);
+        let doc_text = format!("{content_lower} {alias_text} {labels_text}");
         let doc_tokens = tokenize(&doc_text);
         total_dl += doc_tokens.len() as f64;
         let mut seen = HashSet::new();
