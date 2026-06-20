@@ -113,7 +113,7 @@ impl StorageManager {
         let db_path = data_dir.join("tetramem.db");
         
         let manager = SqliteConnectionManager::file(&db_path)
-            .init_flags(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE);
+            .with_flags(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE);
         
         let pool = r2d2::Pool::builder()
             .max_size(16)
@@ -395,13 +395,24 @@ impl StorageManager {
     }
 
     pub fn get_health_trend(&self, hours: i64) -> Vec<(i64, i64, i64, i64, f64, i64)> {
-        let conn = self.pool.get().map_err(|e| e.to_string())?;
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("[Storage] failed to get connection from pool: {}", e);
+                return Vec::new();
+            }
+        };
         let cutoff = chrono::Utc::now().timestamp() - hours * 3600;
-        let mut stmt = conn.prepare(
+        let mut stmt = match conn.prepare(
             "SELECT timestamp, total_memories, clusters, feedback_records, avg_importance, enforced_count FROM health_snapshots WHERE timestamp > ?1 ORDER BY timestamp ASC"
-        ).unwrap();
-        let rows = stmt
-            .query_map(params![cutoff], |row| {
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("[Storage] failed to prepare statement: {}", e);
+                return Vec::new();
+            }
+        };
+        let rows = match stmt.query_map(params![cutoff], |row| {
                 Ok((
                     row.get(0)?,
                     row.get(1)?,
@@ -410,8 +421,13 @@ impl StorageManager {
                     row.get(4)?,
                     row.get(5)?,
                 ))
-            })
-            .unwrap();
+            }) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("[Storage] failed to query health trend: {}", e);
+                return Vec::new();
+            }
+        };
         rows.filter_map(|r| r.ok()).collect()
     }
 
@@ -475,7 +491,13 @@ impl StorageManager {
     }
 
     pub fn get_meta(&self, key: &str) -> Option<String> {
-        let conn = self.pool.get().map_err(|e| e.to_string())?;
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("[Storage] failed to get connection from pool: {}", e);
+                return None;
+            }
+        };
         let mut stmt = conn.prepare("SELECT value FROM meta WHERE key = ?1").ok()?;
         let val: Option<String> = stmt.query_row(params![key], |row| row.get(0)).ok();
         val
@@ -516,7 +538,13 @@ impl StorageManager {
     }
 
     pub fn tetra_count(&self) -> usize {
-        let conn = self.pool.get().map_err(|e| e.to_string())?;
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("[Storage] failed to get connection from pool: {}", e);
+                return 0;
+            }
+        };
         conn.query_row("SELECT COUNT(*) FROM tetrahedrons", [], |row| {
             row.get::<_, i64>(0)
         })
@@ -524,7 +552,13 @@ impl StorageManager {
     }
 
     pub fn relation_count(&self) -> usize {
-        let conn = self.pool.get().map_err(|e| e.to_string())?;
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("[Storage] failed to get connection from pool: {}", e);
+                return 0;
+            }
+        };
         conn.query_row("SELECT COUNT(*) FROM relations", [], |row| {
             row.get::<_, i64>(0)
         })
