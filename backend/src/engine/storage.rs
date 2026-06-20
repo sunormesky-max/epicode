@@ -1,8 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use parking_lot::Mutex;
-use rusqlite::{params, Connection, OpenFlags};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::{params, OpenFlags};
 
 use crate::domain::space::Space;
 use crate::domain::tetra::{MemoryPayload, TetraId, Tetrahedron};
@@ -91,7 +92,7 @@ const MIGRATION_ADD_HEALTH_SNAPSHOTS: &str = "CREATE TABLE IF NOT EXISTS health_
 )";
 
 pub struct StorageManager {
-    conn: Mutex<Connection>,
+    pool: Pool<SqliteConnectionManager>,
     data_dir: PathBuf,
     backup_dir: PathBuf,
     crypto: Option<super::crypto::CryptoEngine>,
@@ -110,55 +111,60 @@ impl StorageManager {
         let _ = fs::create_dir_all(&backup_dir);
 
         let db_path = data_dir.join("tetramem.db");
-        let conn = Connection::open_with_flags(
-            &db_path,
-            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
-        )
-        .map_err(|e| {
-            format!(
-                "failed to open SQLite database at {}: {}",
-                db_path.display(),
-                e
-            )
-        })?;
+        
+        let manager = SqliteConnectionManager::file(&db_path)
+            .init_flags(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE);
+        
+        let pool = r2d2::Pool::builder()
+            .max_size(16)
+            .connection_timeout(std::time::Duration::from_secs(5))
+            .idle_timeout(Some(std::time::Duration::from_secs(60)))
+            .build(manager)
+            .map_err(|e| format!("failed to build connection pool: {}", e))?;
 
-        conn.execute_batch(SCHEMA)
-            .map_err(|e| format!("failed to initialize schema: {}", e))?;
-        if let Err(e) = conn.execute_batch(MIGRATION_ADD_EMBEDDING) {
-            tracing::debug!(
-                "[Storage] embedding migration skipped (likely already applied): {}",
-                e
-            );
-        }
-        if let Err(e) = conn.execute_batch(MIGRATION_ADD_IMPORTANCE) {
-            tracing::debug!(
-                "[Storage] importance migration skipped (likely already applied): {}",
-                e
-            );
-        }
-        if let Err(e) = conn.execute_batch(MIGRATION_ADD_ENFORCED) {
-            tracing::debug!(
-                "[Storage] enforced migration skipped (likely already applied): {}",
-                e
-            );
-        }
-        if let Err(e) = conn.execute_batch(MIGRATION_ADD_RATIONALE) {
-            tracing::debug!("[Storage] rationale migration skipped: {}", e);
-        }
-        if let Err(e) = conn.execute_batch(MIGRATION_ADD_ACCESS_COUNT) {
-            tracing::debug!("[Storage] access_count migration skipped: {}", e);
-        }
-        if let Err(e) = conn.execute_batch(MIGRATION_ADD_MEMORY_TYPE) {
-            tracing::debug!("[Storage] memory_type migration skipped: {}", e);
-        }
-        if let Err(e) = conn.execute_batch(MIGRATION_ADD_HEALTH_SNAPSHOTS) {
-            tracing::debug!("[Storage] health_snapshots migration skipped: {}", e);
+        // Initialize schema using one connection from the pool
+        {
+            let conn = pool.get()
+                .map_err(|e| format!("failed to get connection from pool for schema init: {}", e))?;
+
+            conn.execute_batch(SCHEMA)
+                .map_err(|e| format!("failed to initialize schema: {}", e))?;
+            if let Err(e) = conn.execute_batch(MIGRATION_ADD_EMBEDDING) {
+                tracing::debug!(
+                    "[Storage] embedding migration skipped (likely already applied): {}",
+                    e
+                );
+            }
+            if let Err(e) = conn.execute_batch(MIGRATION_ADD_IMPORTANCE) {
+                tracing::debug!(
+                    "[Storage] importance migration skipped (likely already applied): {}",
+                    e
+                );
+            }
+            if let Err(e) = conn.execute_batch(MIGRATION_ADD_ENFORCED) {
+                tracing::debug!(
+                    "[Storage] enforced migration skipped (likely already applied): {}",
+                    e
+                );
+            }
+            if let Err(e) = conn.execute_batch(MIGRATION_ADD_RATIONALE) {
+                tracing::debug!("[Storage] rationale migration skipped: {}", e);
+            }
+            if let Err(e) = conn.execute_batch(MIGRATION_ADD_ACCESS_COUNT) {
+                tracing::debug!("[Storage] access_count migration skipped: {}", e);
+            }
+            if let Err(e) = conn.execute_batch(MIGRATION_ADD_MEMORY_TYPE) {
+                tracing::debug!("[Storage] memory_type migration skipped: {}", e);
+            }
+            if let Err(e) = conn.execute_batch(MIGRATION_ADD_HEALTH_SNAPSHOTS) {
+                tracing::debug!("[Storage] health_snapshots migration skipped: {}", e);
+            }
         }
 
-        tracing::info!("SQLite database opened: {}", db_path.display());
+        tracing::info!("SQLite database opened with connection pool: {}", db_path.display());
 
         Ok(Self {
-            conn: Mutex::new(conn),
+            pool,
             data_dir: data_dir.to_path_buf(),
             backup_dir,
             crypto: None,
@@ -244,7 +250,7 @@ impl StorageManager {
     }
 
     pub fn save_all(&self, space: &Space, kg: &KnowledgeGraph) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
 
         self.save_tetrahedrons_tx(&tx, space)?;
@@ -256,7 +262,7 @@ impl StorageManager {
     }
 
     pub fn save_space_only(&self, space: &Space) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         self.save_tetrahedrons_tx(&tx, space)?;
         tx.commit().map_err(|e| e.to_string())?;
@@ -264,7 +270,7 @@ impl StorageManager {
     }
 
     pub fn save_kg_only(&self, kg: &KnowledgeGraph) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         self.save_relations_tx(&tx, kg)?;
         self.save_concepts_tx(&tx, kg)?;
@@ -273,7 +279,7 @@ impl StorageManager {
     }
 
     pub fn upsert_tetra(&self, tetra: &Tetrahedron) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let labels_json = self.encrypt_field(
             &serde_json::to_string(&tetra.data.labels).unwrap_or_else(|_| "[]".into()),
         )?;
@@ -312,14 +318,14 @@ impl StorageManager {
     }
 
     pub fn delete_tetra(&self, id: TetraId) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM tetrahedrons WHERE id = ?1", params![id])
             .map_err(|e| format!("delete tetra {}: {}", id, e))?;
         Ok(())
     }
 
     pub fn update_mass(&self, id: TetraId, mass: f64) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE tetrahedrons SET mass = ?1 WHERE id = ?2",
             params![mass, id],
@@ -329,7 +335,7 @@ impl StorageManager {
     }
 
     pub fn update_aliases(&self, id: TetraId, aliases: &[String]) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let aliases_json =
             self.encrypt_field(&serde_json::to_string(aliases).unwrap_or_else(|_| "[]".into()))?;
         conn.execute(
@@ -341,7 +347,7 @@ impl StorageManager {
     }
 
     pub fn update_labels(&self, id: TetraId, labels: &[String]) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let labels_json =
             self.encrypt_field(&serde_json::to_string(labels).unwrap_or_else(|_| "[]".into()))?;
         conn.execute(
@@ -353,7 +359,7 @@ impl StorageManager {
     }
 
     pub fn update_enforced(&self, id: TetraId, enforced: bool) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE tetrahedrons SET importance = importance, enforced = ?1 WHERE id = ?2",
             params![enforced, id],
@@ -363,7 +369,7 @@ impl StorageManager {
     }
 
     pub fn update_importance(&self, id: TetraId, delta: f64) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.execute("UPDATE tetrahedrons SET importance = MAX(0.1, MIN(5.0, importance + ?1)) WHERE id = ?2", params![delta, id])
             .map_err(|e| e.to_string())?;
         Ok(())
@@ -377,7 +383,7 @@ impl StorageManager {
         avg_imp: f64,
         enforced: i64,
     ) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let ts = chrono::Utc::now().timestamp();
         conn.execute(
             "INSERT INTO health_snapshots (timestamp, total_memories, clusters, feedback_records, avg_importance, enforced_count) VALUES (?1,?2,?3,?4,?5,?6)",
@@ -389,7 +395,7 @@ impl StorageManager {
     }
 
     pub fn get_health_trend(&self, hours: i64) -> Vec<(i64, i64, i64, i64, f64, i64)> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let cutoff = chrono::Utc::now().timestamp() - hours * 3600;
         let mut stmt = conn.prepare(
             "SELECT timestamp, total_memories, clusters, feedback_records, avg_importance, enforced_count FROM health_snapshots WHERE timestamp > ?1 ORDER BY timestamp ASC"
@@ -410,7 +416,7 @@ impl StorageManager {
     }
 
     pub fn update_access_count(&self, id: TetraId, count: u32) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE tetrahedrons SET access_count = ?1 WHERE id = ?2",
             params![count, id],
@@ -424,7 +430,7 @@ impl StorageManager {
             return Ok(0);
         }
         let mut count = 0usize;
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         for &id in ids {
             if let Some(tetra) = space.get_tetrahedron(id) {
@@ -469,14 +475,14 @@ impl StorageManager {
     }
 
     pub fn get_meta(&self, key: &str) -> Option<String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare("SELECT value FROM meta WHERE key = ?1").ok()?;
         let val: Option<String> = stmt.query_row(params![key], |row| row.get(0)).ok();
         val
     }
 
     pub fn set_meta(&self, key: &str, value: &str) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
             params![key, value],
@@ -489,7 +495,7 @@ impl StorageManager {
         if entries.is_empty() {
             return Ok(());
         }
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         for (key, value) in entries {
             tx.execute(
@@ -503,14 +509,14 @@ impl StorageManager {
     }
 
     pub fn checkpoint(&self) -> Result<(), String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
             .map_err(|e| format!("checkpoint failed: {}", e))?;
         Ok(())
     }
 
     pub fn tetra_count(&self) -> usize {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.query_row("SELECT COUNT(*) FROM tetrahedrons", [], |row| {
             row.get::<_, i64>(0)
         })
@@ -518,7 +524,7 @@ impl StorageManager {
     }
 
     pub fn relation_count(&self) -> usize {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.query_row("SELECT COUNT(*) FROM relations", [], |row| {
             row.get::<_, i64>(0)
         })
@@ -532,7 +538,7 @@ impl StorageManager {
             .to_str()
             .ok_or_else(|| "backup path is not valid UTF-8".to_string())?;
 
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.execute("VACUUM INTO ?1", params![backup_str])
             .map_err(|e| format!("backup failed: {}", e))?;
 
@@ -573,7 +579,7 @@ impl StorageManager {
     }
 
     fn load_tetrahedrons(&self, space: &Space) -> Result<usize, String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
             "SELECT id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type FROM tetrahedrons ORDER BY id"
         ).map_err(|e| e.to_string())?;
@@ -716,7 +722,7 @@ impl StorageManager {
     }
 
     fn load_relations(&self, kg: &KnowledgeGraph) -> Result<usize, String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare("SELECT source, target, rel_type, strength FROM relations")
             .map_err(|e| e.to_string())?;
@@ -743,7 +749,7 @@ impl StorageManager {
     }
 
     fn load_concepts(&self, kg: &KnowledgeGraph) -> Result<usize, String> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare("SELECT id, label, member_count FROM concepts")
             .map_err(|e| e.to_string())?;

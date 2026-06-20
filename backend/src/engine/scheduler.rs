@@ -226,7 +226,7 @@ impl SchedulerCenter {
                     let _ = self.space.update_payload(id, data);
                 }
                 for &cid in &conflict_ids {
-                    let _ = self.knowledge.add_relation(
+                    self.knowledge.add_relation(
                         id,
                         cid,
                         super::knowledge::RelationType::Contradicts,
@@ -308,7 +308,7 @@ impl SchedulerCenter {
 
         if !intake.conflict_ids.is_empty() {
             for &cid in &intake.conflict_ids {
-                let _ = self.knowledge.add_relation(
+                self.knowledge.add_relation(
                     id,
                     cid,
                     super::knowledge::RelationType::Contradicts,
@@ -434,11 +434,7 @@ impl SchedulerCenter {
                     payload.importance
                 );
                 false
-            } else if *sim < 0.0 {
-                false
-            } else {
-                true
-            }
+            } else { *sim >= 0.0 }
         });
 
         results.truncate(limit);
@@ -716,7 +712,7 @@ impl SchedulerCenter {
             "seed_count": seed_count,
             "associated_count": assoc_count,
             "total_fragments": sorted_items.len(),
-            "emotion": serde_json::to_value(&emotion).unwrap_or_default()
+            "emotion": serde_json::to_value(emotion).unwrap_or_default()
         }))
     }
 
@@ -1696,10 +1692,9 @@ impl SchedulerCenter {
                                 skill.id
                             );
 
-                            if let Some(ref desc) = self
+                            if let Ok(ref desc) = self
                                 .cognitive
                                 .generate_skill_description(&approved.name, &approved.skill_md)
-                                .ok()
                             {
                                 let _ = skills_engine.append_description(skill.id, desc);
                                 tracing::info!(

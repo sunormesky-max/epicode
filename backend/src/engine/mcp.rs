@@ -1012,7 +1012,7 @@ impl McpHandler {
             })
         };
 
-        let action_items = self.build_action_items(&sched);
+        let action_items = self.build_action_items(sched);
 
         if !task.is_empty() {
             let query = if project.is_empty() {
@@ -1023,10 +1023,7 @@ impl McpHandler {
 
             let intent = super::retrieval::RetrievalEngine::parse_intent(&query);
 
-            let mut search_results = match sched.api_search(&query, 20) {
-                Ok(r) => r,
-                Err(_) => vec![],
-            };
+            let mut search_results = sched.api_search(&query, 20).unwrap_or_default();
 
             if !project.is_empty() && !global_scope {
                 search_results.retain(|(_, _, _, p)| {
@@ -1671,7 +1668,7 @@ impl McpHandler {
         }
         let step = args["step"].as_u64().unwrap_or(0) as usize;
         let value = args["value"].as_str().unwrap_or("").trim().to_string();
-        if step < 1 || step > 5 {
+        if !(1..=5).contains(&step) {
             return serde_json::json!({"status": "error", "message": "step must be 1-5"});
         }
         if value.is_empty() && step <= 3 {
@@ -1893,11 +1890,10 @@ impl McpHandler {
                 let old_importance = payload.importance;
                 let final_delta = importance_delta + correction_importance;
                 payload.importance = (old_importance + final_delta).max(0.1).min(5.0);
-                if is_correction {
-                    if !payload.labels.iter().any(|l| l == "outdated") {
+                if is_correction
+                    && !payload.labels.iter().any(|l| l == "outdated") {
                         payload.labels.push("outdated".to_string());
                     }
-                }
                 if is_restored {
                     payload
                         .labels

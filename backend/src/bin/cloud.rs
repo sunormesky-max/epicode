@@ -1309,10 +1309,12 @@ fn build_rest_search_filters(req: &SearchRequest) -> Option<SearchFilters> {
     if !has_labels && !has_min_imp && !has_project && !has_since {
         return None;
     }
-    let mut f = SearchFilters::default();
-    f.labels = req.labels.clone();
-    f.min_importance = req.min_importance;
-    f.project = req.project.clone();
+    let mut f = SearchFilters {
+        labels: req.labels.clone(),
+        min_importance: req.min_importance,
+        project: req.project.clone(),
+        ..Default::default()
+    };
     if let Some(days) = req.since_days {
         let now_ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1581,7 +1583,7 @@ async fn graph_analysis(
                 .flat_map(|t| t.data.labels.clone())
                 .fold(std::collections::HashMap::new(), |mut acc, l| { *acc.entry(l).or_insert(0) += 1; acc });
             let mut sorted: Vec<(String, usize)> = labels.into_iter().collect();
-            sorted.sort_by(|a, b| b.1.cmp(&a.1));
+            sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
             serde_json::json!({
                 "size": c.tetra_ids.len(),
                 "top_labels": sorted.iter().take(3).map(|(l, c)| serde_json::json!({"label": l, "count": c})).collect::<Vec<_>>(),
@@ -2271,16 +2273,13 @@ async fn admin_backup_all(State(st): State<CloudState>) -> (StatusCode, Json<ser
     let users = st.user_mgr.list_users();
     let mut results = Vec::new();
     for u in &users {
-        match st.user_mgr.get_engine(&u.user_id) {
-            Ok(engine) => match engine.backup() {
-                Ok(ts) => results
-                    .push(serde_json::json!({"user_id": u.user_id, "timestamp": ts, "ok": true})),
-                Err(e) => {
-                    results.push(serde_json::json!({"user_id": u.user_id, "error": e, "ok": false}))
-                }
-            },
-            Err(_) => {}
-        }
+        if let Ok(engine) = st.user_mgr.get_engine(&u.user_id) { match engine.backup() {
+            Ok(ts) => results
+                .push(serde_json::json!({"user_id": u.user_id, "timestamp": ts, "ok": true})),
+            Err(e) => {
+                results.push(serde_json::json!({"user_id": u.user_id, "error": e, "ok": false}))
+            }
+        } }
     }
     (
         StatusCode::OK,
@@ -2513,7 +2512,7 @@ async fn create_subaccount(
             "sub-accounts cannot create sub-accounts",
         );
     }
-    if req.user_id.len() < 1 || req.user_id.len() > 64 {
+    if req.user_id.is_empty() || req.user_id.len() > 64 {
         return error_response(StatusCode::BAD_REQUEST, "user_id must be 1-64 characters");
     }
     if !req

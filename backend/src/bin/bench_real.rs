@@ -29,8 +29,7 @@ async fn main() {
     eprintln!("=== Epicode Benchmark: {} memories ===", mem_count);
 
     // Phase 1: Create memories
-    let categories = vec![
-        (
+    let categories = [(
             "architecture",
             "System uses microservices with event-driven communication pattern",
         ),
@@ -61,8 +60,7 @@ async fn main() {
         (
             "convention",
             "All API endpoints return consistent JSON error format with code field",
-        ),
-    ];
+        )];
 
     let t0 = Instant::now();
     let mut create_times = Vec::new();
@@ -181,7 +179,7 @@ async fn main() {
     // Phase 3: Recall
     let t2 = Instant::now();
     let recall_raw = r#"{"jsonrpc":"2.0","id":2000,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"system architecture decisions","depth":2}}}"#;
-    let _resp = handler.process_json(&recall_raw);
+    let _resp = handler.process_json(recall_raw);
     let recall_time = t2.elapsed();
     eprintln!("Recall: {}ms", recall_time.as_millis());
 
@@ -222,7 +220,7 @@ async fn main() {
     eprintln!("ctx_load: {}ms", ctx_time.as_millis());
 
     // Memory usage
-    if let Ok(mem) = std::fs::metadata(format!("data_bench/epicode.db")) {
+    if let Ok(mem) = std::fs::metadata("data_bench/epicode.db") {
         eprintln!("DB size: {}KB", mem.len() / 1024);
     }
 }

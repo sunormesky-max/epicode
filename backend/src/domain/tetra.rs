@@ -38,12 +38,12 @@ const fn canonical_offsets() -> [Point3; 4] {
         Point3 {
             x: 0.0,
             y: half,
-            z: z,
+            z,
         },
         Point3 {
             x: 0.0,
             y: -half,
-            z: z,
+            z,
         },
     ]
 }

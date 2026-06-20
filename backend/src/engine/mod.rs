@@ -70,6 +70,12 @@ pub struct Engine {
     data_path: std::path::PathBuf,
 }
 
+impl Default for Engine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Engine {
     pub fn new() -> Self {
         Self::with_data_dir(std::path::PathBuf::from("data"))
@@ -425,7 +431,7 @@ impl Engine {
         if self.space.identity_info().is_some() {
             return Err("identity already confirmed".into());
         }
-        if step < 1 || step > 5 {
+        if !(1..=5).contains(&step) {
             return Err("step must be 1-5".into());
         }
         if value.trim().is_empty() && step <= 3 {
