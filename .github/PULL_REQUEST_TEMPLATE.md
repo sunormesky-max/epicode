@@ -22,8 +22,13 @@
 
 ## Checklist
 
+- [ ] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
 - [ ] Code follows existing style conventions
 - [ ] No unnecessary dependencies added
 - [ ] Documentation updated if needed
 - [ ] No secrets or credentials in code
 - [ ] Breaking changes documented
+
+---
+
+💡 **Questions or ideas?** Start a [Discussion](https://github.com/sunormesky-max/epicode/discussions) before opening an issue.

@@ -1,6 +1,6 @@
 [package]
 name = "epicode"
-version = "1.0.0"
+version = "1.0.0"  # x-release-please-version
 edition = "2021"
 description = "Epicode — AI Memory Operating System with MCP and SMRP"
 license = "MIT"

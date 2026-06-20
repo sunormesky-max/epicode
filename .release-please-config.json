@@ -1,0 +1,12 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "include-component-in-tag": false,
+      "extra-files": [
+        "backend/Cargo.toml",
+        "guard/Cargo.toml"
+      ]
+    }
+  }
+}
