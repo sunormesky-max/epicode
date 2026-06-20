@@ -97,21 +97,18 @@ pub fn auto_pulse(
             PulseType::Reinforcing { boost: 0.2 }
         };
 
-        match PulseEngine::send(ctx.space, ctx.knowledge, ptype, origin, 12) {
-            Ok(result) => {
-                if result.data.visited_tetras.len() > 1 {
-                    tracing::info!(
-                        "[AutoPulse] {} cluster({}) origin {} (mass={:.2}) → visited {} tetras",
-                        if i == 0 { "Neural" } else { "Reinforcing" },
-                        cluster_size,
-                        origin,
-                        mass,
-                        result.data.visited_tetras.len()
-                    );
-                }
-                pulsed += 1;
+        if let Ok(result) = PulseEngine::send(ctx.space, ctx.knowledge, ptype, origin, 12) {
+            if result.data.visited_tetras.len() > 1 {
+                tracing::info!(
+                    "[AutoPulse] {} cluster({}) origin {} (mass={:.2}) → visited {} tetras",
+                    if i == 0 { "Neural" } else { "Reinforcing" },
+                    cluster_size,
+                    origin,
+                    mass,
+                    result.data.visited_tetras.len()
+                );
             }
-            Err(_) => {}
+            pulsed += 1;
         }
     }
 
@@ -147,13 +144,12 @@ pub fn auto_fission(
 
     for (ci, size) in &sorted_clusters {
         let entropy = dynamics::compute_entropy_from_labels(&clusters[*ci].tetra_ids, labels_map);
-        if *size >= 30
+        if (*size >= 30
             || entropy
                 >= ctx
                     .adaptive
-                    .get(super::adaptive::Param::FissionEntropyThreshold)
-        {
-            if perform_fission_from_snap(
+                    .get(super::adaptive::Param::FissionEntropyThreshold))
+            && perform_fission_from_snap(
                 ctx,
                 *ci,
                 0,
@@ -164,12 +160,11 @@ pub fn auto_fission(
                 core_map,
             )
             .is_some()
-            {
-                return AutoFissionOutcome {
-                    did_fission: true,
-                    merge_pairs: None,
-                };
-            }
+        {
+            return AutoFissionOutcome {
+                did_fission: true,
+                merge_pairs: None,
+            };
         }
     }
 
@@ -250,12 +245,9 @@ pub fn auto_merge(
                     original.y + dy / d.max(0.01) * step,
                     original.z + dz / d.max(0.01) * step,
                 );
-                match ctx.space.relocate_tetrahedron(id, new_core) {
-                    Ok(_) => {
-                        persist_tetra_id(ctx.space, ctx.storage, ctx.gateway, id);
-                        moved += 1;
-                    }
-                    Err(_) => {}
+                if ctx.space.relocate_tetrahedron(id, new_core).is_ok() {
+                    persist_tetra_id(ctx.space, ctx.storage, ctx.gateway, id);
+                    moved += 1;
                 }
             }
         }
@@ -371,7 +363,7 @@ pub fn evict_low_quality(
 
     let mut evicted = 0;
     for &id in &candidates {
-        let has_connections = ctx.knowledge.query_relations(id).len() > 0;
+        let has_connections = !ctx.knowledge.query_relations(id).is_empty();
         if !has_connections {
             purge_fn(id);
             evicted += 1;

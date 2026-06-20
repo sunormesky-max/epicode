@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Layout from '@/components/Layout';
-import { getPublicStats } from '@/lib/api';
+import { getPublicStats, type PublicStats } from '@/lib/api';
 import {
   BarChart3, Zap, Database, Brain, GitBranch,
   Activity, Server, Cpu
@@ -85,10 +85,10 @@ function MetricCard({ icon: Icon, label, value, unit, color, sub }: {
 }
 
 export default function Benchmarks() {
-  const [pubStats, setPubStats] = useState<{ total_memories: number; total_skills: number; total_users: number } | null>(null);
+  const [pubStats, setPubStats] = useState<PublicStats | null>(null);
 
   useEffect(() => {
-    getPublicStats().then(d => setPubStats(d as any)).catch(() => {});
+    getPublicStats().then(setPubStats).catch(() => {});
   }, []);
 
   return (

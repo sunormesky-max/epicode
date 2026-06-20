@@ -75,6 +75,12 @@ pub struct OutcomeTracker {
     avg_effectiveness: std::collections::HashMap<ActionType, f64>,
 }
 
+impl Default for OutcomeTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OutcomeTracker {
     pub fn new() -> Self {
         let mut avg_effectiveness = std::collections::HashMap::new();

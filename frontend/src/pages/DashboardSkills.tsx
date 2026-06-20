@@ -1,4 +1,5 @@
-﻿import { useState, useEffect, useMemo } from 'react';
+﻿/* eslint-disable react-refresh/only-export-components */
+import { useState, useEffect, useMemo } from 'react';
 import { getMySkills, getPublicSkills, createSkill, type SkillData, type CommunitySkill } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
 import { Brain, Wrench, Users, Clock, Tag, Plus, Search, X, Star, Filter } from 'lucide-react';
@@ -75,8 +76,8 @@ export default function Dashboard技能() {
         if (!mounted) return;
         setMy技能(my);
         setPub技能(pub);
-      } catch (e: any) {
-        if (mounted) setError(e.message);
+      } catch (e: unknown) {
+        if (mounted) setError(e instanceof Error ? e.message : 'Failed to load skills');
       }
       if (mounted) setLoading(false);
     }

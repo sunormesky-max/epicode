@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState, useMemo } from 'react';
-import { getStats, getTimeline, getGraphAnalysis, type StatsData, type TimelineEvent } from '@/lib/api';
+import { getStats, getTimeline, getGraphAnalysis, type GraphAnalysis, type StatsData, type TimelineEvent } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
 import {
   Brain, Zap, Layers, BarChart3, Crown, GitBranch,
@@ -13,12 +13,7 @@ const PIE_COLORS = ['#a855f7', '#d946ef', '#6366f1', '#ec4899', '#34d399', '#f59
 export default function DashboardOverview() {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [events, setEvents] = useState<TimelineEvent[]>([]);
-  const [graphInfo, setGraphInfo] = useState<{
-    total_memories: number; relation_count: number; cluster_count: number; concept_count: number;
-    top_labels: { label: string; count: number }[];
-    cluster_analysis: { size: number; top_labels: { label: string; count: number }[] }[];
-    age_distribution: { labels: string[]; values: number[] };
-  } | null>(null);
+  const [graphInfo, setGraphInfo] = useState<GraphAnalysis | null>(null);
   const [chartData, setChartData] = useState<{ name: string; count: number }[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -47,11 +42,11 @@ export default function DashboardOverview() {
         }
         setChartData(Object.entries(dayMap).map(([name, count]) => ({ name, count })));
 
-        const g = await getGraphAnalysis() as any;
+        const g = await getGraphAnalysis();
         if (!mounted) return;
         setGraphInfo(g);
-      } catch (e: any) {
-        if (mounted) setError(e.message || 'Failed to load');
+      } catch (e: unknown) {
+        if (mounted) setError(e instanceof Error ? e.message : 'Failed to load');
       }
       if (mounted) setLoading(false);
     }

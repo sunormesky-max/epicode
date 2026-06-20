@@ -199,7 +199,7 @@ fn handle_authenticated_connection(
                                 tracing::warn!("write error to {}: {}", peer, e);
                                 break;
                             }
-                            if let Err(_) = writer.flush() {
+                            if writer.flush().is_err() {
                                 break;
                             }
                             continue;
@@ -208,7 +208,7 @@ fn handle_authenticated_connection(
                             if let Err(_e) = writeln!(writer, "{}", resp_str) {
                                 break;
                             }
-                            if let Err(_) = writer.flush() {
+                            if writer.flush().is_err() {
                                 break;
                             }
                             continue;
@@ -234,7 +234,7 @@ fn handle_authenticated_connection(
                         tracing::warn!("write error to {}: {}", peer, e);
                         break;
                     }
-                    if let Err(_) = writer.flush() {
+                    if writer.flush().is_err() {
                         break;
                     }
                 }

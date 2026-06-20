@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::http::{header::CONTENT_TYPE, HeaderValue};
 use axum::response::{
@@ -10,10 +10,13 @@ use axum::response::{
 };
 use axum::Json;
 use futures::stream::Stream;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt as _;
 
+use crate::domain::permission::{Permission, ResourceType, UserRole};
 use crate::engine::Engine;
+use chrono::Utc;
+use uuid::Uuid;
 
 // ── Dashboard ──
 
@@ -75,6 +78,38 @@ pub struct IdentityConfirmRequest {
     pub author: String,
     pub extra: Option<std::collections::HashMap<String, String>>,
     pub confirm_token: Option<String>,
+}
+
+// ── 权限管理请求类型 ──
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GrantPermissionRequest {
+    pub user_id: String,
+    pub resource_id: String,
+    pub resource_type: String,
+    pub role: String,
+    pub tenant_id: String,
+    pub granted_by: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RevokePermissionRequest {
+    pub permission_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetPermissionsQuery {
+    pub user_id: Option<String>,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AuditLogsQuery {
+    pub start: Option<i64>,
+    pub end: Option<i64>,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
 }
 
 // ── Handlers ──
@@ -269,6 +304,37 @@ pub async fn get_node(
             "timestamp": payload.timestamp,
         })),
         None => Json(serde_json::json!({"success": false, "error": "node not found"})),
+    }
+}
+
+pub async fn delete_node(
+    State(engine): State<Arc<Engine>>,
+    Path(id): Path<u64>,
+) -> Json<serde_json::Value> {
+    match engine.scheduler.api_delete_memory(id) {
+        Ok(restored_id) => Json(
+            serde_json::json!({"success": true, "deleted": restored_id, "mode": "soft_delete"}),
+        ),
+        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
+    }
+}
+
+pub async fn list_deleted_nodes(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
+    match engine.scheduler.api_list_deleted_memories() {
+        Ok(items) => {
+            Json(serde_json::json!({"success": true, "items": items, "total": items.len()}))
+        }
+        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
+    }
+}
+
+pub async fn restore_node(
+    State(engine): State<Arc<Engine>>,
+    Path(id): Path<u64>,
+) -> Json<serde_json::Value> {
+    match engine.scheduler.api_restore_memory(id) {
+        Ok(restored_id) => Json(serde_json::json!({"success": true, "restored": restored_id})),
+        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
 }
 
@@ -469,6 +535,30 @@ pub async fn security_audit(State(engine): State<Arc<Engine>>) -> Json<serde_jso
     }))
 }
 
+pub async fn cache_stats(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
+    let (l1_hits, l1_misses, l2_hits, l2_misses, evictions, hit_ratio, l1_hit_ratio, l2_hit_ratio) =
+        engine.gateway().cache_stats_snapshot();
+    Json(serde_json::json!({
+        "success": true,
+        "l1_hits": l1_hits,
+        "l1_misses": l1_misses,
+        "l2_hits": l2_hits,
+        "l2_misses": l2_misses,
+        "evictions": evictions,
+        "hit_ratio": hit_ratio,
+        "l1_hit_ratio": l1_hit_ratio,
+        "l2_hit_ratio": l2_hit_ratio,
+    }))
+}
+
+pub async fn clear_cache(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
+    engine.gateway().clear_query_cache();
+    Json(serde_json::json!({
+        "success": true,
+        "message": "query cache cleared",
+    }))
+}
+
 pub async fn list_backups(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
     let backups = engine.storage.list_backups();
     let tetra_count = engine.storage.tetra_count();
@@ -630,4 +720,200 @@ pub async fn update_config(
     Json(
         serde_json::json!({"success": true, "message": "Config saved. Restart required for some changes."}),
     )
+}
+
+// ── 权限管理处理器 ──
+
+pub async fn grant_permission(
+    State(engine): State<Arc<Engine>>,
+    Json(req): Json<GrantPermissionRequest>,
+) -> Json<serde_json::Value> {
+    let resource_type = match ResourceType::from_str(&req.resource_type) {
+        Some(rt) => rt,
+        None => {
+            return Json(serde_json::json!({"success": false, "error": "Invalid resource_type"}))
+        }
+    };
+
+    let role = match UserRole::from_str(&req.role) {
+        Some(r) => r,
+        None => return Json(serde_json::json!({"success": false, "error": "Invalid role"})),
+    };
+
+    let permission = Permission {
+        id: Uuid::new_v4().to_string(),
+        user_id: req.user_id,
+        resource_id: req.resource_id,
+        resource_type,
+        role,
+        granted_at: Utc::now(),
+        granted_by: req.granted_by,
+        tenant_id: req.tenant_id,
+        revoked_at: None,
+    };
+
+    match engine.grant_permission(permission) {
+        Ok(id) => Json(serde_json::json!({"success": true, "permission_id": id})),
+        Err(e) => Json(serde_json::json!({"success": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn revoke_permission(
+    State(engine): State<Arc<Engine>>,
+    Json(req): Json<RevokePermissionRequest>,
+) -> Json<serde_json::Value> {
+    match engine.revoke_permission(&req.permission_id) {
+        Ok(()) => Json(serde_json::json!({"success": true})),
+        Err(e) => Json(serde_json::json!({"success": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn get_user_permissions(
+    State(engine): State<Arc<Engine>>,
+    Query(params): Query<GetPermissionsQuery>,
+) -> Json<serde_json::Value> {
+    match params.user_id {
+        Some(user_id) => match engine.get_user_permissions(&user_id) {
+            Ok(perms) => Json(serde_json::json!({"success": true, "permissions": perms})),
+            Err(e) => Json(serde_json::json!({"success": false, "error": e.to_string()})),
+        },
+        None => Json(serde_json::json!({"success": false, "error": "user_id is required"})),
+    }
+}
+
+pub async fn get_audit_logs(
+    State(engine): State<Arc<Engine>>,
+    Query(params): Query<AuditLogsQuery>,
+) -> Json<serde_json::Value> {
+    let offset = params.offset.unwrap_or(0);
+    let limit = params.limit.unwrap_or(50);
+
+    match engine.get_audit_logs(offset, limit) {
+        Ok((logs, total)) => Json(serde_json::json!({
+            "success": true,
+            "logs": logs,
+            "total": total,
+            "offset": offset,
+            "limit": limit
+        })),
+        Err(e) => Json(serde_json::json!({"success": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn get_current_user_permissions(
+    State(engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
+    let user_id = &engine.user_id;
+    match engine.get_user_permissions(user_id) {
+        Ok(perms) => Json(serde_json::json!({"success": true, "permissions": perms})),
+        Err(e) => Json(serde_json::json!({"success": false, "error": e.to_string()})),
+    }
+}
+
+// ── Key Rotation ──
+
+pub async fn get_current_key(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
+    let kr = engine.key_rotation.lock().unwrap();
+    let current_id = kr.get_current_key_id();
+    Json(serde_json::json!({
+        "success": true,
+        "current_key_id": current_id,
+    }))
+}
+
+pub async fn list_keys(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
+    let kr = engine.key_rotation.lock().unwrap();
+    let keys = kr.list_active_keys();
+    let key_list: Vec<serde_json::Value> = keys
+        .into_iter()
+        .map(|(id, meta)| {
+            serde_json::json!({
+                "key_id": id,
+                "created_at": meta.created_at.to_rfc3339(),
+                "rotated_at": meta.rotated_at.map(|t| t.to_rfc3339()),
+                "revoked_at": meta.revoked_at.map(|t| t.to_rfc3339()),
+                "status": format!("{:?}", meta.status),
+                "version": meta.version,
+            })
+        })
+        .collect();
+    Json(serde_json::json!({
+        "success": true,
+        "keys": key_list,
+        "total": key_list.len(),
+    }))
+}
+
+pub async fn rotate_key(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
+    let mut kr = engine.key_rotation.lock().unwrap();
+    match kr.rotate_key() {
+        Ok(event) => {
+            let event_str = format!("{:?}", event);
+            Json(serde_json::json!({
+                "success": true,
+                "message": "Key rotated successfully",
+                "event": event_str,
+            }))
+        }
+        Err(e) => Json(serde_json::json!({
+            "success": false,
+            "error": e,
+        })),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RevokeKeyRequest {
+    pub key_id: String,
+    pub reason: String,
+}
+
+pub async fn revoke_key(
+    State(engine): State<Arc<Engine>>,
+    Json(req): Json<RevokeKeyRequest>,
+) -> Json<serde_json::Value> {
+    let mut kr = engine.key_rotation.lock().unwrap();
+    match kr.revoke_key(&req.key_id, &req.reason) {
+        Ok(event) => {
+            let event_str = format!("{:?}", event);
+            Json(serde_json::json!({
+                "success": true,
+                "message": "Key revoked successfully",
+                "event": event_str,
+            }))
+        }
+        Err(e) => Json(serde_json::json!({
+            "success": false,
+            "error": e,
+        })),
+    }
+}
+
+pub async fn get_key_events(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
+    let kr = engine.key_rotation.lock().unwrap();
+    let events = kr.get_events();
+    let event_list: Vec<serde_json::Value> = events
+        .into_iter()
+        .map(|e| serde_json::json!({"event": format!("{:?}", e)}))
+        .collect();
+    Json(serde_json::json!({
+        "success": true,
+        "events": event_list,
+        "total": event_list.len(),
+    }))
+}
+
+pub async fn restore_key(
+    State(engine): State<Arc<Engine>>,
+    Json(req): Json<RevokeKeyRequest>,
+) -> Json<serde_json::Value> {
+    let mut kr = engine.key_rotation.lock().unwrap();
+    match kr.restore_key(&req.key_id) {
+        Ok(event) => Json(serde_json::json!({
+            "success": true,
+            "message": "Key restored successfully",
+            "event": format!("{:?}", event),
+        })),
+        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
+    }
 }

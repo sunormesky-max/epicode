@@ -65,6 +65,12 @@ pub struct DriveEngine {
     drives: HashMap<Drive, DriveState>,
 }
 
+impl Default for DriveEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DriveEngine {
     pub fn new() -> Self {
         let mut drives = HashMap::new();

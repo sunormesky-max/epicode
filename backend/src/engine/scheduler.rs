@@ -226,7 +226,7 @@ impl SchedulerCenter {
                     let _ = self.space.update_payload(id, data);
                 }
                 for &cid in &conflict_ids {
-                    let _ = self.knowledge.add_relation(
+                    self.knowledge.add_relation(
                         id,
                         cid,
                         super::knowledge::RelationType::Contradicts,
@@ -308,7 +308,7 @@ impl SchedulerCenter {
 
         if !intake.conflict_ids.is_empty() {
             for &cid in &intake.conflict_ids {
-                let _ = self.knowledge.add_relation(
+                self.knowledge.add_relation(
                     id,
                     cid,
                     super::knowledge::RelationType::Contradicts,
@@ -434,10 +434,8 @@ impl SchedulerCenter {
                     payload.importance
                 );
                 false
-            } else if *sim < 0.0 {
-                false
             } else {
-                true
+                *sim >= 0.0
             }
         });
 
@@ -570,8 +568,29 @@ impl SchedulerCenter {
     }
 
     pub fn api_delete_memory(&self, id: TetraId) -> Result<TetraId, String> {
-        self.purge_tetra(id);
+        let tetra = self
+            .space
+            .get_tetrahedron(id)
+            .ok_or_else(|| format!("memory {} not found", id))?;
+        self.storage.soft_delete_tetra(&tetra, 30)?;
+        self.purge_tetra(id, false);
         Ok(id)
+    }
+
+    pub fn api_list_deleted_memories(
+        &self,
+    ) -> Result<Vec<super::storage::DeletedMemoryInfo>, String> {
+        self.storage.list_deleted_memories()
+    }
+
+    pub fn api_restore_memory(&self, id: TetraId) -> Result<TetraId, String> {
+        let tetra = self
+            .storage
+            .restore_deleted_tetra(id)?
+            .ok_or_else(|| format!("deleted memory {} not found", id))?;
+        let restored_id = self.gateway.restore_tetra(&tetra)?;
+        self.persist_tetra(restored_id);
+        Ok(restored_id)
     }
 
     pub fn api_dream(&self) -> Result<String, String> {
@@ -584,7 +603,7 @@ impl SchedulerCenter {
             .iter()
             .chain(report.merged_remove_ids.iter())
         {
-            self.purge_tetra(id);
+            self.purge_tetra(id, true);
         }
         let access_counts: std::collections::HashMap<u64, u32> = self
             .gateway
@@ -716,7 +735,7 @@ impl SchedulerCenter {
             "seed_count": seed_count,
             "associated_count": assoc_count,
             "total_fragments": sorted_items.len(),
-            "emotion": serde_json::to_value(&emotion).unwrap_or_default()
+            "emotion": serde_json::to_value(emotion).unwrap_or_default()
         }))
     }
 
@@ -1150,7 +1169,7 @@ impl SchedulerCenter {
                     .iter()
                     .chain(result.merged_remove_ids.iter())
                 {
-                    self.purge_tetra(id);
+                    self.purge_tetra(id, true);
                 }
                 tracing::info!(
                     "[LLM] dream: consolidated {}, formed {} connections, {} insights, {} merged, {} evicted",
@@ -1206,7 +1225,7 @@ impl SchedulerCenter {
                         continue;
                     }
                     if self.space.get_tetrahedron(id).is_some() {
-                        self.purge_tetra(id);
+                        self.purge_tetra(id, true);
                         deleted += 1;
                     }
                 }
@@ -1405,7 +1424,7 @@ impl SchedulerCenter {
         super::janitor::mark_dirty_persist(&ctx, id);
     }
 
-    fn purge_tetra(&self, id: TetraId) {
+    fn purge_tetra(&self, id: TetraId, remove_from_storage: bool) {
         let labels = self
             .space
             .get_tetrahedron(id)
@@ -1413,8 +1432,10 @@ impl SchedulerCenter {
         if let Err(e) = self.space.remove_tetrahedron(id) {
             tracing::debug!("purge_tetra {}: space already removed: {}", id, e);
         }
-        if let Err(e) = self.storage.delete_tetra(id) {
-            tracing::warn!("purge_tetra {}: storage delete failed: {}", id, e);
+        if remove_from_storage {
+            if let Err(e) = self.storage.delete_tetra(id) {
+                tracing::warn!("purge_tetra {}: storage delete failed: {}", id, e);
+            }
         }
         self.knowledge.remove_relations_for(id);
         if let Some(ref lbls) = labels {
@@ -1514,7 +1535,7 @@ impl SchedulerCenter {
             adaptive: &adaptive,
         };
         let purge = |id: TetraId| {
-            self.purge_tetra(id);
+            self.purge_tetra(id, true);
         };
         super::auto_pipeline::evict_low_quality(&ctx, &snap.tetras, &purge);
     }
@@ -1696,10 +1717,9 @@ impl SchedulerCenter {
                                 skill.id
                             );
 
-                            if let Some(ref desc) = self
+                            if let Ok(ref desc) = self
                                 .cognitive
                                 .generate_skill_description(&approved.name, &approved.skill_md)
-                                .ok()
                             {
                                 let _ = skills_engine.append_description(skill.id, desc);
                                 tracing::info!(
@@ -1845,7 +1865,7 @@ impl SchedulerCenter {
         };
 
         let purge = |id: TetraId| {
-            self.purge_tetra(id);
+            self.purge_tetra(id, true);
         };
 
         let gov = super::governor::LifecycleGovernor::evaluate(&self.space, &self.knowledge);
@@ -2209,7 +2229,7 @@ impl SchedulerCenter {
                 }
             }
             ScheduledTask::RemoveTetra(id) => {
-                self.purge_tetra(*id);
+                self.purge_tetra(*id, true);
                 tracing::info!("removed tetrahedron {}", id);
                 let _ = self.tx.send(EngineEvent::TetrahedronRemoved(*id));
             }

@@ -111,6 +111,12 @@ pub struct AdaptiveParams {
     params: HashMap<Param, ParamState>,
 }
 
+impl Default for AdaptiveParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AdaptiveParams {
     pub fn new() -> Self {
         let mut params = HashMap::new();

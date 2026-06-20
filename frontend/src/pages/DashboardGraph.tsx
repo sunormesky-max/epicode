@@ -1,6 +1,6 @@
 ﻿import { useEffect, useRef, useState } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
-import { getGraphExport, getGraphAnalysis } from '@/lib/api';
+import { getGraphExport, getGraphAnalysis, type GraphAnalysis } from '@/lib/api';
 import { Search, ZoomIn, ZoomOut, RotateCcw, X } from 'lucide-react'
 ;
 
@@ -13,6 +13,18 @@ interface SimNode {
 
 interface ClusterInfo {
   size: number; top_labels: { label: string; count: number }[];
+}
+
+interface GraphNode {
+  id: number;
+  content: string;
+  labels: string[];
+  mass: number;
+}
+
+interface GraphEdge {
+  source: number;
+  target: number;
 }
 
 export default function DashboardGraph() {
@@ -47,7 +59,7 @@ export default function DashboardGraph() {
     let mounted = true;
     async function load() {
       try {
-        const [data, analysis] = await Promise.all([getGraphExport(), getGraphAnalysis() as any]);
+        const [data, analysis] = await Promise.all([getGraphExport(), getGraphAnalysis()]);
         if (!mounted) return;
 
         const rawNodes = data.nodes || [];
@@ -59,7 +71,7 @@ export default function DashboardGraph() {
         });
 
         const idToIdx = new Map<number, number>();
-        const ns: SimNode[] = rawNodes.map((rn, i) => {
+        const ns: SimNode[] = rawNodes.map((rn: GraphNode, i) => {
           idToIdx.set(rn.id, i);
           return {
             id: rn.id, idx: i,
@@ -75,7 +87,7 @@ export default function DashboardGraph() {
         });
 
         const es: [number, number][] = [];
-        for (const re of rawEdges) {
+        for (const re of rawEdges as GraphEdge[]) {
           const si = idToIdx.get(re.source);
           const ti = idToIdx.get(re.target);
           if (si !== undefined && ti !== undefined) es.push([si, ti]);
@@ -85,11 +97,11 @@ export default function DashboardGraph() {
         setNodes(ns);
         setEdgePairs(es);
         setStats({ nodes: ns.length, edges: es.length, clusters: (data.clusters || []).length });
-        setClusterInfo(analysis?.cluster_analysis || []);
+        setClusterInfo((analysis as GraphAnalysis).cluster_analysis || []);
         nodesRef.current = ns;
         edgesRef.current = es;
-      } catch (e: any) {
-        if (mounted) setError(e.message);
+      } catch (e: unknown) {
+        if (mounted) setError(e instanceof Error ? e.message : 'Failed to load graph');
       }
       if (mounted) setLoading(false);
     }

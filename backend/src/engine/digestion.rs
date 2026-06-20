@@ -352,10 +352,8 @@ impl DigestionEngine {
         ];
 
         for (keyword, label) in rules {
-            if lower.contains(keyword) {
-                if !labels.contains(&label.to_string()) {
-                    labels.push(label.to_string());
-                }
+            if lower.contains(keyword) && !labels.contains(&label.to_string()) {
+                labels.push(label.to_string());
             }
         }
 

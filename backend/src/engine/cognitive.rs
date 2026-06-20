@@ -1345,7 +1345,7 @@ impl CognitiveEngine {
         // Cross-cluster semantic pairs — enriched with KG connection status
         sections.push("\n## Cross-Cluster Associations".to_string());
         let mut cross_cluster_pairs: Vec<String> = Vec::new();
-        let all_content: Vec<&MemoryInfo> = content_tetras.iter().copied().collect();
+        let all_content: Vec<&MemoryInfo> = content_tetras.to_vec();
         let limit = all_content.len().min(25);
         for i in 0..limit {
             for j in (i + 1)..limit {
@@ -1360,7 +1360,7 @@ impl CognitiveEngine {
                     if !shared.is_empty() {
                         let shared_str: String = shared
                             .iter()
-                            .map(|s| -> &str { **s })
+                            .map(|s| -> &str { s })
                             .collect::<Vec<&str>>()
                             .join(",");
                         cross_cluster_pairs.push(format!(

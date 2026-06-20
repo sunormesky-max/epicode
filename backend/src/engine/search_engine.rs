@@ -87,12 +87,12 @@ pub struct SearchFilters {
 
 fn is_cjk(ch: char) -> bool {
     let cp = ch as u32;
-    (cp >= 0x4E00 && cp <= 0x9FFF)
-        || (cp >= 0x3400 && cp <= 0x4DBF)
-        || (cp >= 0x3000 && cp <= 0x303F)
-        || (cp >= 0x3040 && cp <= 0x309F)
-        || (cp >= 0x30A0 && cp <= 0x30FF)
-        || (cp >= 0xAC00 && cp <= 0xD7AF)
+    (0x4E00..=0x9FFF).contains(&cp)
+        || (0x3400..=0x4DBF).contains(&cp)
+        || (0x3000..=0x303F).contains(&cp)
+        || (0x3040..=0x309F).contains(&cp)
+        || (0x30A0..=0x30FF).contains(&cp)
+        || (0xAC00..=0xD7AF).contains(&cp)
 }
 
 pub fn tokenize(text: &str) -> Vec<String> {
