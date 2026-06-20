@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::{Path, State, Query};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::http::{header::CONTENT_TYPE, HeaderValue};
 use axum::response::{
@@ -13,8 +13,8 @@ use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt as _;
 
-use crate::engine::Engine;
 use crate::domain::permission::{Permission, ResourceType, UserRole};
+use crate::engine::Engine;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -304,6 +304,37 @@ pub async fn get_node(
             "timestamp": payload.timestamp,
         })),
         None => Json(serde_json::json!({"success": false, "error": "node not found"})),
+    }
+}
+
+pub async fn delete_node(
+    State(engine): State<Arc<Engine>>,
+    Path(id): Path<u64>,
+) -> Json<serde_json::Value> {
+    match engine.scheduler.api_delete_memory(id) {
+        Ok(restored_id) => Json(
+            serde_json::json!({"success": true, "deleted": restored_id, "mode": "soft_delete"}),
+        ),
+        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
+    }
+}
+
+pub async fn list_deleted_nodes(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
+    match engine.scheduler.api_list_deleted_memories() {
+        Ok(items) => {
+            Json(serde_json::json!({"success": true, "items": items, "total": items.len()}))
+        }
+        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
+    }
+}
+
+pub async fn restore_node(
+    State(engine): State<Arc<Engine>>,
+    Path(id): Path<u64>,
+) -> Json<serde_json::Value> {
+    match engine.scheduler.api_restore_memory(id) {
+        Ok(restored_id) => Json(serde_json::json!({"success": true, "restored": restored_id})),
+        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
 }
 
@@ -824,12 +855,10 @@ pub async fn rotate_key(State(engine): State<Arc<Engine>>) -> Json<serde_json::V
                 "event": event_str,
             }))
         }
-        Err(e) => {
-            Json(serde_json::json!({
-                "success": false,
-                "error": e,
-            }))
-        }
+        Err(e) => Json(serde_json::json!({
+            "success": false,
+            "error": e,
+        })),
     }
 }
 
@@ -853,12 +882,10 @@ pub async fn revoke_key(
                 "event": event_str,
             }))
         }
-        Err(e) => {
-            Json(serde_json::json!({
-                "success": false,
-                "error": e,
-            }))
-        }
+        Err(e) => Json(serde_json::json!({
+            "success": false,
+            "error": e,
+        })),
     }
 }
 

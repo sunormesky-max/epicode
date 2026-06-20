@@ -29,7 +29,8 @@ async fn main() {
     eprintln!("=== Epicode Benchmark: {} memories ===", mem_count);
 
     // Phase 1: Create memories
-    let categories = [(
+    let categories = [
+        (
             "architecture",
             "System uses microservices with event-driven communication pattern",
         ),
@@ -60,7 +61,8 @@ async fn main() {
         (
             "convention",
             "All API endpoints return consistent JSON error format with code field",
-        )];
+        ),
+    ];
 
     let t0 = Instant::now();
     let mut create_times = Vec::new();

@@ -3,6 +3,11 @@ import { searchMemories, getTimeline, deleteMemory, storeMemory, type SearchResu
 import DashboardLayout from '@/components/DashboardLayout';
 import { Search, Plus, Filter, X, ChevronDown, Calendar, Tag, Hash } from 'lucide-react';
 
+const SORT_OPTIONS: Array<{ key: 'newest' | 'oldest'; label: string }> = [
+  { key: 'newest', label: '最新优先' },
+  { key: 'oldest', label: '最早优先' },
+];
+
 export default function DashboardMemories() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -32,8 +37,8 @@ export default function DashboardMemories() {
         if (!mounted) return;
         setEvents(data.events || []);
         setTotalEvents(data.total || 0);
-      } catch (e: any) {
-        if (mounted) setError(e.message);
+      } catch (e: unknown) {
+        if (mounted) setError(e instanceof Error ? e.message : 'Failed to load memories');
       }
       if (mounted) setInitialLoading(false);
     }
@@ -56,8 +61,8 @@ export default function DashboardMemories() {
       const sinceDaysMap: Record<string, number | undefined> = { all: undefined, today: 1, week: 7, month: 30 };
       const data = await searchMemories(query, { limit: 20, since_days: sinceDaysMap[timeRange] });
       setResults(data.results || []);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Search failed');
       setResults([]);
     }
     setLoading(false);
@@ -184,8 +189,8 @@ export default function DashboardMemories() {
               <Hash size={12} /> 排序方式
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
-              {[{ key: 'newest', label: '最新优先' }, { key: 'oldest', label: '最早优先' }].map(s => (
-                <button key={s.key} onClick={() => setSortBy(s.key as any)} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12,
+              {SORT_OPTIONS.map(s => (
+                <button key={s.key} onClick={() => setSortBy(s.key)} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12,
                   background: sortBy === s.key ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.04)', color: sortBy === s.key ? '#a855f7' : '#9ca3af' }}>
                   {s.label}
                 </button>

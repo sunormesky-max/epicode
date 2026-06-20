@@ -35,11 +35,7 @@ const fn canonical_offsets() -> [Point3; 4] {
             y: 0.0,
             z: -z,
         },
-        Point3 {
-            x: 0.0,
-            y: half,
-            z,
-        },
+        Point3 { x: 0.0, y: half, z },
         Point3 {
             x: 0.0,
             y: -half,
@@ -95,7 +91,7 @@ impl Default for MemoryPayload {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Tetrahedron {
     pub id: TetraId,
     pub vertex_ids: [VertexId; VERTEX_COUNT],

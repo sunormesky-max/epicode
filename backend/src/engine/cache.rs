@@ -36,7 +36,8 @@ impl CacheStats {
     pub fn hit_ratio(&self) -> f64 {
         let total_hits =
             self.l1_hits.load(Ordering::Relaxed) + self.l2_hits.load(Ordering::Relaxed);
-        let total_misses = self.l1_misses.load(Ordering::Relaxed) + self.l2_misses.load(Ordering::Relaxed);
+        let total_misses =
+            self.l1_misses.load(Ordering::Relaxed) + self.l2_misses.load(Ordering::Relaxed);
         let total = total_hits + total_misses;
         if total == 0 {
             0.0
@@ -116,18 +117,16 @@ impl CacheLayer {
 
         let l2_client = std::env::var("REDIS_URL").ok().and_then(|url| {
             match redis::Client::open(url.as_str()) {
-                Ok(client) => {
-                    match client.get_connection() {
-                        Ok(_conn) => {
-                            tracing::info!("Redis L2 cache enabled");
-                            Some(client)
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to connect to Redis: {}, using L1 only", e);
-                            None
-                        }
+                Ok(client) => match client.get_connection() {
+                    Ok(_conn) => {
+                        tracing::info!("Redis L2 cache enabled");
+                        Some(client)
                     }
-                }
+                    Err(e) => {
+                        tracing::warn!("Failed to connect to Redis: {}, using L1 only", e);
+                        None
+                    }
+                },
                 Err(e) => {
                     tracing::warn!("Invalid Redis URL: {}, using L1 only", e);
                     None

@@ -35,17 +35,15 @@ impl PermissionRepository {
         resource_type: ResourceType,
     ) -> Result<Option<Permission>, String> {
         match self.permissions.lock() {
-            Ok(perms) => {
-                Ok(perms
-                    .iter()
-                    .find(|p| {
-                        p.user_id == user_id
-                            && p.resource_id == resource_id
-                            && p.resource_type == resource_type
-                            && p.revoked_at.is_none()
-                    })
-                    .cloned())
-            }
+            Ok(perms) => Ok(perms
+                .iter()
+                .find(|p| {
+                    p.user_id == user_id
+                        && p.resource_id == resource_id
+                        && p.resource_type == resource_type
+                        && p.revoked_at.is_none()
+                })
+                .cloned()),
             Err(e) => Err(format!("Failed to acquire lock: {}", e)),
         }
     }
@@ -53,13 +51,11 @@ impl PermissionRepository {
     /// 获取用户的所有权限
     pub fn get_user_permissions(&self, user_id: &str) -> Result<Vec<Permission>, String> {
         match self.permissions.lock() {
-            Ok(perms) => {
-                Ok(perms
-                    .iter()
-                    .filter(|p| p.user_id == user_id && p.revoked_at.is_none())
-                    .cloned()
-                    .collect())
-            }
+            Ok(perms) => Ok(perms
+                .iter()
+                .filter(|p| p.user_id == user_id && p.revoked_at.is_none())
+                .cloned()
+                .collect()),
             Err(e) => Err(format!("Failed to acquire lock: {}", e)),
         }
     }
@@ -71,17 +67,15 @@ impl PermissionRepository {
         resource_type: ResourceType,
     ) -> Result<Vec<Permission>, String> {
         match self.permissions.lock() {
-            Ok(perms) => {
-                Ok(perms
-                    .iter()
-                    .filter(|p| {
-                        p.resource_id == resource_id
-                            && p.resource_type == resource_type
-                            && p.revoked_at.is_none()
-                    })
-                    .cloned()
-                    .collect())
-            }
+            Ok(perms) => Ok(perms
+                .iter()
+                .filter(|p| {
+                    p.resource_id == resource_id
+                        && p.resource_type == resource_type
+                        && p.revoked_at.is_none()
+                })
+                .cloned()
+                .collect()),
             Err(e) => Err(format!("Failed to acquire lock: {}", e)),
         }
     }
@@ -274,8 +268,8 @@ impl Clone for AuthorizationChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
     use crate::domain::permission::UserRole;
+    use chrono::Utc;
 
     #[test]
     fn test_permission_repository_new() {

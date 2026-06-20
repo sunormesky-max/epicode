@@ -138,10 +138,7 @@ impl PermissionMatrix {
                 Action::Export,
                 Action::Share,
             ],
-            UserRole::Viewer => vec![
-                Action::Read,
-                Action::Export,
-            ],
+            UserRole::Viewer => vec![Action::Read, Action::Export],
         }
     }
 
@@ -155,9 +152,20 @@ impl PermissionMatrix {
         let mut matrix = HashMap::new();
         matrix.insert(
             "owner",
-            vec!["create", "read", "update", "delete", "export", "share", "manage_users"],
+            vec![
+                "create",
+                "read",
+                "update",
+                "delete",
+                "export",
+                "share",
+                "manage_users",
+            ],
         );
-        matrix.insert("editor", vec!["create", "read", "update", "export", "share"]);
+        matrix.insert(
+            "editor",
+            vec!["create", "read", "update", "export", "share"],
+        );
         matrix.insert("viewer", vec!["read", "export"]);
         matrix
     }
@@ -188,8 +196,16 @@ pub enum AuthzError {
 impl std::fmt::Display for AuthzError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AuthzError::PermissionDenied { user_id, resource_id, action } => {
-                write!(f, "Permission denied for user {} to {} on resource {}", user_id, action, resource_id)
+            AuthzError::PermissionDenied {
+                user_id,
+                resource_id,
+                action,
+            } => {
+                write!(
+                    f,
+                    "Permission denied for user {} to {} on resource {}",
+                    user_id, action, resource_id
+                )
             }
             AuthzError::ResourceNotFound { resource_id } => {
                 write!(f, "Resource not found: {}", resource_id)
@@ -306,11 +322,26 @@ mod tests {
 
     #[test]
     fn test_can_perform() {
-        assert!(PermissionMatrix::can_perform(UserRole::Owner, Action::Delete));
-        assert!(PermissionMatrix::can_perform(UserRole::Editor, Action::Update));
-        assert!(!PermissionMatrix::can_perform(UserRole::Editor, Action::Delete));
-        assert!(PermissionMatrix::can_perform(UserRole::Viewer, Action::Read));
-        assert!(!PermissionMatrix::can_perform(UserRole::Viewer, Action::Create));
+        assert!(PermissionMatrix::can_perform(
+            UserRole::Owner,
+            Action::Delete
+        ));
+        assert!(PermissionMatrix::can_perform(
+            UserRole::Editor,
+            Action::Update
+        ));
+        assert!(!PermissionMatrix::can_perform(
+            UserRole::Editor,
+            Action::Delete
+        ));
+        assert!(PermissionMatrix::can_perform(
+            UserRole::Viewer,
+            Action::Read
+        ));
+        assert!(!PermissionMatrix::can_perform(
+            UserRole::Viewer,
+            Action::Create
+        ));
     }
 
     #[test]

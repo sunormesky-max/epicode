@@ -8,8 +8,8 @@ use crate::domain::tetra::{MemoryPayload, TetraId, EDGE_LENGTH};
 use crate::domain::vertex::Point3;
 
 use super::bus::{EngineEvent, EventSender};
-use super::cache::{CacheLayer, CacheStats};
 use super::cache::CacheValue;
+use super::cache::{CacheLayer, CacheStats};
 use super::classifier::CategoryClassifier;
 use super::cognitive::CognitiveEngine;
 use super::embedding::EmbeddingService;
@@ -521,7 +521,8 @@ impl GatewayCenter {
             embedding: &self.embedding,
             label_index: &self.index.label_index,
         };
-        let results = super::search_engine::search(&ctx, query, k, self.vector.as_deref(), filters)?;
+        let results =
+            super::search_engine::search(&ctx, query, k, self.vector.as_deref(), filters)?;
         futures::executor::block_on(self.cache.set(
             cache_key,
             CacheValue {
@@ -896,6 +897,27 @@ impl GatewayCenter {
         self.index.remove_dirty(id);
         self.index.invalidate_placement_cache();
         self.search.invalidate_df_cache();
+    }
+
+    pub fn restore_tetra(
+        &self,
+        tetra: &crate::domain::tetra::Tetrahedron,
+    ) -> Result<TetraId, String> {
+        let positions = crate::domain::tetra::Tetrahedron::compute_vertices(tetra.core);
+        let id = self.space.add_tetrahedron_with_id(tetra, &positions)?;
+        if !tetra.data.embedding.is_empty() && tetra.data.embedding.len() == EMBEDDING_DIM {
+            self.search
+                .hnsw
+                .lock()
+                .insert(id, tetra.data.embedding.clone());
+        }
+        self.knowledge
+            .auto_link_one(id, &self.space, &self.index.label_index.lock());
+        self.index.insert_labels(id, &tetra.data.labels);
+        self.index.insert_content_hash(tetra.data.content_hash, id);
+        self.index.invalidate_placement_cache();
+        self.search.invalidate_df_cache();
+        Ok(id)
     }
 }
 

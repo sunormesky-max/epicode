@@ -54,7 +54,11 @@ pub struct KeyRotation {
 }
 
 impl KeyRotation {
-    pub fn new(rotation_days: u64, transition_days: u64, max_versions: usize) -> Result<Self, String> {
+    pub fn new(
+        rotation_days: u64,
+        transition_days: u64,
+        max_versions: usize,
+    ) -> Result<Self, String> {
         let initial_key_id = Uuid::new_v4().to_string();
         let mut keys = HashMap::new();
 
@@ -95,10 +99,7 @@ impl KeyRotation {
         self.keys
             .iter()
             .filter_map(|(id, (_, meta))| {
-                if matches!(
-                    meta.status,
-                    KeyStatus::Active | KeyStatus::Transitioning
-                ) {
+                if matches!(meta.status, KeyStatus::Active | KeyStatus::Transitioning) {
                     Some((id.clone(), meta.clone()))
                 } else {
                     None
@@ -252,10 +253,7 @@ impl KeyRotation {
 
     pub fn validate_key(&self, key_id: &str) -> bool {
         if let Some((_, meta)) = self.keys.get(key_id) {
-            matches!(
-                meta.status,
-                KeyStatus::Active | KeyStatus::Transitioning
-            )
+            matches!(meta.status, KeyStatus::Active | KeyStatus::Transitioning)
         } else {
             false
         }
@@ -320,11 +318,7 @@ mod tests {
 
         let event = kr.revoke_key(&old_id, "Security incident").unwrap();
         match event {
-            KeyEvent::Revoked {
-                key_id,
-                reason,
-                ..
-            } => {
+            KeyEvent::Revoked { key_id, reason, .. } => {
                 assert_eq!(key_id, old_id);
                 assert_eq!(reason, "Security incident");
             }
@@ -377,11 +371,9 @@ mod tests {
         let mut kr = KeyRotation::new(90, 30, 5).unwrap();
         let initial_time = Utc::now();
 
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async {
-                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-            });
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        });
 
         kr.rotate_key().unwrap();
 

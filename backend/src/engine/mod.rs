@@ -346,11 +346,10 @@ impl Engine {
         scheduler.set_skills(skills.clone());
 
         let key_rotation = Arc::new(Mutex::new(
-            key_rotation::KeyRotation::new(90, 30, 5)
-                .unwrap_or_else(|e| {
-                    tracing::error!("Failed to initialize key rotation: {}", e);
-                    key_rotation::KeyRotation::new(90, 30, 5).unwrap()
-                })
+            key_rotation::KeyRotation::new(90, 30, 5).unwrap_or_else(|e| {
+                tracing::error!("Failed to initialize key rotation: {}", e);
+                key_rotation::KeyRotation::new(90, 30, 5).unwrap()
+            }),
         ));
 
         let audit_logger = AuditLogger::new();
@@ -615,15 +614,25 @@ impl Engine {
 
     // ── 权限管理方法 ──
 
-    pub fn grant_permission(&self, permission: crate::domain::permission::Permission) -> Result<String, crate::domain::permission::AuthzError> {
+    pub fn grant_permission(
+        &self,
+        permission: crate::domain::permission::Permission,
+    ) -> Result<String, crate::domain::permission::AuthzError> {
         self.authz.grant_permission(permission)
     }
 
-    pub fn revoke_permission(&self, permission_id: &str) -> Result<(), crate::domain::permission::AuthzError> {
+    pub fn revoke_permission(
+        &self,
+        permission_id: &str,
+    ) -> Result<(), crate::domain::permission::AuthzError> {
         self.authz.revoke_permission(permission_id)
     }
 
-    pub fn get_user_permissions(&self, user_id: &str) -> Result<Vec<crate::domain::permission::Permission>, crate::domain::permission::AuthzError> {
+    pub fn get_user_permissions(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<crate::domain::permission::Permission>, crate::domain::permission::AuthzError>
+    {
         self.authz.get_user_permissions(user_id)
     }
 
@@ -631,8 +640,10 @@ impl Engine {
         &self,
         resource_id: &str,
         resource_type: crate::domain::permission::ResourceType,
-    ) -> Result<Vec<crate::domain::permission::Permission>, crate::domain::permission::AuthzError> {
-        self.authz.get_resource_permissions(resource_id, resource_type)
+    ) -> Result<Vec<crate::domain::permission::Permission>, crate::domain::permission::AuthzError>
+    {
+        self.authz
+            .get_resource_permissions(resource_id, resource_type)
     }
 
     pub async fn check_authorization(
@@ -652,7 +663,10 @@ impl Engine {
         &self,
         offset: usize,
         limit: usize,
-    ) -> Result<(Vec<crate::domain::permission::AuditLogEntry>, usize), crate::domain::permission::AuthzError> {
+    ) -> Result<
+        (Vec<crate::domain::permission::AuditLogEntry>, usize),
+        crate::domain::permission::AuthzError,
+    > {
         self.authz.get_audit_logs(offset, limit)
     }
 

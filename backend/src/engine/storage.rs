@@ -115,6 +115,23 @@ const MIGRATION_ADD_KEY_EVENTS: &str = "CREATE TABLE IF NOT EXISTS key_events (
     INDEX idx_event_timestamp (event_timestamp)
 )";
 
+const MIGRATION_ADD_DELETED_MEMORIES: &str = "CREATE TABLE IF NOT EXISTS deleted_memories (
+   id INTEGER PRIMARY KEY,
+   tetra_json TEXT NOT NULL,
+   deleted_at INTEGER NOT NULL,
+   expires_at INTEGER NOT NULL
+)";
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DeletedMemoryInfo {
+    pub id: TetraId,
+    pub content: String,
+    pub labels: Vec<String>,
+    pub timestamp: i64,
+    pub deleted_at: i64,
+    pub expires_at: i64,
+}
+
 pub struct StorageManager {
     pool: Pool<SqliteConnectionManager>,
     data_dir: PathBuf,
@@ -135,10 +152,10 @@ impl StorageManager {
         let _ = fs::create_dir_all(&backup_dir);
 
         let db_path = data_dir.join("tetramem.db");
-        
+
         let manager = SqliteConnectionManager::file(&db_path)
             .with_flags(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE);
-        
+
         let pool = r2d2::Pool::builder()
             .max_size(16)
             .connection_timeout(std::time::Duration::from_secs(5))
@@ -148,8 +165,9 @@ impl StorageManager {
 
         // Initialize schema using one connection from the pool
         {
-            let conn = pool.get()
-                .map_err(|e| format!("failed to get connection from pool for schema init: {}", e))?;
+            let conn = pool.get().map_err(|e| {
+                format!("failed to get connection from pool for schema init: {}", e)
+            })?;
 
             conn.execute_batch(SCHEMA)
                 .map_err(|e| format!("failed to initialize schema: {}", e))?;
@@ -189,9 +207,15 @@ impl StorageManager {
             if let Err(e) = conn.execute_batch(MIGRATION_ADD_KEY_EVENTS) {
                 tracing::debug!("[Storage] key_events migration skipped: {}", e);
             }
+            if let Err(e) = conn.execute_batch(MIGRATION_ADD_DELETED_MEMORIES) {
+                tracing::debug!("[Storage] deleted_memories migration skipped: {}", e);
+            }
         }
 
-        tracing::info!("SQLite database opened with connection pool: {}", db_path.display());
+        tracing::info!(
+            "SQLite database opened with connection pool: {}",
+            db_path.display()
+        );
 
         Ok(Self {
             pool,
@@ -354,6 +378,134 @@ impl StorageManager {
         Ok(())
     }
 
+    pub fn soft_delete_tetra(
+        &self,
+        tetra: &Tetrahedron,
+        retention_days: i64,
+    ) -> Result<(i64, i64), String> {
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let deleted_at = chrono::Utc::now().timestamp();
+        let expires_at = deleted_at + retention_days * 86_400;
+        let tetra_json =
+            serde_json::to_string(tetra).map_err(|e| format!("serialize deleted tetra: {}", e))?;
+        tx.execute(
+            "INSERT OR REPLACE INTO deleted_memories (id, tetra_json, deleted_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
+            params![tetra.id, tetra_json, deleted_at, expires_at],
+        )
+        .map_err(|e| format!("archive deleted tetra {}: {}", tetra.id, e))?;
+        tx.execute("DELETE FROM tetrahedrons WHERE id = ?1", params![tetra.id])
+            .map_err(|e| format!("delete tetra {}: {}", tetra.id, e))?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok((deleted_at, expires_at))
+    }
+
+    pub fn restore_deleted_tetra(&self, id: TetraId) -> Result<Option<Tetrahedron>, String> {
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let tetra_json: Option<String> = tx
+            .query_row(
+                "SELECT tetra_json FROM deleted_memories WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let Some(tetra_json) = tetra_json else {
+            return Ok(None);
+        };
+
+        let tetra: Tetrahedron =
+            serde_json::from_str(&tetra_json).map_err(|e| format!("restore parse tetra: {}", e))?;
+        let labels_json = self.encrypt_field(
+            &serde_json::to_string(&tetra.data.labels).unwrap_or_else(|_| "[]".into()),
+        )?;
+        let aliases_json = self.encrypt_field(
+            &serde_json::to_string(&tetra.data.aliases).unwrap_or_else(|_| "[]".into()),
+        )?;
+        let vertex_json =
+            serde_json::to_string(&tetra.vertex_ids).unwrap_or_else(|_| "[0,0,0,0]".into());
+        let emb_blob = if tetra.data.embedding.is_empty() {
+            None
+        } else {
+            Some(VectorLayer::embedding_to_blob(&tetra.data.embedding))
+        };
+        let content_hash = tetra.data.content_hash as i64;
+        let encrypted_content = self.encrypt_field(&tetra.data.content)?;
+        tx.execute(
+            "INSERT OR REPLACE INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            params![
+                tetra.id,
+                tetra.core.x, tetra.core.y, tetra.core.z,
+                encrypted_content,
+                content_hash,
+                labels_json,
+                tetra.mass,
+                tetra.data.timestamp,
+                aliases_json,
+                vertex_json,
+                emb_blob,
+                tetra.data.importance,
+                tetra.data.enforced as i32,
+                tetra.data.rationale,
+                tetra.data.access_count,
+                tetra.data.memory_type,
+            ],
+        )
+        .map_err(|e| format!("restore tetra {}: {}", tetra.id, e))?;
+        tx.execute("DELETE FROM deleted_memories WHERE id = ?1", params![id])
+            .map_err(|e| format!("remove deleted archive {}: {}", id, e))?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(Some(tetra))
+    }
+
+    pub fn list_deleted_memories(&self) -> Result<Vec<DeletedMemoryInfo>, String> {
+        self.purge_expired_deleted_memories()?;
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id, tetra_json, deleted_at, expires_at FROM deleted_memories ORDER BY deleted_at DESC")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                let id: u64 = row.get(0)?;
+                let tetra_json: String = row.get(1)?;
+                let deleted_at: i64 = row.get(2)?;
+                let expires_at: i64 = row.get(3)?;
+                Ok((id, tetra_json, deleted_at, expires_at))
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            let (id, tetra_json, deleted_at, expires_at) =
+                row.map_err(|e: rusqlite::Error| e.to_string())?;
+            let tetra: Tetrahedron = serde_json::from_str(&tetra_json)
+                .map_err(|e| format!("list deleted parse tetra {}: {}", id, e))?;
+            items.push(DeletedMemoryInfo {
+                id,
+                content: tetra.data.content,
+                labels: tetra.data.labels,
+                timestamp: tetra.data.timestamp,
+                deleted_at,
+                expires_at,
+            });
+        }
+        Ok(items)
+    }
+
+    pub fn purge_expired_deleted_memories(&self) -> Result<usize, String> {
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
+        let now = chrono::Utc::now().timestamp();
+        let deleted = conn
+            .execute(
+                "DELETE FROM deleted_memories WHERE expires_at <= ?1",
+                params![now],
+            )
+            .map_err(|e| format!("purge expired deleted memories: {}", e))?;
+        Ok(deleted)
+    }
+
     pub fn update_mass(&self, id: TetraId, mass: f64) -> Result<(), String> {
         let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.execute(
@@ -443,15 +595,15 @@ impl StorageManager {
             }
         };
         let rows = match stmt.query_map(params![cutoff], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                ))
-            }) {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+            ))
+        }) {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("[Storage] failed to query health trend: {}", e);
@@ -1132,5 +1284,42 @@ mod tests {
         assert!(report.kg_ok);
         assert_eq!(report.tetras_loaded, 0);
         assert_eq!(report.relations_loaded, 0);
+    }
+
+    #[test]
+    fn soft_delete_and_restore_roundtrip() {
+        let dir = tmp_dir("soft_delete_restore");
+        let storage = StorageManager::new(&dir).unwrap();
+        let tetra = make_tetra(42, "trash me", 1.5);
+
+        storage.upsert_tetra(&tetra).unwrap();
+        let (deleted_at, expires_at) = storage.soft_delete_tetra(&tetra, 30).unwrap();
+        assert!(deleted_at > 0);
+        assert!(expires_at > deleted_at);
+        assert_eq!(storage.tetra_count(), 0);
+
+        let deleted = storage.list_deleted_memories().unwrap();
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0].id, 42);
+        assert_eq!(deleted[0].content, "trash me");
+
+        let restored = storage.restore_deleted_tetra(42).unwrap().unwrap();
+        assert_eq!(restored.id, 42);
+        assert_eq!(restored.data.content, "trash me");
+        assert_eq!(storage.tetra_count(), 1);
+        assert!(storage.list_deleted_memories().unwrap().is_empty());
+    }
+
+    #[test]
+    fn purge_expired_deleted_memories_clears_old_records() {
+        let dir = tmp_dir("purge_deleted");
+        let storage = StorageManager::new(&dir).unwrap();
+        let tetra = make_tetra(55, "expired", 1.0);
+
+        storage.upsert_tetra(&tetra).unwrap();
+        let (_deleted_at, _expires_at) = storage.soft_delete_tetra(&tetra, 0).unwrap();
+        let purged = storage.purge_expired_deleted_memories().unwrap();
+        assert_eq!(purged, 1);
+        assert!(storage.list_deleted_memories().unwrap().is_empty());
     }
 }

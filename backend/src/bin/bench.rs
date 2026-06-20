@@ -30,14 +30,16 @@ async fn main() {
 
     // Phase 2: Search latency
     println!("\n--- Phase 2: Search Latency ---");
-    let queries = ["Rust向量搜索",
+    let queries = [
+        "Rust向量搜索",
         "performance optimization",
         "记忆系统架构设计",
         "ONNX模型推理速度",
         "multi-tenant data isolation",
         "四面体物理哲学",
         "加密安全防护措施",
-        "Epicode cloud deployment"];
+        "Epicode cloud deployment",
+    ];
     let mut search_times = Vec::new();
     for (round, query) in queries.iter().cycle().take(50).enumerate() {
         let start = Instant::now();

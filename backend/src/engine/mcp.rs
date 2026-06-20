@@ -1890,10 +1890,9 @@ impl McpHandler {
                 let old_importance = payload.importance;
                 let final_delta = importance_delta + correction_importance;
                 payload.importance = (old_importance + final_delta).max(0.1).min(5.0);
-                if is_correction
-                    && !payload.labels.iter().any(|l| l == "outdated") {
-                        payload.labels.push("outdated".to_string());
-                    }
+                if is_correction && !payload.labels.iter().any(|l| l == "outdated") {
+                    payload.labels.push("outdated".to_string());
+                }
                 if is_restored {
                     payload
                         .labels

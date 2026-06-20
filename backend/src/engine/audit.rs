@@ -67,12 +67,7 @@ impl AuditLogger {
         match self.logs.lock() {
             Ok(logs) => {
                 let total = logs.len();
-                let items = logs
-                    .iter()
-                    .skip(offset)
-                    .take(limit)
-                    .cloned()
-                    .collect();
+                let items = logs.iter().skip(offset).take(limit).cloned().collect();
                 Ok((items, total))
             }
             Err(e) => Err(format!("Failed to acquire lock: {}", e)),
@@ -126,7 +121,9 @@ impl AuditLogger {
             Ok(logs) => {
                 let items = logs
                     .iter()
-                    .filter(|log| log.resource_type == resource_type && log.resource_id == resource_id)
+                    .filter(|log| {
+                        log.resource_type == resource_type && log.resource_id == resource_id
+                    })
                     .cloned()
                     .collect();
                 Ok(items)
@@ -313,10 +310,7 @@ mod tests {
 
         let logs = logger.get_all().unwrap();
         assert_eq!(logs[0].result, AuditResult::PermissionDenied);
-        assert_eq!(
-            logs[0].error_message,
-            Some("User is not owner".to_string())
-        );
+        assert_eq!(logs[0].error_message, Some("User is not owner".to_string()));
     }
 
     #[test]

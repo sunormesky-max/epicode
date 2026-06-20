@@ -34,7 +34,7 @@ function HeroSection() {
 
   useEffect(() => {
     getPublicStats()
-      .then((d: any) => {
+      .then((d) => {
         const users = d.total_users ?? 0;
         const memories = d.total_memories ?? 0;
         setStats({

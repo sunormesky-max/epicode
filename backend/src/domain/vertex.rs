@@ -7,7 +7,7 @@ pub const VERTEX_MERGE_EPSILON: f64 = 0.05;
 ///
 /// This is the fundamental unit of spatial existence.
 /// All geometric operations begin here.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Point3 {
     pub x: f64,
     pub y: f64,

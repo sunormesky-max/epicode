@@ -29,8 +29,8 @@ export default function DashboardSubAccounts() {
         const accs = await getSubAccounts();
         if (!mounted) return;
         setAccounts(accs);
-      } catch (e: any) {
-        if (mounted) setError(e.message);
+      } catch (e: unknown) {
+        if (mounted) setError(e instanceof Error ? e.message : 'Failed to load sub-accounts');
       }
       if (mounted) setLoading(false);
     }
@@ -45,8 +45,8 @@ export default function DashboardSubAccounts() {
       await createSubAccount(newId.trim(), newPwd.trim());
       setAccounts(prev => [...prev, { user_id: newId.trim(), created_at: Date.now() / 1000, memories_used: 0, plan: 'Free' }]);
       setNewId(''); setNewPwd(''); setShowCreate(false);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to create sub-account');
     }
     setCreating(false);
   }
@@ -56,8 +56,8 @@ export default function DashboardSubAccounts() {
     try {
       await revokeSubAccount(user_id);
       setAccounts(prev => prev.filter(a => a.user_id !== user_id));
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to revoke sub-account');
     }
   }
 

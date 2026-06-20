@@ -160,12 +160,12 @@ pub fn auto_fission(
                 core_map,
             )
             .is_some()
-            {
-                return AutoFissionOutcome {
-                    did_fission: true,
-                    merge_pairs: None,
-                };
-            }
+        {
+            return AutoFissionOutcome {
+                did_fission: true,
+                merge_pairs: None,
+            };
+        }
     }
 
     if clusters.len() >= 2 {

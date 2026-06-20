@@ -127,10 +127,16 @@ async fn main() {
         .route("/security/audit", get(routes::security_audit))
         .route("/admin/cache/stats", get(routes::cache_stats))
         .route("/admin/cache/clear", post(routes::clear_cache))
-        .route("/admin/permissions", post(routes::grant_permission).get(routes::get_user_permissions))
+        .route(
+            "/admin/permissions",
+            post(routes::grant_permission).get(routes::get_user_permissions),
+        )
         .route("/admin/permissions/revoke", post(routes::revoke_permission))
         .route("/admin/audit/logs", get(routes::get_audit_logs))
-        .route("/user/permissions", get(routes::get_current_user_permissions))
+        .route(
+            "/user/permissions",
+            get(routes::get_current_user_permissions),
+        )
         .route("/admin/keys/current", get(routes::get_current_key))
         .route("/admin/keys/list", get(routes::list_keys))
         .route("/admin/keys/rotate", post(routes::rotate_key))
@@ -141,7 +147,12 @@ async fn main() {
         .route("/ask", post(routes::ask))
         .route("/nodes", post(routes::create_node))
         .route("/nodes", get(routes::list_nodes))
-        .route("/nodes/:id", get(routes::get_node))
+        .route(
+            "/nodes/:id",
+            get(routes::get_node).delete(routes::delete_node),
+        )
+        .route("/trash", get(routes::list_deleted_nodes))
+        .route("/trash/:id/restore", post(routes::restore_node))
         .route("/search", post(routes::search))
         .route("/recall", post(routes::recall))
         .route("/pulse", post(routes::send_pulse))
