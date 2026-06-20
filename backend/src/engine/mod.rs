@@ -1,7 +1,9 @@
 pub mod adaptive;
 pub mod assembler;
+pub mod audit;
 pub mod auto_pipeline;
 pub mod bus;
+pub mod cache;
 pub mod classifier;
 pub mod cognitive;
 pub mod cognitive_hooks;
@@ -20,6 +22,7 @@ pub mod hnsw;
 pub mod index_manager;
 pub mod intake;
 pub mod janitor;
+pub mod key_rotation;
 pub mod knowledge;
 pub mod mcp;
 pub mod outcome;
@@ -37,10 +40,12 @@ pub mod user_manager;
 pub mod vector;
 
 use std::sync::Arc;
+use std::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use crate::domain::space::Space;
 
+use self::audit::AuditLogger;
 use self::bus::EventBus;
 use self::classifier::CategoryClassifier;
 use self::cognitive::CognitiveEngine;
@@ -53,6 +58,7 @@ use self::security::SecurityGuard;
 use self::skills::SkillEngine;
 use self::storage::StorageManager;
 use self::vector::VectorLayer;
+use crate::api::authz::{AuthorizationChecker, PermissionRepository};
 
 pub struct Engine {
     pub space: Arc<Space>,
@@ -65,6 +71,8 @@ pub struct Engine {
     pub guard: Arc<SecurityGuard>,
     pub storage: Arc<StorageManager>,
     pub skills: Arc<SkillEngine>,
+    pub key_rotation: Arc<Mutex<key_rotation::KeyRotation>>,
+    pub authz: Arc<AuthorizationChecker>,
     handles: Vec<JoinHandle<()>>,
     pub user_id: String,
     data_path: std::path::PathBuf,
@@ -337,6 +345,18 @@ impl Engine {
         let skills = Arc::new(SkillEngine::new(storage.clone()));
         scheduler.set_skills(skills.clone());
 
+        let key_rotation = Arc::new(Mutex::new(
+            key_rotation::KeyRotation::new(90, 30, 5)
+                .unwrap_or_else(|e| {
+                    tracing::error!("Failed to initialize key rotation: {}", e);
+                    key_rotation::KeyRotation::new(90, 30, 5).unwrap()
+                })
+        ));
+
+        let audit_logger = AuditLogger::new();
+        let permission_repo = PermissionRepository::new();
+        let authz = Arc::new(AuthorizationChecker::new(permission_repo, audit_logger));
+
         Self {
             space,
             bus,
@@ -347,6 +367,8 @@ impl Engine {
             guard: security,
             storage,
             skills,
+            key_rotation,
+            authz,
             handles: Vec::new(),
             user_id: uid.to_string(),
             data_path: data_path.clone(),
@@ -589,6 +611,49 @@ impl Engine {
 
     pub fn request_shutdown(&self) {
         let _ = self.bus.sender().send(bus::EngineEvent::Shutdown);
+    }
+
+    // ── 权限管理方法 ──
+
+    pub fn grant_permission(&self, permission: crate::domain::permission::Permission) -> Result<String, crate::domain::permission::AuthzError> {
+        self.authz.grant_permission(permission)
+    }
+
+    pub fn revoke_permission(&self, permission_id: &str) -> Result<(), crate::domain::permission::AuthzError> {
+        self.authz.revoke_permission(permission_id)
+    }
+
+    pub fn get_user_permissions(&self, user_id: &str) -> Result<Vec<crate::domain::permission::Permission>, crate::domain::permission::AuthzError> {
+        self.authz.get_user_permissions(user_id)
+    }
+
+    pub fn get_resource_permissions(
+        &self,
+        resource_id: &str,
+        resource_type: crate::domain::permission::ResourceType,
+    ) -> Result<Vec<crate::domain::permission::Permission>, crate::domain::permission::AuthzError> {
+        self.authz.get_resource_permissions(resource_id, resource_type)
+    }
+
+    pub async fn check_authorization(
+        &self,
+        user_id: &str,
+        resource_id: &str,
+        resource_type: crate::domain::permission::ResourceType,
+        action: crate::domain::permission::Action,
+        tenant_id: &str,
+    ) -> Result<(), crate::domain::permission::AuthzError> {
+        self.authz
+            .check(user_id, resource_id, resource_type, action, tenant_id)
+            .await
+    }
+
+    pub fn get_audit_logs(
+        &self,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<crate::domain::permission::AuditLogEntry>, usize), crate::domain::permission::AuthzError> {
+        self.authz.get_audit_logs(offset, limit)
     }
 
     pub async fn shutdown(mut self) {

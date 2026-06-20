@@ -8,6 +8,8 @@ use crate::domain::tetra::{MemoryPayload, TetraId, EDGE_LENGTH};
 use crate::domain::vertex::Point3;
 
 use super::bus::{EngineEvent, EventSender};
+use super::cache::{CacheLayer, CacheStats};
+use super::cache::CacheValue;
 use super::classifier::CategoryClassifier;
 use super::cognitive::CognitiveEngine;
 use super::embedding::EmbeddingService;
@@ -29,6 +31,8 @@ pub struct GatewayCenter {
     pub knowledge: Arc<KnowledgeGraph>,
     search: SearchEngineState,
     index: IndexManager,
+    cache: Arc<CacheLayer>,
+    cache_stats: Arc<CacheStats>,
 }
 
 impl GatewayCenter {
@@ -58,6 +62,10 @@ impl GatewayCenter {
                 chash_idx.entry(t.data.content_hash).or_insert(t.id);
             }
         }
+
+        let cache_stats = CacheStats::new();
+        let cache = Arc::new(CacheLayer::new(cache_stats.clone()));
+
         Self {
             space,
             energy,
@@ -69,6 +77,8 @@ impl GatewayCenter {
             knowledge,
             search: SearchEngineState::new(hnsw),
             index: IndexManager::new(label_idx, chash_idx),
+            cache,
+            cache_stats,
         }
     }
 
@@ -234,6 +244,14 @@ impl GatewayCenter {
                 }
                 let _ = self.tx.send(EngineEvent::TetrahedronCreated(id));
                 self.search.invalidate_df_cache();
+                let cache = self.cache.clone();
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    handle.spawn(async move {
+                        cache.invalidate("search:*").await;
+                    });
+                } else {
+                    futures::executor::block_on(cache.invalidate("search:*"));
+                }
                 tracing::info!("memory created: tetra {} hash={}", id, content_hash);
                 Ok(id)
             }
@@ -490,6 +508,11 @@ impl GatewayCenter {
         k: usize,
         filters: Option<&super::search_engine::SearchFilters>,
     ) -> Result<Vec<(TetraId, f64, f64, MemoryPayload)>, String> {
+        let cache_key = CacheLayer::generate_query_key(query, filters);
+        if let Some(cached) = futures::executor::block_on(self.cache.get(&cache_key)) {
+            return Ok(cached.results);
+        }
+
         let ctx = SearchCtx {
             state: &self.search,
             space: &self.space,
@@ -498,7 +521,32 @@ impl GatewayCenter {
             embedding: &self.embedding,
             label_index: &self.index.label_index,
         };
-        super::search_engine::search(&ctx, query, k, self.vector.as_deref(), filters)
+        let results = super::search_engine::search(&ctx, query, k, self.vector.as_deref(), filters)?;
+        futures::executor::block_on(self.cache.set(
+            cache_key,
+            CacheValue {
+                results: results.clone(),
+                timestamp: chrono::Utc::now().timestamp(),
+            },
+        ));
+        Ok(results)
+    }
+
+    pub fn cache_stats_snapshot(&self) -> (u64, u64, u64, u64, u64, f64, f64, f64) {
+        (
+            self.cache_stats.l1_hits.load(AtomicOrdering::Relaxed),
+            self.cache_stats.l1_misses.load(AtomicOrdering::Relaxed),
+            self.cache_stats.l2_hits.load(AtomicOrdering::Relaxed),
+            self.cache_stats.l2_misses.load(AtomicOrdering::Relaxed),
+            self.cache_stats.evictions.load(AtomicOrdering::Relaxed),
+            self.cache_stats.hit_ratio(),
+            self.cache_stats.l1_hit_ratio(),
+            self.cache_stats.l2_hit_ratio(),
+        )
+    }
+
+    pub fn clear_query_cache(&self) {
+        futures::executor::block_on(self.cache.clear());
     }
 
     pub fn expand_from_seeds(

@@ -91,6 +91,30 @@ const MIGRATION_ADD_HEALTH_SNAPSHOTS: &str = "CREATE TABLE IF NOT EXISTS health_
     enforced_count INTEGER NOT NULL DEFAULT 0
 )";
 
+const MIGRATION_ADD_KEY_METADATA: &str = "CREATE TABLE IF NOT EXISTS key_metadata (
+    key_id TEXT PRIMARY KEY,
+    created_at INTEGER NOT NULL,
+    rotated_at INTEGER,
+    revoked_at INTEGER,
+    status TEXT NOT NULL DEFAULT 'active',
+    version INTEGER NOT NULL,
+    created_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)";
+
+const MIGRATION_ADD_KEY_EVENTS: &str = "CREATE TABLE IF NOT EXISTS key_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    key_id TEXT NOT NULL,
+    old_key_id TEXT,
+    new_key_id TEXT,
+    reason TEXT,
+    event_timestamp INTEGER NOT NULL,
+    created_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_key_id (key_id),
+    INDEX idx_event_type (event_type),
+    INDEX idx_event_timestamp (event_timestamp)
+)";
+
 pub struct StorageManager {
     pool: Pool<SqliteConnectionManager>,
     data_dir: PathBuf,
@@ -158,6 +182,12 @@ impl StorageManager {
             }
             if let Err(e) = conn.execute_batch(MIGRATION_ADD_HEALTH_SNAPSHOTS) {
                 tracing::debug!("[Storage] health_snapshots migration skipped: {}", e);
+            }
+            if let Err(e) = conn.execute_batch(MIGRATION_ADD_KEY_METADATA) {
+                tracing::debug!("[Storage] key_metadata migration skipped: {}", e);
+            }
+            if let Err(e) = conn.execute_batch(MIGRATION_ADD_KEY_EVENTS) {
+                tracing::debug!("[Storage] key_events migration skipped: {}", e);
             }
         }
 
