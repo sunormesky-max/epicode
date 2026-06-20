@@ -198,6 +198,10 @@ impl HnswIndex {
         self.nodes.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
     fn random_level(&self) -> usize {
         let r: f64 = rand::random::<f64>();
         ((-r.ln() * self.ml) as usize).min(16)
@@ -288,13 +292,13 @@ impl Eq for Candidate {}
 
 impl PartialOrd for Candidate {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.dist.partial_cmp(&other.dist)
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for Candidate {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap_or(Ordering::Equal)
+        self.dist.total_cmp(&other.dist)
     }
 }
 

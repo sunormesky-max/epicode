@@ -109,8 +109,8 @@ impl ContextAssembler {
             constraints.push(content.clone());
         }
 
-        recent_decisions.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
-        patterns.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
+        recent_decisions.sort_by_key(|b| std::cmp::Reverse(b.1.timestamp));
+        patterns.sort_by_key(|b| std::cmp::Reverse(b.1.timestamp));
 
         let mut used_ids: HashSet<u64> = HashSet::new();
         let mut sections: Vec<Section> = Vec::new();

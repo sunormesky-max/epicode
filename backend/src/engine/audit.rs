@@ -16,6 +16,7 @@ impl AuditLogger {
     }
 
     /// 记录审计日志条目
+    #[allow(clippy::too_many_arguments)]
     pub fn log(
         &self,
         user_id: String,

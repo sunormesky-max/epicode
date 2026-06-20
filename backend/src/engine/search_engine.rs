@@ -577,6 +577,7 @@ fn is_noise_content(content: &str) -> bool {
     false
 }
 
+#[allow(clippy::too_many_arguments)]
 fn score_tetra(
     t: &crate::domain::tetra::Tetrahedron,
     query_embedding: &Option<Vec<f64>>,

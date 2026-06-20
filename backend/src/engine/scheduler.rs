@@ -74,6 +74,7 @@ pub struct SchedulerCenter {
 }
 
 impl SchedulerCenter {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         space: Arc<Space>,
         energy: Arc<EnergyCenter>,
@@ -103,6 +104,7 @@ impl SchedulerCenter {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_security(
         space: Arc<Space>,
         energy: Arc<EnergyCenter>,
@@ -523,8 +525,7 @@ impl SchedulerCenter {
             "general",
         );
 
-        let mut result = Vec::new();
-        result.push((0u64, 1.0, narrative, vec!["assembled-context".to_string()]));
+        let result = vec![(0u64, 1.0, narrative, vec!["assembled-context".to_string()])];
         result
     }
 
@@ -1638,22 +1639,22 @@ impl SchedulerCenter {
             self.auto_fission(&snap);
         }
 
-        if count % 20 == 0 && count > 0 {
+        if count.is_multiple_of(20) && count > 0 {
             self.auto_skills(&snap);
         }
 
-        if count % 30 == 0 && count > 0 && self.energy.available() >= 50.0 {
+        if count.is_multiple_of(30) && count > 0 && self.energy.available() >= 50.0 {
             let pre_snap = self.build_snapshot();
             self.auto_dream();
             self.record_outcome(ActionType::Dream, &pre_snap, count);
         }
 
-        if count % 200 == 0 && count > 0 && should_evict {
+        if count.is_multiple_of(200) && count > 0 && should_evict {
             self.evict_low_quality(&snap);
         }
 
         // Phase 5: Emotion
-        if count % 10 == 0 {
+        if count.is_multiple_of(10) {
             let texts: Vec<&str> = snap
                 .tetras
                 .iter()
@@ -1673,14 +1674,14 @@ impl SchedulerCenter {
         }
 
         // Phase 6: Think — LLM cognitive decision every 5 ticks (when enabled)
-        if count % 5 == 0 && self.cognitive.enabled() {
-            if count % 15 == 0 && count > 0 {
+        if count.is_multiple_of(5) && self.cognitive.enabled() {
+            if count.is_multiple_of(15) && count > 0 {
                 self.generate_aliases((count / 15) as usize, &snap);
             }
-            if count % 30 == 0 && count > 0 {
+            if count.is_multiple_of(30) && count > 0 {
                 self.reclassify_memories((count / 30) as usize, &snap);
             }
-            if count % 20 == 0 && count > 0 {
+            if count.is_multiple_of(20) && count > 0 {
                 self.extract_entities((count / 20) as usize, &snap);
             }
             let state = self.collect_state_from_snap(&snap);
@@ -1696,7 +1697,7 @@ impl SchedulerCenter {
             );
             Some(CognitiveThought { tick: count, state })
         } else {
-            if count % 10 == 0 {
+            if count.is_multiple_of(10) {
                 self.auto_save();
             }
             None
@@ -1763,7 +1764,7 @@ impl SchedulerCenter {
                 }
             }
             let mut v: Vec<_> = label_counts.into_iter().collect();
-            v.sort_by(|a, b| b.1.cmp(&a.1));
+            v.sort_by_key(|b| std::cmp::Reverse(b.1));
             v.truncate(5);
             v
         };
@@ -1970,8 +1971,8 @@ impl SchedulerCenter {
                     if let Some(tetra) = self.space.get_tetrahedron(*id) {
                         let mut data = tetra.data.clone();
                         let old_imp = data.importance;
-                        let adj = (*total_delta * 0.3).max(-0.5).min(0.5);
-                        data.importance = (data.importance + adj).max(0.1).min(5.0);
+                        let adj = (*total_delta * 0.3).clamp(-0.5, 0.5);
+                        data.importance = (data.importance + adj).clamp(0.1, 5.0);
                         let _ = self.space.update_payload(*id, data);
                         let _ = self.storage.update_importance(*id, adj);
                         aggregated += 1;
@@ -2204,7 +2205,7 @@ impl SchedulerCenter {
             action_names
         );
 
-        if tick % 10 == 0 {
+        if tick.is_multiple_of(10) {
             self.auto_save();
         }
     }
@@ -2261,7 +2262,7 @@ impl SchedulerCenter {
                             }
                             Ok(EngineEvent::TetrahedronCreated(id)) => {
                                 self.log_event(format!("created({})", id));
-                                if self.tick_count.load(Ordering::SeqCst) % 3 == 0 {
+                                if self.tick_count.load(Ordering::SeqCst).is_multiple_of(3) {
                                     self.auto_save();
                                 }
                             }
@@ -2285,21 +2286,21 @@ impl SchedulerCenter {
                             self.execute_task(task);
                         }
 
-                        if count % 10 == 0 {
+                        if count.is_multiple_of(10) {
                             let snap = self.build_snapshot();
                             self.auto_fission(&snap);
                         }
 
-                        if count % 50 == 0 && count > 0 && self.energy.available() >= 50.0 {
+                        if count.is_multiple_of(50) && count > 0 && self.energy.available() >= 50.0 {
                             self.auto_dream();
                         }
 
-                        if count % 200 == 0 && count > 0 {
+                        if count.is_multiple_of(200) && count > 0 {
                             let snap = self.build_snapshot();
                             self.evict_low_quality(&snap);
                         }
 
-                        if count % 10 == 0 {
+                        if count.is_multiple_of(10) {
                             self.auto_save();
                         }
                     }
@@ -2319,7 +2320,7 @@ impl SchedulerCenter {
                                 }
                             } else {
                                 let count = me.tick_count.load(Ordering::SeqCst);
-                                if count % 10 == 0 {
+                                if count.is_multiple_of(10) {
                                     me.auto_save();
                                 }
                             }

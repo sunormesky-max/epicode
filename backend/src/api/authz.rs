@@ -458,7 +458,7 @@ mod tests {
         ));
 
         let (logs, total) = checker.get_audit_logs(0, 10).unwrap();
-        assert!(logs.len() > 0);
+        assert!(!logs.is_empty());
         assert!(total > 0);
     }
 }
