@@ -17,3 +17,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
+      # Note: release-please updates version.txt and the Cargo.toml files.
+      # frontend/package.json should be kept in sync manually or via a follow-up
+      # commit inside the release PR until a JSON-friendly updater is added.

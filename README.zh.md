@@ -50,7 +50,7 @@ curl -X POST http://localhost:8080/api/v1/search \
   -d '{"query": "AI 记忆"}'
 ```
 
-> 🖼️ **仪表盘截图即将补充。**
+> 💡 **在线演示：** [epicode.cn](https://epicode.cn) · 仪表盘截图将在后续 PR 中补充。
 
 ## 核心特性
 

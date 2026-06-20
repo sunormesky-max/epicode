@@ -50,7 +50,7 @@ curl -X POST http://localhost:8080/api/v1/search \
   -d '{"query": "AI memory"}'
 ```
 
-> 🖼️ **Dashboard screenshot coming soon.**
+> 💡 **Live demo:** [epicode.cn](https://epicode.cn) · Dashboard screenshot will be added in a follow-up PR.
 
 ## Key Features
 
