@@ -1,15 +1,5 @@
 use crate::domain::tetra::MemoryPayload;
-
-fn truncate_str(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
+use crate::util::truncate_str;
 
 pub struct IntakeResult {
     pub labels: Vec<String>,
