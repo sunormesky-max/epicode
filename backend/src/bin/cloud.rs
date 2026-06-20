@@ -37,6 +37,7 @@ use epicode::engine::skills::SkillEngine;
 use epicode::engine::storage::StorageManager;
 use epicode::engine::user_manager::{UserInfo, UserManager, UserPlan};
 use epicode::engine::Engine;
+use epicode::util::strip_html;
 
 struct RateBucket {
     count: usize,
@@ -147,22 +148,6 @@ fn validate_user_id(id: &str) -> Result<(), String> {
         return Err("user_id: only a-z A-Z 0-9 - _ allowed".into());
     }
     Ok(())
-}
-
-fn strip_html(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut in_tag = false;
-    for ch in s.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => {
-                in_tag = false;
-            }
-            _ if !in_tag => result.push(ch),
-            _ => {}
-        }
-    }
-    result
 }
 
 fn validate_content(content: &str) -> Result<(), String> {
