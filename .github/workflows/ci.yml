@@ -54,7 +54,7 @@ jobs:
       - name: Check build
         run: cargo check --locked
       - name: Run tests
-        run: cargo test --locked --all-targets
+        run: cargo test --locked --all-targets -- --test-threads=1
 
   frontend:
     runs-on: ubuntu-latest
