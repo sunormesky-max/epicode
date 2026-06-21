@@ -10,6 +10,13 @@
 - 最佳实践
 - 代码示例
 
+## 现有技能
+
+| 技能 | 描述 | 难度 | 作者 |
+|------|------|------|------|
+| [rust-error-handling](rust-error-handling.md) | Rust 错误处理最佳实践 | intermediate | 冬儿 |
+| [react-state-management](react-state-management.md) | React 状态管理（Zustand） | beginner | 冬儿 |
+
 ## 技能格式
 
 每个技能是一个 SKILL.md 文件：
@@ -35,6 +42,8 @@
 - category: 分类
 - difficulty: 难度
 - language: 语言（可选）
+- author: 作者
+- created: 创建日期
 ```
 
 ## 提交技能
@@ -43,12 +52,6 @@
 2. 命名格式：`skill-name.md`
 3. 提交 PR 到主仓库
 4. 通过 `epicode-sdk` 同步到本地
-
-## 现有技能
-
-| 技能 | 描述 | 作者 |
-|------|------|------|
-| （等待社区贡献） | | |
 
 ## 同步技能
 
