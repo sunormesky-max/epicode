@@ -36,6 +36,7 @@ Python client library for the Epicode API.
 pip install epicode-sdk
 ```
 
+> **Note:** The old package name `epicode-sdk` is deprecated. Please use `epicode-sdk` instead.
 ## Quick Start
 
 ```python
