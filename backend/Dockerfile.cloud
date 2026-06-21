@@ -1,3 +1,4 @@
+# Build stage
 FROM rust:1.88-bookworm AS builder
 
 WORKDIR /build
@@ -5,8 +6,11 @@ COPY . .
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libsqlite3-dev pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
-RUN cargo build --release --locked --bin epicode-cloud
 
+# Build all backend binaries
+RUN cargo build --release --locked
+
+# Runtime stage
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -15,13 +19,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -r epicode && useradd -r -g epicode -d /app -s /sbin/nologin epicode
 
 WORKDIR /app
-COPY --from=builder /build/target/release/epicode-cloud /app/epicode-cloud
 
-# Models are downloaded at runtime or mounted as volumes
-# The application will use HTTP fallback if ONNX models are not present
+# Copy all backend binaries
+COPY --from=builder /build/target/release/epicode /app/
+COPY --from=builder /build/target/release/epicode-mcp /app/
+COPY --from=builder /build/target/release/epicode-bench /app/
+COPY --from=builder /build/target/release/epicode-migrate /app/
+COPY --from=builder /build/target/release/epicode-cloud /app/
+
+# Create directories
 RUN mkdir -p /app/models /app/data
 
-RUN chmod 500 /app/epicode-cloud && chown -R epicode:epicode /app
+# Set permissions
+RUN chmod 500 /app/epicode* && chown -R epicode:epicode /app
 USER epicode
 
 ENV RUST_LOG=info
