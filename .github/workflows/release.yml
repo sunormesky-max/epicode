@@ -11,6 +11,9 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -19,50 +22,113 @@ jobs:
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # Sync frontend package.json version after release-please updates version.txt
-      - name: Checkout for version sync
-        if: steps.release.outputs.release_created == 'true'
-        uses: actions/checkout@v4
+  build-binaries:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary_suffix: ''
+            archive_ext: tar.gz
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary_suffix: ''
+            archive_ext: tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary_suffix: ''
+            archive_ext: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary_suffix: ''
+            archive_ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary_suffix: '.exe'
+            archive_ext: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          toolchain: "1.88"
+          targets: ${{ matrix.target }}
 
-      - name: Sync frontend version
-        if: steps.release.outputs.release_created == 'true'
+      - name: Install cross-compilation dependencies (Linux aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
-          VERSION=$(cat version.txt)
-          cd frontend
-          # Update package.json version
-          npm version "${VERSION}" --no-git-tag-version
-          # Configure git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Commit the version sync
-          git add package.json package-lock.json
-          git commit -m "chore(release): sync frontend version to ${VERSION} [skip ci]"
-          git push
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
-      # Build and attach release binaries
-      - name: Build release binaries
-        if: steps.release.outputs.release_created == 'true'
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev pkg-config libssl-dev
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build backend binaries
         run: |
           cd backend
-          cargo build --release
-          cd ../guard
-          cargo build --release
+          cargo build --release --target ${{ matrix.target }}
 
-      - name: Upload release assets
-        if: steps.release.outputs.release_created == 'true'
-        uses: actions/upload-release-asset@v1
+      - name: Build guard binary
+        run: |
+          cd guard
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Package binaries
+        shell: bash
+        run: |
+          VERSION=${{ needs.release-please.outputs.tag_name }}
+          TARGET=${{ matrix.target }}
+          SUFFIX=${{ matrix.binary_suffix }}
+          EXT=${{ matrix.archive_ext }}
+          PKG_NAME="epicode-${VERSION}-${TARGET}"
+          mkdir -p "${PKG_NAME}"
+          
+          # Backend binaries
+          cp "backend/target/${TARGET}/release/epicode${SUFFIX}" "${PKG_NAME}/" 2>/dev/null || true
+          cp "backend/target/${TARGET}/release/epicode-mcp${SUFFIX}" "${PKG_NAME}/" 2>/dev/null || true
+          cp "backend/target/${TARGET}/release/epicode-bench${SUFFIX}" "${PKG_NAME}/" 2>/dev/null || true
+          cp "backend/target/${TARGET}/release/epicode-migrate${SUFFIX}" "${PKG_NAME}/" 2>/dev/null || true
+          cp "backend/target/${TARGET}/release/epicode-cloud${SUFFIX}" "${PKG_NAME}/" 2>/dev/null || true
+          
+          # Guard binary
+          cp "guard/target/${TARGET}/release/epicode-guard${SUFFIX}" "${PKG_NAME}/" 2>/dev/null || true
+          
+          # README and LICENSE
+          cp README.md "${PKG_NAME}/"
+          cp LICENSE "${PKG_NAME}/"
+          
+          # Create archive
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            7z a "${PKG_NAME}.zip" "${PKG_NAME}"
+            echo "ASSET=${PKG_NAME}.zip" >> $GITHUB_ENV
+          else
+            tar czf "${PKG_NAME}.tar.gz" "${PKG_NAME}"
+            echo "ASSET=${PKG_NAME}.tar.gz" >> $GITHUB_ENV
+          fi
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          files: ${{ env.ASSET }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.release.outputs.upload_url }}
-          asset_path: |
-            backend/target/release/epicode
-            backend/target/release/epicode-mcp
-            backend/target/release/epicode-bench
-            backend/target/release/epicode-migrate
-            backend/target/release/epicode-cloud
-            guard/target/release/epicode-guard
-          asset_name: epicode-${{ steps.release.outputs.tag_name }}
-          asset_content_type: application/octet-stream

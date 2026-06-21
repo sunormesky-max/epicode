@@ -6,8 +6,16 @@
       "extra-files": [
         "backend/Cargo.toml",
         "guard/Cargo.toml",
-        "frontend/package.json",
-        "frontend/package-lock.json",
+        {
+          "type": "json",
+          "path": "frontend/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "frontend/package-lock.json",
+          "jsonpath": "$.version"
+        },
         "README.md",
         "README.zh.md"
       ],
@@ -21,7 +29,9 @@
         { "type": "test", "section": "Tests", "hidden": true },
         { "type": "chore", "section": "Miscellaneous", "hidden": true },
         { "type": "security", "section": "Security" }
-      ]
+      ],
+      "draft": false,
+      "prerelease": false
     }
   }
 }
