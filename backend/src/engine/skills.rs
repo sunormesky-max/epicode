@@ -61,12 +61,8 @@ impl SkillEngine {
     fn load_from_storage(&self) {
         if let Some(data) = self.storage.get_meta("skills_data") {
             if let Ok(loaded) = serde_json::from_str::<Vec<Skill>>(&data) {
-                let mut skills = self
-                    .skills
-                    .lock();
-                let mut next_id = self
-                    .next_id
-                    .lock();
+                let mut skills = self.skills.lock();
+                let mut next_id = self.next_id.lock();
                 for mut s in loaded {
                     if s.id >= *next_id {
                         *next_id = s.id + 1;
@@ -82,18 +78,14 @@ impl SkillEngine {
     }
 
     fn persist(&self) {
-        let skills = self
-            .skills
-            .lock();
+        let skills = self.skills.lock();
         if let Ok(data) = serde_json::to_string(&skills.values().collect::<Vec<_>>()) {
             let _ = self.storage.set_meta("skills_data", &data);
         }
     }
 
     fn alloc_id(&self) -> u64 {
-        let mut next_id = self
-            .next_id
-            .lock();
+        let mut next_id = self.next_id.lock();
         let id = *next_id;
         *next_id += 1;
         id
@@ -131,10 +123,7 @@ impl SkillEngine {
     }
 
     pub fn get(&self, id: u64) -> Option<Skill> {
-        self.skills
-            .lock()
-            .get(&id)
-            .cloned()
+        self.skills.lock().get(&id).cloned()
     }
 
     pub fn list(&self, owner: Option<&str>) -> Vec<Skill> {
@@ -189,9 +178,7 @@ impl SkillEngine {
     }
 
     pub fn append_description(&self, id: u64, description: &str) -> Result<(), String> {
-        let mut skills = self
-            .skills
-            .lock();
+        let mut skills = self.skills.lock();
         let skill = skills.get_mut(&id).ok_or("skill not found")?;
         let desc_section = format!("\n\n## 中文描述\n\n{description}");
         skill.skill_md.push_str(&desc_section);
@@ -243,9 +230,7 @@ impl SkillEngine {
             created_at: now,
             updated_at: now,
         };
-        let mut skills = self
-            .skills
-            .lock();
+        let mut skills = self.skills.lock();
         skills.insert(id, forked.clone());
         drop(skills);
         self.persist();
@@ -259,23 +244,15 @@ impl SkillEngine {
     }
 
     pub fn insert_skill(&self, skill: Skill) -> Skill {
-        let id = if skill.id
-            >= *self
-                .next_id
-                .lock()
-        {
-            let mut next_id = self
-                .next_id
-                .lock();
+        let id = if skill.id >= *self.next_id.lock() {
+            let mut next_id = self.next_id.lock();
             *next_id = skill.id + 1;
             skill.id
         } else {
             self.alloc_id()
         };
         let s = Skill { id, ..skill };
-        let mut skills = self
-            .skills
-            .lock();
+        let mut skills = self.skills.lock();
         skills.insert(id, s.clone());
         drop(skills);
         self.persist();
@@ -307,9 +284,7 @@ impl SkillEngine {
     }
 
     pub fn submit_for_review(&self, id: u64) -> Result<Skill, String> {
-        let mut skills = self
-            .skills
-            .lock();
+        let mut skills = self.skills.lock();
         let skill = skills.get_mut(&id).ok_or("skill not found")?;
         if skill.is_public || skill.review_status == ReviewStatus::PendingReview {
             return Err("skill already published or pending review".to_string());
@@ -334,9 +309,7 @@ impl SkillEngine {
     }
 
     pub fn approve_skill(&self, id: u64) -> Result<Skill, String> {
-        let mut skills = self
-            .skills
-            .lock();
+        let mut skills = self.skills.lock();
         let skill = skills.get_mut(&id).ok_or("skill not found")?;
         if skill.review_status != ReviewStatus::PendingReview {
             return Err("skill is not pending review".to_string());
@@ -360,9 +333,7 @@ impl SkillEngine {
     }
 
     pub fn reject_skill(&self, id: u64, reason: &str) -> Result<Skill, String> {
-        let mut skills = self
-            .skills
-            .lock();
+        let mut skills = self.skills.lock();
         let skill = skills.get_mut(&id).ok_or("skill not found")?;
         if skill.review_status != ReviewStatus::PendingReview {
             return Err("skill is not pending review".to_string());
@@ -416,9 +387,7 @@ impl SkillEngine {
     }
 
     pub fn review_pending(&self) -> Vec<Skill> {
-        let skills = self
-            .skills
-            .lock();
+        let skills = self.skills.lock();
         skills
             .values()
             .filter(|s| s.review_status == ReviewStatus::PendingReview)
@@ -427,9 +396,7 @@ impl SkillEngine {
     }
 
     pub fn link_memory(&self, skill_id: u64, memory_id: TetraId) -> Result<(), String> {
-        let mut skills = self
-            .skills
-            .lock();
+        let mut skills = self.skills.lock();
         let skill = skills.get_mut(&skill_id).ok_or("skill not found")?;
         if !skill.memory_ids.contains(&memory_id) {
             skill.memory_ids.push(memory_id);
@@ -440,9 +407,7 @@ impl SkillEngine {
     }
 
     pub fn purge_non_system(&self) -> usize {
-        let mut skills = self
-            .skills
-            .lock();
+        let mut skills = self.skills.lock();
         let before = skills.len();
         skills.retain(|_, s| s.is_system);
         let removed = before - skills.len();
@@ -455,9 +420,7 @@ impl SkillEngine {
     }
 
     pub fn match_skills(&self, query: &str, owner: &str, limit: usize) -> Vec<Skill> {
-        let skills = self
-            .skills
-            .lock();
+        let skills = self.skills.lock();
         let query_lower = query.to_lowercase();
         let query_words: Vec<&str> = query_lower.split_whitespace().collect();
 

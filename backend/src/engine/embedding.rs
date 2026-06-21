@@ -75,10 +75,7 @@ impl EmbeddingService {
 
         let mut req = self.client.post(&self.api_url);
         if !self.api_key.is_empty() {
-            req = req.header(
-                "Authorization",
-                format!("Bearer {}", self.api_key),
-            );
+            req = req.header("Authorization", format!("Bearer {}", self.api_key));
         }
 
         let resp: serde_json::Value = req
@@ -157,8 +154,7 @@ mod tests {
     #[test]
     fn cosine_empty_vectors() {
         assert_eq!(
-            super::super::vector::VectorLayer::cosine_similarity(&[], &[]
-            ),
+            super::super::vector::VectorLayer::cosine_similarity(&[], &[]),
             0.0
         );
     }

@@ -225,19 +225,15 @@ mod tests {
 
     #[test]
     fn fallback_classify_physics() {
-        let result = CategoryClassifier::new("", "").classify(
-            "anything",
-            &["physics".to_string(), "quantum".to_string()],
-        );
+        let result = CategoryClassifier::new("", "")
+            .classify("anything", &["physics".to_string(), "quantum".to_string()]);
         assert_eq!(result.category, "science.physics");
     }
 
     #[test]
     fn fallback_classify_programming() {
-        let result = CategoryClassifier::new("", "").classify(
-            "anything",
-            &["rust".to_string(), "programming".to_string()],
-        );
+        let result = CategoryClassifier::new("", "")
+            .classify("anything", &["rust".to_string(), "programming".to_string()]);
         assert_eq!(result.category, "tech.programming");
     }
 

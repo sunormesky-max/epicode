@@ -13,8 +13,8 @@ use super::Engine;
 
 fn hash_password(password: &str) -> Result<String, String> {
     let salt = SaltString::generate(&mut OsRng);
-    let params = Params::new(65536, 3, 4, Some(32))
-        .map_err(|e| format!("invalid argon2 params: {e}"))?;
+    let params =
+        Params::new(65536, 3, 4, Some(32)).map_err(|e| format!("invalid argon2 params: {e}"))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     argon2
         .hash_password(password.as_bytes(), &salt)
@@ -329,8 +329,8 @@ impl UserManager {
             return Err("user limit reached".into());
         }
         let max_mem = plan.max_memories();
-        let password_hash = hash_password(password)
-            .map_err(|e| format!("failed to hash password: {e}"))?;
+        let password_hash =
+            hash_password(password).map_err(|e| format!("failed to hash password: {e}"))?;
         let info = UserInfo {
             user_id: user_id.to_string(),
             api_key: api_key.to_string(),
@@ -416,8 +416,8 @@ impl UserManager {
         }
         let mut db = self.users_db.write();
         let info = db.get_mut(user_id).ok_or("user not found")?;
-        info.password_hash = hash_password(password)
-            .map_err(|e| format!("failed to hash password: {e}"))?;
+        info.password_hash =
+            hash_password(password).map_err(|e| format!("failed to hash password: {e}"))?;
         let snapshot = db.clone();
         drop(db);
         self.save_users_db(&snapshot)
@@ -459,8 +459,8 @@ impl UserManager {
             return Err("maximum 10 sub-accounts per main account".into());
         }
         let api_key = format!("tm-{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
-        let password_hash = hash_password(password)
-            .map_err(|e| format!("failed to hash password: {e}"))?;
+        let password_hash =
+            hash_password(password).map_err(|e| format!("failed to hash password: {e}"))?;
         let sub_info = UserInfo {
             user_id: sub_user_id.to_string(),
             api_key: api_key.clone(),

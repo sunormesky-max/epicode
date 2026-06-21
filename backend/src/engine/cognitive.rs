@@ -963,8 +963,8 @@ impl CognitiveEngine {
                     "temperature": 0.3,
                     "max_tokens": 8192,
                 }))
-            .map_err(|e| format!("request body: {e}"))?
-            .send()
+                .map_err(|e| format!("request body: {e}"))?
+                .send()
                 .map_err(|e| format!("LLM round{round}: {e}"))?
                 .text()
                 .map_err(|e| format!("LLM body round{round}: {e}"))?;

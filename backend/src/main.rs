@@ -107,12 +107,10 @@ async fn main() {
             epicode::api::middleware::security_layer,
         ))
         .layer(middleware::from_fn(server::security_headers_middleware))
-        .layer(
-            server::cors_layer(
-                &server::default_cors_origin(),
-                server::default_cors_headers(),
-            ),
-        )
+        .layer(server::cors_layer(
+            &server::default_cors_origin(),
+            server::default_cors_headers(),
+        ))
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
 

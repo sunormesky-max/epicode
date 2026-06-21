@@ -54,11 +54,7 @@ pub struct KeyRotation {
 }
 
 impl KeyRotation {
-    pub fn new(
-        rotation_days: u64,
-        transition_days: u64,
-        max_versions: usize,
-    ) -> Self {
+    pub fn new(rotation_days: u64, transition_days: u64, max_versions: usize) -> Self {
         let initial_key_id = Uuid::new_v4().to_string();
         let mut keys = HashMap::new();
 
