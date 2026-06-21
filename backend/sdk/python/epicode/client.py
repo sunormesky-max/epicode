@@ -6,7 +6,7 @@ from typing import Any
 
 import requests
 
-from tetramem.exceptions import (
+from epicode.exceptions import (
     AuthenticationError,
     NotFoundError,
     PlanLimitExceededError,
@@ -15,7 +15,7 @@ from tetramem.exceptions import (
     EpicodeError,
     ValidationError,
 )
-from tetramem.models import (
+from epicode.models import (
     AskResponse,
     CreateNodeResponse,
     Emotion,

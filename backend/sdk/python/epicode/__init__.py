@@ -1,8 +1,8 @@
 """Epicode SDK – Python client library."""
 
-from tetramem.client import EpicodeClient
-from tetramem.admin import EpicodeAdmin
-from tetramem.exceptions import (
+from epicode.client import EpicodeClient
+from epicode.admin import EpicodeAdmin
+from epicode.exceptions import (
     AuthenticationError,
     EpicodeError,
     NotFoundError,
@@ -11,24 +11,26 @@ from tetramem.exceptions import (
     ServerError,
     ValidationError,
 )
-from tetramem.models import (
+from epicode.models import (
     AdminStatsResponse,
     AdminUsersResponse,
     AskResponse,
     CreateNodeResponse,
     Emotion,
     HealthResponse,
-    KnowledgeResponse,
-    NodeResponse,
+    KnowledgeGraphResponse,
+    Memory,
+    MemoryFragment,
+    NodeData,
     RecallResponse,
     RegisterResponse,
-    RememberResponse,
-    SearchResult,
     SearchResponse,
     StatsResponse,
+    TimelineEvent,
     TimelineResponse,
 )
 
+__version__ = "1.0.0"
 __all__ = [
     "EpicodeClient",
     "EpicodeAdmin",
@@ -45,15 +47,14 @@ __all__ = [
     "CreateNodeResponse",
     "Emotion",
     "HealthResponse",
-    "KnowledgeResponse",
-    "NodeResponse",
+    "KnowledgeGraphResponse",
+    "Memory",
+    "MemoryFragment",
+    "NodeData",
     "RecallResponse",
     "RegisterResponse",
-    "RememberResponse",
-    "SearchResult",
     "SearchResponse",
     "StatsResponse",
+    "TimelineEvent",
     "TimelineResponse",
 ]
-
-__version__ = "14.1.1"

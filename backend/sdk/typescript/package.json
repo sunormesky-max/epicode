@@ -1,7 +1,7 @@
 {
-  "name": "tetramem-sdk",
+  "name": "epicode-sdk",
   "version": "1.0.0",
-  "description": "TypeScript SDK for the Epicode API — spatial AI memory system",
+  "description": "TypeScript SDK for the Epicode API \u2014 spatial AI memory system",
   "main": "dist/tetramem.js",
   "types": "dist/tetramem.d.ts",
   "files": [
@@ -26,8 +26,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sunormesky-max/epicode.git",
-    "directory": "backend/sdk/typescript"
+    "url": "https://github.com/sunormesky-max/epicode"
   },
   "bugs": {
     "url": "https://github.com/sunormesky-max/epicode/issues"

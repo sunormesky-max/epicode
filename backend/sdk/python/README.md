@@ -5,13 +5,14 @@ Python client library for the Epicode API.
 ## Installation
 
 ```bash
-pip install tetramem-sdk
+pip install epicode-sdk
 ```
 
+> **Note:** The old package name `epicode-sdk` is deprecated. Please use `epicode-sdk` instead.
 ## Quick Start
 
 ```python
-from tetramem import EpicodeClient
+from epicode import EpicodeClient
 
 client = EpicodeClient("your-api-key")
 
@@ -59,7 +60,7 @@ with EpicodeClient("your-api-key") as client:
 ## Admin API
 
 ```python
-from tetramem import EpicodeAdmin
+from epicode import EpicodeAdmin
 
 admin = EpicodeAdmin("your-admin-key")
 
@@ -81,7 +82,7 @@ admin.close()
 ## Error Handling
 
 ```python
-from tetramem import EpicodeClient, AuthenticationError, PlanLimitExceededError
+from epicode import EpicodeClient, AuthenticationError, PlanLimitExceededError
 
 client = EpicodeClient("invalid-key")
 

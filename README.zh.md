@@ -68,6 +68,39 @@ curl -X POST http://localhost:8080/api/v1/search \
 AI 代理 → POST /remember
     → 安全中间件（API Key + 速率限制 + 能量检查）
     → GatewayCenter（嵌入计算 → LLM 分类 → 空间放置）
+
+## SDK
+
+### Python
+
+```bash
+pip install epicode-sdk
+```
+
+```python
+from epicode import EpicodeClient
+
+client = EpicodeClient("your-api-key")
+client.remember("项目截止日期是6月15日")
+results = client.search("截止日期")
+```
+
+### TypeScript / JavaScript
+
+```bash
+npm install epicode-sdk
+```
+
+```typescript
+import { EpicodeClient } from "epicode-sdk";
+
+const client = new EpicodeClient("your-api-key");
+await client.remember("已部署 v2.3 到生产环境");
+const results = await client.search("生产部署");
+```
+
+> **注意：** 旧包名 `tetramem-sdk` 已弃用，请使用 `epicode-sdk`。
+
     → 新四面体放入 Space（自动合并近距离顶点）
     → 知识图谱更新
     → 调度器后台运行：脉冲 / 自动链接 / 去重 / 梦境循环

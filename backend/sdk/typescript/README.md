@@ -4,12 +4,15 @@ Zero-dependency TypeScript SDK for the Epicode API.
 
 ## Install
 
+> **Note:** The old package name `epicode-sdk` is deprecated.
+
+
 Copy `src/tetramem.ts` into your project, or install from source.
 
 ## Quick Start
 
 ```ts
-import { EpicodeClient, EpicodeAdmin } from "./tetramem";
+import { EpicodeClient, EpicodeAdmin } from "epicode-sdk";
 
 const client = new EpicodeClient("your-api-key");
 
@@ -67,7 +70,7 @@ console.log(stats.max_users);
 ## Error Handling
 
 ```ts
-import { EpicodeError } from "./tetramem";
+import { EpicodeError } from "epicode-sdk";
 
 try {
   await client.remember("hello");
