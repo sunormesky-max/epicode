@@ -1,6 +1,6 @@
 import { useI18nContext } from '@/i18n/I18nContext';
 import LanguageSwitcher from './LanguageSwitcher';
-import { Github, MessageCircle } from 'lucide-react';
+import { Github } from 'lucide-react';
 
 export default function Footer() {
   const { t } = useI18nContext();
@@ -14,8 +14,8 @@ export default function Footer() {
 
   const communityLinks = [
     { href: '#/community', label: t('footer.communitySkills') },
-    { href: 'https://github.com', label: 'GitHub', external: true },
-    { href: 'https://discord.com', label: 'Discord', external: true },
+    { href: 'https://github.com/sunormesky-max/epicode', label: 'GitHub', external: true },
+    { href: 'https://github.com/sunormesky-max/epicode', label: 'Open Source', external: true },
   ];
 
   return (
@@ -69,7 +69,7 @@ export default function Footer() {
                 <li key={link.label}>
                   <a href={link.href} className="text-sm no-underline transition-colors duration-200 hover:text-[var(--accent-magenta)] inline-flex items-center gap-2" style={{ color: 'var(--text-secondary)' }} target={link.external ? '_blank' : undefined} rel={link.external ? 'noopener noreferrer' : undefined}>
                     {link.label === 'GitHub' && <Github size={14} />}
-                    {link.label === 'Discord' && <MessageCircle size={14} />}
+                    {link.label === 'Open Source' && <Github size={14} />}
                     {link.label}
                   </a>
                 </li>

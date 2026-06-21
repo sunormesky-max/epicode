@@ -1,7 +1,7 @@
 import { useLocation } from 'react-router';
 import { useI18nContext } from '@/i18n/I18nContext';
 import { isAuthenticated } from '@/lib/api';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, Github } from 'lucide-react';
 import { useState } from 'react';
 
 export default function Navbar() {
