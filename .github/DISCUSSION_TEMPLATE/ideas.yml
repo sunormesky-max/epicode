@@ -1,0 +1,38 @@
+name: 💡 Ideas
+
+description: 分享你的想法和建议
+
+title: "[Idea] "
+
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你的想法
+      description: 详细描述你的想法
+      placeholder: 我想到了一个好主意...
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: 动机
+      description: 为什么这个想法有价值？
+      placeholder: 这个问题影响了...
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: 可能的解决方案
+      description: 你有具体的实现思路吗？
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 检查清单
+      options:
+        - label: 我已经搜索过现有的 issues 和 discussions
+          required: true
+        - label: 这个想法与 Epicode 的目标一致
+          required: true
