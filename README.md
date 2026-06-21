@@ -69,45 +69,6 @@ AI Agent → POST /remember
     → Security middleware (API key + rate limit + energy check)
     → GatewayCenter (embedding → LLM classification → spatial placement)
 
-## SDK
-
-### Python
-
-```bash
-pip install epicode-sdk
-```
-
-```python
-from epicode import EpicodeClient
-
-client = EpicodeClient("your-api-key")
-client.remember("Project deadline is June 15.")
-results = client.search("deadline")
-```
-
-### TypeScript / JavaScript
-
-```bash
-npm install epicode-sdk
-```
-
-```typescript
-import { EpicodeClient } from "epicode-sdk";
-
-const client = new EpicodeClient("your-api-key");
-await client.remember("Deployed v2.3 to production");
-const results = await client.search("production deploy");
-```
-
-> **Note:** The old package name `tetramem-sdk` is deprecated. Please use `epicode-sdk`.
-
-    → New tetrahedron placed in Space (auto-merge nearby vertices)
-    → Knowledge graph updated
-    → Scheduler runs background cycles: pulse / link / dedup / dream
-```
-
-Read more in [docs/architecture.md](docs/architecture.md).
-
 ## Tech Stack
 
 | Layer | Technologies |
@@ -157,6 +118,46 @@ Visit `http://localhost:8080`. For production details, see [docs/deployment.md](
 - [Deployment](docs/deployment.md) — Docker, Kubernetes, and bare-metal.
 - [Examples](docs/examples.md) — curl, Node.js, and Python snippets.
 - [Troubleshooting](docs/troubleshooting.md) — common issues and fixes.
+
+## SDK
+
+### Python
+
+```bash
+pip install epicode-sdk
+```
+
+```python
+from epicode import EpicodeClient
+
+client = EpicodeClient("your-api-key")
+client.remember("Project deadline is June 15.")
+results = client.search("deadline")
+```
+
+### TypeScript / JavaScript
+
+```bash
+npm install epicode-sdk
+```
+
+```typescript
+import { EpicodeClient } from "epicode-sdk";
+
+const client = new EpicodeClient("your-api-key");
+await client.remember("Deployed v2.3 to production");
+const results = await client.search("production deploy");
+```
+
+> **Note:** The old package name `tetramem-sdk` is deprecated. Please use `epicode-sdk`.
+
+    → New tetrahedron placed in Space (auto-merge nearby vertices)
+    → Knowledge graph updated
+    → Scheduler runs background cycles: pulse / link / dedup / dream
+```
+
+Read more in [docs/architecture.md](docs/architecture.md).
+
 
 ## Community & Contributing
 

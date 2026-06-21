@@ -69,9 +69,7 @@ AI 代理 → POST /remember
     → 安全中间件（API Key + 速率限制 + 能量检查）
     → GatewayCenter（嵌入计算 → LLM 分类 → 空间放置）
 
-## SDK
-
-### Python
+## Python
 
 ```bash
 pip install epicode-sdk
@@ -158,6 +156,9 @@ docker compose up --build -d
 - [Examples](docs/examples.md) — curl、Node.js、Python 示例（英文）。
 - [Troubleshooting](docs/troubleshooting.md) — 常见问题与排查（英文）。
 
+## SDK
+
+#
 ## 社区与贡献
 
 欢迎贡献！
