@@ -1,28 +1,60 @@
+# macOS
 .DS_Store
+
+# Dependencies
 node_modules/
+
+# Build outputs
 dist/
 target/
+
+# Data & models
 models/
-*.lock
-*.db
-*.sqlite
 *.onnx
 *.bin
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Lock files - allow Cargo.lock for Rust projects
+*.lock
+!backend/Cargo.lock
+!guard/Cargo.lock
+
+# Compiled files
 *.dll
 *.lib
 *.pdb
 *.exp
+
+# Environment files
 .env
 .env.*
 !.env.example
+
+# Archives
 *.tar
 *.tar.gz
 *.zip
+
+# Security
 KEYS.txt
+
+# IDE
 .vscode/
+
+# Claude worktrees
 .claude/
+
+# Local config
 *.local.json
+
+# Deployment temp files
 tmp_deploy*
+
+# Claude docs
 CLAUDE.md
 claude.md
 ARCHITECTURE_CONTEXT.md
@@ -30,7 +62,12 @@ STABILITY.md
 SOURCE_GUIDE.md
 info.md
 .backend-features.json
+
+# Service files - allow guard service file
 *.service
+!guard/*.service
+
+# Misc dev files
 write_all_context.jsonl
 pillar-architecture-v15.md
 v1.1.0-dev-plan.md
