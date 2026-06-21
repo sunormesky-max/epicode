@@ -13,10 +13,56 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
-      # Note: release-please updates version.txt and the Cargo.toml files.
-      # frontend/package.json should be kept in sync manually or via a follow-up
-      # commit inside the release PR until a JSON-friendly updater is added.
+
+      # Sync frontend package.json version after release-please updates version.txt
+      - name: Checkout for version sync
+        if: steps.release.outputs.release_created == 'true'
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync frontend version
+        if: steps.release.outputs.release_created == 'true'
+        run: |
+          VERSION=$(cat version.txt)
+          cd frontend
+          # Update package.json version
+          npm version "${VERSION}" --no-git-tag-version
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Commit the version sync
+          git add package.json package-lock.json
+          git commit -m "chore(release): sync frontend version to ${VERSION} [skip ci]"
+          git push
+
+      # Build and attach release binaries
+      - name: Build release binaries
+        if: steps.release.outputs.release_created == 'true'
+        run: |
+          cd backend
+          cargo build --release
+          cd ../guard
+          cargo build --release
+
+      - name: Upload release assets
+        if: steps.release.outputs.release_created == 'true'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.release.outputs.upload_url }}
+          asset_path: |
+            backend/target/release/epicode
+            backend/target/release/epicode-mcp
+            backend/target/release/epicode-bench
+            backend/target/release/epicode-migrate
+            backend/target/release/epicode-cloud
+            guard/target/release/epicode-guard
+          asset_name: epicode-${{ steps.release.outputs.tag_name }}
+          asset_content_type: application/octet-stream

@@ -1,0 +1,78 @@
+# GitHub Labels Configuration
+# Apply with: github-label-sync or gh label create
+
+- name: bug
+  color: d73a4a
+  description: Something isn't working
+
+- name: duplicate
+  color: cfd3d7
+  description: This issue or pull request already exists
+
+- name: enhancement
+  color: a2eeef
+  description: New feature or request
+
+- name: good first issue
+  color: 7057ff
+  description: Good for newcomers
+
+- name: help wanted
+  color: 008672
+  description: Extra attention is needed
+
+- name: invalid
+  color: e4e669
+  description: This doesn't seem right
+
+- name: question
+  color: d876e3
+  description: Further information is requested
+
+- name: documentation
+  color: 0075ca
+  description: Improvements or additions to documentation
+
+- name: security
+  color: ff0000
+  description: Security-related issues
+
+- name: breaking change
+  color: b60205
+  description: Changes that break backward compatibility
+
+- name: performance
+  color: 1d76db
+  description: Performance improvements or regressions
+
+- name: dependencies
+  color: 0366d6
+  description: Updates to dependencies
+
+- name: rust
+  color: dea584
+  description: Related to Rust backend code
+
+- name: frontend
+  color: 61dafb
+  description: Related to frontend/React code
+
+- name: infrastructure
+  color: 5319e7
+  description: CI/CD, build, deployment
+
+- name: discussion
+  color: fef2c0
+  description: Needs discussion before implementation
+
+- name: stale
+  color: ffffff
+  description: Marked as stale due to inactivity
+
+- name: pinned
+  color: f9d0c4
+  description: Pinned issue, do not stale
+
+- name: work-in-progress
+  color: fbcA04
+  description: Work in progress, do not stale
