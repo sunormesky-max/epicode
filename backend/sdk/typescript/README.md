@@ -4,10 +4,10 @@ Zero-dependency TypeScript SDK for the Epicode API.
 
 ## Install
 
-> **Note:** The old package name `epicode-sdk` is deprecated.
+> **Note:** The old package name `tetramem-sdk` is deprecated.
 
 
-Copy `src/tetramem.ts` into your project, or install from source.
+Copy `src/epicode.ts` into your project, or install from source.
 
 ## Quick Start
 
