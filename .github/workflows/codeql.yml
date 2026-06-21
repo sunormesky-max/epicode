@@ -35,6 +35,12 @@ jobs:
           queries: security-extended,security-and-quality
 
       - if: matrix.build-mode == 'manual'
+        name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev pkg-config libssl-dev
+
+      - if: matrix.build-mode == 'manual'
         name: Build Rust
         run: |
           cd backend
