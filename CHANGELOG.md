@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- MCP Registry discovery JSON with 35 standardized tools (`.well-known/mcp/discovery.json`).
+- Python SDK with SMRP tiered recall, identity rituals, and knowledge graph support.
+- TypeScript SDK with differentiated features beyond basic remember/search.
+- End-to-end AI Agent memory example (`examples/python/ai_agent_memory.py`).
+- Release strategy documentation (`RELEASE_STRATEGY.md`).
+- GitHub community health files: issue templates, PR template, CODE_OF_CONDUCT.md, SECURITY.md.
+- GitHub Actions workflows: greetings.yml, discussions.yml, scorecard.yml.
+- CI optimization with `paths-ignore` for markdown and docs changes.
+
+### Changed
+
+- Environment variable prefix migrated from `TETRAMEM_` to `EPICODE_` across 26 files.
+
+### Fixed
+
+- Backend compilation warnings in `backend/src/engine/mod.rs`.
+
+
 ## [1.0.1] - 2026-06-21
 
 ### Fixed
