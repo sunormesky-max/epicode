@@ -21,8 +21,8 @@ use uuid::Uuid;
 // ── Dashboard ──
 
 fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(&format!("EPICODE_{}", name))
-        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+    std::env::var(format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(format!("TETRAMEM_{}", name)))
 }
 
 pub async fn dashboard() -> Response {

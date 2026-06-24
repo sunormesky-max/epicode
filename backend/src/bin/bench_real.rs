@@ -6,8 +6,8 @@ use epicode::engine::mcp::McpHandler;
 use epicode::engine::Engine;
 
 fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(&format!("EPICODE_{}", name))
-        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+    std::env::var(format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(format!("TETRAMEM_{}", name)))
 }
 
 #[tokio::main]

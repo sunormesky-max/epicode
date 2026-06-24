@@ -51,8 +51,8 @@ const LOGIN_MAX_FAILURES: u32 = 5;
 const LOGIN_LOCKOUT_SECS: u64 = 900;
 
 fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(&format!("EPICODE_{}", name))
-        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+    std::env::var(format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(format!("TETRAMEM_{}", name)))
 }
 
 fn require_admin(

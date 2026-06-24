@@ -10,8 +10,8 @@ use zeroize::Zeroize;
 type HmacSha256 = Hmac<Sha256>;
 
 fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(&format!("EPICODE_{}", name))
-        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+    std::env::var(format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(format!("TETRAMEM_{}", name)))
 }
 
 pub fn constant_time_eq(a: &str, b: &str) -> bool {

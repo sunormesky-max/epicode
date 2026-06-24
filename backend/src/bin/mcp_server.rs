@@ -7,8 +7,8 @@ use epicode::engine::user_manager::UserManager;
 use epicode::engine::Engine;
 
 fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(&format!("EPICODE_{}", name))
-        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+    std::env::var(format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(format!("TETRAMEM_{}", name)))
 }
 
 fn parse_directive(s: &str) -> tracing_subscriber::filter::Directive {

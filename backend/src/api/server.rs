@@ -5,8 +5,8 @@ use axum::{middleware, Json};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(&format!("EPICODE_{}", name))
-        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+    std::env::var(format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(format!("TETRAMEM_{}", name)))
 }
 
 /// Run a synchronous, potentially blocking computation on a dedicated blocking
