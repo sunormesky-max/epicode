@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -113,8 +114,8 @@ jobs:
           cp "guard/target/${TARGET}/release/epicode-guard${SUFFIX}" "${PKG_NAME}/" 2>/dev/null || true
           
           # README and LICENSE
-          cp README.md "${PKG_NAME}/"
-          cp LICENSE "${PKG_NAME}/"
+          cp README.md "${PKG_NAME}/" 2>/dev/null || true
+          cp LICENSE "${PKG_NAME}/" 2>/dev/null || true
           
           # Create archive
           if [[ "${{ runner.os }}" == "Windows" ]]; then
