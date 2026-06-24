@@ -23,15 +23,20 @@ pub struct SecurityConfig {
     pub audit_log_size: usize,
 }
 
+fn env_var(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(&format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+}
+
 impl SecurityConfig {
     /// Try to build a `SecurityConfig` from environment variables.
     /// Returns `Err` if `TETRAMEM_API_KEY` is not set and insecure auth is not allowed.
     pub fn try_from_env() -> Result<Self, String> {
-        let key = std::env::var("TETRAMEM_API_KEY")
+        let key = env_var("API_KEY")
             .ok()
             .filter(|k| !k.is_empty());
         let allow_insecure = matches!(
-            std::env::var("TETRAMEM_ALLOW_INSECURE_AUTH"),
+            env_var("ALLOW_INSECURE_AUTH"),
             Ok(v) if v == "1" || v.eq_ignore_ascii_case("true")
         ) || cfg!(test)
             || cfg!(debug_assertions);
@@ -39,13 +44,13 @@ impl SecurityConfig {
             Some(k) => (true, vec![k]),
             None if allow_insecure => {
                 tracing::warn!(
-                    "TETRAMEM_API_KEY not set — insecure auth is enabled only for local/dev use"
+                    "EPICODE_API_KEY (or TETRAMEM_API_KEY) not set — insecure auth is enabled only for local/dev use"
                 );
                 (false, vec![])
             }
             None => {
                 return Err(
-                    "TETRAMEM_API_KEY must be set. Generate one with: openssl rand -base64 32"
+                    "EPICODE_API_KEY (or TETRAMEM_API_KEY) must be set. Generate one with: openssl rand -base64 32"
                         .to_string(),
                 );
             }

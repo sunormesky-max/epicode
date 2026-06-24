@@ -20,6 +20,11 @@ use uuid::Uuid;
 
 // ── Dashboard ──
 
+fn env_var(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(&format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+}
+
 pub async fn dashboard() -> Response {
     let html = include_str!("dashboard.html");
     let mut response = Response::new(Body::from(html));
@@ -219,11 +224,11 @@ pub async fn confirm_identity(
     if req.name.is_empty() {
         return Json(serde_json::json!({"success": false, "error": "name is required"}));
     }
-    let expected_token = match std::env::var("TETRAMEM_IDENTITY_TOKEN") {
+    let expected_token = match env_var("IDENTITY_TOKEN") {
         Ok(t) if !t.is_empty() => t,
         _ => {
             return Json(
-                serde_json::json!({"success": false, "error": "TETRAMEM_IDENTITY_TOKEN not configured. Set env var and restart."}),
+                serde_json::json!({"success": false, "error": "EPICODE_IDENTITY_TOKEN (or TETRAMEM_IDENTITY_TOKEN) not configured. Set env var and restart."}),
             );
         }
     };
@@ -715,7 +720,7 @@ pub async fn update_config(
 ) -> Json<serde_json::Value> {
     if let Some(_key) = &req.api_key {
         return Json(
-            serde_json::json!({"success": false, "error": "API key cannot be changed via API. Set TETRAMEM_API_KEY env var and restart."}),
+            serde_json::json!({"success": false, "error": "API key cannot be changed via API. Set EPICODE_API_KEY (or TETRAMEM_API_KEY) env var and restart."}),
         );
     }
     let mut entries: Vec<(&str, String)> = Vec::new();

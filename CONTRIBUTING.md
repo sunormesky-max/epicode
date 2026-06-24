@@ -42,7 +42,7 @@ npm run build
 # Terminal 1 — backend Cloud mode
 cd backend
 cargo build --release
-export TETRAMEM_API_KEY="$(openssl rand -base64 32)"
+export EPICODE_API_KEY="$(openssl rand -base64 32)"
 export DEEPSEEK_API_KEY="your-deepseek-key"
 ./target/release/epicode --cloud
 

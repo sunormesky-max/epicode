@@ -1,0 +1,26 @@
+name: Discussions
+
+on:
+  discussion:
+    types: [created]
+
+permissions:
+  discussions: write
+
+jobs:
+  greet:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Greet new discussion
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const discussion = context.payload.discussion;
+            if (discussion.category.name === 'Q&A') {
+              github.rest.discussions.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                discussion_number: discussion.number,
+                body: 'Thanks for starting a discussion! We will review it soon. If this is a bug report, please consider opening an issue instead.'
+              });
+            }

@@ -57,10 +57,10 @@ services:
     ports:
       - "127.0.0.1:9111:9111"
     environment:
-      - TETRAMEM_MASTER_KEY=${MASTER_KEY}
-      - TETRAMEM_ADMIN_KEY=${ADMIN_KEY}
+      - EPICODE_MASTER_KEY=${MASTER_KEY}
+      - EPICODE_ADMIN_KEY=${ADMIN_KEY}
       - DEEPSEEK_API_KEY=\${DEEPSEEK_API_KEY}
-      - TETRAMEM_LISTEN_ADDR=0.0.0.0:9111
+      - EPICODE_LISTEN_ADDR=0.0.0.0:9111
       - RUST_LOG=info
     volumes:
       - epicode-data:/app/data

@@ -6,6 +6,11 @@ use epicode::engine::mcp::McpHandler;
 use epicode::engine::user_manager::UserManager;
 use epicode::engine::Engine;
 
+fn env_var(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(&format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+}
+
 fn parse_directive(s: &str) -> tracing_subscriber::filter::Directive {
     match s.parse() {
         Ok(d) => d,
@@ -34,7 +39,7 @@ async fn main() {
         .init();
 
     let is_multi_user =
-        std::env::var("TETRAMEM_PORT").is_ok() || std::env::var("TETRAMEM_MULTI_USER").is_ok();
+        env_var("PORT").is_ok() || env_var("MULTI_USER").is_ok();
 
     if is_multi_user {
         run_multi_user_server(data_dir);
@@ -110,11 +115,11 @@ fn run_multi_user_server(data_dir: PathBuf) {
         Arc::new(UserManager::new(&data_dir))
     };
 
-    let port: u16 = std::env::var("TETRAMEM_PORT")
+    let port: u16 = env_var("PORT")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(19100);
-    let bind_addr = std::env::var("TETRAMEM_BIND").unwrap_or_else(|_| "127.0.0.1".into());
+    let bind_addr = env_var("BIND").unwrap_or_else(|_| "127.0.0.1".into());
     let addr = format!("{bind_addr}:{port}");
 
     let listener = match std::net::TcpListener::bind(&addr) {
@@ -313,7 +318,7 @@ fn do_final_save_handler(handler: &McpHandler) {
 }
 
 fn resolve_data_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("TETRAMEM_DATA_DIR") {
+    if let Ok(dir) = env_var("DATA_DIR") {
         return PathBuf::from(dir);
     }
     let mut dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));

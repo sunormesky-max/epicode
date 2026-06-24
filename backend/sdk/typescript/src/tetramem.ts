@@ -128,6 +128,65 @@ export interface TimelineResponse {
   events: TimelineEvent[];
   total: number;
 }
+export interface TieredMemoryResult {
+  id: string;
+  content: string;
+  tier: number;
+  similarity: number;
+  kg_associations: unknown[];
+  emotional_valence: Emotion;
+  spatial_coords: [number, number, number];
+}
+
+export interface RecallWithTiersResponse {
+  success: boolean;
+  query: string;
+  tiers: TieredMemoryResult[][];
+  total_results: number;
+  knowledge_graph_edges: unknown[];
+}
+
+export interface IdentityStepResponse {
+  success: boolean;
+  step: number;
+  agent_name: string;
+  ritual_state: string;
+  personality_signature: Record<string, unknown>;
+}
+
+export interface DreamCycleResponse {
+  success: boolean;
+  cycles_completed: number;
+  memories_consolidated: number;
+  new_associations: number;
+  energy_delta: number;
+}
+
+export interface KnowledgeGraphNode {
+  id: string;
+  label: string;
+  content: string;
+  x: number;
+  y: number;
+  z: number;
+  tier: number;
+}
+
+export interface KnowledgeGraphEdge {
+  source: string;
+  target: string;
+  relation: string;
+  strength: number;
+}
+
+export interface KnowledgeGraphResponse {
+  success: boolean;
+  node_id: string;
+  nodes: KnowledgeGraphNode[];
+  edges: KnowledgeGraphEdge[];
+  clusters: unknown[];
+}
+
 
 export interface RegisterRequest {
   user_id: string;
@@ -191,6 +250,15 @@ async function request<T>(
   return data as T;
 }
 
+/**
+ * High-level client for the Epicode API.
+ *
+ * Epicode is not just a vector database. It stores memories as tetrahedrons
+ * in 3D space with automatic knowledge graph extraction. SMRP (Structured
+ * Memory Response Protocol) returns tiered, contextual memories with emotional
+ * valence and spatial placement. Identity rituals give AI agents persistent
+ * personality across sessions.
+ */
 export class EpicodeClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -296,6 +364,79 @@ export class EpicodeClient {
     return request<TimelineResponse>(
       this.baseUrl,
       "/v1/timeline",
+      "GET",
+      undefined,
+      this.authHeaders()
+    );
+  }
+
+  /**
+   * Recall associative memories with tiered results via SMRP.
+   *
+   * SMRP (Structured Memory Response Protocol) returns tiered, contextual
+   * memories with emotional valence and spatial placement. Unlike flat
+   * vector databases, Epicode returns memories organized by relevance tiers
+   * with knowledge graph associations.
+   */
+  recallWithTiers(
+    query: string,
+    depth?: number
+  ): Promise<RecallWithTiersResponse> {
+    return request<RecallWithTiersResponse>(
+      this.baseUrl,
+      "/v1/recall/tiers",
+      "POST",
+      { query, depth },
+      this.authHeaders()
+    );
+  }
+
+  /**
+   * Perform an identity ritual step.
+   *
+   * Identity rituals give AI agents persistent personality across sessions.
+   * This is a unique Epicode feature that goes far beyond simple vector
+   * storage, allowing agents to build and maintain a sense of self over time.
+   */
+  identityStep(step: number, agentName: string): Promise<IdentityStepResponse> {
+    return request<IdentityStepResponse>(
+      this.baseUrl,
+      "/v1/identity/step",
+      "POST",
+      { step, agent_name: agentName },
+      this.authHeaders()
+    );
+  }
+
+  /**
+   * Trigger background memory consolidation (dream cycle).
+   *
+   * The "living memory system" aspect of Epicode. Dream cycles run in the
+   * background to consolidate memories, form new associations, and prune weak
+   * connections — mimicking how biological brains strengthen memories during
+   * sleep. This is not something flat vector databases can do.
+   */
+  dreamCycle(): Promise<DreamCycleResponse> {
+    return request<DreamCycleResponse>(
+      this.baseUrl,
+      "/v1/dream/cycle",
+      "POST",
+      undefined,
+      this.authHeaders()
+    );
+  }
+
+  /**
+   * Return knowledge graph visualization data for a node.
+   *
+   * Epicode automatically extracts knowledge graph relationships from
+   * memories stored as tetrahedrons in 3D space. This method returns the
+   * nodes, edges, and clusters that make up the graph around a given memory.
+   */
+  knowledgeGraph(nodeId: string): Promise<KnowledgeGraphResponse> {
+    return request<KnowledgeGraphResponse>(
+      this.baseUrl,
+      `/v1/knowledge-graph/${encodeURIComponent(nodeId)}`,
       "GET",
       undefined,
       this.authHeaders()

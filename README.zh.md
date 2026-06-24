@@ -139,7 +139,7 @@ cargo test --all-targets
 ```bash
 cd deploy
 cp .env.example .env
-# 填写 DEEPSEEK_API_KEY、TETRAMEM_ADMIN_KEY、TETRAMEM_MASTER_KEY
+# 填写 DEEPSEEK_API_KEY、EPICODE_ADMIN_KEY、EPICODE_MASTER_KEY
 docker compose up --build -d
 ```
 

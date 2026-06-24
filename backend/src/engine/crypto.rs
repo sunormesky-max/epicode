@@ -9,6 +9,11 @@ use zeroize::Zeroize;
 
 type HmacSha256 = Hmac<Sha256>;
 
+fn env_var(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(&format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+}
+
 pub fn constant_time_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;
@@ -37,8 +42,8 @@ pub struct CryptoEngine {
 
 impl CryptoEngine {
     pub fn from_env() -> Result<Self, String> {
-        let key_b64 = std::env::var("TETRAMEM_MASTER_KEY")
-            .map_err(|_| "TETRAMEM_MASTER_KEY not set".to_string())?;
+        let key_b64 = env_var("MASTER_KEY")
+            .map_err(|_| "EPICODE_MASTER_KEY (or TETRAMEM_MASTER_KEY) not set".to_string())?;
         let key = STANDARD
             .decode(&key_b64)
             .map_err(|e| format!("invalid master key base64: {e}"))?;

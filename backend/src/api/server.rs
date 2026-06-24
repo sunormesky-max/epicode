@@ -4,6 +4,11 @@ use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::{middleware, Json};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
+fn env_var(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(&format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+}
+
 /// Run a synchronous, potentially blocking computation on a dedicated blocking
 /// thread pool. Use this for Engine calls that may perform I/O (SQLite, HTTP
 /// embedding fallback) or CPU-heavy work (ONNX inference) so that tokio worker
@@ -80,7 +85,7 @@ pub fn cors_layer(origin: &str, allowed_headers: Vec<HeaderName>) -> CorsLayer {
 
 /// Default CORS origin for single-tenant mode.
 pub fn default_cors_origin() -> String {
-    std::env::var("TETRAMEM_CORS_ORIGIN").unwrap_or_else(|_| "http://localhost:3000".to_string())
+    env_var("CORS_ORIGIN").unwrap_or_else(|_| "http://localhost:3000".to_string())
 }
 
 /// Default allowed headers for single-tenant mode.

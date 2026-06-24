@@ -5,9 +5,9 @@ services:
       dockerfile: Dockerfile.cloud
     environment:
       RUST_LOG: info
-      TETRAMEM_LISTEN_ADDR: 0.0.0.0:9111
-      TETRAMEM_ADMIN_KEY: ${TETRAMEM_ADMIN_KEY}
-      TETRAMEM_MASTER_KEY: ${TETRAMEM_MASTER_KEY:-}
+      EPICODE_LISTEN_ADDR: 0.0.0.0:9111
+      EPICODE_ADMIN_KEY: ${EPICODE_ADMIN_KEY}
+      EPICODE_MASTER_KEY: ${EPICODE_MASTER_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       REDIS_URL: ${REDIS_URL:-}
     volumes:

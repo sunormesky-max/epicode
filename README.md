@@ -102,7 +102,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development setup.
 ```bash
 cd deploy
 cp .env.example .env
-# fill in DEEPSEEK_API_KEY, TETRAMEM_ADMIN_KEY, TETRAMEM_MASTER_KEY
+# fill in DEEPSEEK_API_KEY, EPICODE_ADMIN_KEY, EPICODE_MASTER_KEY
 docker compose up --build -d
 ```
 

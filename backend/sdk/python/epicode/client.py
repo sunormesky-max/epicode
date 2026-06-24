@@ -18,21 +18,35 @@ from epicode.exceptions import (
 from epicode.models import (
     AskResponse,
     CreateNodeResponse,
+    DreamCycleResponse,
     Emotion,
     HealthResponse,
+    IdentityStepResponse,
+    KnowledgeGraphEdge,
+    KnowledgeGraphNode,
+    KnowledgeGraphResponse,
     KnowledgeResponse,
     NodeResponse,
     RecallResponse,
+    RecallWithTiersResponse,
     RememberResponse,
     SearchResult,
     SearchResponse,
     StatsResponse,
+    TieredMemoryResult,
     TimelineResponse,
 )
 
 
 class EpicodeClient:
-    """High-level client for the Epicode API."""
+    """High-level client for the Epicode API.
+
+    Epicode is not just a vector database. It stores memories as tetrahedrons
+    in 3D space with automatic knowledge graph extraction. SMRP (Structured
+    Memory Response Protocol) returns tiered, contextual memories with emotional
+    valence and spatial placement. Identity rituals give AI agents persistent
+    personality across sessions.
+    """
 
     DEFAULT_BASE_URL = "http://localhost:9111"
     DEFAULT_TIMEOUT = 30
@@ -95,7 +109,12 @@ class EpicodeClient:
         )
 
     def remember(self, content: str) -> RememberResponse:
-        """Store a new memory."""
+        """Store a new memory as a tetrahedron in 3D space.
+
+        Unlike flat vector databases like Pinecone, Epicode stores each memory
+        with spatial coordinates and automatically extracts knowledge graph
+        relationships.
+        """
         data = self._request("POST", "/v1/remember", json={"content": content})
         return RememberResponse(
             success=data.get("success", False),
@@ -125,7 +144,12 @@ class EpicodeClient:
         )
 
     def recall(self, query: str, *, depth: int | None = None) -> RecallResponse:
-        """Recall associative memories for a query."""
+        """Recall associative memories for a query.
+
+        Uses SMRP (Structured Memory Response Protocol) to return contextual
+        memories with emotional valence and spatial placement — not just flat
+        similarity scores like traditional vector databases.
+        """
         payload: dict[str, Any] = {"query": query}
         if depth is not None:
             payload["depth"] = depth
@@ -220,6 +244,145 @@ class EpicodeClient:
             success=data.get("success", False),
             events=data.get("events", []),
             total=data.get("total", 0),
+        )
+
+    def recall_with_tiers(self, query: str, depth: int = 2) -> RecallWithTiersResponse:
+        """Return tiered memory results with knowledge graph associations.
+
+        This is Epicode's key differentiator — not just flat vector search,
+        but structured memory with tiers and KG relationships. SMRP (Structured
+        Memory Response Protocol) returns tiered, contextual memories with
+        emotional valence and spatial placement.
+
+        Args:
+            query: The search query.
+            depth: How many tiers to traverse in the knowledge graph.
+
+        Returns:
+            A ``RecallWithTiersResponse`` containing tiered results and KG edges.
+        """
+        payload: dict[str, Any] = {"query": query, "depth": depth}
+        data = self._request("POST", "/v1/recall/tiers", json=payload)
+
+        tiers: list[list[TieredMemoryResult]] = []
+        for tier_list in data.get("tiers", []):
+            tier_results: list[TieredMemoryResult] = []
+            for r in tier_list:
+                raw_emotion = r.get("emotional_valence", {})
+                emotion = Emotion(
+                    pleasure=raw_emotion.get("pleasure", 0.0),
+                    arousal=raw_emotion.get("arousal", 0.0),
+                    dominance=raw_emotion.get("dominance", 0.0),
+                )
+                coords = r.get("spatial_coords", [0.0, 0.0, 0.0])
+                if len(coords) < 3:
+                    coords = [0.0, 0.0, 0.0]
+                tier_results.append(
+                    TieredMemoryResult(
+                        id=r.get("id", ""),
+                        content=r.get("content", ""),
+                        tier=r.get("tier", 1),
+                        similarity=r.get("similarity", 0.0),
+                        kg_associations=r.get("kg_associations", []),
+                        emotional_valence=emotion,
+                        spatial_coords=(coords[0], coords[1], coords[2]),
+                    )
+                )
+            tiers.append(tier_results)
+
+        return RecallWithTiersResponse(
+            success=data.get("success", False),
+            query=data.get("query", ""),
+            tiers=tiers,
+            total_results=data.get("total_results", 0),
+            knowledge_graph_edges=data.get("knowledge_graph_edges", []),
+        )
+
+    def identity_step(self, step: int, agent_name: str) -> IdentityStepResponse:
+        """Perform the identity ritual step.
+
+        Identity rituals give AI agents persistent personality across sessions.
+        This is a unique Epicode feature that goes far beyond simple vector
+        storage, allowing agents to build and maintain a sense of self over time.
+
+        Args:
+            step: The ritual step number (1-7).
+            agent_name: The name of the agent performing the ritual.
+
+        Returns:
+            An ``IdentityStepResponse`` with the updated ritual state.
+        """
+        payload = {"step": step, "agent_name": agent_name}
+        data = self._request("POST", "/v1/identity/step", json=payload)
+        return IdentityStepResponse(
+            success=data.get("success", False),
+            step=data.get("step", 0),
+            agent_name=data.get("agent_name", ""),
+            ritual_state=data.get("ritual_state", ""),
+            personality_signature=data.get("personality_signature", {}),
+        )
+
+    def dream_cycle(self) -> DreamCycleResponse:
+        """Trigger background memory consolidation.
+
+        The "living memory system" aspect of Epicode. Dream cycles run in the
+        background to consolidate memories, form new associations, and prune weak
+        connections — mimicking how biological brains strengthen memories during
+        sleep. This is not something flat vector databases can do.
+
+        Returns:
+            A ``DreamCycleResponse`` with consolidation metrics.
+        """
+        data = self._request("POST", "/v1/dream/cycle")
+        return DreamCycleResponse(
+            success=data.get("success", False),
+            cycles_completed=data.get("cycles_completed", 0),
+            memories_consolidated=data.get("memories_consolidated", 0),
+            new_associations=data.get("new_associations", 0),
+            energy_delta=data.get("energy_delta", 0.0),
+        )
+
+    def knowledge_graph(self, node_id: str) -> KnowledgeGraphResponse:
+        """Return knowledge graph visualization data for a node.
+
+        Epicode automatically extracts knowledge graph relationships from
+        memories stored as tetrahedrons in 3D space. This method returns the
+        nodes, edges, and clusters that make up the graph around a given memory.
+
+        Args:
+            node_id: The ID of the central node to visualize.
+
+        Returns:
+            A ``KnowledgeGraphResponse`` with nodes, edges, and cluster data.
+        """
+        data = self._request("GET", f"/v1/knowledge-graph/{node_id}")
+        nodes = [
+            KnowledgeGraphNode(
+                id=n.get("id", ""),
+                label=n.get("label", ""),
+                content=n.get("content", ""),
+                x=n.get("x", 0.0),
+                y=n.get("y", 0.0),
+                z=n.get("z", 0.0),
+                tier=n.get("tier", 1),
+            )
+            for n in data.get("nodes", [])
+        ]
+        edges = [
+            KnowledgeGraphEdge(
+                source=e.get("source", ""),
+                target=e.get("target", ""),
+                relation=e.get("relation", ""),
+                strength=e.get("strength", 0.5),
+            )
+            for e in data.get("edges", [])
+        ]
+        return KnowledgeGraphResponse(
+            success=data.get("success", False),
+            node_id=data.get("node_id", ""),
+            nodes=nodes,
+            edges=edges,
+            clusters=data.get("clusters", []),
         )
 
     def close(self) -> None:

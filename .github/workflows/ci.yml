@@ -9,6 +9,14 @@ on:
       - 'README*'
       - 'CHANGELOG*'
       - 'ROADMAP*'
+      - 'RELEASE_STRATEGY*'
+      - 'CODE_OF_CONDUCT*'
+      - 'SECURITY*'
+      - 'AUTHORS*'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/FUNDING.yml'
+      - '.github/labels.yml'
   pull_request:
     branches: [main]
     paths-ignore:
@@ -17,6 +25,14 @@ on:
       - 'README*'
       - 'CHANGELOG*'
       - 'ROADMAP*'
+      - 'RELEASE_STRATEGY*'
+      - 'CODE_OF_CONDUCT*'
+      - 'SECURITY*'
+      - 'AUTHORS*'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/FUNDING.yml'
+      - '.github/labels.yml'
 
 permissions:
   contents: read

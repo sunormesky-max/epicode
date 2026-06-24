@@ -5,11 +5,16 @@ use std::time::Instant;
 use epicode::engine::mcp::McpHandler;
 use epicode::engine::Engine;
 
+fn env_var(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(&format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+}
+
 #[tokio::main]
 async fn main() {
     std::env::set_var("EMBEDDING_API_URL", "disabled://none");
 
-    let data_dir = std::env::var("TETRAMEM_DATA_DIR")
+    let data_dir = env_var("DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("data_bench"));
     if data_dir.exists() {

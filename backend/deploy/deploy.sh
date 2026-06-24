@@ -99,9 +99,9 @@ Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
 
-Environment=TETRAMEM_DATA_DIR=${DATA_DIR}
-Environment=TETRAMEM_MASTER_KEY=__MASTER_KEY_PLACEHOLDER__
-Environment=TETRAMEM_API_KEY=__API_KEY_PLACEHOLDER__
+Environment=EPICODE_DATA_DIR=${DATA_DIR}
+Environment=EPICODE_MASTER_KEY=__MASTER_KEY_PLACEHOLDER__
+Environment=EPICODE_API_KEY=__API_KEY_PLACEHOLDER__
 Environment=DEEPSEEK_API_KEY=__DEEPSEEK_KEY_PLACEHOLDER__
 Environment=RUST_LOG=epicode=info
 
@@ -118,8 +118,8 @@ echo ""
 echo "=== Deployment Complete ==="
 echo ""
 echo "REQUIRED: Edit /etc/systemd/system/epicode.service and set:"
-echo "  TETRAMEM_MASTER_KEY — encryption key (base64, 32 bytes)"
-echo "  TETRAMEM_API_KEY    — API authentication key"
+echo "  EPICODE_MASTER_KEY — encryption key (base64, 32 bytes)"
+echo "  EPICODE_API_KEY    — API authentication key"
 echo "  DEEPSEEK_API_KEY    — DeepSeek LLM API key"
 echo ""
 echo "Then run:"

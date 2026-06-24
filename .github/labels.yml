@@ -1,6 +1,3 @@
-# GitHub Labels Configuration
-# Apply with: github-label-sync or gh label create
-
 - name: bug
   color: d73a4a
   description: Something isn't working
@@ -12,6 +9,10 @@
 - name: enhancement
   color: a2eeef
   description: New feature or request
+
+- name: documentation
+  color: 0075ca
+  description: Improvements or additions to documentation
 
 - name: good first issue
   color: 7057ff
@@ -29,50 +30,30 @@
   color: d876e3
   description: Further information is requested
 
-- name: documentation
-  color: 0075ca
-  description: Improvements or additions to documentation
-
 - name: security
   color: ff0000
-  description: Security-related issues
+  description: Security-related issue
 
-- name: breaking change
-  color: b60205
-  description: Changes that break backward compatibility
+- name: triage
+  color: 6c757d
+  description: Needs triage
 
 - name: performance
-  color: 1d76db
-  description: Performance improvements or regressions
+  color: f9d0c4
+  description: Performance-related issue
 
 - name: dependencies
   color: 0366d6
-  description: Updates to dependencies
-
-- name: rust
-  color: dea584
-  description: Related to Rust backend code
-
-- name: frontend
-  color: 61dafb
-  description: Related to frontend/React code
-
-- name: infrastructure
-  color: 5319e7
-  description: CI/CD, build, deployment
-
-- name: discussion
-  color: fef2c0
-  description: Needs discussion before implementation
+  description: Pull requests that update a dependency file
 
 - name: stale
   color: ffffff
-  description: Marked as stale due to inactivity
+  description: Issue or PR has been marked as stale
 
 - name: pinned
-  color: f9d0c4
-  description: Pinned issue, do not stale
+  color: fef2c0
+  description: Pinned issue, exempt from stale bot
 
 - name: work-in-progress
-  color: fbcA04
-  description: Work in progress, do not stale
+  color: fef2c0
+  description: Work in progress, exempt from stale bot

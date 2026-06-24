@@ -50,6 +50,11 @@ const RATE_LIMIT_MAX: usize = 60;
 const LOGIN_MAX_FAILURES: u32 = 5;
 const LOGIN_LOCKOUT_SECS: u64 = 900;
 
+fn env_var(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(&format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+}
+
 fn require_admin(
     admin_key: &str,
     headers: &axum::http::HeaderMap,
@@ -151,10 +156,10 @@ async fn main() {
 
     tracing::info!("Epicode Cloud v1.0.0 — starting...");
 
-    let admin_key = match std::env::var("TETRAMEM_ADMIN_KEY") {
+    let admin_key = match env_var("ADMIN_KEY") {
         Ok(v) if !v.is_empty() => v,
         _ => {
-            tracing::error!("FATAL: TETRAMEM_ADMIN_KEY environment variable must be set");
+            tracing::error!("FATAL: EPICODE_ADMIN_KEY (or TETRAMEM_ADMIN_KEY) environment variable must be set");
             std::process::exit(1);
         }
     };
@@ -165,13 +170,13 @@ async fn main() {
     }
 
     let listen_addr =
-        std::env::var("TETRAMEM_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9111".into());
+        env_var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9111".into());
 
     let cors_origin =
-        std::env::var("TETRAMEM_CORS_ORIGIN").unwrap_or_else(|_| "http://localhost:3000".into());
+        env_var("CORS_ORIGIN").unwrap_or_else(|_| "http://localhost:3000".into());
 
     let data_dir = std::path::PathBuf::from(
-        std::env::var("TETRAMEM_DATA_DIR").unwrap_or_else(|_| "data".into()),
+        env_var("DATA_DIR").unwrap_or_else(|_| "data".into()),
     );
     if let Err(e) = std::fs::create_dir_all(&data_dir) {
         tracing::error!("FATAL: cannot create data dir {:?}: {}", data_dir, e);
@@ -380,10 +385,10 @@ async fn main() {
     };
     tracing::info!("Epicode Cloud listening on {}", addr);
 
-    let tcp_port: Option<u16> = std::env::var("TETRAMEM_TCP_PORT")
+    let tcp_port: Option<u16> = env_var("TCP_PORT")
         .ok()
         .and_then(|s| s.parse().ok());
-    let tcp_bind = std::env::var("TETRAMEM_TCP_BIND").unwrap_or_else(|_| "127.0.0.1".into());
+    let tcp_bind = env_var("TCP_BIND").unwrap_or_else(|_| "127.0.0.1".into());
 
     let shutdown_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let tcp_semaphore = Arc::new(Semaphore::new(100));

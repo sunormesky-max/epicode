@@ -24,7 +24,7 @@ echo "Binary:  $BIN"
 echo "DataDir: $DATA_DIR"
 echo ""
 
-export TETRAMEM_DATA_DIR="$DATA_DIR"
+export EPICODE_DATA_DIR="$DATA_DIR"
 START=$(date +%s%N)
 
 OUTPUT=$("$BIN" < "$INPUT_FILE" 2>"$DATA_DIR/stderr.txt")

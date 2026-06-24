@@ -1,34 +1,44 @@
 ## Description
 
-<!-- What does this PR change? -->
+<!-- Please include a summary of the changes and which issue is fixed -->
 
-## Motivation
+Fixes # (issue)
 
-<!-- Why is this change needed? Link the issue if available. -->
+## Type of Change
 
-## Changes
+<!-- Please delete options that are not relevant -->
 
-<!-- List the key changes in this PR. -->
+- [ ] Bug fix (non-breaking change which fixes an issue)
+- [ ] New feature (non-breaking change which adds functionality)
+- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- [ ] Documentation update
+- [ ] Performance improvement
+- [ ] Code refactoring
+- [ ] Dependency update
 
-- 
+## How Has This Been Tested?
 
-## Testing
+<!-- Please describe the tests that you ran to verify your changes -->
 
-<!-- How did you verify the change? -->
+- [ ] Unit tests
+- [ ] Integration tests
+- [ ] Manual testing
 
-- [ ] `cargo test` / backend tests pass
-- [ ] `npm test` / frontend tests pass
-- [ ] Manual testing performed
+Please describe the test configuration:
 
 ## Checklist
 
-- [ ] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
-- [ ] Code follows existing style conventions
-- [ ] No unnecessary dependencies added
-- [ ] Documentation updated if needed
-- [ ] No secrets or credentials in code
-- [ ] Breaking changes documented
+- [ ] My code follows the style guidelines of this project
+- [ ] I have performed a self-review of my own code
+- [ ] I have commented my code, particularly in hard-to-understand areas
+- [ ] I have made corresponding changes to the documentation
+- [ ] My changes generate no new warnings
+- [ ] I have added tests that prove my fix is effective or that my feature works
+- [ ] New and existing unit tests pass locally with my changes
+- [ ] Any dependent changes have been merged and published in downstream modules
 
----
+## Screenshots (if applicable)
 
-💡 **Questions or ideas?** Start a [Discussion](https://github.com/sunormesky-max/epicode/discussions) before opening an issue.
+## Additional Notes
+
+<!-- Add any other notes about the PR here -->

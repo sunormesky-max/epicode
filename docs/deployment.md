@@ -37,8 +37,8 @@ After startup:
 | Variable | Purpose |
 | --- | --- |
 | `DEEPSEEK_API_KEY` | LLM-backed ask/recall flows |
-| `TETRAMEM_ADMIN_KEY` | Cloud admin surface |
-| `TETRAMEM_MASTER_KEY` | Optional master encryption key |
+| `EPICODE_ADMIN_KEY` | Cloud admin surface |
+| `EPICODE_MASTER_KEY` | Optional master encryption key |
 | `REDIS_URL` | Optional L2 cache backend |
 | `EPICODE_HOST` | Hostname used by ingress / reverse proxy |
 

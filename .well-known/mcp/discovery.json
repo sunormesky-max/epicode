@@ -1,0 +1,484 @@
+{
+  "schema_version": "mcp-registry/1.0",
+  "name": "Epicode",
+  "description": "Open-source spatial AI memory system with knowledge graph and identity rituals",
+  "version": "1.0.0",
+  "author": "sunormesky-max",
+  "license": "MIT",
+  "repository": "https://github.com/sunormesky-max/epicode",
+  "homepage": "https://epicode.cn",
+  "mcp_version": "1.0",
+  "tools": [
+    {
+      "name": "memory_create",
+      "description": "Create a new memory entry in the spatial memory system",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "content": { "type": "string", "description": "The content of the memory" },
+          "tags": { "type": "array", "items": { "type": "string" }, "description": "Tags for categorization" },
+          "space": { "type": "string", "description": "Target memory space" }
+        },
+        "required": ["content"]
+      }
+    },
+    {
+      "name": "memory_search",
+      "description": "Search memories by content, tags, or spatial coordinates",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Search query string" },
+          "space": { "type": "string", "description": "Limit search to a specific space" },
+          "limit": { "type": "number", "description": "Maximum number of results" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "memory_recall",
+      "description": "Recall a specific memory by ID or spatial reference",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "memory_id": { "type": "string", "description": "Unique memory identifier" },
+          "spatial_ref": { "type": "string", "description": "Spatial reference coordinate" }
+        }
+      }
+    },
+    {
+      "name": "ctx_load",
+      "description": "Load context from a saved session or memory space",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "context_id": { "type": "string", "description": "Context identifier to load" },
+          "space": { "type": "string", "description": "Target memory space" }
+        },
+        "required": ["context_id"]
+      }
+    },
+    {
+      "name": "ctx_save",
+      "description": "Save current context to a named session or memory space",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Name for the saved context" },
+          "space": { "type": "string", "description": "Target memory space" },
+          "metadata": { "type": "object", "description": "Additional metadata to store" }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "session_summary",
+      "description": "Generate a summary of the current or specified session",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "session_id": { "type": "string", "description": "Session identifier" },
+          "format": { "type": "string", "enum": ["brief", "detailed", "structured"], "description": "Summary format" }
+        }
+      }
+    },
+    {
+      "name": "pattern_learn",
+      "description": "Learn and store a new behavioral or data pattern",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": { "type": "string", "description": "Pattern description or data" },
+          "category": { "type": "string", "description": "Pattern category" },
+          "confidence": { "type": "number", "description": "Confidence score (0-1)" }
+        },
+        "required": ["pattern"]
+      }
+    },
+    {
+      "name": "pattern_recall",
+      "description": "Recall previously learned patterns by category or query",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "category": { "type": "string", "description": "Pattern category to filter" },
+          "query": { "type": "string", "description": "Search query for patterns" }
+        }
+      }
+    },
+    {
+      "name": "decision_record",
+      "description": "Record a decision with context, rationale, and outcome",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "decision": { "type": "string", "description": "Description of the decision" },
+          "rationale": { "type": "string", "description": "Reasoning behind the decision" },
+          "context": { "type": "string", "description": "Decision context" },
+          "outcome": { "type": "string", "description": "Observed outcome" }
+        },
+        "required": ["decision", "rationale"]
+      }
+    },
+    {
+      "name": "bug_memory",
+      "description": "Record or search bug-related memories and resolutions",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "bug_id": { "type": "string", "description": "Bug identifier" },
+          "description": { "type": "string", "description": "Bug description" },
+          "resolution": { "type": "string", "description": "Resolution or fix applied" },
+          "action": { "type": "string", "enum": ["record", "search", "update"], "description": "Action to perform" }
+        }
+      }
+    },
+    {
+      "name": "space_stats",
+      "description": "Get statistics and metrics for a memory space",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "space": { "type": "string", "description": "Memory space name" },
+          "metric": { "type": "string", "enum": ["count", "size", "activity", "all"], "description": "Metric to retrieve" }
+        },
+        "required": ["space"]
+      }
+    },
+    {
+      "name": "dream_cycle",
+      "description": "Run a dream cycle for memory consolidation and insight generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "space": { "type": "string", "description": "Target memory space" },
+          "focus": { "type": "string", "description": "Focus area for the dream cycle" },
+          "depth": { "type": "number", "description": "Depth of consolidation (1-10)" }
+        }
+      }
+    },
+    {
+      "name": "knowledge_relations",
+      "description": "Query or establish relations in the knowledge graph",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entity_a": { "type": "string", "description": "First entity" },
+          "relation": { "type": "string", "description": "Relation type" },
+          "entity_b": { "type": "string", "description": "Second entity" },
+          "action": { "type": "string", "enum": ["query", "create", "delete"], "description": "Action to perform" }
+        }
+      }
+    },
+    {
+      "name": "concepts",
+      "description": "Manage conceptual knowledge and abstractions",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "concept": { "type": "string", "description": "Concept name or definition" },
+          "action": { "type": "string", "enum": ["define", "query", "relate", "list"], "description": "Action to perform" },
+          "definition": { "type": "string", "description": "Concept definition" }
+        }
+      }
+    },
+    {
+      "name": "identity_confirm",
+      "description": "Confirm identity with verification challenge",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "identity_token": { "type": "string", "description": "Identity verification token" },
+          "challenge_response": { "type": "string", "description": "Response to identity challenge" }
+        },
+        "required": ["identity_token"]
+      }
+    },
+    {
+      "name": "identity_step",
+      "description": "Perform a step in the identity ritual sequence",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "step": { "type": "number", "description": "Ritual step number" },
+          "input": { "type": "string", "description": "Input for this step" },
+          "session_token": { "type": "string", "description": "Ritual session token" }
+        },
+        "required": ["step"]
+      }
+    },
+    {
+      "name": "identity_finalize",
+      "description": "Finalize the identity ritual and establish persistent identity",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "session_token": { "type": "string", "description": "Ritual session token" },
+          "confirmation": { "type": "string", "description": "Final confirmation input" }
+        },
+        "required": ["session_token"]
+      }
+    },
+    {
+      "name": "skill_execute",
+      "description": "Execute a registered skill with given parameters",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "skill": { "type": "string", "description": "Skill name to execute" },
+          "params": { "type": "object", "description": "Skill parameters" },
+          "context": { "type": "string", "description": "Execution context" }
+        },
+        "required": ["skill"]
+      }
+    },
+    {
+      "name": "skills_sync",
+      "description": "Synchronize skills registry with remote or local source",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "description": "Skills source URL or path" },
+          "mode": { "type": "string", "enum": ["full", "incremental", "force"], "description": "Sync mode" }
+        }
+      }
+    },
+    {
+      "name": "feedback_submit",
+      "description": "Submit feedback for a tool, skill, or memory entry",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": { "type": "string", "description": "Target of feedback (tool/skill/memory ID)" },
+          "rating": { "type": "number", "description": "Rating score (1-5)" },
+          "comment": { "type": "string", "description": "Feedback comment" },
+          "type": { "type": "string", "enum": ["tool", "skill", "memory", "general"], "description": "Feedback type" }
+        },
+        "required": ["target", "rating"]
+      }
+    },
+    {
+      "name": "project_list",
+      "description": "List all tracked projects and their memory spaces",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filter": { "type": "string", "description": "Filter by project name or status" },
+          "include_archived": { "type": "boolean", "description": "Include archived projects" }
+        }
+      }
+    },
+    {
+      "name": "enforced_rules",
+      "description": "Retrieve or update enforced rules for the system",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["get", "set", "list", "delete"], "description": "Action to perform" },
+          "rule_id": { "type": "string", "description": "Rule identifier" },
+          "rule": { "type": "object", "description": "Rule definition" }
+        }
+      }
+    },
+    {
+      "name": "memory_update",
+      "description": "Update an existing memory entry",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "memory_id": { "type": "string", "description": "Memory identifier" },
+          "content": { "type": "string", "description": "Updated content" },
+          "tags": { "type": "array", "items": { "type": "string" }, "description": "Updated tags" }
+        },
+        "required": ["memory_id"]
+      }
+    },
+    {
+      "name": "memory_delete",
+      "description": "Delete a memory entry by ID",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "memory_id": { "type": "string", "description": "Memory identifier to delete" },
+          "confirm": { "type": "boolean", "description": "Confirm deletion" }
+        },
+        "required": ["memory_id"]
+      }
+    },
+    {
+      "name": "space_create",
+      "description": "Create a new memory space",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Space name" },
+          "description": { "type": "string", "description": "Space description" },
+          "schema": { "type": "object", "description": "Space schema definition" }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "space_delete",
+      "description": "Delete a memory space",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Space name to delete" },
+          "confirm": { "type": "boolean", "description": "Confirm deletion" }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "space_list",
+      "description": "List all available memory spaces",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filter": { "type": "string", "description": "Filter string" }
+        }
+      }
+    },
+    {
+      "name": "knowledge_query",
+      "description": "Query the knowledge graph for entities or relations",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Graph query string" },
+          "entity": { "type": "string", "description": "Entity to query" },
+          "depth": { "type": "number", "description": "Query depth" }
+        }
+      }
+    },
+    {
+      "name": "knowledge_add",
+      "description": "Add a new entity or relation to the knowledge graph",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entity": { "type": "string", "description": "Entity name" },
+          "type": { "type": "string", "description": "Entity type" },
+          "relations": { "type": "array", "items": { "type": "object" }, "description": "Relations to create" }
+        },
+        "required": ["entity"]
+      }
+    },
+    {
+      "name": "identity_init",
+      "description": "Initialize a new identity ritual session",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "identity_name": { "type": "string", "description": "Name for the new identity" },
+          "ritual_type": { "type": "string", "description": "Type of identity ritual" }
+        }
+      }
+    },
+    {
+      "name": "identity_status",
+      "description": "Check the status of an identity ritual session",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "session_token": { "type": "string", "description": "Ritual session token" }
+        },
+        "required": ["session_token"]
+      }
+    },
+    {
+      "name": "skill_register",
+      "description": "Register a new skill in the skills registry",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Skill name" },
+          "description": { "type": "string", "description": "Skill description" },
+          "handler": { "type": "string", "description": "Skill handler reference" },
+          "schema": { "type": "object", "description": "Skill parameter schema" }
+        },
+        "required": ["name", "handler"]
+      }
+    },
+    {
+      "name": "skill_list",
+      "description": "List all registered skills",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filter": { "type": "string", "description": "Filter by skill name or category" },
+          "enabled_only": { "type": "boolean", "description": "Show only enabled skills" }
+        }
+      }
+    },
+    {
+      "name": "project_create",
+      "description": "Create a new project with associated memory space",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Project name" },
+          "description": { "type": "string", "description": "Project description" },
+          "space": { "type": "string", "description": "Associated memory space" }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "project_delete",
+      "description": "Delete a project and optionally its memory space",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Project name" },
+          "delete_space": { "type": "boolean", "description": "Also delete associated memory space" }
+        },
+        "required": ["name"]
+      }
+    }
+  ],
+  "resources": [
+    {
+      "name": "memory_space",
+      "description": "Access to a specific memory space",
+      "uri_template": "epicode://memory/{space_name}",
+      "mime_type": "application/json"
+    },
+    {
+      "name": "knowledge_graph",
+      "description": "Access to the knowledge graph data",
+      "uri_template": "epicode://knowledge/{entity_id}",
+      "mime_type": "application/json"
+    },
+    {
+      "name": "identity_session",
+      "description": "Access to identity ritual session data",
+      "uri_template": "epicode://identity/{session_token}",
+      "mime_type": "application/json"
+    },
+    {
+      "name": "skill_registry",
+      "description": "Access to the skills registry",
+      "uri_template": "epicode://skills/{skill_name}",
+      "mime_type": "application/json"
+    }
+  ],
+  "prompts": [
+    {
+      "name": "memory_explore",
+      "description": "Explore memories in a space with guided questions",
+      "template": "Explore the memory space '{{space}}' and identify key themes, patterns, and insights. Consider: What are the most frequently referenced concepts? What temporal patterns exist? What relationships emerge?"
+    },
+    {
+      "name": "identity_ritual_guide",
+      "description": "Guide through the identity ritual process",
+      "template": "Guide the user through the identity ritual. Current step: {{step}}. Ask appropriate questions and provide guidance for establishing a persistent identity."
+    },
+    {
+      "name": "knowledge_insight",
+      "description": "Generate insights from the knowledge graph",
+      "template": "Analyze the knowledge graph around entity '{{entity}}' and generate insights about: 1) Key relationships, 2) Emerging patterns, 3) Potential gaps or contradictions."
+    }
+  ]
+}

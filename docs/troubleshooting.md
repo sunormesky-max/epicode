@@ -47,7 +47,7 @@ Verify:
 curl http://localhost:9111/health
 ```
 
-If you override `TETRAMEM_LISTEN_ADDR`, keep the healthcheck, ingress, and port mappings aligned.
+If you override `EPICODE_LISTEN_ADDR`, keep the healthcheck, ingress, and port mappings aligned.
 
 ## Cache features do not use Redis
 

@@ -1,8 +1,11 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Ask a Question
+  - name: Epicode Community Support
     url: https://github.com/sunormesky-max/epicode/discussions
-    about: Ask questions and discuss ideas with the community
-  - name: Security Vulnerability
-    url: https://github.com/sunormesky-max/epicode/security/advisories/new
-    about: Report security vulnerabilities privately
+    about: Please ask and answer questions here.
+  - name: Epicode Website
+    url: https://epicode.cn
+    about: Visit our official website for documentation and updates.
+  - name: Security Issues
+    url: https://github.com/sunormesky-max/epicode/security/advisories
+    about: Please report security vulnerabilities here.

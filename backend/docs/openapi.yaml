@@ -634,7 +634,7 @@ components:
       type: apiKey
       in: header
       name: X-Admin-Key
-      description: "Admin key (set via TETRAMEM_ADMIN_KEY env var)"
+      description: "Admin key (set via EPICODE_ADMIN_KEY env var)"
     InviteCodeAuth:
       type: apiKey
       in: header

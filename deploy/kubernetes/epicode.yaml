@@ -11,8 +11,8 @@ metadata:
 type: Opaque
 stringData:
   DEEPSEEK_API_KEY: replace-me
-  TETRAMEM_ADMIN_KEY: replace-me
-  TETRAMEM_MASTER_KEY: ""
+  EPICODE_ADMIN_KEY: replace-me
+  EPICODE_MASTER_KEY: ""
   REDIS_URL: redis://epicode-redis:6379
 ---
 apiVersion: v1
@@ -83,23 +83,23 @@ spec:
           env:
             - name: RUST_LOG
               value: info
-            - name: TETRAMEM_LISTEN_ADDR
+            - name: EPICODE_LISTEN_ADDR
               value: 0.0.0.0:9111
             - name: DEEPSEEK_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: epicode-secrets
                   key: DEEPSEEK_API_KEY
-            - name: TETRAMEM_ADMIN_KEY
+            - name: EPICODE_ADMIN_KEY
               valueFrom:
                 secretKeyRef:
                   name: epicode-secrets
-                  key: TETRAMEM_ADMIN_KEY
-            - name: TETRAMEM_MASTER_KEY
+                  key: EPICODE_ADMIN_KEY
+            - name: EPICODE_MASTER_KEY
               valueFrom:
                 secretKeyRef:
                   name: epicode-secrets
-                  key: TETRAMEM_MASTER_KEY
+                  key: EPICODE_MASTER_KEY
             - name: REDIS_URL
               valueFrom:
                 secretKeyRef:

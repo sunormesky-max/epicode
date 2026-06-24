@@ -11,6 +11,11 @@ use epicode::api::routes;
 use epicode::api::server;
 use epicode::engine::Engine;
 
+fn env_var(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(&format!("EPICODE_{}", name))
+        .or_else(|_| std::env::var(&format!("TETRAMEM_{}", name)))
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -115,7 +120,7 @@ async fn main() {
         .with_state(state.clone());
 
     let listen_addr =
-        std::env::var("TETRAMEM_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9110".to_string());
+        env_var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9110".to_string());
     let addr: SocketAddr = match listen_addr.parse() {
         Ok(a) => a,
         Err(e) => {
