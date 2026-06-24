@@ -1,9 +1,8 @@
 name: OpenSSF Scorecard
 
 on:
-  branch_protection_rule:
   schedule:
-    - cron: '0 0 * * 0'  # Run weekly on Sundays
+    - cron: '0 0 * * 0'
   push:
     branches: [main]
   workflow_dispatch:
@@ -19,8 +18,6 @@ jobs:
       id-token: write
       contents: read
       actions: read
-      issues: read
-      checks: read
 
     steps:
       - name: Checkout code
