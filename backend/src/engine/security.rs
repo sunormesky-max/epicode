@@ -32,9 +32,7 @@ impl SecurityConfig {
     /// Try to build a `SecurityConfig` from environment variables.
     /// Returns `Err` if `TETRAMEM_API_KEY` is not set and insecure auth is not allowed.
     pub fn try_from_env() -> Result<Self, String> {
-        let key = env_var("API_KEY")
-            .ok()
-            .filter(|k| !k.is_empty());
+        let key = env_var("API_KEY").ok().filter(|k| !k.is_empty());
         let allow_insecure = matches!(
             env_var("ALLOW_INSECURE_AUTH"),
             Ok(v) if v == "1" || v.eq_ignore_ascii_case("true")

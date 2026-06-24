@@ -78,7 +78,6 @@ pub struct Engine {
     data_path: std::path::PathBuf,
 }
 
-
 impl Default for Engine {
     fn default() -> Self {
         Self::new()
@@ -219,7 +218,9 @@ impl Engine {
                     sm.with_encryption(crypto, uid)
                 }
                 Err(_) => {
-                    tracing::debug!("Encryption disabled (no EPICODE_MASTER_KEY or TETRAMEM_MASTER_KEY)");
+                    tracing::debug!(
+                        "Encryption disabled (no EPICODE_MASTER_KEY or TETRAMEM_MASTER_KEY)"
+                    );
                     sm
                 }
             }

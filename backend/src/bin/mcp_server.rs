@@ -38,8 +38,7 @@ async fn main() {
         .with_writer(io::stderr)
         .init();
 
-    let is_multi_user =
-        env_var("PORT").is_ok() || env_var("MULTI_USER").is_ok();
+    let is_multi_user = env_var("PORT").is_ok() || env_var("MULTI_USER").is_ok();
 
     if is_multi_user {
         run_multi_user_server(data_dir);

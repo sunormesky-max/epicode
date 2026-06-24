@@ -159,7 +159,9 @@ async fn main() {
     let admin_key = match env_var("ADMIN_KEY") {
         Ok(v) if !v.is_empty() => v,
         _ => {
-            tracing::error!("FATAL: EPICODE_ADMIN_KEY (or TETRAMEM_ADMIN_KEY) environment variable must be set");
+            tracing::error!(
+                "FATAL: EPICODE_ADMIN_KEY (or TETRAMEM_ADMIN_KEY) environment variable must be set"
+            );
             std::process::exit(1);
         }
     };
@@ -169,15 +171,11 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let listen_addr =
-        env_var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9111".into());
+    let listen_addr = env_var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9111".into());
 
-    let cors_origin =
-        env_var("CORS_ORIGIN").unwrap_or_else(|_| "http://localhost:3000".into());
+    let cors_origin = env_var("CORS_ORIGIN").unwrap_or_else(|_| "http://localhost:3000".into());
 
-    let data_dir = std::path::PathBuf::from(
-        env_var("DATA_DIR").unwrap_or_else(|_| "data".into()),
-    );
+    let data_dir = std::path::PathBuf::from(env_var("DATA_DIR").unwrap_or_else(|_| "data".into()));
     if let Err(e) = std::fs::create_dir_all(&data_dir) {
         tracing::error!("FATAL: cannot create data dir {:?}: {}", data_dir, e);
         std::process::exit(1);
@@ -385,9 +383,7 @@ async fn main() {
     };
     tracing::info!("Epicode Cloud listening on {}", addr);
 
-    let tcp_port: Option<u16> = env_var("TCP_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok());
+    let tcp_port: Option<u16> = env_var("TCP_PORT").ok().and_then(|s| s.parse().ok());
     let tcp_bind = env_var("TCP_BIND").unwrap_or_else(|_| "127.0.0.1".into());
 
     let shutdown_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));

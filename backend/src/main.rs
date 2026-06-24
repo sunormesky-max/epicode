@@ -119,8 +119,7 @@ async fn main() {
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
 
-    let listen_addr =
-        env_var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9110".to_string());
+    let listen_addr = env_var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9110".to_string());
     let addr: SocketAddr = match listen_addr.parse() {
         Ok(a) => a,
         Err(e) => {
