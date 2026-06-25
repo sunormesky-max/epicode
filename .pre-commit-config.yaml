@@ -1,0 +1,56 @@
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt (backend)
+        entry: bash -c 'cd backend && cargo fmt --all --check'
+        language: system
+        files: ^backend/.*\.rs$
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy (backend)
+        entry: bash -c 'cd backend && cargo clippy --locked --all-targets -- -D warnings'
+        language: system
+        files: ^backend/.*\.rs$
+        pass_filenames: false
+
+      - id: guard-fmt
+        name: cargo fmt (guard)
+        entry: bash -c 'cd guard && cargo fmt --all --check'
+        language: system
+        files: ^guard/.*\.rs$
+        pass_filenames: false
+
+      - id: frontend-lint
+        name: eslint (frontend)
+        entry: bash -c 'cd frontend && npm run lint'
+        language: system
+        files: ^frontend/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: false
+
+      - id: frontend-check
+        name: tsc (frontend)
+        entry: bash -c 'cd frontend && npm run check'
+        language: system
+        files: ^frontend/.*\.(ts|tsx)$
+        pass_filenames: false
+
+      - id: version-check
+        name: version consistency
+        entry: bash scripts/verify-version.sh
+        language: system
+        files: ^(version\.txt|backend/Cargo\.toml|guard/Cargo\.toml|frontend/package\.json|backend/sdk/.*|\.release-please-manifest\.json|backend/docs/openapi\.yaml)$
+        pass_filenames: false
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key

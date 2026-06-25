@@ -6,9 +6,40 @@ updates:
       interval: weekly
     commit-message:
       prefix: chore
+    ignore:
+      - dependency-name: redis
+        update-types: [version-update:semver-major]
+      - dependency-name: bincode
+        update-types: [version-update:semver-major]
+      - dependency-name: sha2
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: cargo
+    directory: /guard
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
 
   - package-ecosystem: npm
     directory: /frontend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+    ignore:
+      - dependency-name: lucide-react
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: npm
+    directory: /backend/sdk/typescript
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+
+  - package-ecosystem: pip
+    directory: /backend/sdk/python
     schedule:
       interval: weekly
     commit-message:
