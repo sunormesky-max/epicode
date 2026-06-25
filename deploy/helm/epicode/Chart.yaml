@@ -1,0 +1,19 @@
+apiVersion: v2
+name: epicode
+description: Epicode — open-source spatial AI memory system. Stores memories as tetrahedrons in 3D space and auto-builds a knowledge graph.
+type: application
+version: 1.0.1
+appVersion: "1.0.1"
+home: https://epicode.cn
+sources:
+  - https://github.com/sunormesky-max/epicode
+maintainers:
+  - name: sunormesky-max
+keywords:
+  - ai
+  - memory
+  - vector-search
+  - knowledge-graph
+  - mcp
+  - llm
+icon: https://epicode.cn/logo.png

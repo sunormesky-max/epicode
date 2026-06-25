@@ -10,6 +10,9 @@
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](deploy/docker-compose.yml)
 [![Rust](https://img.shields.io/badge/Rust-1.88+-orange?logo=rust)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/v2/github.com/sunormesky-max/epicode/badge)](https://securityscorecards.dev/viewer/?uri=github.com/sunormesky-max/epicode)
+[![Security Policy](https://img.shields.io/badge/Security-Policy-blue)](SECURITY.md)
+[![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen)](CONTRIBUTING.md)
 
 [![GitHub stars](https://img.shields.io/github/stars/sunormesky-max/epicode?style=social)](https://github.com/sunormesky-max/epicode/stargazers)
 [![GitHub Discussions](https://img.shields.io/github/discussions/sunormesky-max/epicode)](https://github.com/sunormesky-max/epicode/discussions)
