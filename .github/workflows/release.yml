@@ -125,11 +125,22 @@ jobs:
             tar czf "${PKG_NAME}.tar.gz" "${PKG_NAME}"
             echo "ASSET=${PKG_NAME}.tar.gz" >> $GITHUB_ENV
           fi
+          
+          # Generate SHA256 checksum
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            certutil -hashfile "${PKG_NAME}.zip" SHA256 | sed -n 2p | tr -d ' ' > "${PKG_NAME}.zip.sha256"
+            echo "CHECKSUM_ASSET=${PKG_NAME}.zip.sha256" >> $GITHUB_ENV
+          else
+            shasum -a 256 "${PKG_NAME}.tar.gz" > "${PKG_NAME}.tar.gz.sha256"
+            echo "CHECKSUM_ASSET=${PKG_NAME}.tar.gz.sha256" >> $GITHUB_ENV
+          fi
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release-please.outputs.tag_name }}
-          files: ${{ env.ASSET }}
+          files: |
+            ${{ env.ASSET }}
+            ${{ env.CHECKSUM_ASSET }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

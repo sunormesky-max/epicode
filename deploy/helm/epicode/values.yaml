@@ -1,0 +1,112 @@
+# Default values for Epicode Helm chart.
+# Override these in your values.yaml or via --set.
+
+replicaCount:
+  backend: 1
+  frontend: 2
+
+image:
+  backend:
+    repository: ghcr.io/sunormesky-max/epicode-backend
+    tag: "1.0.1"
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: ghcr.io/sunormesky-max/epicode-frontend
+    tag: "1.0.1"
+    pullPolicy: IfNotPresent
+
+# Required secrets — provide via --set or external secret manager
+env:
+  EPICODE_ADMIN_KEY: ""        # REQUIRED
+  EPICODE_MASTER_KEY: ""       # REQUIRED (32-byte base64)
+  DEEPSEEK_API_KEY: ""         # optional
+  REDIS_URL: ""                # optional, enables distributed rate limiting
+  RUST_LOG: "info"
+  EPICODE_LISTEN_ADDR: "0.0.0.0:9111"
+
+service:
+  backend:
+    type: ClusterIP
+    port: 9111
+  frontend:
+    type: ClusterIP
+    port: 3000
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: epicode.example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+          service: backend
+        - path: /docs
+          pathType: Prefix
+          service: backend
+        - path: /health
+          pathType: Exact
+          service: backend
+        - path: /
+          pathType: Prefix
+          service: frontend
+  tls:
+    - secretName: epicode-tls
+      hosts:
+        - epicode.example.com
+
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  mountPath: /app/data
+
+resources:
+  backend:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  frontend:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+probes:
+  backend:
+    liveness:
+      httpGet:
+        path: /health
+        port: 9111
+      initialDelaySeconds: 10
+      periodSeconds: 30
+    readiness:
+      httpGet:
+        path: /health
+        port: 9111
+      initialDelaySeconds: 5
+      periodSeconds: 10
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+redis:
+  enabled: true
+  image: redis:7-alpine
+  persistence:
+    enabled: false  # cache is rebuildable
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

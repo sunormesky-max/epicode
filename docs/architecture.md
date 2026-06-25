@@ -10,7 +10,25 @@ Epicode processes incoming memories through a pipeline of security checks, embed
 
 The following diagram illustrates how a memory flows through the system from ingestion to retrieval:
 
+```mermaid
+flowchart LR
+    A[AI Agent] -->|POST /api/v1/remember| B[Security Middleware<br/>API Key + Rate Limit + Energy]
+    B --> C[GatewayCenter]
+    C --> D[Embedding ONNX 768-dim]
+    C --> E[LLM Classification]
+    C --> F[Spatial Placement]
+    D & E & F --> G[Space<br/>Tetrahedron + Auto-merge]
+    G --> H[Knowledge Graph]
+    H --> I[Scheduler]
+    I -->|periodic| J[Auto-pulse]
+    I -->|periodic| K[Auto-link]
+    I -->|periodic| L[Dedup]
+    I -->|periodic| M[Dream cycle]
+    H --> N[Search/Recall/Ask API]
+    N --> A
 ```
+
+```text
 AI Agent → POST /remember → Security Middleware (API Key + Rate Limit + Energy Check)
     → GatewayCenter (Embedding → LLM Classification → Spatial Placement)
     → New Tetrahedron placed into Space (Auto-merge nearby vertices → Natural clustering)
@@ -104,3 +122,20 @@ Long-running and periodic work is executed via `tokio::task`:
 - [API Reference](api-reference.md) — HTTP endpoints and MCP tools.
 - [MCP Protocol](mcp-protocol.md) — Model Context Protocol integration details.
 - [Configuration](configuration.md) — Environment variables and deployment settings.
+- [Development Guide](development.md) — Local setup, testing, debugging.
+- [Deployment Guide](deployment.md) — Production deployment, TLS, monitoring.
+
+## Legacy Compatibility
+
+Epicode was previously named Tetramem. The following legacy artifacts are preserved for backward compatibility and will be removed in a future major release (2.0):
+
+| Artifact | Location | Status |
+|----------|----------|--------|
+| `tetramem.db` database filename | `backend/src/engine/storage.rs` | Renamed to `epicode.db` in v2.0; migration script provided at release |
+| `TETRAMEM_*` environment variable prefix | Multiple `env_var()` helpers | Accepted as fallback; `EPICODE_*` preferred |
+| `tetramem-sdk` package name | README deprecation notice only | Already renamed to `epicode-sdk` |
+
+**Migration path (planned for v2.0)**:
+1. Backend auto-detects `tetramem.db` and renames to `epicode.db` on startup
+2. `TETRAMEM_*` env vars emit deprecation warning, still accepted
+3. v2.1 removes `TETRAMEM_*` fallback entirely
