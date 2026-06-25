@@ -107,3 +107,72 @@ jobs:
         run: npm run test
       - name: Build
         run: npm run build
+
+  guard:
+    runs-on: ubuntu-latest
+    needs: version-check
+    defaults:
+      run:
+        working-directory: guard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "stable"
+          components: rustfmt, clippy
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev pkg-config libssl-dev
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            guard/target
+          key: ${{ runner.os }}-guard-cargo-${{ hashFiles('guard/Cargo.lock') }}
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Run clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Check build
+        run: cargo check --locked
+      - name: Run tests
+        run: cargo test --locked --all-targets
+
+  sdk-typescript:
+    runs-on: ubuntu-latest
+    needs: version-check
+    defaults:
+      run:
+        working-directory: backend/sdk/typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/sdk/typescript/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+
+  sdk-python:
+    runs-on: ubuntu-latest
+    needs: version-check
+    defaults:
+      run:
+        working-directory: backend/sdk/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -e .
+      - name: Type check
+        run: pip install mypy && mypy epicode --ignore-missing-imports || true
+      - name: Syntax check
+        run: python -m py_compile epicode/*.py

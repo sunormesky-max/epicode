@@ -40,7 +40,7 @@ body:
       label: Environment
       description: |
         - OS: [e.g. macOS, Linux, Windows]
-        - Epicode version: [e.g. 0.1.0]
+        - Epicode version: [e.g. 1.0.1]
         - Rust version: [e.g. 1.88]
         - Node version: [e.g. 20]
       placeholder: |
