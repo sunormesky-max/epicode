@@ -4,18 +4,18 @@ This document describes the core HTTP endpoints and MCP tools exposed by the Epi
 
 ## Base URL
 
-Online deployments typically expose endpoints under the `/api` prefix. Local deployments or reverse-proxy configurations may use `/v1` directly.
+Online deployments typically expose endpoints under the `/api/v1` public prefix. The Epicode backend itself serves the same endpoints under `/v1` directly; the included Nginx reverse proxy strips `/api` before forwarding traffic. Local deployments may also call the backend directly at `http://localhost:9111` using the `/v1` paths.
 
 ## Core Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/v1/remember` | Store a new memory. Accepts content, labels, and optional metadata. Computes embeddings and places the memory in 3D space. |
-| `POST` | `/v1/search` | Semantic search across memories. Uses BM25 + HNSW hybrid search to return contextually relevant results for natural language queries. |
-| `POST` | `/v1/recall` | Deep recall operation. Combines semantic search with knowledge graph expansion to retrieve richly connected memories. |
-| `GET` | `/v1/stats` | Retrieve spatial statistics. Returns tetrahedron count, vertex count, cluster count, energy levels, and other system metrics. |
-| `GET` | `/v1/graph/analysis` | Knowledge graph analysis. Returns node/edge counts, centrality metrics, and community structure of the relationship graph. |
-| `GET` | `/v1/health` | Health check endpoint. Returns system status and basic liveness information. |
+| `POST` | `/remember` | Store a new memory. Accepts content, labels, and optional metadata. Computes embeddings and places the memory in 3D space. |
+| `POST` | `/search` | Semantic search across memories. Uses BM25 + HNSW hybrid search to return contextually relevant results for natural language queries. |
+| `POST` | `/recall` | Deep recall operation. Combines semantic search with knowledge graph expansion to retrieve richly connected memories. |
+| `GET` | `/stats` | Retrieve spatial statistics. Returns tetrahedron count, vertex count, cluster count, energy levels, and other system metrics. |
+| `GET` | `/graph/analysis` | Knowledge graph analysis. Returns node/edge counts, centrality metrics, and community structure of the relationship graph. |
+| `GET` | `/health` | Health check endpoint. Returns system status and basic liveness information. |
 
 ### Example: Store a Memory
 

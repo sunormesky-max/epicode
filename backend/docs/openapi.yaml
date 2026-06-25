@@ -2,17 +2,15 @@ openapi: 3.1.0
 info:
   title: Epicode Cloud API
   description: Semantic memory service with ONNX 768-dim vector search, hybrid BM25 retrieval, multi-tenant isolation, and LLM-powered Q&A
-  version: 1.0.0
+  version: 1.0.1  # x-release-please-version
   contact:
     name: Epicode Support
     email: support@epicode.cn
     url: https://epicode.cn
 
 servers:
-  - url: http://localhost:9111
-    description: Local backend direct
-  - url: https://epicode.cn/api
-    description: Production reverse proxy
+  - url: /api/v1
+    description: Public API prefix (Nginx strips /api before forwarding to backend)
 
 security:
   - ApiKeyAuth: []
@@ -48,7 +46,7 @@ paths:
                 type: object
                 properties:
                   status: { type: string, example: ok }
-                  version: { type: string, example: "1.0.0-cloud" }
+                  version: { type: string, example: "1.0.1-cloud" }
                   success: { type: boolean, example: true }
 
   /stats/public:
@@ -82,7 +80,7 @@ paths:
           in: header
           required: false
           schema: { type: string }
-          description: "One-time invite code (obtained from an existing user's /v1/stats)"
+          description: "One-time invite code (obtained from an existing user's /stats)"
         - name: X-Admin-Key
           in: header
           required: false
@@ -129,7 +127,7 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
-  /v1/login:
+  /login:
     post:
       tags: [Auth]
       summary: Login with username and password
@@ -164,7 +162,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
-  /v1/remember:
+  /remember:
     post:
       tags: [Memory]
       summary: Store a new memory
@@ -195,7 +193,7 @@ paths:
                   id: { type: integer, description: "Unique memory ID" }
                   labels: { type: array, items: { type: string }, description: "Auto-classified tags" }
 
-  /v1/search:
+  /search:
     post:
       tags: [Memory]
       summary: Semantic search across memories
@@ -238,7 +236,7 @@ paths:
                         labels: { type: array, items: { type: string } }
                         similarity: { type: number, description: "Combined score (0-1)" }
 
-  /v1/recall:
+  /recall:
     post:
       tags: [Memory]
       summary: Deep memory recall with associations
@@ -286,7 +284,7 @@ paths:
                       items:
                         type: object
 
-  /v1/ask:
+  /ask:
     post:
       tags: [Q&A]
       summary: Ask a question about your memories
@@ -326,7 +324,7 @@ paths:
                     items:
                       type: object
 
-  /v1/nodes:
+  /nodes:
     post:
       tags: [Memory]
       summary: Create a memory node with metadata
@@ -361,7 +359,7 @@ paths:
                   success: { type: boolean }
                   id: { type: integer }
 
-  /v1/nodes/{id}:
+  /nodes/{id}:
     get:
       tags: [Memory]
       summary: Get a single memory by ID
@@ -385,7 +383,7 @@ paths:
         "404":
           description: Not found
 
-  /v1/memories/{id}:
+  /memories/{id}:
     delete:
       tags: [Memory]
       summary: Delete a memory by ID
@@ -405,7 +403,7 @@ paths:
                   success: { type: boolean }
                   deleted: { type: integer }
 
-  /v1/memories/batch-delete:
+  /memories/batch-delete:
     post:
       tags: [Memory]
       summary: Delete multiple memories in one request
@@ -431,7 +429,7 @@ paths:
                   success: { type: boolean }
                   deleted_count: { type: integer }
 
-  /v1/knowledge:
+  /knowledge:
     post:
       tags: [Knowledge Graph]
       summary: Get knowledge graph relations for a memory
@@ -464,7 +462,7 @@ paths:
                         relation: { type: string }
                         strength: { type: number }
 
-  /v1/graph/export:
+  /graph/export:
     get:
       tags: [Knowledge Graph]
       summary: Export graph nodes, edges, concepts, and clusters
@@ -495,7 +493,7 @@ paths:
                   total_nodes: { type: integer }
                   total_edges: { type: integer }
 
-  /v1/stats:
+  /stats:
     get:
       tags: [System]
       summary: Get user statistics
@@ -518,7 +516,7 @@ paths:
                   clusters: { type: integer }
                   invite_code: { type: string, description: "Current invite code (only visible to admin users)" }
 
-  /v1/timeline:
+  /timeline:
     get:
       tags: [Memory]
       summary: Get memories in chronological order (last 200)
@@ -542,7 +540,7 @@ paths:
                         labels: { type: array, items: { type: string } }
                         timestamp: { type: integer }
 
-  /v1/digest:
+  /digest:
     post:
       tags: [Ingestion]
       summary: Ingest and digest content (text, files)
@@ -629,7 +627,7 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
-      description: "User API key (tm-...), obtained via /register or /v1/login"
+      description: "User API key (tm-...), obtained via /register or /login"
     AdminKeyAuth:
       type: apiKey
       in: header

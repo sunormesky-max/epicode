@@ -154,7 +154,7 @@ async fn main() {
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()))
         .init();
 
-    tracing::info!("Epicode Cloud v1.0.0 — starting...");
+    tracing::info!("Epicode Cloud v1.0.1 — starting...");
 
     let admin_key = match env_var("ADMIN_KEY") {
         Ok(v) if !v.is_empty() => v,

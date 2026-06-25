@@ -1,0 +1,36 @@
+sequenceDiagram
+    autonumber
+    participant Dev as 维护者/Engineer
+    participant GH as GitHub (main)
+    participant RP as release-please-action
+    participant VC as VersionManager
+    participant CI as CI / Release Jobs
+
+    Dev->>VC: 1. 手动将所有版本文件对齐到 1.0.1
+    VC->>VC: verify() 校验一致性
+    Dev->>GH: 2. 提交 conventional commit（如 chore: align versions to 1.0.1）
+    GH->>RP: 3. push 触发 release-please
+    RP->>VC: 4. 读取 .release-please-manifest.json / config
+    RP->>VC: 5. 按 extra-files 更新 version.txt、Cargo.toml、package.json、pyproject.toml、lock 文件
+    RP->>GH: 6. 生成 release PR（含 CHANGELOG 与 README 版本占位更新）
+    Dev->>GH: 7. 审核并合并 release PR
+    GH->>GH: 8. 自动打 tag v1.0.1，创建 GitHub Release
+    GH->>CI: 9. 触发 build-binaries、docker 等多平台构建
+
+---
+
+sequenceDiagram
+    autonumber
+    participant Dev as Engineer
+    participant Git as Git 索引
+    participant Ignore as .gitignore
+    participant LS as git ls-files 校验
+
+    Dev->>Git: git rm --cached epicode-changes.patch epicode-push.bundle
+    Dev->>Git: git rm --cached -r skills/ backend/sdk/python/epicode_sdk.egg-info/
+    Dev->>Ignore: 新增 *.patch、*.bundle、skills/、*.egg-info/ 等规则
+    Dev->>Git: git add .gitignore
+    Dev->>Git: git status --ignored
+    Git-->>Dev: 显示已删除索引、临时文件为 ignored
+    Dev->>LS: git ls-files | rg 临时产物/构建产物
+    LS-->>Dev: 返回空，清理完成

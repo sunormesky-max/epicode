@@ -4,10 +4,9 @@ Zero-dependency TypeScript SDK for the Epicode API.
 
 ## Install
 
-> **Note:** The old package name `tetramem-sdk` is deprecated.
-
-
-Copy `src/epicode.ts` into your project, or install from source.
+```bash
+npm install epicode-sdk
+```
 
 ## Quick Start
 
@@ -83,8 +82,16 @@ try {
 
 ## Custom Base URL
 
+The default base URL uses the public API prefix served by the included Nginx reverse proxy:
+
 ```ts
-const client = new EpicodeClient("key", "http://localhost:9111");
+const client = new EpicodeClient("key"); // http://localhost:8080/api/v1
+```
+
+To call the Epicode backend directly (without Nginx), override the base URL:
+
+```ts
+const client = new EpicodeClient("key", "http://localhost:9111/v1");
 ```
 
 ## API
@@ -92,15 +99,17 @@ const client = new EpicodeClient("key", "http://localhost:9111");
 | Method | Endpoint | Client Method |
 |--------|----------|---------------|
 | GET | `/health` | `client.health()` |
-| POST | `/v1/remember` | `client.remember(content)` |
-| POST | `/v1/search` | `client.search(query, limit?)` |
-| POST | `/v1/recall` | `client.recall(query, depth?)` |
-| POST | `/v1/ask` | `client.ask(question, depth?)` |
-| POST | `/v1/nodes` | `client.createNode(content, labels?, timestamp?)` |
-| GET | `/v1/nodes/:id` | `client.getNode(id)` |
-| POST | `/v1/knowledge` | `client.knowledge(id)` |
-| GET | `/v1/stats` | `client.stats()` |
-| GET | `/v1/timeline` | `client.timeline()` |
+| POST | `/remember` | `client.remember(content)` |
+| POST | `/search` | `client.search(query, limit?)` |
+| POST | `/recall` | `client.recall(query, depth?)` |
+| POST | `/ask` | `client.ask(question, depth?)` |
+| POST | `/nodes` | `client.createNode(content, labels?, timestamp?)` |
+| GET | `/nodes/:id` | `client.getNode(id)` |
+| POST | `/knowledge` | `client.knowledge(id)` |
+| GET | `/stats` | `client.stats()` |
+| GET | `/timeline` | `client.timeline()` |
 | POST | `/register` | `admin.register(userId, plan?)` |
 | GET | `/admin/users` | `admin.users()` |
 | GET | `/admin/stats` | `admin.stats()` |
+
+> **Note:** The old package name `tetramem-sdk` is deprecated. Please use `epicode-sdk`.

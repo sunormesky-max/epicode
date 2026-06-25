@@ -171,6 +171,9 @@ spec:
     - host: epicode.example.com
       http:
         paths:
+          # Public API prefix is /api/v1. The Ingress routes /api to the
+          # backend; an upstream Nginx or ingress controller strips /api
+          # before forwarding, so the backend receives /v1/... paths.
           - path: /api
             pathType: Prefix
             backend:

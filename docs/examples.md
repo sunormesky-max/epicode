@@ -66,7 +66,7 @@ kg = client.knowledge_graph(node_id="abc123")
 
 All examples use the same public API shape:
 
-- base URL defaults to `http://localhost:8080/api`
+- base URL defaults to `http://localhost:8080/api/v1`
 - authentication uses `X-API-Key`
 - requests are standard JSON over HTTP
 

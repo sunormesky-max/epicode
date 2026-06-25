@@ -1,4 +1,4 @@
-const DEFAULT_BASE_URL = "http://localhost:9111";
+const DEFAULT_BASE_URL = "http://localhost:8080/api/v1";
 
 export class EpicodeError extends Error {
   constructor(
@@ -279,7 +279,7 @@ export class EpicodeClient {
   remember(content: string): Promise<RememberResponse> {
     return request<RememberResponse>(
       this.baseUrl,
-      "/v1/remember",
+      "/remember",
       "POST",
       { content },
       this.authHeaders()
@@ -289,7 +289,7 @@ export class EpicodeClient {
   search(query: string, limit?: number): Promise<SearchResponse> {
     return request<SearchResponse>(
       this.baseUrl,
-      "/v1/search",
+      "/search",
       "POST",
       { query, limit },
       this.authHeaders()
@@ -299,7 +299,7 @@ export class EpicodeClient {
   recall(query: string, depth?: number): Promise<RecallResponse> {
     return request<RecallResponse>(
       this.baseUrl,
-      "/v1/recall",
+      "/recall",
       "POST",
       { query, depth },
       this.authHeaders()
@@ -309,7 +309,7 @@ export class EpicodeClient {
   ask(question: string, depth?: number): Promise<AskResponse> {
     return request<AskResponse>(
       this.baseUrl,
-      "/v1/ask",
+      "/ask",
       "POST",
       { question, depth },
       this.authHeaders()
@@ -323,7 +323,7 @@ export class EpicodeClient {
   ): Promise<CreateNodeResponse> {
     return request<CreateNodeResponse>(
       this.baseUrl,
-      "/v1/nodes",
+      "/nodes",
       "POST",
       { content, labels, timestamp },
       this.authHeaders()
@@ -333,7 +333,7 @@ export class EpicodeClient {
   getNode(id: string): Promise<GetNodeResponse> {
     return request<GetNodeResponse>(
       this.baseUrl,
-      `/v1/nodes/${encodeURIComponent(id)}`,
+      `/nodes/${encodeURIComponent(id)}`,
       "GET",
       undefined,
       this.authHeaders()
@@ -343,7 +343,7 @@ export class EpicodeClient {
   knowledge(id: string): Promise<KnowledgeResponse> {
     return request<KnowledgeResponse>(
       this.baseUrl,
-      "/v1/knowledge",
+      "/knowledge",
       "POST",
       { id },
       this.authHeaders()
@@ -353,7 +353,7 @@ export class EpicodeClient {
   stats(): Promise<StatsResponse> {
     return request<StatsResponse>(
       this.baseUrl,
-      "/v1/stats",
+      "/stats",
       "GET",
       undefined,
       this.authHeaders()
@@ -363,7 +363,7 @@ export class EpicodeClient {
   timeline(): Promise<TimelineResponse> {
     return request<TimelineResponse>(
       this.baseUrl,
-      "/v1/timeline",
+      "/timeline",
       "GET",
       undefined,
       this.authHeaders()
@@ -384,7 +384,7 @@ export class EpicodeClient {
   ): Promise<RecallWithTiersResponse> {
     return request<RecallWithTiersResponse>(
       this.baseUrl,
-      "/v1/recall/tiers",
+      "/recall/tiers",
       "POST",
       { query, depth },
       this.authHeaders()
@@ -401,7 +401,7 @@ export class EpicodeClient {
   identityStep(step: number, agentName: string): Promise<IdentityStepResponse> {
     return request<IdentityStepResponse>(
       this.baseUrl,
-      "/v1/identity/step",
+      "/identity/step",
       "POST",
       { step, agent_name: agentName },
       this.authHeaders()
@@ -419,7 +419,7 @@ export class EpicodeClient {
   dreamCycle(): Promise<DreamCycleResponse> {
     return request<DreamCycleResponse>(
       this.baseUrl,
-      "/v1/dream/cycle",
+      "/dream/cycle",
       "POST",
       undefined,
       this.authHeaders()
@@ -436,7 +436,7 @@ export class EpicodeClient {
   knowledgeGraph(nodeId: string): Promise<KnowledgeGraphResponse> {
     return request<KnowledgeGraphResponse>(
       this.baseUrl,
-      `/v1/knowledge-graph/${encodeURIComponent(nodeId)}`,
+      `/knowledge-graph/${encodeURIComponent(nodeId)}`,
       "GET",
       undefined,
       this.authHeaders()

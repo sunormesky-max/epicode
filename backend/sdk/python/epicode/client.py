@@ -48,7 +48,7 @@ class EpicodeClient:
     personality across sessions.
     """
 
-    DEFAULT_BASE_URL = "http://localhost:9111"
+    DEFAULT_BASE_URL = "http://localhost:8080/api/v1"
     DEFAULT_TIMEOUT = 30
 
     def __init__(
@@ -115,7 +115,7 @@ class EpicodeClient:
         with spatial coordinates and automatically extracts knowledge graph
         relationships.
         """
-        data = self._request("POST", "/v1/remember", json={"content": content})
+        data = self._request("POST", "/remember", json={"content": content})
         return RememberResponse(
             success=data.get("success", False),
             id=data.get("id", ""),
@@ -127,7 +127,7 @@ class EpicodeClient:
         payload: dict[str, Any] = {"query": query}
         if limit is not None:
             payload["limit"] = limit
-        data = self._request("POST", "/v1/search", json=payload)
+        data = self._request("POST", "/search", json=payload)
         results = [
             SearchResult(
                 id=r.get("id", ""),
@@ -153,7 +153,7 @@ class EpicodeClient:
         payload: dict[str, Any] = {"query": query}
         if depth is not None:
             payload["depth"] = depth
-        data = self._request("POST", "/v1/recall", json=payload)
+        data = self._request("POST", "/recall", json=payload)
         raw_emotion = data.get("emotion", {})
         emotion = Emotion(
             pleasure=raw_emotion.get("pleasure", 0.0),
@@ -175,7 +175,7 @@ class EpicodeClient:
         payload: dict[str, Any] = {"question": question}
         if depth is not None:
             payload["depth"] = depth
-        data = self._request("POST", "/v1/ask", json=payload)
+        data = self._request("POST", "/ask", json=payload)
         return AskResponse(
             success=data.get("success", False),
             question=data.get("question", ""),
@@ -197,7 +197,7 @@ class EpicodeClient:
             payload["labels"] = labels
         if timestamp is not None:
             payload["timestamp"] = timestamp
-        data = self._request("POST", "/v1/nodes", json=payload)
+        data = self._request("POST", "/nodes", json=payload)
         return CreateNodeResponse(
             success=data.get("success", False),
             id=data.get("id", ""),
@@ -205,7 +205,7 @@ class EpicodeClient:
 
     def get_node(self, node_id: str) -> NodeResponse:
         """Retrieve a knowledge graph node by ID."""
-        data = self._request("GET", f"/v1/nodes/{node_id}")
+        data = self._request("GET", f"/nodes/{node_id}")
         return NodeResponse(
             success=data.get("success", False),
             id=data.get("id", ""),
@@ -215,7 +215,7 @@ class EpicodeClient:
 
     def knowledge(self, id: str) -> KnowledgeResponse:
         """Expand a memory node into related knowledge."""
-        data = self._request("POST", "/v1/knowledge", json={"id": id})
+        data = self._request("POST", "/knowledge", json={"id": id})
         return KnowledgeResponse(
             success=data.get("success", False),
             id=data.get("id", ""),
@@ -225,7 +225,7 @@ class EpicodeClient:
 
     def stats(self) -> StatsResponse:
         """Get account usage statistics."""
-        data = self._request("GET", "/v1/stats")
+        data = self._request("GET", "/stats")
         return StatsResponse(
             success=data.get("success", False),
             user_id=data.get("user_id", ""),
@@ -239,7 +239,7 @@ class EpicodeClient:
 
     def timeline(self) -> TimelineResponse:
         """Get the memory timeline."""
-        data = self._request("GET", "/v1/timeline")
+        data = self._request("GET", "/timeline")
         return TimelineResponse(
             success=data.get("success", False),
             events=data.get("events", []),
@@ -262,7 +262,7 @@ class EpicodeClient:
             A ``RecallWithTiersResponse`` containing tiered results and KG edges.
         """
         payload: dict[str, Any] = {"query": query, "depth": depth}
-        data = self._request("POST", "/v1/recall/tiers", json=payload)
+        data = self._request("POST", "/recall/tiers", json=payload)
 
         tiers: list[list[TieredMemoryResult]] = []
         for tier_list in data.get("tiers", []):
@@ -313,7 +313,7 @@ class EpicodeClient:
             An ``IdentityStepResponse`` with the updated ritual state.
         """
         payload = {"step": step, "agent_name": agent_name}
-        data = self._request("POST", "/v1/identity/step", json=payload)
+        data = self._request("POST", "/identity/step", json=payload)
         return IdentityStepResponse(
             success=data.get("success", False),
             step=data.get("step", 0),
@@ -333,7 +333,7 @@ class EpicodeClient:
         Returns:
             A ``DreamCycleResponse`` with consolidation metrics.
         """
-        data = self._request("POST", "/v1/dream/cycle")
+        data = self._request("POST", "/dream/cycle")
         return DreamCycleResponse(
             success=data.get("success", False),
             cycles_completed=data.get("cycles_completed", 0),
@@ -355,7 +355,7 @@ class EpicodeClient:
         Returns:
             A ``KnowledgeGraphResponse`` with nodes, edges, and cluster data.
         """
-        data = self._request("GET", f"/v1/knowledge-graph/{node_id}")
+        data = self._request("GET", f"/knowledge-graph/{node_id}")
         nodes = [
             KnowledgeGraphNode(
                 id=n.get("id", ""),

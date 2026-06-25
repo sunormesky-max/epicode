@@ -65,9 +65,16 @@ curl -X POST http://localhost:8080/api/v1/search \
 ## Architecture
 
 ```text
-AI Agent → POST /remember
+AI Agent → POST /api/v1/remember
+    → Nginx (strips /api prefix)
     → Security middleware (API key + rate limit + energy check)
     → GatewayCenter (embedding → LLM classification → spatial placement)
+    → New tetrahedron placed in Space (auto-merge nearby vertices)
+    → Knowledge graph updated
+    → Scheduler runs background cycles: pulse / link / dedup / dream
+```
+
+Read more in [docs/architecture.md](docs/architecture.md).
 
 ## Tech Stack
 
@@ -150,14 +157,6 @@ const results = await client.search("production deploy");
 ```
 
 > **Note:** The old package name `tetramem-sdk` is deprecated. Please use `epicode-sdk`.
-
-    → New tetrahedron placed in Space (auto-merge nearby vertices)
-    → Knowledge graph updated
-    → Scheduler runs background cycles: pulse / link / dedup / dream
-```
-
-Read more in [docs/architecture.md](docs/architecture.md).
-
 
 ## Community & Contributing
 

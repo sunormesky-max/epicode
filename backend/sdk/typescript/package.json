@@ -1,9 +1,9 @@
 {
   "name": "epicode-sdk",
-  "version": "1.0.0",
-  "description": "TypeScript SDK for the Epicode API \u2014 spatial AI memory system",
-  "main": "dist/tetramem.js",
-  "types": "dist/tetramem.d.ts",
+  "version": "1.0.1",
+  "description": "TypeScript SDK for the Epicode API — spatial AI memory system",
+  "main": "dist/epicode.js",
+  "types": "dist/epicode.d.ts",
   "files": [
     "dist/",
     "src/",

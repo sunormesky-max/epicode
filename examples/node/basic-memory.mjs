@@ -1,4 +1,4 @@
-const baseUrl = process.env.EPICODE_BASE_URL ?? "http://localhost:8080/api";
+const baseUrl = process.env.EPICODE_BASE_URL ?? "http://localhost:8080/api/v1";
 const apiKey = process.env.EPICODE_API_KEY;
 
 if (!apiKey) {
@@ -22,18 +22,18 @@ async function api(path, body) {
   return data;
 }
 
-const remembered = await api("/v1/remember", {
+const remembered = await api("/remember", {
   content: "Node example stored a deployment memory",
 });
 console.log("remember:", remembered);
 
-const search = await api("/v1/search", {
+const search = await api("/search", {
   query: "deployment memory",
   limit: 3,
 });
 console.log("search:", search);
 
-const answer = await api("/v1/ask", {
+const answer = await api("/ask", {
   question: "What memory did the Node example store?",
   depth: 2,
 });

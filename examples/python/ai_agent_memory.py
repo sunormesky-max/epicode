@@ -42,7 +42,7 @@ This example demonstrates an AI agent named "Aurora" that:
 
 Run this example:
     export EPICODE_API_KEY="your-api-key"
-    export EPICODE_BASE_URL="http://localhost:9111"  # or your cloud endpoint
+    export EPICODE_BASE_URL="http://localhost:8080/api/v1"  # or your cloud endpoint
     python ai_agent_memory.py
 
 ================================================================================
@@ -60,7 +60,7 @@ from epicode.models import Emotion
 # ---------------------------------------------------------------------------
 
 API_KEY = os.environ.get("EPICODE_API_KEY")
-BASE_URL = os.environ.get("EPICODE_BASE_URL", "http://localhost:9111")
+BASE_URL = os.environ.get("EPICODE_BASE_URL", "http://localhost:8080/api/v1")
 
 if not API_KEY:
     print("❌ Set EPICODE_API_KEY before running this example.")
@@ -264,7 +264,7 @@ This is unique to Epicode. Flat vector databases never self-organize.
 # We use the raw request path since dream_cycle is an MCP tool
 print("  🌙 Triggering dream cycle...")
 try:
-    dream_data = client._request("POST", "/v1/dream")
+    dream_data = client._request("POST", "/dream")
     print(f"  ✅ Dream cycle completed!")
     print(f"\n  📊 Consolidation report:")
     print(f"     • Connections strengthened: {dream_data.get('strengthened', 'N/A')}")

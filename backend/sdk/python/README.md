@@ -8,7 +8,7 @@ Python client library for the Epicode API.
 pip install epicode-sdk
 ```
 
-> **Note:** The old package name `epicode-sdk` is deprecated. Please use `epicode-sdk` instead.
+> **Note:** The old package name `tetramem-sdk` is deprecated. Please use `epicode-sdk` instead.
 ## Quick Start
 
 ```python
@@ -99,8 +99,8 @@ except PlanLimitExceededError:
 ```python
 client = EpicodeClient(
     "your-api-key",
-    base_url="http://localhost:9111",  # default
-    timeout=60,                                 # seconds, default 30
+    base_url="http://localhost:8080/api/v1",  # default (via Nginx reverse proxy)
+    timeout=60,                                      # seconds, default 30
 )
 ```
 

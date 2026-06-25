@@ -20,7 +20,7 @@ from epicode.models import AdminStatsResponse, AdminUsersResponse, RegisterRespo
 class EpicodeAdmin:
     """Admin client for the Epicode API."""
 
-    DEFAULT_BASE_URL = "http://localhost:9111"
+    DEFAULT_BASE_URL = "http://localhost:8080/api/v1"
     DEFAULT_TIMEOUT = 30
 
     def __init__(

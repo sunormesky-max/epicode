@@ -51,36 +51,11 @@ async fn main() {
 
     let state = Arc::new(engine);
 
-    let app = Router::new()
-        .route("/", get(routes::dashboard))
-        .route("/dashboard", get(routes::dashboard))
+    // Public API routes exposed under the `/v1` namespace.
+    // The included Nginx reverse proxy strips `/api` before forwarding, so the
+    // public prefix is `/api/v1` while the backend sees `/v1`.
+    let v1_routes = Router::new()
         .route("/health", get(routes::health))
-        .route("/constitution", get(routes::constitution))
-        .route("/sse", get(routes::sse_stream))
-        .route(
-            "/config",
-            get(routes::get_config).post(routes::update_config),
-        )
-        .route("/security/stats", get(routes::security_stats))
-        .route("/security/audit", get(routes::security_audit))
-        .route("/admin/cache/stats", get(routes::cache_stats))
-        .route("/admin/cache/clear", post(routes::clear_cache))
-        .route(
-            "/admin/permissions",
-            post(routes::grant_permission).get(routes::get_user_permissions),
-        )
-        .route("/admin/permissions/revoke", post(routes::revoke_permission))
-        .route("/admin/audit/logs", get(routes::get_audit_logs))
-        .route(
-            "/user/permissions",
-            get(routes::get_current_user_permissions),
-        )
-        .route("/admin/keys/current", get(routes::get_current_key))
-        .route("/admin/keys/list", get(routes::list_keys))
-        .route("/admin/keys/rotate", post(routes::rotate_key))
-        .route("/admin/keys/revoke", post(routes::revoke_key))
-        .route("/admin/keys/restore", post(routes::restore_key))
-        .route("/admin/keys/events", get(routes::get_key_events))
         .route("/remember", post(routes::remember))
         .route("/ask", post(routes::ask))
         .route("/nodes", post(routes::create_node))
@@ -107,6 +82,38 @@ async fn main() {
         .route("/mcp", post(routes::mcp))
         .route("/timeline", get(routes::timeline))
         .route("/backups", get(routes::list_backups))
+        .with_state(state.clone());
+
+    let app = Router::new()
+        .route("/", get(routes::dashboard))
+        .route("/dashboard", get(routes::dashboard))
+        .route("/constitution", get(routes::constitution))
+        .route("/sse", get(routes::sse_stream))
+        .route(
+            "/config",
+            get(routes::get_config).post(routes::update_config),
+        )
+        .route("/security/stats", get(routes::security_stats))
+        .route("/security/audit", get(routes::security_audit))
+        .route("/admin/cache/stats", get(routes::cache_stats))
+        .route("/admin/cache/clear", post(routes::clear_cache))
+        .route(
+            "/admin/permissions",
+            post(routes::grant_permission).get(routes::get_user_permissions),
+        )
+        .route("/admin/permissions/revoke", post(routes::revoke_permission))
+        .route("/admin/audit/logs", get(routes::get_audit_logs))
+        .route(
+            "/user/permissions",
+            get(routes::get_current_user_permissions),
+        )
+        .route("/admin/keys/current", get(routes::get_current_key))
+        .route("/admin/keys/list", get(routes::list_keys))
+        .route("/admin/keys/rotate", post(routes::rotate_key))
+        .route("/admin/keys/revoke", post(routes::revoke_key))
+        .route("/admin/keys/restore", post(routes::restore_key))
+        .route("/admin/keys/events", get(routes::get_key_events))
+        .nest("/v1", v1_routes)
         .layer(middleware::from_fn_with_state(
             state.clone(),
             epicode::api::middleware::security_layer,

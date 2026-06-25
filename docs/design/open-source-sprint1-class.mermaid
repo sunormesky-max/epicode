@@ -1,0 +1,52 @@
+classDiagram
+    class VersionManager {
+        +String targetVersion
+        +List~VersionSource~ sources
+        +bump(String version)
+        +verify() Boolean
+    }
+
+    class VersionSource {
+        +String path
+        +String format
+        +read() String
+        +write(String version)
+    }
+
+    class ReleasePleaseConfig {
+        +String manifestPath
+        +Object config
+        +List~String~ extraFiles
+        +addExtraFile(String path)
+        +toJson() String
+    }
+
+    class GitIgnoreManager {
+        +String rootIgnorePath
+        +List~String~ rules
+        +addRule(String rule)
+        +apply()
+        +verifyUntracked(String pattern) Boolean
+    }
+
+    class ReadmeSynchronizer {
+        +String enPath
+        +String zhPath
+        +fixArchitectureBlock()
+        +syncSectionOrder()
+        +removeDeprecatedName(String name)
+    }
+
+    class ApiSpecNormalizer {
+        +String publicPrefix
+        +updateOpenApi(String path)
+        +updateReferenceDoc(String path)
+        +updateNginx(String path)
+        +updateK8sIngress(String path)
+        +updateExamples(List~String~ paths)
+    }
+
+    VersionManager --> VersionSource : manages
+    ReleasePleaseConfig --> VersionSource : references
+    ReadmeSynchronizer --> VersionManager : updates badges
+    ApiSpecNormalizer --> VersionManager : uses version

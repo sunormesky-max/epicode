@@ -6,7 +6,7 @@ async fn main() {
         epicode::engine::Engine::with_data_dir(std::path::PathBuf::from("data/bench_tmp"));
     engine.start();
 
-    println!("=== Epicode v1.0.0 Performance Benchmark ===\n");
+    println!("=== Epicode v1.0.1 Performance Benchmark ===\n");
 
     let total_memories = 100;
     let warmup = 5;

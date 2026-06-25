@@ -7,3 +7,11 @@
 *.onnx
 models_768/
 test_data_scheduler/
+
+# Python build artifacts
+*.egg-info/
+__pycache__/
+*.pyc
+build/
+dist/
+.pytest_cache/

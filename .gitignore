@@ -71,3 +71,20 @@ info.md
 write_all_context.jsonl
 pillar-architecture-v15.md
 v1.1.0-dev-plan.md
+
+# Temporary / local artifacts
+*.patch
+*.bundle
+.pytest_cache/
+.workbuddy/
+deliverables/
+mcp-bridge/
+skills/
+overview.md
+
+# Python build artifacts
+*.egg-info/
+__pycache__/
+*.pyc
+build/
+dist/
