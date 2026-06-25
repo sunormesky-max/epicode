@@ -81,6 +81,7 @@ deliverables/
 mcp-bridge/
 skills/
 overview.md
+PUSH_SUMMARY.md
 
 # Python build artifacts
 *.egg-info/
