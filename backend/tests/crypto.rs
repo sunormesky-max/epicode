@@ -3,8 +3,8 @@
 //! These tests exercise the public surface of the crypto engine without
 //! touching the network or filesystem. They run as part of `cargo test`.
 
-use epicode::engine::crypto::{constant_time_eq, constant_time_eq_bytes, CryptoEngine};
 use base64::Engine;
+use epicode::engine::crypto::{constant_time_eq, constant_time_eq_bytes, CryptoEngine};
 
 #[test]
 fn constant_time_eq_matches_identical_strings() {
@@ -30,7 +30,10 @@ fn crypto_engine_round_trip_text() {
     let ciphertext = engine
         .encrypt_content(plaintext, user)
         .expect("encrypt succeeds");
-    assert_ne!(ciphertext, plaintext, "ciphertext must differ from plaintext");
+    assert_ne!(
+        ciphertext, plaintext,
+        "ciphertext must differ from plaintext"
+    );
 
     let recovered = engine
         .decrypt_content(&ciphertext, user)
@@ -114,6 +117,9 @@ fn derive_user_key_is_deterministic() {
     let c1 = k1.encrypt_data(data).expect("encrypt");
     let c2 = k2.encrypt_data(data).expect("encrypt");
     // Both keys should decrypt each other's ciphertext because they are equal.
-    assert!(k1.decrypt_data(&c2).is_ok(), "identical keys must decrypt each other's ciphertext");
+    assert!(
+        k1.decrypt_data(&c2).is_ok(),
+        "identical keys must decrypt each other's ciphertext"
+    );
     assert!(k2.decrypt_data(&c1).is_ok());
 }

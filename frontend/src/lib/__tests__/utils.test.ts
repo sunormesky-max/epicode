@@ -7,7 +7,9 @@ describe('cn (className merge)', () => {
   });
 
   it('handles conditional classes', () => {
-    expect(cn('base', false && 'no', true && 'yes', undefined, null)).toBe(
+    const isActive = true;
+    const isDisabled = false;
+    expect(cn('base', isDisabled && 'no', isActive && 'yes', undefined, null)).toBe(
       'base yes',
     );
   });

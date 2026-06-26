@@ -124,7 +124,7 @@ const WEB_ATTACK_PATTERNS: &[&str] = &[
     ".env.production",
 ];
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 struct IpEntry {
     score: u32,
     last_fail: i64,
@@ -133,20 +133,6 @@ struct IpEntry {
     web_attacks: u32,
     web_scans: u32,
     honeypot_hits: u32,
-}
-
-impl Default for IpEntry {
-    fn default() -> Self {
-        Self {
-            score: 0,
-            last_fail: 0,
-            banned_until: 0,
-            ssh_fails: 0,
-            web_attacks: 0,
-            web_scans: 0,
-            honeypot_hits: 0,
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -325,7 +311,7 @@ fn epicode_remember(content: &str, labels: &[&str]) {
         labels_str
     );
     let success = Command::new("curl")
-        .args(&[
+        .args([
             "-s",
             "-X",
             "POST",
@@ -421,7 +407,7 @@ fn run_cmd_output(cmd: &str, args: &[&str]) -> Option<String> {
 fn nft_init() {
     migrate_v1_rules();
     let _ = Command::new("nft")
-        .args(&["delete", "table", "inet", NFT_TABLE])
+        .args(["delete", "table", "inet", NFT_TABLE])
         .output();
     run_cmd("nft", &["add", "table", "inet", NFT_TABLE]);
     run_cmd(
@@ -816,12 +802,13 @@ fn run_daemon() {
             ));
         }
 
-        if cycle % (FILE_CHECK_INTERVAL_SECS / CHECK_INTERVAL_SECS) == 0 {
+        let file_check_every = FILE_CHECK_INTERVAL_SECS / CHECK_INTERVAL_SECS;
+        if cycle.is_multiple_of(file_check_every) {
             check_file_integrity(&mut state);
             state.last_file_check = now;
         }
 
-        if cycle % 30 == 0 {
+        if cycle.is_multiple_of(30) {
             let unexpected = check_unexpected_ports();
             if !unexpected.is_empty() && unexpected != state.last_ports {
                 log_msg(&format!(
@@ -832,7 +819,7 @@ fn run_daemon() {
             state.last_ports = unexpected;
         }
 
-        if cycle % 6 == 0 {
+        if cycle.is_multiple_of(6) {
             let floods = check_connection_flood();
             for (ip, count) in &floods {
                 let entry = state.ips.entry(ip.clone()).or_default();
@@ -855,7 +842,7 @@ fn run_daemon() {
 
         state.save();
 
-        if cycle % 60 == 0 && cycle > 0 {
+        if cycle.is_multiple_of(60) && cycle > 0 {
             log_msg(&format!(
                 "Stats: tracked={} nft_banned={} total_bans={} attacks={} honeypot={}",
                 state.ips.len(),
@@ -905,7 +892,7 @@ fn cmd_status() {
     if !active.is_empty() {
         println!("--- Active Bans (top 20 by score) ---");
         let mut sorted = active;
-        sorted.sort_by(|a, b| b.1.score.cmp(&a.1.score));
+        sorted.sort_by_key(|&(_, e)| std::cmp::Reverse(e.score));
         for (ip, entry) in sorted.iter().take(20) {
             let remain = (entry.banned_until - now) / 60;
             let tags = if entry.honeypot_hits > 0 {
@@ -927,7 +914,7 @@ fn cmd_status() {
         .iter()
         .filter(|(_, e)| e.banned_until == 0 && e.score > 3)
         .collect();
-    suspects.sort_by(|a, b| b.1.score.cmp(&a.1.score));
+    suspects.sort_by_key(|&(_, e)| std::cmp::Reverse(e.score));
     if !suspects.is_empty() {
         println!("\n--- Suspicious IPs (score > 3, top 10) ---");
         for (ip, entry) in suspects.iter().take(10) {

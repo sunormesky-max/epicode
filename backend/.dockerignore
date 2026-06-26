@@ -10,5 +10,6 @@ data
 ARCHITECTURE_CONTEXT.md
 test_data_scheduler
 sdk
-admin
-docs
+# NOTE: do NOT ignore admin/ and docs/ — the cloud binary embeds them at
+# compile time via include_str!("../../admin/index.html") and
+# include_str!("../../docs/openapi.yaml"). Excluding them breaks the build.

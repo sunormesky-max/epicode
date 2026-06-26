@@ -1,5 +1,11 @@
 # Build stage
-FROM rust:1.88-bookworm AS builder
+# NOTE: must use trixie (glibc 2.40), not bookworm (glibc 2.36). The `ort`
+# crate ships a prebuilt ONNX Runtime whose link step references
+# __isoc23_strtol / __isoc23_strtoll (glibc >= 2.38); bookworm is too old and
+# the link fails with "undefined reference to __isoc23_strtol". The runtime
+# image below MUST match or exceed the builder's glibc, or the binary will
+# fail at startup with "GLIBC_2.40 not found".
+FROM rust:1.88-trixie AS builder
 
 WORKDIR /build
 COPY . .
@@ -11,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN cargo build --release --locked
 
 # Runtime stage
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libssl3 libsqlite3-0 curl && rm -rf /var/lib/apt/lists/*
