@@ -23,11 +23,11 @@ The changelog is maintained in `CHANGELOG.md` at the root of the repository. Eac
 
 ### Added
 
-- Support for custom output templates in code generation ([#142](https://github.com/sunorme/sunormesky-max_epicode/pull/142) by [@contributor](https://github.com/contributor))
+- Support for custom output templates in code generation ([#142](https://github.com/sunormesky-max/epicode/pull/142) by [@contributor](https://github.com/contributor))
 
 ### Fixed
 
-- Corrected parsing of nested block comments in TypeScript files ([#138](https://github.com/sunorme/sunormesky-max_epicode/issues/138))
+- Corrected parsing of nested block comments in TypeScript files ([#138](https://github.com/sunormesky-max/epicode/issues/138))
 ```
 
 ## Categories
@@ -102,7 +102,7 @@ Describe what changed and why it matters to users. Avoid vague entries like "fix
 
 **Good:**
 ```
-- Fixed crash when parsing files with empty function bodies ([#145](https://github.com/sunorme/sunormesky-max_epicode/issues/145))
+- Fixed crash when parsing files with empty function bodies ([#145](https://github.com/sunormesky-max/epicode/issues/145))
 ```
 
 ### Focus on User Impact
@@ -157,7 +157,7 @@ Example:
 ```markdown
 ### Deprecated
 
-- The `--old-flag` CLI option is deprecated and will be removed in v2.0. Use `--new-flag` instead. ([#156](https://github.com/sunorme/sunormesky-max_epicode/pull/156))
+- The `--old-flag` CLI option is deprecated and will be removed in v2.0. Use `--new-flag` instead. ([#156](https://github.com/sunormesky-max/epicode/pull/156))
 ```
 
 ## Release Process
