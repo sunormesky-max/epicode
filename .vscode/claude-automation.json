@@ -1,0 +1,42 @@
+{
+  "$schema": "https://claude.ai/schemas/vscode-automation.json",
+  "description": "Epicode Claude Automation Configuration",
+  "version": "1.0.0",
+  "triggers": {
+    "onSave": {
+      "rust": {
+        "enabled": true,
+        "actions": ["format", "clippy-check"],
+        "autoFix": false
+      },
+      "typescript": {
+        "enabled": true,
+        "actions": ["eslint-fix", "type-check"],
+        "autoFix": true
+      }
+    },
+    "onCommit": {
+      "preCommit": {
+        "enabled": true,
+        "stages": ["backend-ci", "frontend-ci"]
+      }
+    },
+    "onPush": {
+      "postPush": {
+        "enabled": true,
+        "actions": ["check-ci-status", "notify-discord"]
+      }
+    }
+  },
+  "commands": {
+    "quickFix": {
+      "description": "Run cargo fix or eslint --fix on current file",
+      "backend": "cargo fix --allow-dirty --allow-staged",
+      "frontend": "npx eslint --fix"
+    },
+    "fullAudit": {
+      "description": "Run complete project audit",
+      "command": "bash -c 'cd backend && cargo audit && cargo outdated && cd ../frontend && npm audit'"
+    }
+  }
+}

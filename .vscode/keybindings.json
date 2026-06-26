@@ -1,0 +1,27 @@
+[
+  {
+    "key": "cmd+shift+b",
+    "command": "workbench.action.tasks.runTask",
+    "args": "Backend: Full CI Pipeline"
+  },
+  {
+    "key": "cmd+shift+t",
+    "command": "workbench.action.tasks.runTask",
+    "args": "Backend: Test"
+  },
+  {
+    "key": "cmd+shift+l",
+    "command": "workbench.action.tasks.runTask",
+    "args": "Frontend: Full CI Pipeline"
+  },
+  {
+    "key": "cmd+shift+i",
+    "command": "workbench.action.tasks.runTask",
+    "args": "Project: Full CI (Backend + Frontend)"
+  },
+  {
+    "key": "cmd+shift+g",
+    "command": "workbench.action.tasks.runTask",
+    "args": "Git: Push to Main"
+  }
+]
