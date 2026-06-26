@@ -1,0 +1,56 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug: epicode-cloud",
+      "cargo": {
+        "args": ["build", "--bin=epicode-cloud", "--package=epicode"],
+        "filter": { "name": "epicode-cloud", "kind": "bin" }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "RUST_LOG": "debug",
+        "TETRAMEM_MASTER_KEY": "dev-master-key-32-bytes-long!!"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug: epicode-mcp",
+      "cargo": {
+        "args": ["build", "--bin=epicode-mcp", "--package=epicode"],
+        "filter": { "name": "epicode-mcp", "kind": "bin" }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "RUST_LOG": "debug",
+        "TETRAMEM_MASTER_KEY": "dev-master-key-32-bytes-long!!"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug: Unit Tests",
+      "cargo": {
+        "args": ["test", "--no-run", "--lib", "--package=epicode"],
+        "filter": { "name": "epicode", "kind": "lib" }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}/backend"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug: Frontend Dev Server",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "${workspaceFolder}/frontend",
+      "env": { "NODE_ENV": "development" },
+      "console": "integratedTerminal"
+    }
+  ]
+}

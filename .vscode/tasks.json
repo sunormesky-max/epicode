@@ -1,0 +1,148 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Backend: Check & Test",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["check", "--locked", "--all-targets"],
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "echo": true, "reveal": "always", "focus": false, "panel": "shared" },
+      "problemMatcher": "$rustc",
+      "detail": "Check Rust backend compilation"
+    },
+    {
+      "label": "Backend: Clippy (Strict)",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["clippy", "--locked", "--all-targets", "--", "-D", "warnings"],
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "group": "build",
+      "presentation": { "echo": true, "reveal": "always", "focus": false, "panel": "shared" },
+      "problemMatcher": "$rustc",
+      "detail": "Run clippy with -D warnings"
+    },
+    {
+      "label": "Backend: Test",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["test", "--locked", "--all-targets"],
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "group": { "kind": "test", "isDefault": true },
+      "presentation": { "echo": true, "reveal": "always", "focus": false, "panel": "shared" },
+      "problemMatcher": "$rustc",
+      "detail": "Run all Rust tests"
+    },
+    {
+      "label": "Backend: Format",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["fmt", "--all"],
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "group": "build",
+      "presentation": { "echo": true, "reveal": "silent", "focus": false, "panel": "shared" },
+      "problemMatcher": [],
+      "detail": "Format Rust code with rustfmt"
+    },
+    {
+      "label": "Backend: Full CI Pipeline",
+      "type": "shell",
+      "command": "bash",
+      "args": ["-c", "cargo fmt --all --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked --all-targets"],
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "group": "build",
+      "presentation": { "echo": true, "reveal": "always", "focus": false, "panel": "dedicated" },
+      "problemMatcher": "$rustc",
+      "detail": "Run full backend CI locally"
+    },
+    {
+      "label": "Frontend: Type Check",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "check"],
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "group": "build",
+      "presentation": { "echo": true, "reveal": "always", "focus": false, "panel": "shared" },
+      "problemMatcher": "$tsc",
+      "detail": "TypeScript type check"
+    },
+    {
+      "label": "Frontend: Lint",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "lint"],
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "group": "build",
+      "presentation": { "echo": true, "reveal": "always", "focus": false, "panel": "shared" },
+      "problemMatcher": "$eslint-stylish",
+      "detail": "ESLint check"
+    },
+    {
+      "label": "Frontend: Test",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "test"],
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "group": "test",
+      "presentation": { "echo": true, "reveal": "always", "focus": false, "panel": "shared" },
+      "problemMatcher": [],
+      "detail": "Run frontend tests"
+    },
+    {
+      "label": "Frontend: Build",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "build"],
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "group": "build",
+      "presentation": { "echo": true, "reveal": "always", "focus": false, "panel": "shared" },
+      "problemMatcher": [],
+      "detail": "Production build"
+    },
+    {
+      "label": "Frontend: Full CI Pipeline",
+      "type": "shell",
+      "command": "bash",
+      "args": ["-c", "npm run check && npm run lint && npm run test && npm run build"],
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "group": "build",
+      "presentation": { "echo": true, "reveal": "always", "focus": false, "panel": "dedicated" },
+      "problemMatcher": ["$tsc", "$eslint-stylish"],
+      "detail": "Run full frontend CI locally"
+    },
+    {
+      "label": "Project: Full CI (Backend + Frontend)",
+      "type": "shell",
+      "command": "bash",
+      "args": ["-c", "echo '=== Backend ===' && cd backend && cargo fmt --all --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked --all-targets && echo '=== Frontend ===' && cd ../frontend && npm run check && npm run lint && npm run test && npm run build"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": { "kind": "build", "isDefault": false },
+      "presentation": { "echo": true, "reveal": "always", "focus": false, "panel": "dedicated" },
+      "problemMatcher": ["$rustc", "$tsc", "$eslint-stylish"],
+      "detail": "Run complete CI pipeline for both backend and frontend"
+    },
+    {
+      "label": "Git: Push to Main",
+      "type": "shell",
+      "command": "git",
+      "args": ["push", "origin", "main"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "none",
+      "presentation": { "echo": true, "reveal": "silent", "focus": false, "panel": "shared" },
+      "problemMatcher": [],
+      "detail": "Push current branch to origin/main"
+    },
+    {
+      "label": "Git: Create Feature Branch",
+      "type": "shell",
+      "command": "bash",
+      "args": ["-c", "git checkout -b feat/$(date +%Y%m%d)-$(openssl rand -hex 2)"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "none",
+      "presentation": { "echo": true, "reveal": "silent", "focus": false, "panel": "shared" },
+      "problemMatcher": [],
+      "detail": "Create a new feature branch with timestamp"
+    }
+  ]
+}
