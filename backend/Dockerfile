@@ -1,11 +1,14 @@
-FROM rust:1.88-bookworm AS builder
+# NOTE: must use trixie (glibc 2.40), not bookworm (glibc 2.36). The `ort`
+# crate ships a prebuilt ONNX Runtime that needs glibc >= 2.38 at link time
+# (__isoc23_strtol / __isoc23_strtoll). The runtime image must match.
+FROM rust:1.88-trixie AS builder
 
 WORKDIR /build
 COPY . .
 
 RUN cargo build --release --locked --bin epicode-cloud
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libssl3 curl && rm -rf /var/lib/apt/lists/*
