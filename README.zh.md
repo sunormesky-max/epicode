@@ -175,6 +175,14 @@ const results = await client.search("生产部署");
 
 Epicode 采用 [MIT License](LICENSE) 开源许可证。
 
+> **关于构建期依赖的说明。** 本地嵌入引擎（`backend/src/engine/vector.rs`）
+> 依赖 [`ort`](https://crates.io/crates/ort) crate，首次构建后端时会从
+> `ort-rs` 官方分发镜像（`cdn.pyke.io`）下载一个**采用 MIT 许可证**的预编译
+> [ONNX Runtime](https://github.com/microsoft/onnxruntime)。这是第三方预编译二进制，
+> 非源码。如需完全从源码构建，或改用系统自带的 ONNX Runtime，请在构建时设置
+> `ORT_STRATEGY=system` / `ORT_LIB_DIR`（或 `ORT_STRATEGY=compile`）。详见
+> [`ort` 文档](https://docs.rs/ort)。
+
 ---
 
 <div align="center">

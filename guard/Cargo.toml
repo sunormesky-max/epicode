@@ -2,6 +2,10 @@
 name = "epicode-guard"
 version = "1.0.1"  # x-release-please-version
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/sunormesky-max/epicode"
+homepage = "https://epicode.cn"
+description = "Lightweight host security guard for Epicode deployments"
 
 [dependencies]
 chrono = "0.4"
