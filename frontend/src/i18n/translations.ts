@@ -2,11 +2,10 @@ export type Language = 'zh' | 'en';
 
 // ── Phase 1 Translation Keys ──
 export type TranslationKey =
-  // Common
   | 'common.loading' | 'common.error' | 'common.retry' | 'common.save' | 'common.cancel'
   | 'common.delete' | 'common.edit' | 'common.create' | 'common.search' | 'common.copy'
   | 'common.copied' | 'common.close' | 'common.submit' | 'common.confirm' | 'common.back'
-  | 'common.next' | 'common.prev' | 'common.of'
+  | 'common.next' | 'common.prev' | 'common.of' | 'common.all'
   // Navigation
   | 'nav.home' | 'nav.quickStart' | 'nav.docs' | 'nav.community' | 'nav.benchmarks'
   | 'nav.console' | 'nav.getStarted' | 'nav.overview' | 'nav.memories' | 'nav.graph'
@@ -69,6 +68,31 @@ export type TranslationKey =
   | 'dash.totalMemories' | 'dash.thisWeek' | 'dash.activeClusters'
   | 'dash.energy' | 'dash.avgQuery' | 'dash.apiCalls'
   | 'dash.quickStore' | 'dash.quickSearch' | 'dash.quickDigest' | 'dash.quickDocs'
+  // Community - Hero
+  | 'community.hero.overline' | 'community.hero.title' | 'community.hero.subtitle'
+  | 'community.hero.ctaPrimary' | 'community.hero.ctaSecondary'
+  // Community - Stats
+  | 'community.stats.stars' | 'community.stats.forks' | 'community.stats.issues'
+  | 'community.stats.contributors' | 'community.stats.unavailable'
+  // Community - Contribute
+  | 'community.contribute.overline' | 'community.contribute.title' | 'community.contribute.subtitle'
+  | 'community.contribute.issue.title' | 'community.contribute.issue.desc' | 'community.contribute.issue.cta'
+  | 'community.contribute.pr.title' | 'community.contribute.pr.desc' | 'community.contribute.pr.cta'
+  | 'community.contribute.discussion.title' | 'community.contribute.discussion.desc' | 'community.contribute.discussion.cta'
+  | 'community.contribute.skill.title' | 'community.contribute.skill.desc' | 'community.contribute.skill.cta'
+  // Community - Contributors
+  | 'community.contributors.overline' | 'community.contributors.title' | 'community.contributors.subtitle'
+  | 'community.contributors.viewAll'
+  // Community - Skills (section wrapper for existing skill browser)
+  | 'community.skills.overline' | 'community.skills.title' | 'community.skills.subtitle'
+  // Community - Governance
+  | 'community.governance.overline' | 'community.governance.title' | 'community.governance.subtitle'
+  | 'community.governance.contributing' | 'community.governance.coc' | 'community.governance.security' | 'community.governance.governance'
+  // Community - Channels
+  | 'community.channels.overline' | 'community.channels.title' | 'community.channels.subtitle'
+  | 'community.channels.discussions.title' | 'community.channels.discussions.desc' | 'community.channels.discussions.cta'
+  | 'community.channels.sponsors.title' | 'community.channels.sponsors.desc' | 'community.channels.sponsors.cta'
+  | 'community.channels.docs.title' | 'community.channels.docs.desc' | 'community.channels.docs.cta'
   ;
 
 export const translations: Record<Language, Record<TranslationKey, string>> = {
@@ -92,6 +116,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'common.next': '下一页',
     'common.prev': '上一页',
     'common.of': '/',
+    'common.all': '全部',
     // Navigation
     'nav.home': '首页',
     'nav.quickStart': '快速上手',
@@ -257,6 +282,64 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.quickSearch': '搜索记忆',
     'dash.quickDigest': '消化文件',
     'dash.quickDocs': '查看文档',
+    // Community - Hero
+    'community.hero.overline': '开源社区',
+    'community.hero.title': '与 Epicode 共同成长',
+    'community.hero.subtitle': 'Epicode 是一个开源的空间化 AI 记忆系统。无论你是报告 Bug、提交代码，还是分享技能，这里都是参与的地方。',
+    'community.hero.ctaPrimary': '快速上手',
+    'community.hero.ctaSecondary': '在 GitHub 上查看',
+    // Community - Stats
+    'community.stats.stars': 'Stars',
+    'community.stats.forks': 'Forks',
+    'community.stats.issues': 'Open Issues',
+    'community.stats.contributors': 'Contributors',
+    'community.stats.unavailable': '暂时无法加载 GitHub 数据',
+    // Community - Contribute
+    'community.contribute.overline': '参与方式',
+    'community.contribute.title': '四种方式参与贡献',
+    'community.contribute.subtitle': '每一份贡献都让 Epicode 更好。',
+    'community.contribute.issue.title': '报告问题',
+    'community.contribute.issue.desc': '发现 Bug 或有功能想法？通过 Issue 模板提交，附上复现步骤和环境信息。',
+    'community.contribute.issue.cta': '提交 Issue',
+    'community.contribute.pr.title': '提交代码',
+    'community.contribute.pr.desc': '修复 Bug 或实现新功能。遵循 Conventional Commits，确保 CI 全绿，等待维护者审核合并。',
+    'community.contribute.pr.cta': '发起 Pull Request',
+    'community.contribute.discussion.title': '参与讨论',
+    'community.contribute.discussion.desc': '在 Discussions 提问、分享想法、参与路线图规划，或帮助其他用户解答疑问。',
+    'community.contribute.discussion.cta': '前往 Discussions',
+    'community.contribute.skill.title': '分享技能',
+    'community.contribute.skill.desc': '把你的 Prompt 模板、工作流或最佳实践沉淀成技能，通过社区页面让所有人受益。',
+    'community.contribute.skill.cta': '浏览社区技能',
+    // Community - Contributors
+    'community.contributors.overline': '致谢',
+    'community.contributors.title': '感谢每一位贡献者',
+    'community.contributors.subtitle': 'Epicode 由社区共同打造。以下是代码库的 contributors（数据来自 GitHub）。',
+    'community.contributors.viewAll': '在 GitHub 上查看全部贡献者',
+    // Community - Skills
+    'community.skills.overline': '技能市场',
+    'community.skills.title': '社区技能',
+    'community.skills.subtitle': '探索来自社区和官方的公开技能库。',
+    // Community - Governance
+    'community.governance.overline': '治理与准则',
+    'community.governance.title': '我们如何协作',
+    'community.governance.subtitle': '透明、友好、可持续的开源协作建立在清晰的规则之上。',
+    'community.governance.contributing': '贡献指南',
+    'community.governance.coc': '行为准则',
+    'community.governance.security': '安全策略',
+    'community.governance.governance': '项目治理',
+    // Community - Channels
+    'community.channels.overline': '保持联系',
+    'community.channels.title': '加入社区',
+    'community.channels.subtitle': '在哪里找到我们，以及如何获取帮助。',
+    'community.channels.discussions.title': 'GitHub Discussions',
+    'community.channels.discussions.desc': '提问、分享想法、参与路线图讨论的主要场所。',
+    'community.channels.discussions.cta': '进入 Discussions',
+    'community.channels.sponsors.title': 'GitHub Sponsors',
+    'community.channels.sponsors.desc': '如果 Epicode 帮到了你，可以通过 GitHub Sponsors 支持项目的持续维护。',
+    'community.channels.sponsors.cta': '支持我们',
+    'community.channels.docs.title': '官方文档',
+    'community.channels.docs.desc': '架构、API、部署、配置等完整开发文档，托管在 epicode.cn。',
+    'community.channels.docs.cta': '阅读文档',
   },
   en: {
     // Common
@@ -278,6 +361,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'common.next': 'Next',
     'common.prev': 'Previous',
     'common.of': 'of',
+    'common.all': 'All',
     // Navigation
     'nav.home': 'Home',
     'nav.quickStart': 'Quick Start',
@@ -443,5 +527,63 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.quickSearch': 'Search Memory',
     'dash.quickDigest': 'Digest File',
     'dash.quickDocs': 'View Docs',
+    // Community - Hero
+    'community.hero.overline': 'Open Source',
+    'community.hero.title': 'Grow with Epicode',
+    'community.hero.subtitle': 'Epicode is an open-source spatial AI memory system. Whether you report a bug, submit code, or share a skill, this is the place to get involved.',
+    'community.hero.ctaPrimary': 'Quick Start',
+    'community.hero.ctaSecondary': 'View on GitHub',
+    // Community - Stats
+    'community.stats.stars': 'Stars',
+    'community.stats.forks': 'Forks',
+    'community.stats.issues': 'Open Issues',
+    'community.stats.contributors': 'Contributors',
+    'community.stats.unavailable': 'Could not load GitHub data right now',
+    // Community - Contribute
+    'community.contribute.overline': 'GET INVOLVED',
+    'community.contribute.title': 'Four Ways to Contribute',
+    'community.contribute.subtitle': 'Every contribution makes Epicode better.',
+    'community.contribute.issue.title': 'Report Issues',
+    'community.contribute.issue.desc': 'Found a bug or have an idea? File it with the issue template — include reproduction steps and environment info.',
+    'community.contribute.issue.cta': 'File an Issue',
+    'community.contribute.pr.title': 'Submit Code',
+    'community.contribute.pr.desc': 'Fix a bug or build a feature. Follow Conventional Commits, keep CI green, and wait for a maintainer review.',
+    'community.contribute.pr.cta': 'Open a Pull Request',
+    'community.contribute.discussion.title': 'Join Discussions',
+    'community.contribute.discussion.desc': 'Ask questions, share ideas, shape the roadmap, and help other users in Discussions.',
+    'community.contribute.discussion.cta': 'Go to Discussions',
+    'community.contribute.skill.title': 'Share Skills',
+    'community.contribute.skill.desc': 'Turn your prompt templates, workflows, or best practices into skills and share them with everyone via the community page.',
+    'community.contribute.skill.cta': 'Browse Community Skills',
+    // Community - Contributors
+    'community.contributors.overline': 'ACKNOWLEDGMENTS',
+    'community.contributors.title': 'Thanks to Every Contributor',
+    'community.contributors.subtitle': 'Epicode is built by the community. These are the repository contributors (data from GitHub).',
+    'community.contributors.viewAll': 'View all contributors on GitHub',
+    // Community - Skills
+    'community.skills.overline': 'SKILL MARKETPLACE',
+    'community.skills.title': 'Community Skills',
+    'community.skills.subtitle': 'Explore public skills from the community and the official team.',
+    // Community - Governance
+    'community.governance.overline': 'GOVERNANCE',
+    'community.governance.title': 'How We Collaborate',
+    'community.governance.subtitle': 'Transparent, friendly, sustainable open-source collaboration rests on clear rules.',
+    'community.governance.contributing': 'Contributing Guide',
+    'community.governance.coc': 'Code of Conduct',
+    'community.governance.security': 'Security Policy',
+    'community.governance.governance': 'Project Governance',
+    // Community - Channels
+    'community.channels.overline': 'STAY IN TOUCH',
+    'community.channels.title': 'Join the Community',
+    'community.channels.subtitle': 'Where to find us and how to get help.',
+    'community.channels.discussions.title': 'GitHub Discussions',
+    'community.channels.discussions.desc': 'The main place to ask questions, share ideas, and shape the roadmap.',
+    'community.channels.discussions.cta': 'Open Discussions',
+    'community.channels.sponsors.title': 'GitHub Sponsors',
+    'community.channels.sponsors.desc': 'If Epicode helped you, support ongoing maintenance via GitHub Sponsors.',
+    'community.channels.sponsors.cta': 'Sponsor Us',
+    'community.channels.docs.title': 'Official Docs',
+    'community.channels.docs.desc': 'Full developer docs — architecture, API, deployment, configuration — hosted on epicode.cn.',
+    'community.channels.docs.cta': 'Read the Docs',
   },
 };
