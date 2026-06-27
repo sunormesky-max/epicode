@@ -44,4 +44,3 @@ docs/
 | 部署 | [deployment.md](../deployment.md) | 待翻译 |
 | 开发指南 | [development.md](../development.md) | 待翻译 |
 | API 参考 | [api-reference.md](../api-reference.md) | 待翻译 |
-| 发布策略 | [release-strategy.md](../release-strategy.md) | 待翻译 |

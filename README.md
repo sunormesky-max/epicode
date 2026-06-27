@@ -175,6 +175,15 @@ We welcome contributions!
 
 Epicode is released under the [MIT License](LICENSE).
 
+> **Note on build-time dependencies.** The local embedding engine
+> (`backend/src/engine/vector.rs`) depends on the [`ort`](https://crates.io/crates/ort)
+> crate, which downloads a prebuilt, **MIT-licensed** [ONNX Runtime](https://github.com/microsoft/onnxruntime)
+> from the official `ort-rs` distribution mirror (`cdn.pyke.io`) the first time
+> you build the backend. This is a third-party precompiled binary, not source.
+> To build fully from source or use a system-provided ONNX Runtime instead,
+> set `ORT_STRATEGY=system` / `ORT_LIB_DIR` (or `ORT_STRATEGY=compile`) at build
+> time. See the [`ort` docs](https://docs.rs/ort) for details.
+
 ---
 
 <div align="center">
