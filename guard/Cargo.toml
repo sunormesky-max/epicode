@@ -1,6 +1,6 @@
 [package]
 name = "epicode-guard"
-version = "1.0.1"  # x-release-please-version
+version = "2.0.0"  # x-release-please-version
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/sunormesky-max/epicode"
