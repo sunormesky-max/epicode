@@ -1,6 +1,6 @@
 [Unit]
 Description=Epicode Guard - Auto Defense Daemon
-After=network.target firewalld.service
+After=network.target nftables.service
 
 [Service]
 Type=simple
@@ -8,6 +8,34 @@ ExecStart=/usr/local/bin/epicode-guard daemon
 Restart=on-failure
 RestartSec=10
 LimitNOFILE=65536
+
+# Hardening. The daemon needs CAP_NET_ADMIN (nft) and read access to
+# /var/log, /etc/shadow; everything else is closed off so that if the daemon
+# is ever compromised it cannot pivot into full host compromise.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH
+ReadWritePaths=/var/lib/epicode-guard /var/log/epicode-guard
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount @swap @cpu-emulation @debug @obsolete
 
 StandardOutput=journal
 StandardError=journal
