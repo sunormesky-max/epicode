@@ -323,7 +323,8 @@ mod tests {
                 enforced: false,
                 rationale: None,
                 access_count: 0,
-                memory_type: None,
+quality_score: 1.0,
+memory_type: None,
             },
         )
     }

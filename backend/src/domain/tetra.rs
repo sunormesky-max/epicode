@@ -66,6 +66,8 @@ pub struct MemoryPayload {
     #[serde(default)]
     pub access_count: u32,
     #[serde(default)]
+    pub quality_score: f64,
+    #[serde(default)]
     pub memory_type: Option<String>,
 }
 
@@ -86,6 +88,7 @@ impl Default for MemoryPayload {
             enforced: false,
             rationale: None,
             access_count: 0,
+            quality_score: 1.0,
             memory_type: None,
         }
     }

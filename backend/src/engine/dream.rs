@@ -55,10 +55,13 @@ impl DreamEngine {
                 new_importance = new_importance.min(0.3);
             }
 
+            let quality_score = new_importance * (1.0 + (access + 1.0).ln()) / (1.0 + age_days / 7.0);
             new_importance = new_importance.clamp(0.1, 3.0);
-            if (new_importance - t.data.importance).abs() > 0.01 {
+            let q_clamped = quality_score.clamp(0.01, 10.0);
+            if (new_importance - t.data.importance).abs() > 0.01 || (q_clamped - t.data.quality_score).abs() > 0.01 {
                 if let Some(mut tetra) = space.get_tetrahedron(t.id) {
                     tetra.data.importance = new_importance;
+                    tetra.data.quality_score = q_clamped;
                     let _ = space.update_payload(t.id, tetra.data);
                     updated += 1;
                 }
@@ -122,6 +125,37 @@ impl DreamEngine {
 
         if junk_evicted > 0 {
             insights.push(format!("evicted {junk_evicted} junk/low-mass memories"));
+        }
+
+        // Phase 1b: Capacity-based eviction using LRU + quality score
+        let tetras = space.all_tetrahedrons();
+        const CAPACITY_THRESHOLD: usize = 10000;
+        if tetras.len() > CAPACITY_THRESHOLD {
+            let mut candidates: Vec<(u64, f64, bool)> = tetras
+                .iter()
+                .filter(|t| !t.data.enforced)
+                .map(|t| (t.id, t.data.quality_score, t.data.labels.iter().any(|l| l.starts_with("meta-"))))
+                .collect();
+            // Sort by quality_score ascending (lowest first), evict non-meta first
+            candidates.sort_by(|a, b| {
+                let meta_ord = a.2.cmp(&b.2); // non-meta (false) comes before meta (true)
+                let score_ord = a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal);
+                meta_ord.then(score_ord)
+            });
+            let to_evict = tetras.len() - CAPACITY_THRESHOLD;
+            let mut capacity_evicted = 0usize;
+            for (id, _score, _is_meta) in candidates.iter().take(to_evict) {
+                if let Err(e) = space.remove_tetrahedron(*id) {
+                    tracing::debug!("[Dream] capacity evict {} failed: {}", id, e);
+                } else {
+                    evicted_ids.push(*id);
+                    capacity_evicted += 1;
+                }
+            }
+            if capacity_evicted > 0 {
+                insights.push(format!("evicted {capacity_evicted} low-quality memories (capacity > {CAPACITY_THRESHOLD})"));
+                junk_evicted += capacity_evicted;
+            }
         }
 
         // Refresh after eviction
@@ -357,7 +391,8 @@ mod tests {
                     enforced: false,
                     rationale: None,
                     access_count: 0,
-                    memory_type: None,
+quality_score: 1.0,
+memory_type: None,
                 },
                 mass: 1.0,
             };
@@ -399,7 +434,8 @@ mod tests {
                     enforced: false,
                     rationale: None,
                     access_count: 0,
-                    memory_type: None,
+quality_score: 1.0,
+memory_type: None,
                 },
                 mass: 1.0,
             };

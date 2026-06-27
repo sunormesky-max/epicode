@@ -1524,6 +1524,37 @@ impl McpHandler {
 
         let extractions = extract_context_memories(context, project, role);
 
+        // Cross-category dedup: if two extracted contents are >80% similar,
+        // keep only the one with higher category priority.
+        let extractions = {
+            let mut kept: Vec<ExtractedMemory> = Vec::new();
+            for ext in extractions {
+                let mut duplicate = false;
+                for other in &kept {
+                    let sim = super::intake::MemoryIntake::text_similarity(&ext.content, &other.content);
+                    if sim > 0.8 {
+                        let priority = |c: &str| match c {
+                            "decision" => 5,
+                            "bug" => 4,
+                            "pattern" => 3,
+                            "finding" => 2,
+                            "preference" => 1,
+                            "session-summary" => 0,
+                            _ => 0,
+                        };
+                        if priority(&ext.category) <= priority(&other.category) {
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                }
+                if !duplicate {
+                    kept.push(ext);
+                }
+            }
+            kept
+        };
+
         if extractions.is_empty() {
             let identity = self.engine.space.identity_info();
             let id_json = if let Some(ref info) = identity {

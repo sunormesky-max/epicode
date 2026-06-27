@@ -403,6 +403,7 @@ mod tests {
             enforced: false,
             rationale: None,
             access_count: 0,
+            quality_score: 1.0,
             memory_type: memory_type.map(|s| s.to_string()),
         }
     }

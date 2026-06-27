@@ -1147,6 +1147,7 @@ impl SchedulerCenter {
                     enforced: false,
                     rationale: None,
                     access_count: 0,
+                    quality_score: 1.0,
                     memory_type: Some("bridge".to_string()),
                 };
                 let tetra = Tetrahedron {
@@ -1262,6 +1263,7 @@ impl SchedulerCenter {
                         enforced: t.data.enforced,
                         rationale: t.data.rationale.clone(),
                         access_count: t.data.access_count,
+                        quality_score: t.data.quality_score,
                         memory_type: t.data.memory_type.clone(),
                     };
                     if let Err(e) = self.space.update_payload(*keep, updated.clone()) {
@@ -1311,6 +1313,7 @@ impl SchedulerCenter {
                             enforced: false,
                             rationale: t.data.rationale.clone(),
                             access_count: t.data.access_count,
+                            quality_score: t.data.quality_score,
                             memory_type: t.data.memory_type.clone(),
                         };
                         if let Err(e) = self.space.update_payload(id, updated) {
@@ -1373,6 +1376,7 @@ impl SchedulerCenter {
                         enforced: t.data.enforced,
                         rationale: t.data.rationale.clone(),
                         access_count: t.data.access_count,
+                        quality_score: t.data.quality_score,
                         memory_type: t.data.memory_type.clone(),
                     };
                     if let Err(e) = self.space.update_payload(*id, updated) {
@@ -2413,7 +2417,8 @@ mod tests {
             enforced: false,
             rationale: None,
             access_count: 0,
-            memory_type: None,
+quality_score: 1.0,
+memory_type: None,
         };
         let tetra = Tetrahedron {
             id: 0,
