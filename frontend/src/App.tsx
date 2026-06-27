@@ -1,7 +1,21 @@
 import { lazy, Suspense } from 'react';
-import { Routes, Route } from 'react-router';
+import { Routes, Route, Navigate } from 'react-router';
 import { I18nProvider } from '@/i18n/I18nContext';
 import PageBackground from '@/components/PageBackground';
+import { isAuthenticated } from '@/lib/api';
+
+// Authentication guard for /dashboard/*. Without this, the dashboard pages
+// mount even when no API key is present, immediately firing authenticated
+// requests with `X-API-Key: null`, leaking the routes and producing an error
+// flash. The user can also navigate to /dashboard/* directly without ever
+// logging in. We redirect to /login with a `from` state so a successful login
+// returns the user to the route they originally requested.
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  if (!isAuthenticated()) {
+    return <Navigate to="/login" replace state={{ from: window.location.hash } } />;
+  }
+  return <>{children}</>;
+}
 
 const Home = lazy(() => import('@/pages/Home'));
 const Login = lazy(() => import('@/pages/Login'));
@@ -49,11 +63,11 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="/dashboard" element={<DashboardOverview />} />
-          <Route path="/dashboard/memories" element={<DashboardMemories />} />
-          <Route path="/dashboard/graph" element={<DashboardGraph />} />
-          <Route path="/dashboard/skills" element={<DashboardSkills />} />
-          <Route path="/dashboard/accounts" element={<DashboardSubAccounts />} />
+          <Route path="/dashboard" element={<RequireAuth><DashboardOverview /></RequireAuth>} />
+          <Route path="/dashboard/memories" element={<RequireAuth><DashboardMemories /></RequireAuth>} />
+          <Route path="/dashboard/graph" element={<RequireAuth><DashboardGraph /></RequireAuth>} />
+          <Route path="/dashboard/skills" element={<RequireAuth><DashboardSkills /></RequireAuth>} />
+          <Route path="/dashboard/accounts" element={<RequireAuth><DashboardSubAccounts /></RequireAuth>} />
           <Route path="/docs" element={<Docs />} />
           <Route path="/guide" element={<Guide />} />
           <Route path="/community" element={<Community />} />

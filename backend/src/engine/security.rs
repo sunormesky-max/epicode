@@ -5,6 +5,8 @@ use std::time::Instant;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
+use super::crypto::constant_time_eq;
+
 const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 const RATE_LIMIT_MAX_REQUESTS: u64 = 120;
 const MAX_CONTENT_LENGTH: usize = 10000;
@@ -16,6 +18,12 @@ const MAX_LABEL_LENGTH: usize = 64;
 pub struct SecurityConfig {
     pub enabled: bool,
     pub api_keys: Vec<String>,
+    /// Optional administrative key. When set, sensitive endpoints
+    /// (`/admin/*`, `/config`) require this key instead of the regular API key,
+    /// preventing a standard client from escalating to admin operations.
+    /// When `None`, admin endpoints fall back to requiring a regular API key
+    /// (single-tenant mode) — but only when security is enabled.
+    pub admin_key: Option<String>,
     pub rate_limit_per_minute: u64,
     pub max_content_length: usize,
     pub max_query_length: usize,
@@ -33,11 +41,16 @@ impl SecurityConfig {
     /// Returns `Err` if `TETRAMEM_API_KEY` is not set and insecure auth is not allowed.
     pub fn try_from_env() -> Result<Self, String> {
         let key = env_var("API_KEY").ok().filter(|k| !k.is_empty());
+        // Insecure auth must be an explicit opt-in. We deliberately do NOT
+        // auto-enable it for `cfg!(debug_assertions)` builds: a debug binary
+        // accidentally deployed to production would otherwise expose every
+        // endpoint with no authentication. Operators must set ALLOW_INSECURE_AUTH=1
+        // (and only when EPICODE_API_KEY is unset) to opt in.
         let allow_insecure = matches!(
             env_var("ALLOW_INSECURE_AUTH"),
             Ok(v) if v == "1" || v.eq_ignore_ascii_case("true")
-        ) || cfg!(test)
-            || cfg!(debug_assertions);
+        ) || cfg!(test);
+        let admin_key = env_var("ADMIN_KEY").ok().filter(|k| !k.is_empty());
         let (enabled, api_keys) = match key {
             Some(k) => (true, vec![k]),
             None if allow_insecure => {
@@ -56,6 +69,7 @@ impl SecurityConfig {
         Ok(Self {
             enabled,
             api_keys,
+            admin_key,
             rate_limit_per_minute: RATE_LIMIT_MAX_REQUESTS,
             max_content_length: MAX_CONTENT_LENGTH,
             max_query_length: MAX_QUERY_LENGTH,
@@ -366,10 +380,35 @@ impl SecurityGuard {
     }
 
     fn mask_key(key: &str) -> String {
-        if key.len() <= 8 {
-            return "*".repeat(key.len());
+        let chars: Vec<char> = key.chars().collect();
+        if chars.len() <= 8 {
+            return "*".repeat(chars.len());
         }
-        format!("{}****{}", &key[..3], &key[key.len() - 2..])
+        // Use char indexing (not byte slicing) so multi-byte UTF-8 keys can never
+        // panic on a char boundary — a remotely-supplied X-API-Key could otherwise
+        // crash the server, and `panic = "abort"` would kill the process.
+        let head: String = chars.iter().take(3).collect();
+        let tail: String = chars.iter().rev().take(2).rev().collect();
+        format!("{head}****{tail}")
+    }
+
+    /// Check whether `api_key` is permitted to perform administrative operations.
+    /// Uses constant-time comparison to avoid leaking the admin key via timing.
+    /// Returns `true` when security is disabled (local/dev), or when the supplied
+    /// key matches the configured admin key, or — in single-tenant mode where no
+    /// admin key is configured — when it matches the regular API key.
+    pub fn check_admin(&self, api_key: &str) -> bool {
+        if !self.config.enabled {
+            return true;
+        }
+        if let Some(admin) = &self.config.admin_key {
+            return constant_time_eq(api_key, admin);
+        }
+        // Fallback: regular API key doubles as admin key in single-tenant mode.
+        self.config
+            .api_keys
+            .iter()
+            .any(|k| constant_time_eq(api_key, k))
     }
 
     fn hash_key(key: &str) -> String {
@@ -405,6 +444,7 @@ mod tests {
         SecurityGuard::new(SecurityConfig {
             enabled: true,
             api_keys: vec!["test-key-123".to_string()],
+            admin_key: None,
             rate_limit_per_minute: 5,
             max_content_length: 100,
             max_query_length: 50,
@@ -601,6 +641,7 @@ mod tests {
         let guard = SecurityGuard::new(SecurityConfig {
             enabled: false,
             api_keys: vec![],
+            admin_key: None,
             rate_limit_per_minute: 0,
             max_content_length: 0,
             max_query_length: 0,
@@ -614,5 +655,46 @@ mod tests {
     fn mask_key_hides_middle() {
         let masked = SecurityGuard::mask_key("abcdefghijklmnop");
         assert_eq!(masked, "abc****op");
+    }
+
+    #[test]
+    fn mask_key_handles_multibyte_without_panic() {
+        // A remotely-supplied X-API-Key with multi-byte UTF-8 must not panic
+        // (regression for the old `&key[..3]` byte slice).
+        let masked = SecurityGuard::mask_key("🔑secure-key-🔐");
+        assert!(masked.contains("****"));
+    }
+
+    #[test]
+    fn check_admin_with_dedicated_admin_key() {
+        let guard = SecurityGuard::new(SecurityConfig {
+            enabled: true,
+            api_keys: vec!["regular-key".to_string()],
+            admin_key: Some("admin-secret".to_string()),
+            rate_limit_per_minute: 5,
+            max_content_length: 100,
+            max_query_length: 50,
+            max_labels: 5,
+            audit_log_size: 50,
+        });
+        assert!(!guard.check_admin("regular-key"));
+        assert!(guard.check_admin("admin-secret"));
+        assert!(!guard.check_admin("wrong"));
+    }
+
+    #[test]
+    fn check_admin_single_tenant_falls_back_to_api_key() {
+        let guard = SecurityGuard::new(SecurityConfig {
+            enabled: true,
+            api_keys: vec!["regular-key".to_string()],
+            admin_key: None,
+            rate_limit_per_minute: 5,
+            max_content_length: 100,
+            max_query_length: 50,
+            max_labels: 5,
+            audit_log_size: 50,
+        });
+        assert!(guard.check_admin("regular-key"));
+        assert!(!guard.check_admin("other"));
     }
 }

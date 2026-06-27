@@ -99,6 +99,7 @@ impl SchedulerCenter {
             Arc::new(SecurityGuard::new(SecurityConfig {
                 enabled: false,
                 api_keys: vec![],
+                admin_key: None,
                 rate_limit_per_minute: 120,
                 max_content_length: 10000,
                 max_query_length: 2000,

@@ -40,6 +40,27 @@ pub async fn security_layer(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
+    // Sensitive administrative/configuration endpoints require an elevated
+    // key. `check_admin` is satisfied by the dedicated ADMIN_KEY (when set) or,
+    // in single-tenant mode without a separate admin key, by the regular API
+    // key. This stops a standard client holding only the memory-write key from
+    // calling key rotation, permission grants, config rewrites, or log reads.
+    let is_admin_path = path == "/config"
+        || path.starts_with("/admin/")
+        || path.starts_with("/security/audit")
+        || path.starts_with("/security/stats");
+    if is_admin_path && !guard.check_admin(api_key) {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({
+                "success": false,
+                "error": "AdminPrivilegeRequired",
+                "action": action,
+            })),
+        )
+            .into_response();
+    }
+
     match guard.full_check(api_key, &action) {
         Ok(_client_id) => next.run(request).await,
         Err((result, _detail)) => {
