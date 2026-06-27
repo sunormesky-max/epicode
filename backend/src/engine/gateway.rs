@@ -176,6 +176,7 @@ impl GatewayCenter {
             enforced: false,
             rationale: None,
             access_count: 0,
+            quality_score: 1.0,
             memory_type: None,
         };
         let tetra = crate::domain::tetra::Tetrahedron {

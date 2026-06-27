@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-pub const DEFAULT_MAX_ENERGY: f64 = 10000.0;
+pub const DEFAULT_MAX_ENERGY: f64 = 25000.0;
 pub const CREATE_COST: f64 = 10.0;
 pub const PULSE_COST: f64 = 2.0;
 pub const RECHARGE_RATE: f64 = 12.0;
