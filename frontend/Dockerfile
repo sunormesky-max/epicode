@@ -16,6 +16,12 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 
+# Drop root: run as the unprivileged `node` user (uid 1000) built into the
+# node:alpine image. Chown first so the runtime can read everything it copied
+# in as root, then switch identity.
+RUN chown -R node:node /app
+USER node
+
 ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
