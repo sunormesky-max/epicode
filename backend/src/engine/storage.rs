@@ -351,8 +351,8 @@ impl StorageManager {
         let encrypted_content = self.encrypt_field(&tetra.data.content)?;
 
         conn.execute(
-            "INSERT OR REPLACE INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            "INSERT OR REPLACE INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 tetra.id,
                 tetra.core.x, tetra.core.y, tetra.core.z,
@@ -366,6 +366,9 @@ impl StorageManager {
                 emb_blob,
                 tetra.data.importance,
                 tetra.data.enforced as i32,
+                tetra.data.rationale,
+                tetra.data.access_count as i32,
+                tetra.data.memory_type,
             ],
         ).map_err(|e| format!("upsert tetra {}: {}", tetra.id, e))?;
         Ok(())
@@ -648,8 +651,8 @@ impl StorageManager {
                 let content_hash = tetra.data.content_hash as i64;
                 let encrypted_content = self.encrypt_field(&tetra.data.content)?;
                 tx.execute(
-                    "INSERT OR REPLACE INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                    "INSERT OR REPLACE INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
                     params![
                         tetra.id,
                         tetra.core.x, tetra.core.y, tetra.core.z,
@@ -663,6 +666,9 @@ impl StorageManager {
                         emb_blob,
                         tetra.data.importance,
                         tetra.data.enforced as i32,
+                        tetra.data.rationale,
+                        tetra.data.access_count as i32,
+                        tetra.data.memory_type,
                     ],
                 ).map_err(|e| format!("batch upsert {id}: {e}"))?;
                 count += 1;
