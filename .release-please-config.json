@@ -37,7 +37,20 @@
           "jsonpath": "$.version"
         },
         "README.md",
-        "README.zh.md"
+        "README.zh.md",
+        {
+          "type": "yaml",
+          "path": "deploy/helm/epicode/Chart.yaml",
+          "yaml": { "version": "$_VERSION_", "appVersion": "$_VERSION_" }
+        },
+        {
+          "type": "generic",
+          "path": "deploy/helm/epicode/values.yaml"
+        },
+        {
+          "type": "generic",
+          "path": "deploy/kubernetes/epicode.yaml"
+        }
       ],
       "changelog-sections": [
         { "type": "feat", "section": "Features" },
