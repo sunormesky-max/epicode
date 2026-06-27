@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::middleware;
 use axum::routing::{get, post};
 use axum::Router;
@@ -124,6 +125,11 @@ async fn main() {
             server::default_cors_headers(),
         ))
         .layer(TraceLayer::new_for_http())
+        // Cap request bodies at 10 MiB to prevent oversized-payload DoS. The
+        // largest legitimate request is /remember (content + labels + meta),
+        // which is comfortably under this; anything bigger is almost certainly
+        // abuse or a client bug.
+        .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
         .with_state(state.clone());
 
     let listen_addr = env_var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9110".to_string());
