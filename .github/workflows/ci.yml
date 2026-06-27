@@ -78,9 +78,12 @@ jobs:
       - name: Run tests
         run: cargo test --locked --all-targets -- --test-threads=1
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: cargo install cargo-audit --locked
       - name: Run security audit
-        run: cargo audit || true
+        # Do NOT `|| true` — previously this swallowed every advisory, making
+        # the "security audit" step purely cosmetic. Let the job fail on known
+        # high/critical advisories and surface them for triage.
+        run: cargo audit --deny warnings
 
   frontend:
     runs-on: ubuntu-latest
@@ -174,3 +177,25 @@ jobs:
         run: pip install mypy && mypy epicode --ignore-missing-imports || true
       - name: Syntax check
         run: python -m py_compile epicode/*.py
+
+  mcp-bridge:
+    runs-on: ubuntu-latest
+    needs: version-check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install bridge + test deps
+        # The MCP bridge and its unit tests must be exercised in CI. The bridge
+        # had previously been gitignored (now tracked), so `tests/test_epicode_mcp_server.py`
+        # was a once-unrunable file. We install `pytest` + `pytest-asyncio` and run it.
+        run: |
+          pip install --upgrade pip
+          pip install -r mcp-bridge/requirements.txt
+          pip install pytest pytest-asyncio
+      - name: Run bridge tests
+        working-directory: tests
+        env:
+          PYTHONPATH: "${{ github.workspace }}/mcp-bridge"
+        run: pytest -v
