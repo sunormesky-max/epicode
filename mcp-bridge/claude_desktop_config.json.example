@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "epicode-memory": {
+      "command": "/Users/sunorme/.workbuddy/binaries/python/envs/epicode-mcp/bin/python3",
+      "args": [
+        "/Users/sunorme/sunormesky-max_epicode/mcp-bridge/epicode_mcp_server.py"
+      ],
+      "env": {
+        "EPICODE_API_KEY": "your_api_key_here",
+        "EPICODE_BASE_URL": "https://epicode.cn"
+      }
+    }
+  }
+}
