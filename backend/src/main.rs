@@ -56,6 +56,7 @@ async fn main() {
     // The included Nginx reverse proxy strips `/api` before forwarding, so the
     // public prefix is `/api/v1` while the backend sees `/v1`.
     let v1_routes = Router::new()
+        .route("/ws", get(routes::ws_handler))
         .route("/health", get(routes::health))
         .route("/remember", post(routes::remember))
         .route("/ask", post(routes::ask))
