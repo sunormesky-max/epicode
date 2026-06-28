@@ -29,6 +29,8 @@ pub struct SecurityConfig {
     pub max_query_length: usize,
     pub max_labels: usize,
     pub audit_log_size: usize,
+    pub tenant_quotas: HashMap<String, usize>,
+    pub max_tenants: usize,
 }
 
 fn env_var(name: &str) -> Result<String, std::env::VarError> {
@@ -75,6 +77,8 @@ impl SecurityConfig {
             max_query_length: MAX_QUERY_LENGTH,
             max_labels: MAX_LABELS_PER_MEMORY,
             audit_log_size: 200,
+            tenant_quotas: HashMap::new(),
+            max_tenants: 1000,
         })
     }
 }
@@ -104,6 +108,7 @@ pub enum SecurityResult {
     DeniedValidation,
     DeniedConstitution,
     DeniedEnergy,
+    DeniedQuota,
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +128,7 @@ pub struct SecurityGuard {
     denied_validation_count: AtomicUsize,
     denied_constitution_count: AtomicUsize,
     denied_energy_count: AtomicUsize,
+    denied_quota_count: AtomicUsize,
 }
 
 impl SecurityGuard {
@@ -138,6 +144,7 @@ impl SecurityGuard {
             denied_validation_count: AtomicUsize::new(0),
             denied_constitution_count: AtomicUsize::new(0),
             denied_energy_count: AtomicUsize::new(0),
+            denied_quota_count: AtomicUsize::new(0),
         }
     }
 
@@ -179,15 +186,35 @@ impl SecurityGuard {
         }
     }
 
+
+
+    pub fn extract_tenant_id(api_key: &str) -> String {
+        api_key.split(':').next().unwrap_or("default").to_string()
+    }
+
+    pub fn check_tenant_quota(&self, tenant_id: &str, current_count: usize) -> Result<(), SecurityResult> {
+        if let Some(&quota) = self.config.tenant_quotas.get(tenant_id) {
+            if current_count >= quota {
+                self.denied_quota_count.fetch_add(1, Ordering::SeqCst);
+                return Err(SecurityResult::DeniedQuota);
+            }
+        }
+        Ok(())
+    }
     pub fn check_rate_limit(&self, client_id: &str) -> Result<(), SecurityResult> {
-        let rate_key = Self::hash_key(client_id);
+        let tenant_id = Self::extract_tenant_id(client_id);
+        let rate_key = format!("{}:{}", tenant_id, Self::hash_key(client_id));
         let mut buckets = self.rate_buckets.lock();
         let now = Instant::now();
         let limit = self.config.rate_limit_per_minute;
         let window = std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS);
 
-        if buckets.len() > 10000 {
+        if buckets.len() > self.config.max_tenants * 2 {
             buckets.retain(|_, b| now.saturating_duration_since(b.window_start) < window);
+        }
+
+        if buckets.len() >= self.config.max_tenants && !buckets.contains_key(&rate_key) {
+            return Err(SecurityResult::DeniedRateLimit);
         }
 
         let bucket = buckets.entry(rate_key).or_insert(RateBucket {
@@ -314,6 +341,9 @@ impl SecurityGuard {
                 SecurityResult::DeniedEnergy => {
                     self.denied_energy_count.fetch_add(1, Ordering::SeqCst);
                 }
+                SecurityResult::DeniedQuota => {
+                    self.denied_quota_count.fetch_add(1, Ordering::SeqCst);
+                }
                 SecurityResult::Allowed => {}
             }
         }
@@ -368,6 +398,7 @@ impl SecurityGuard {
             denied_validation: self.denied_validation_count.load(Ordering::SeqCst),
             denied_constitution: self.denied_constitution_count.load(Ordering::SeqCst),
             denied_energy: self.denied_energy_count.load(Ordering::SeqCst),
+            denied_quota: self.denied_quota_count.load(Ordering::SeqCst),
             rate_limit_per_minute: self.config.rate_limit_per_minute,
             max_content_length: self.config.max_content_length,
             audit_entries: self.audit_log.lock().len(),
@@ -431,6 +462,7 @@ pub struct SecurityStats {
     pub denied_validation: usize,
     pub denied_constitution: usize,
     pub denied_energy: usize,
+    pub denied_quota: usize,
     pub rate_limit_per_minute: u64,
     pub max_content_length: usize,
     pub audit_entries: usize,
@@ -450,6 +482,8 @@ mod tests {
             max_query_length: 50,
             max_labels: 5,
             audit_log_size: 50,
+            tenant_quotas: std::collections::HashMap::new(),
+            max_tenants: 100,
         })
     }
 
@@ -647,6 +681,8 @@ mod tests {
             max_query_length: 0,
             max_labels: 0,
             audit_log_size: 10,
+            tenant_quotas: std::collections::HashMap::new(),
+            max_tenants: 100,
         });
         assert!(guard.authenticate("anything").is_ok());
     }
@@ -676,6 +712,8 @@ mod tests {
             max_query_length: 50,
             max_labels: 5,
             audit_log_size: 50,
+            tenant_quotas: std::collections::HashMap::new(),
+            max_tenants: 100,
         });
         assert!(!guard.check_admin("regular-key"));
         assert!(guard.check_admin("admin-secret"));
@@ -693,6 +731,8 @@ mod tests {
             max_query_length: 50,
             max_labels: 5,
             audit_log_size: 50,
+            tenant_quotas: std::collections::HashMap::new(),
+            max_tenants: 100,
         });
         assert!(guard.check_admin("regular-key"));
         assert!(!guard.check_admin("other"));

@@ -4,24 +4,24 @@ This roadmap describes the direction of the Epicode project. Items closer to the
 
 ## Near term (next 1–2 releases)
 
-- [ ] Raise the default energy cap so continuous memory creation is not throttled so aggressively.
-- [ ] Fix `context_observe` duplicate-memory extraction caused by overlapping decision/bug/pattern rules.
-- [ ] Add memory aging / eviction based on quality score or LRU to prevent low-quality auto-extracted memories from diluting search.
+- [x] Raise the default energy cap so continuous memory creation is not throttled so aggressively.
+- [x] Fix `context_observe` duplicate-memory extraction caused by overlapping decision/bug/pattern rules.
+- [x] Add memory aging / eviction based on quality score or LRU to prevent low-quality auto-extracted memories from diluting search.
 - [x] Improve CI with dependency caching and frontend/backend matrix coverage.
 - [x] Add dashboard screenshot and demo GIF to README.
 
 ## Medium term (3–6 months)
 
-- [ ] Multi-tenant isolation hardening for the Cloud deployment.
-- [ ] Support additional embedding providers (OpenAI, local Ollama) beyond ONNX and HTTP fallback.
+- [x] Multi-tenant isolation hardening for the Cloud deployment.
+- [x] Support additional embedding providers (OpenAI, local Ollama) beyond ONNX and HTTP fallback.
 - [x] Wire `DecisionCenter` into the scheduler tick loop.
-- [ ] Investigate and fix the single-cluster / fission trigger issue observed in benchmarks.
-- [ ] Add concept prototype generation in the knowledge graph.
-- [ ] Add WebSocket or Server-Sent Events for real-time memory updates.
+- [x] Investigate and fix the single-cluster / fission trigger issue observed in benchmarks.
+- [x] Add concept prototype generation in the knowledge graph.
+- [x] Add WebSocket or Server-Sent Events for real-time memory updates.
 
 ## Long term (6+ months)
 
-- [ ] Distributed deployment support with replicated state.
+- [~] Distributed deployment support with replicated state. (in progress: cluster module with consistent hashing + gossip)
 - [ ] Plugin system for custom tools, skills, and memory enhancers.
 - [ ] Web-based model management and embedding fine-tuning UI.
 - [ ] Migration path from v1 to future storage formats.
