@@ -28,6 +28,7 @@ pub mod key_rotation;
 pub mod knowledge;
 pub mod mcp;
 pub mod outcome;
+pub mod plugin;
 pub mod pulse;
 pub mod reasoning;
 pub mod retrieval;
@@ -49,6 +50,7 @@ use crate::domain::space::Space;
 
 use self::audit::AuditLogger;
 use self::bus::EventBus;
+use self::cluster::{ClusterConfig, ClusterHandle, DistributedBus};
 use self::classifier::CategoryClassifier;
 use self::cognitive::CognitiveEngine;
 use self::embedding::EmbeddingService;
@@ -65,6 +67,9 @@ use crate::api::authz::{AuthorizationChecker, PermissionRepository};
 pub struct Engine {
     pub space: Arc<Space>,
     pub bus: Arc<EventBus>,
+    pub cluster: Option<Arc<ClusterHandle>>,
+    #[allow(dead_code)]
+    dist_bus: Option<DistributedBus>,
     #[allow(dead_code)] // kept alive for SchedulerCenter's Arc lifetime
     gateway: Arc<GatewayCenter>,
     pub energy: Arc<EnergyCenter>,
@@ -75,6 +80,7 @@ pub struct Engine {
     pub skills: Arc<SkillEngine>,
     pub key_rotation: Arc<Mutex<key_rotation::KeyRotation>>,
     pub authz: Arc<AuthorizationChecker>,
+    pub plugin_registry: Arc<plugin::PluginRegistry>,
     handles: Vec<JoinHandle<()>>,
     pub user_id: String,
     data_path: std::path::PathBuf,
@@ -150,6 +156,29 @@ impl Engine {
 
         let space = Arc::new(Space::new());
         let bus = Arc::new(EventBus::new(256));
+
+        let cluster_config = ClusterConfig::from_env();
+        let (cluster, dist_bus) = if cluster_config.enabled {
+            let node_id = uuid::Uuid::new_v4();
+            let gossip = Arc::new(self::cluster::GossipState::new(
+                node_id,
+                cluster_config.listen_addr.clone(),
+                cluster_config.heartbeat_interval_ms,
+                cluster_config.heartbeat_timeout_ms,
+            ));
+            let ring = parking_lot::RwLock::new(self::cluster::HashRing::new(cluster_config.vnode_count));
+            let handle = Arc::new(ClusterHandle {
+                ring,
+                gossip,
+                config: cluster_config.clone(),
+            });
+            let dbus = DistributedBus::new(bus.sender(), Some(handle.clone()));
+            tracing::info!("[{}] cluster mode enabled: node_id={}, listen={}", uid, node_id, cluster_config.listen_addr);
+            (Some(handle), Some(dbus))
+        } else {
+            tracing::debug!("[{}] cluster mode disabled", uid);
+            (None, None)
+        };
 
         let energy = Arc::new(EnergyCenter::new(
             energy::DEFAULT_MAX_ENERGY,
@@ -341,6 +370,12 @@ impl Engine {
             storage.clone(),
         ));
 
+        let plugin_registry = Arc::new(self::plugin::PluginRegistry::new());
+        let builtin_plugin = Arc::new(self::plugin::BuiltinToolPlugin);
+        if let Err(e) = plugin_registry.register(builtin_plugin) {
+            tracing::warn!("Failed to register builtin plugin: {}", e);
+        }
+
         let tool_ctx = Arc::new(self::tools::ToolContext::new(
             space.clone(),
             energy.clone(),
@@ -348,7 +383,10 @@ impl Engine {
             security.clone(),
             energy::DEFAULT_MAX_ENERGY,
         ));
-        let registry = Arc::new(self::tools::ToolRegistry::new(tool_ctx));
+        let registry = Arc::new(self::tools::ToolRegistry::new_with_plugin_registry(
+            tool_ctx,
+            Some(plugin_registry.clone()),
+        ));
         cognitive.set_tools(registry);
 
         let skills = Arc::new(SkillEngine::new(storage.clone()));
@@ -363,6 +401,8 @@ impl Engine {
         Self {
             space,
             bus,
+            cluster,
+            dist_bus,
             gateway,
             energy,
             scheduler,
@@ -372,6 +412,7 @@ impl Engine {
             skills,
             key_rotation,
             authz,
+            plugin_registry,
             handles: Vec::new(),
             user_id: uid.to_string(),
             data_path: data_path.clone(),

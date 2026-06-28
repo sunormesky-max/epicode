@@ -22,7 +22,7 @@ This roadmap describes the direction of the Epicode project. Items closer to the
 ## Long term (6+ months)
 
 - [~] Distributed deployment support with replicated state. (in progress: cluster module with consistent hashing + gossip)
-- [ ] Plugin system for custom tools, skills, and memory enhancers.
+- [~] Plugin system for custom tools, skills, and memory enhancers. (in progress: Plugin trait + PluginRegistry + integration with ToolRegistry)
 - [ ] Web-based model management and embedding fine-tuning UI.
 - [ ] Migration path from v1 to future storage formats.
 
