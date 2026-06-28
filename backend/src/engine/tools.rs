@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use super::plugin::PluginRegistry;
+
 use crate::domain::space::Space;
 
 use super::dynamics;
@@ -35,6 +37,7 @@ impl ToolContext {
 
 pub struct ToolRegistry {
     ctx: Arc<ToolContext>,
+    plugin_registry: Option<Arc<PluginRegistry>>,
 }
 
 impl super::cognitive::ToolProvider for ToolRegistry {
@@ -49,7 +52,20 @@ impl super::cognitive::ToolProvider for ToolRegistry {
 
 impl ToolRegistry {
     pub fn new(ctx: Arc<ToolContext>) -> Self {
-        Self { ctx }
+        Self {
+            ctx,
+            plugin_registry: None,
+        }
+    }
+
+    pub fn new_with_plugin_registry(
+        ctx: Arc<ToolContext>,
+        plugin_registry: Option<Arc<PluginRegistry>>,
+    ) -> Self {
+        Self {
+            ctx,
+            plugin_registry,
+        }
     }
 
     pub fn tool_definitions() -> Vec<serde_json::Value> {
@@ -164,7 +180,13 @@ impl ToolRegistry {
             "cluster_similarity" => self.cluster_similarity(args),
             "check_operation" => self.check_operation(args),
             "list_by_label" => self.list_by_label(args),
-            _ => Err(format!("unknown tool: {name}")),
+            _ => {
+                if let Some(ref pr) = self.plugin_registry {
+                    pr.execute_tool(name, args)
+                } else {
+                    Err(format!("unknown tool: {name}"))
+                }
+            }
         }
     }
 
