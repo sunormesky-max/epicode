@@ -14,7 +14,7 @@ This roadmap describes the direction of the Epicode project. Items closer to the
 
 - [ ] Multi-tenant isolation hardening for the Cloud deployment.
 - [ ] Support additional embedding providers (OpenAI, local Ollama) beyond ONNX and HTTP fallback.
-- [ ] Wire `DecisionCenter` into the scheduler tick loop.
+- [x] Wire `DecisionCenter` into the scheduler tick loop.
 - [ ] Investigate and fix the single-cluster / fission trigger issue observed in benchmarks.
 - [ ] Add concept prototype generation in the knowledge graph.
 - [ ] Add WebSocket or Server-Sent Events for real-time memory updates.

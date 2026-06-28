@@ -6,6 +6,7 @@ pub mod bus;
 pub mod cache;
 pub mod classifier;
 pub mod cognitive;
+pub mod decision_center;
 pub mod cognitive_hooks;
 pub mod constitution;
 pub mod crypto;
@@ -323,11 +324,13 @@ impl Engine {
             vector,
         ));
 
+        let decision_center = Arc::new(crate::engine::decision_center::DecisionCenter::new(cognitive.clone()));
         let scheduler = Arc::new(SchedulerCenter::with_security(
             space.clone(),
             energy.clone(),
             knowledge,
             cognitive.clone(),
+            decision_center,
             gateway.clone(),
             bus.sender(),
             bus.subscribe(),
