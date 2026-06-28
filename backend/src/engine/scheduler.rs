@@ -108,6 +108,8 @@ impl SchedulerCenter {
                 max_query_length: 2000,
                 max_labels: 10,
                 audit_log_size: 200,
+                tenant_quotas: std::collections::HashMap::new(),
+                max_tenants: 100,
             })),
             Arc::new(
                 super::storage::StorageManager::new(std::path::Path::new("data"))
@@ -1608,6 +1610,7 @@ impl SchedulerCenter {
             };
             let energy_ratio = snap.energy / self.max_energy.max(1.0);
             let tetra_count = snap.tetras.len();
+            let largest_cluster_size = snap.clusters.iter().map(|c| c.tetra_ids.len()).max().unwrap_or(0);
             let unexplored_ratio = if tetra_count > 0 {
                 let explored: usize = snap.tetras.iter().filter(|t| t.mass > 1.05).count();
                 1.0 - (explored as f64 / tetra_count as f64)
@@ -1636,6 +1639,7 @@ impl SchedulerCenter {
                 energy_ratio,
                 unexplored_ratio,
                 redundancy_ratio,
+                largest_cluster_size,
             );
         }
 
@@ -1664,6 +1668,10 @@ impl SchedulerCenter {
             let pre_snap = self.build_snapshot();
             self.auto_dream();
             self.record_outcome(ActionType::Dream, &pre_snap, count);
+        }
+
+        if count.is_multiple_of(50) && count > 0 {
+            self.auto_generate_concepts(&snap);
         }
 
         if count.is_multiple_of(200) && count > 0 && should_evict {
@@ -2076,6 +2084,18 @@ impl SchedulerCenter {
             );
         }
     }
+
+    fn auto_generate_concepts(&self, snap: &TickSnapshot) {
+        let concepts = self.knowledge.generate_concepts(&self.space);
+        if !concepts.is_empty() {
+            tracing::info!(
+                "[Concepts] generated {} concept prototypes from {} clusters",
+                concepts.len(),
+                snap.clusters.len()
+            );
+        }
+    }
+
 
     fn reclassify_memories(&self, round: usize, snap: &TickSnapshot) {
         self.last_reclassify_tick.store(snap.tick, Ordering::SeqCst);

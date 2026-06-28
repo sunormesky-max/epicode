@@ -63,6 +63,8 @@ impl DriveState {
 
 pub struct DriveEngine {
     drives: HashMap<Drive, DriveState>,
+    cluster_count: usize,
+    largest_cluster_size: usize,
 }
 
 impl Default for DriveEngine {
@@ -78,7 +80,11 @@ impl DriveEngine {
         drives.insert(Drive::Coherence, DriveState::new(0.5, 0.4));
         drives.insert(Drive::Efficiency, DriveState::new(0.5, 0.25));
         drives.insert(Drive::Vitality, DriveState::new(0.5, 0.2));
-        Self { drives }
+        Self {
+            drives,
+            cluster_count: 0,
+            largest_cluster_size: 0,
+        }
     }
 
     pub fn observe(
@@ -89,6 +95,7 @@ impl DriveEngine {
         energy_ratio: f64,
         unexplored_ratio: f64,
         redundancy_ratio: f64,
+        largest_cluster_size: usize,
     ) {
         if let Some(cur) = self.drives.get_mut(&Drive::Curiosity) {
             cur.update(unexplored_ratio);
@@ -104,7 +111,9 @@ impl DriveEngine {
             vit.update(1.0 - energy_ratio);
         }
 
-        let _ = (tetra_count, cluster_count);
+        let _ = tetra_count;
+        self.cluster_count = cluster_count;
+        self.largest_cluster_size = largest_cluster_size;
     }
 
     pub fn reward(&mut self, drive: Drive, amount: f64) {
@@ -139,6 +148,8 @@ impl DriveEngine {
 
     pub fn should_fission(&self) -> bool {
         self.value(Drive::Coherence) > 0.6
+            && self.cluster_count > 0
+            && self.largest_cluster_size >= 6
     }
 
     pub fn should_dream(&self) -> bool {

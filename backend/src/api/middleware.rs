@@ -71,6 +71,7 @@ pub async fn security_layer(
                 SecurityResult::DeniedConstitution => StatusCode::FORBIDDEN,
                 SecurityResult::DeniedEnergy => StatusCode::SERVICE_UNAVAILABLE,
                 SecurityResult::Allowed => StatusCode::OK,
+                SecurityResult::DeniedQuota => StatusCode::FORBIDDEN,
             };
             (
                 status,

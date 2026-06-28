@@ -3,6 +3,7 @@ pub mod assembler;
 pub mod audit;
 pub mod auto_pipeline;
 pub mod bus;
+pub mod cluster;
 pub mod cache;
 pub mod classifier;
 pub mod cognitive;

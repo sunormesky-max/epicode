@@ -353,6 +353,58 @@ impl KnowledgeGraph {
         labeled
     }
 
+
+    pub fn generate_concepts(&self, space: &Space) -> Vec<ConceptPrototype> {
+        let clusters = space.find_clusters();
+        let mut new_concepts = Vec::new();
+        let tetras = space.all_tetrahedrons();
+        let tetra_map: std::collections::HashMap<u64, _> = tetras.iter().map(|t| (t.id, t)).collect();
+
+        for (idx, cluster) in clusters.iter().enumerate() {
+            if cluster.tetra_ids.len() < 3 {
+                continue;
+            }
+
+            let mut sum_x = 0.0;
+            let mut sum_y = 0.0;
+            let mut sum_z = 0.0;
+            let mut label_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+            for &id in &cluster.tetra_ids {
+                if let Some(t) = tetra_map.get(&id) {
+                    sum_x += t.core.x;
+                    sum_y += t.core.y;
+                    sum_z += t.core.z;
+                    for label in &t.data.labels {
+                        *label_counts.entry(label.clone()).or_insert(0) += 1;
+                    }
+                }
+            }
+
+            let count = cluster.tetra_ids.len() as f64;
+            let centroid = vec![sum_x / count, sum_y / count, sum_z / count];
+
+            let dominant_label = label_counts
+                .iter()
+                .max_by_key(|(_, c)| *c)
+                .map(|(l, _)| l.clone())
+                .unwrap_or_else(|| "general".to_string());
+
+            new_concepts.push(ConceptPrototype {
+                id: idx as u64 + 1,
+                centroid,
+                member_count: cluster.tetra_ids.len() as u64,
+                label: dominant_label,
+                member_ids: cluster.tetra_ids.clone(),
+            });
+        }
+
+        let mut stored = self.concepts.write();
+        *stored = new_concepts.clone();
+        self.dirty.store(true, std::sync::atomic::Ordering::Release);
+        new_concepts
+    }
+
     pub fn export_graph(&self, space: &Space) -> GraphExport {
         let relations = self.relations.read();
         let concepts = self.concepts.read();
@@ -799,5 +851,82 @@ memory_type: None,
             kg.add_relation(0, i, RelationType::SimilarTo, 0.5);
         }
         assert!(kg.relation_count() <= MAX_RELATIONS_PER_NODE);
+    }
+
+    #[test]
+    fn concept_generation_from_clusters() {
+        let space = Space::new();
+        let kg = KnowledgeGraph::new();
+
+        // Create 3 tetras at the same position (same cluster)
+        for i in 0..3 {
+            let core = Point3::new(0.0, 0.0, 0.0);
+            let pos = Tetrahedron::compute_vertices(core);
+            let t = Tetrahedron {
+                id: i,
+                vertex_ids: [i * 4, i * 4 + 1, i * 4 + 2, i * 4 + 3],
+                core,
+                data: crate::domain::tetra::MemoryPayload {
+                    content: format!("hello {}", i),
+                    content_hash: 0,
+                    labels: vec!["greeting".to_string()],
+                    timestamp: 0,
+                    aliases: vec![],
+                    embedding: vec![],
+                    importance: 1.0,
+                    enforced: false,
+                    rationale: None,
+                    access_count: 0,
+                    quality_score: 1.0,
+                    memory_type: None,
+                },
+                mass: 1.0,
+            };
+            space.add_tetrahedron(&t, &pos).unwrap();
+        }
+
+        let concepts = kg.generate_concepts(&space);
+        assert!(!concepts.is_empty(), "should generate at least 1 concept from cluster of 3");
+        assert_eq!(concepts[0].label, "greeting", "concept should have greeting label");
+        assert_eq!(concepts[0].member_count, 3, "concept should have 3 members");
+    }
+
+    #[test]
+    fn concept_generation_skips_small_clusters() {
+        let space = Space::new();
+        let kg = KnowledgeGraph::new();
+
+        for i in 0..2 {
+            let core = Point3::new(i as f64 * 2.0, 0.0, 0.0);
+            let pos = Tetrahedron::compute_vertices(core);
+            let t = Tetrahedron {
+                id: i,
+                vertex_ids: [i * 4, i * 4 + 1, i * 4 + 2, i * 4 + 3],
+                core,
+                data: crate::domain::tetra::MemoryPayload {
+                    content: format!("small {}", i),
+                    content_hash: 0,
+                    labels: vec!["tiny".to_string()],
+                    timestamp: 0,
+                    aliases: vec![],
+                    embedding: vec![],
+                    importance: 1.0,
+                    enforced: false,
+                    rationale: None,
+                    access_count: 0,
+                    quality_score: 1.0,
+                    memory_type: None,
+                },
+                mass: 1.0,
+            };
+            space.add_tetrahedron(&t, &pos).unwrap();
+        }
+
+        let concepts = kg.generate_concepts(&space);
+        assert_eq!(
+            concepts.len(),
+            0,
+            "cluster with 2 tetras should not generate a concept"
+        );
     }
 }
