@@ -49,6 +49,7 @@ pub struct SchedulerCenter {
     energy: Arc<EnergyCenter>,
     knowledge: Arc<KnowledgeGraph>,
     cognitive: Arc<CognitiveEngine>,
+    decision_center: Arc<super::decision_center::DecisionCenter>,
     gateway: Arc<super::gateway::GatewayCenter>,
     queue: ParkMutex<VecDeque<ScheduledTask>>,
     tx: EventSender,
@@ -86,11 +87,13 @@ impl SchedulerCenter {
         tick_interval_ms: u64,
         max_energy: f64,
     ) -> Self {
+        let decision_center = Arc::new(crate::engine::decision_center::DecisionCenter::new(cognitive.clone()));
         Self::with_security(
             space,
             energy,
             knowledge,
             cognitive,
+            decision_center,
             gateway,
             tx,
             _rx,
@@ -119,6 +122,7 @@ impl SchedulerCenter {
         energy: Arc<EnergyCenter>,
         knowledge: Arc<KnowledgeGraph>,
         cognitive: Arc<CognitiveEngine>,
+        decision_center: Arc<super::decision_center::DecisionCenter>,
         gateway: Arc<super::gateway::GatewayCenter>,
         tx: EventSender,
         _rx: broadcast::Receiver<EngineEvent>,
@@ -132,6 +136,7 @@ impl SchedulerCenter {
             energy,
             knowledge,
             cognitive,
+            decision_center,
             gateway,
             queue: ParkMutex::new(VecDeque::new()),
             tx,
@@ -1686,7 +1691,7 @@ impl SchedulerCenter {
         }
 
         // Phase 6: Think — LLM cognitive decision every 5 ticks (when enabled)
-        if count.is_multiple_of(5) && self.cognitive.enabled() {
+        if count.is_multiple_of(5) && self.decision_center.enabled() {
             if count.is_multiple_of(15) && count > 0 {
                 self.generate_aliases((count / 15) as usize, &snap);
             }
@@ -2326,7 +2331,7 @@ impl SchedulerCenter {
                         tokio::task::spawn_blocking(move || {
                             let thought = me.tick_and_maybe_think();
                             if let Some(ct) = thought {
-                                match me.cognitive.decide(&ct.state) {
+                                match me.decision_center.decide(&ct.state) {
                                     Ok(response) => me.apply_thought(ct.tick, response),
                                     Err(e) => tracing::warn!("[LLM] cognitive error: {}", e),
                                 }
@@ -2455,11 +2460,13 @@ memory_type: None,
         let security = Arc::new(SecurityGuard::from_env());
         let storage =
             Arc::new(StorageManager::new(std::path::Path::new("test_data_scheduler")).unwrap());
+        let decision_center = Arc::new(crate::engine::decision_center::DecisionCenter::new(cognitive.clone()));
         let scheduler = Arc::new(SchedulerCenter::with_security(
             space.clone(),
             energy.clone(),
             knowledge.clone(),
             cognitive.clone(),
+            decision_center,
             gateway.clone(),
             tx,
             rx,
