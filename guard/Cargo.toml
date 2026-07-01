@@ -16,7 +16,7 @@ serde_json = "1"
 # `curl -H "X-API-Key: <key>" ...` invocation exposed the secret to any local
 # user via `ps -ef`/`/proc/<pid>/cmdline`). `ureq` keeps the binary small
 # (no async runtime) and lets us construct the request body with serde_json.
-ureq = { version = "2", features = ["json"] }
+ureq = { version = "3", features = ["json"] }
 
 [profile.release]
 opt-level = "s"
