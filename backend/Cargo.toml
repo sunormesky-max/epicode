@@ -33,7 +33,7 @@ ort = { version = "2.0.0-rc.12", features = ["ndarray"] }
 tokenizers = "0.23"
 ndarray = "0.17"
 parking_lot = "0.12"
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 sha2 = "0.10"
 hmac = "0.12"
 base64 = "0.22"
