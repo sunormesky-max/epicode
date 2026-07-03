@@ -154,8 +154,7 @@ impl DecisionCenter {
                     resp.actions.truncate(self.config.max_actions_per_tick);
                 }
 
-                let actions_taken: Vec<String> =
-                    resp.actions.iter().map(|a| action_name(a)).collect();
+                let actions_taken: Vec<String> = resp.actions.iter().map(action_name).collect();
 
                 let outcome = DecisionOutcome {
                     tick,
