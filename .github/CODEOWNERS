@@ -1,0 +1,15 @@
+# Default owners for all files
+* @sunormesky-max
+
+# Security-sensitive areas
+backend/src/engine/security.rs @sunormesky-max
+backend/src/engine/key_rotation.rs @sunormesky-max
+backend/src/main.rs @sunormesky-max
+.github/workflows/ @sunormesky-max
+SECURITY.md @sunormesky-max
+
+# Public docs and release metadata
+README.md @sunormesky-max
+README.zh.md @sunormesky-max
+ROADMAP.md @sunormesky-max
+CHANGELOG.md @sunormesky-max
