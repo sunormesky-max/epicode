@@ -168,8 +168,11 @@ We welcome contributions!
 - [Discussions](https://github.com/sunormesky-max/epicode/discussions) — ask questions and share ideas.
 - [Issues](https://github.com/sunormesky-max/epicode/issues) — bug reports and feature requests.
 - [Contributing Guide](CONTRIBUTING.md) — development setup, commit style, PR process.
+- [Governance](.github/GOVERNANCE.md) — project decision model and maintainer responsibilities.
+- [Support](SUPPORT.md) — where to ask questions and get help.
 - [Security Policy](SECURITY.md) — report vulnerabilities privately.
 - [Roadmap](ROADMAP.md) — upcoming features and long-term plans.
+- [How to Cite](CITATION.cff) — citation metadata for papers and references.
 
 ## License
 

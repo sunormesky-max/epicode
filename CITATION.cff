@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use Epicode in research or production publications, please cite it."
+title: "Epicode: AI Memory Operating System"
+type: software
+authors:
+  - family-names: "sunormesky-max"
+    given-names: "sunorme"
+    alias: "sunormesky-max"
+repository-code: "https://github.com/sunormesky-max/epicode"
+url: "https://epicode.cn/"
+license: "MIT"
+keywords:
+  - ai-memory
+  - knowledge-graph
+  - mcp
+  - rust
+  - retrieval
+  - agent-memory
+abstract: "Epicode is an open-source spatial AI memory system with persistent memory, semantic retrieval, and knowledge graph integration."

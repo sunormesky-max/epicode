@@ -168,8 +168,11 @@ const results = await client.search("生产部署");
 - [Discussions](https://github.com/sunormesky-max/epicode/discussions) — 提问和交流想法。
 - [Issues](https://github.com/sunormesky-max/epicode/issues) — Bug 报告和功能请求。
 - [Contributing Guide](CONTRIBUTING.md) — 开发环境、提交规范、PR 流程（英文）。
+- [Governance](.github/GOVERNANCE.md) — 项目决策机制与维护者职责（英文）。
+- [Support](SUPPORT.md) — 提问渠道与支持方式。
 - [Security Policy](SECURITY.md) — 安全漏洞私下报告方式。
 - [Roadmap](ROADMAP.md) — 即将推出的功能和长期规划（英文）。
+- [How to Cite](CITATION.cff) — 学术引用与参考元数据。
 
 ## 许可证
 

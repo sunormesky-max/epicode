@@ -1,0 +1,7 @@
+Contact: mailto:security@epicode.cn
+Contact: https://github.com/sunormesky-max/epicode/security/advisories/new
+Expires: 2027-07-03T23:59:59Z
+Preferred-Languages: en, zh
+Policy: https://github.com/sunormesky-max/epicode/blob/main/SECURITY.md
+Hiring: https://github.com/sunormesky-max/epicode/discussions
+Canonical: https://epicode.cn/.well-known/security.txt
