@@ -409,8 +409,8 @@ mod tests {
             enforced: false,
             rationale: None,
             access_count: 0,
-quality_score: 1.0,
-memory_type: None,
+            quality_score: 1.0,
+            memory_type: None,
         };
         let young = LifecycleGovernor::effective_importance(&payload, 1);
         let old = LifecycleGovernor::effective_importance(&payload, 100);
@@ -460,8 +460,8 @@ memory_type: None,
             enforced: false,
             rationale: None,
             access_count: 0,
-quality_score: 1.0,
-memory_type: None,
+            quality_score: 1.0,
+            memory_type: None,
         };
         let frequent = MemoryPayload {
             content: "test".to_string(),

@@ -353,12 +353,12 @@ impl KnowledgeGraph {
         labeled
     }
 
-
     pub fn generate_concepts(&self, space: &Space) -> Vec<ConceptPrototype> {
         let clusters = space.find_clusters();
         let mut new_concepts = Vec::new();
         let tetras = space.all_tetrahedrons();
-        let tetra_map: std::collections::HashMap<u64, _> = tetras.iter().map(|t| (t.id, t)).collect();
+        let tetra_map: std::collections::HashMap<u64, _> =
+            tetras.iter().map(|t| (t.id, t)).collect();
 
         for (idx, cluster) in clusters.iter().enumerate() {
             if cluster.tetra_ids.len() < 3 {
@@ -368,7 +368,8 @@ impl KnowledgeGraph {
             let mut sum_x = 0.0;
             let mut sum_y = 0.0;
             let mut sum_z = 0.0;
-            let mut label_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            let mut label_counts: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
 
             for &id in &cluster.tetra_ids {
                 if let Some(t) = tetra_map.get(&id) {
@@ -779,8 +780,8 @@ mod tests {
                     enforced: false,
                     rationale: None,
                     access_count: 0,
-quality_score: 1.0,
-memory_type: None,
+                    quality_score: 1.0,
+                    memory_type: None,
                 },
                 mass: 1.0,
             };
@@ -886,8 +887,14 @@ memory_type: None,
         }
 
         let concepts = kg.generate_concepts(&space);
-        assert!(!concepts.is_empty(), "should generate at least 1 concept from cluster of 3");
-        assert_eq!(concepts[0].label, "greeting", "concept should have greeting label");
+        assert!(
+            !concepts.is_empty(),
+            "should generate at least 1 concept from cluster of 3"
+        );
+        assert_eq!(
+            concepts[0].label, "greeting",
+            "concept should have greeting label"
+        );
         assert_eq!(concepts[0].member_count, 3, "concept should have 3 members");
     }
 

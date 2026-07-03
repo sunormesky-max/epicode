@@ -41,7 +41,12 @@
         {
           "type": "yaml",
           "path": "deploy/helm/epicode/Chart.yaml",
-          "yaml": { "version": "$_VERSION_", "appVersion": "$_VERSION_" }
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "yaml",
+          "path": "deploy/helm/epicode/Chart.yaml",
+          "jsonpath": "$.appVersion"
         },
         {
           "type": "generic",
