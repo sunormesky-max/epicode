@@ -842,6 +842,14 @@ impl Engine {
         self.scheduler.api_stats()
     }
 
+    pub fn search_metrics(&self) -> self::gateway::SearchMetrics {
+        self.scheduler.api_search_metrics()
+    }
+
+    pub fn decision_stats(&self) -> serde_json::Value {
+        self.scheduler.api_decision_stats()
+    }
+
     pub fn get_relations(
         &self,
         id: crate::domain::tetra::TetraId,

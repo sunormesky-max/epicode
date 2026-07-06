@@ -501,6 +501,14 @@ impl SchedulerCenter {
         self.gateway.stats()
     }
 
+    pub fn api_search_metrics(&self) -> super::gateway::SearchMetrics {
+        self.gateway.search_metrics()
+    }
+
+    pub fn api_decision_stats(&self) -> serde_json::Value {
+        self.decision_center.stats()
+    }
+
     pub fn api_load_context(&self, limit: usize) -> Vec<(TetraId, f64, String, Vec<String>)> {
         let session = self
             .gateway

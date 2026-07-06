@@ -57,6 +57,8 @@ export default function DashboardOverview() {
   const labelPie = useMemo(() => (graphInfo?.top_labels || []).slice(0, 8).map(l => ({ name: l.label, value: l.count })), [graphInfo]);
   const ageBar = useMemo(() => graphInfo?.age_distribution ? graphInfo.age_distribution.labels.map((l, i) => ({ name: l, value: graphInfo.age_distribution.values[i] })) : [], [graphInfo]);
   const ageBarMax = useMemo(() => Math.max(...ageBar.map(x => x.value), 1), [ageBar]);
+  const callStats = stats?.call_stats;
+  const fmtPercent = (v: number | undefined) => `${((v ?? 0) * 100).toFixed(1)}%`;
 
   if (loading) {
     return (
@@ -221,6 +223,71 @@ export default function DashboardOverview() {
           </div>
         </div>
       )}
+
+      {/* Call Detail Stats */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+        <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 20 }}>
+          <h3 style={{ color: '#f0f0f5', fontSize: 14, fontWeight: 600, marginBottom: 16 }}>调用详情统计</h3>
+          {callStats ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+              {[
+                { label: '总请求', value: callStats.total_requests.toLocaleString(), color: '#a855f7' },
+                { label: '成功请求', value: callStats.success_requests.toLocaleString(), color: '#34d399' },
+                { label: '拒绝率', value: fmtPercent(callStats.denied_rate), color: '#f87171' },
+                { label: '检索命中率', value: fmtPercent(callStats.search_hit_ratio), color: '#60a5fa' },
+                { label: '决策总数', value: callStats.decision_total.toLocaleString(), color: '#f59e0b' },
+                { label: '平均决策延迟', value: `${callStats.decision_avg_latency_ms} ms`, color: '#d946ef' },
+                { label: '缓存命中率', value: fmtPercent(callStats.cache_hit_ratio), color: '#22c55e' },
+                { label: 'L1 / L2 命中率', value: `${fmtPercent(callStats.cache_l1_hit_ratio)} / ${fmtPercent(callStats.cache_l2_hit_ratio)}`, color: '#38bdf8' },
+              ].map((item) => (
+                <div key={item.label} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)', borderRadius: 10, padding: '10px 12px' }}>
+                  <div style={{ color: '#6b7280', fontSize: 11, marginBottom: 4 }}>{item.label}</div>
+                  <div style={{ color: item.color, fontSize: 15, fontWeight: 600 }}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ color: '#6b7280', fontSize: 13 }}>暂无调用统计数据</p>
+          )}
+        </div>
+
+        <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 20 }}>
+          <h3 style={{ color: '#f0f0f5', fontSize: 14, fontWeight: 600, marginBottom: 16 }}>检索热点与未命中</h3>
+          {callStats ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <div style={{ color: '#9ca3af', fontSize: 12, marginBottom: 8 }}>热点标签</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {(callStats.top_labels || []).slice(0, 8).map((item) => (
+                    <span key={item.label} style={{ background: 'rgba(168,85,247,0.12)', color: '#c084fc', border: '1px solid rgba(168,85,247,0.25)', fontSize: 11, padding: '3px 8px', borderRadius: 6 }}>
+                      {item.label} ({item.count})
+                    </span>
+                  ))}
+                  {(!callStats.top_labels || callStats.top_labels.length === 0) && (
+                    <span style={{ color: '#6b7280', fontSize: 12 }}>暂无热点标签</span>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div style={{ color: '#9ca3af', fontSize: 12, marginBottom: 8 }}>高频未命中查询</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {(callStats.search_miss_queries || []).slice(0, 5).map((q, idx) => (
+                    <div key={`${idx}-${q}`} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)', borderRadius: 8, padding: '6px 10px', color: '#f0f0f5', fontSize: 12, fontFamily: 'monospace' }}>
+                      {q}
+                    </div>
+                  ))}
+                  {(!callStats.search_miss_queries || callStats.search_miss_queries.length === 0) && (
+                    <span style={{ color: '#6b7280', fontSize: 12 }}>暂无未命中查询</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p style={{ color: '#6b7280', fontSize: 13 }}>暂无检索行为数据</p>
+          )}
+        </div>
+      </div>
 
       {/* Recent Memories */}
       <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 20 }}>
