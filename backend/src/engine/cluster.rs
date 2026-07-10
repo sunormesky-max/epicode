@@ -232,7 +232,8 @@ impl GossipState {
             .iter()
             .filter(|(id, m)| {
                 **id != self.local_id
-                    && now.saturating_sub(m.last_heartbeat) >= self.heartbeat_timeout.as_millis() as u64
+                    && now.saturating_sub(m.last_heartbeat)
+                        >= self.heartbeat_timeout.as_millis() as u64
             })
             .map(|(id, _)| *id)
             .collect();
@@ -263,7 +264,10 @@ pub struct ClusterHandle {
 }
 
 impl DistributedBus {
-    pub fn new(local_tx: crate::engine::bus::EventSender, cluster: Option<Arc<ClusterHandle>>) -> Self {
+    pub fn new(
+        local_tx: crate::engine::bus::EventSender,
+        cluster: Option<Arc<ClusterHandle>>,
+    ) -> Self {
         Self { local_tx, cluster }
     }
 

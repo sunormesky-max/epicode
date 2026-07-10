@@ -208,7 +208,9 @@ mod tests {
     #[test]
     fn register_and_list() {
         let reg = PluginRegistry::new();
-        let p = Arc::new(TestPlugin { id: "test.a".to_string() });
+        let p = Arc::new(TestPlugin {
+            id: "test.a".to_string(),
+        });
         assert!(reg.register(p).is_ok());
         assert_eq!(reg.count(), 1);
 
@@ -220,8 +222,12 @@ mod tests {
     #[test]
     fn duplicate_registration_fails() {
         let reg = PluginRegistry::new();
-        let p1 = Arc::new(TestPlugin { id: "dup".to_string() });
-        let p2 = Arc::new(TestPlugin { id: "dup".to_string() });
+        let p1 = Arc::new(TestPlugin {
+            id: "dup".to_string(),
+        });
+        let p2 = Arc::new(TestPlugin {
+            id: "dup".to_string(),
+        });
         assert!(reg.register(p1).is_ok());
         assert!(reg.register(p2).is_err());
     }
@@ -229,7 +235,9 @@ mod tests {
     #[test]
     fn unregister_removes_plugin() {
         let reg = PluginRegistry::new();
-        let p = Arc::new(TestPlugin { id: "remove.me".to_string() });
+        let p = Arc::new(TestPlugin {
+            id: "remove.me".to_string(),
+        });
         reg.register(p).unwrap();
         assert!(reg.unregister("remove.me"));
         assert!(!reg.has("remove.me"));
@@ -239,7 +247,9 @@ mod tests {
     #[test]
     fn execute_tool_across_plugins() {
         let reg = PluginRegistry::new();
-        let p = Arc::new(TestPlugin { id: "test.exec".to_string() });
+        let p = Arc::new(TestPlugin {
+            id: "test.exec".to_string(),
+        });
         reg.register(p).unwrap();
 
         let result = reg.execute_tool("test_echo", &serde_json::json!({"message": "hello"}));
@@ -249,7 +259,9 @@ mod tests {
     #[test]
     fn tool_definitions_aggregated() {
         let reg = PluginRegistry::new();
-        let p = Arc::new(TestPlugin { id: "test.defs".to_string() });
+        let p = Arc::new(TestPlugin {
+            id: "test.defs".to_string(),
+        });
         reg.register(p).unwrap();
 
         let defs = reg.all_tool_definitions();

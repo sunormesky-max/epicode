@@ -203,15 +203,12 @@ impl DecisionCenter {
     /// Validate a single action against current state constraints.
     fn validate_action(&self, state: &SystemState, action: &SchedulerAction) -> bool {
         match action {
-            SchedulerAction::Pulse { origin, .. } => {
-                state.memories.iter().any(|m| m.id == *origin)
-            }
-            SchedulerAction::Fission { cluster_index } => {
-                *cluster_index < state.total_clusters
-            }
-            SchedulerAction::Fuse { cluster_a, cluster_b } => {
-                *cluster_a < state.total_clusters && *cluster_b < state.total_clusters
-            }
+            SchedulerAction::Pulse { origin, .. } => state.memories.iter().any(|m| m.id == *origin),
+            SchedulerAction::Fission { cluster_index } => *cluster_index < state.total_clusters,
+            SchedulerAction::Fuse {
+                cluster_a,
+                cluster_b,
+            } => *cluster_a < state.total_clusters && *cluster_b < state.total_clusters,
             SchedulerAction::Link { a, b, .. } => {
                 let a_ok = state.memories.iter().any(|m| m.id == *a);
                 let b_ok = state.memories.iter().any(|m| m.id == *b);
@@ -219,15 +216,15 @@ impl DecisionCenter {
             }
             SchedulerAction::Consolidate { ids, keep, .. } => {
                 let id_set: std::collections::HashSet<u64> = ids.iter().copied().collect();
-                let all_exist = ids.iter().all(|id| state.memories.iter().any(|m| m.id == *id));
+                let all_exist = ids
+                    .iter()
+                    .all(|id| state.memories.iter().any(|m| m.id == *id));
                 all_exist && id_set.len() > 1 && id_set.contains(keep)
             }
-            SchedulerAction::MarkJunk { ids, .. } => {
-                ids.iter().all(|id| state.memories.iter().any(|m| m.id == *id))
-            }
-            SchedulerAction::Relabel { id, .. } => {
-                state.memories.iter().any(|m| m.id == *id)
-            }
+            SchedulerAction::MarkJunk { ids, .. } => ids
+                .iter()
+                .all(|id| state.memories.iter().any(|m| m.id == *id)),
+            SchedulerAction::Relabel { id, .. } => state.memories.iter().any(|m| m.id == *id),
             SchedulerAction::Reflect { .. } => true,
             SchedulerAction::Dream => true,
             SchedulerAction::UseTool { .. } => true,

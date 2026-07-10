@@ -87,7 +87,9 @@ impl SchedulerCenter {
         tick_interval_ms: u64,
         max_energy: f64,
     ) -> Self {
-        let decision_center = Arc::new(crate::engine::decision_center::DecisionCenter::new(cognitive.clone()));
+        let decision_center = Arc::new(crate::engine::decision_center::DecisionCenter::new(
+            cognitive.clone(),
+        ));
         Self::with_security(
             space,
             energy,
@@ -1618,7 +1620,12 @@ impl SchedulerCenter {
             };
             let energy_ratio = snap.energy / self.max_energy.max(1.0);
             let tetra_count = snap.tetras.len();
-            let largest_cluster_size = snap.clusters.iter().map(|c| c.tetra_ids.len()).max().unwrap_or(0);
+            let largest_cluster_size = snap
+                .clusters
+                .iter()
+                .map(|c| c.tetra_ids.len())
+                .max()
+                .unwrap_or(0);
             let unexplored_ratio = if tetra_count > 0 {
                 let explored: usize = snap.tetras.iter().filter(|t| t.mass > 1.05).count();
                 1.0 - (explored as f64 / tetra_count as f64)
@@ -2104,7 +2111,6 @@ impl SchedulerCenter {
         }
     }
 
-
     fn reclassify_memories(&self, round: usize, snap: &TickSnapshot) {
         self.last_reclassify_tick.store(snap.tick, Ordering::SeqCst);
         let ctx = super::cognitive_hooks::CognitiveHooksCtx {
@@ -2450,8 +2456,8 @@ mod tests {
             enforced: false,
             rationale: None,
             access_count: 0,
-quality_score: 1.0,
-memory_type: None,
+            quality_score: 1.0,
+            memory_type: None,
         };
         let tetra = Tetrahedron {
             id: 0,
@@ -2488,7 +2494,9 @@ memory_type: None,
         let security = Arc::new(SecurityGuard::from_env());
         let storage =
             Arc::new(StorageManager::new(std::path::Path::new("test_data_scheduler")).unwrap());
-        let decision_center = Arc::new(crate::engine::decision_center::DecisionCenter::new(cognitive.clone()));
+        let decision_center = Arc::new(crate::engine::decision_center::DecisionCenter::new(
+            cognitive.clone(),
+        ));
         let scheduler = Arc::new(SchedulerCenter::with_security(
             space.clone(),
             energy.clone(),

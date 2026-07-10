@@ -186,13 +186,15 @@ impl SecurityGuard {
         }
     }
 
-
-
     pub fn extract_tenant_id(api_key: &str) -> String {
         api_key.split(':').next().unwrap_or("default").to_string()
     }
 
-    pub fn check_tenant_quota(&self, tenant_id: &str, current_count: usize) -> Result<(), SecurityResult> {
+    pub fn check_tenant_quota(
+        &self,
+        tenant_id: &str,
+        current_count: usize,
+    ) -> Result<(), SecurityResult> {
         if let Some(&quota) = self.config.tenant_quotas.get(tenant_id) {
             if current_count >= quota {
                 self.denied_quota_count.fetch_add(1, Ordering::SeqCst);

@@ -1531,7 +1531,8 @@ impl McpHandler {
             for ext in extractions {
                 let mut duplicate = false;
                 for other in &kept {
-                    let sim = super::intake::MemoryIntake::text_similarity(&ext.content, &other.content);
+                    let sim =
+                        super::intake::MemoryIntake::text_similarity(&ext.content, &other.content);
                     if sim > 0.8 {
                         let priority = |c: &str| match c {
                             "decision" => 5,

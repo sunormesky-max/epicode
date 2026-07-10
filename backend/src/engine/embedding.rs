@@ -12,7 +12,9 @@ pub enum EmbeddingProvider {
 
 impl EmbeddingProvider {
     pub fn detect(api_url: &str, model: &str) -> Self {
-        let provider_env = std::env::var("EMBEDDING_PROVIDER").unwrap_or_default().to_lowercase();
+        let provider_env = std::env::var("EMBEDDING_PROVIDER")
+            .unwrap_or_default()
+            .to_lowercase();
         match provider_env.as_str() {
             "openai" => return EmbeddingProvider::OpenAI,
             "ollama" => return EmbeddingProvider::Ollama,
