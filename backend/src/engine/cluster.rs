@@ -281,7 +281,7 @@ impl DistributedBus {
     }
 
     pub fn is_clustered(&self) -> bool {
-        self.cluster.as_ref().map_or(false, |c| c.config.enabled)
+        self.cluster.as_ref().is_some_and(|c| c.config.enabled)
     }
 }
 

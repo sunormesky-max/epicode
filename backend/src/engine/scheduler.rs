@@ -26,6 +26,7 @@ struct CognitiveThought {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum ScheduledTask {
     CreateTetra {
         core: Point3,
