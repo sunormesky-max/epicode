@@ -1149,6 +1149,13 @@ async fn digest_content(
 #[derive(Deserialize)]
 struct RememberRequest {
     content: String,
+    /// Unix timestamp (seconds) when the memory becomes queryable.
+    valid_from: Option<i64>,
+    /// Unix timestamp (seconds) after which the memory is excluded from retrieval.
+    valid_until: Option<i64>,
+    /// Convenience: TTL in seconds from now (sets valid_until = now + ttl_seconds).
+    /// Ignored when valid_until is already set.
+    ttl_seconds: Option<i64>,
 }
 
 async fn remember(
@@ -1170,7 +1177,14 @@ async fn remember(
     if let Err(resp) = require_identity(&engine) {
         return resp;
     }
-    match engine.scheduler.api_remember(&clean_content) {
+    let valid_until = req.valid_until.or_else(|| {
+        req.ttl_seconds
+            .map(|ttl| chrono::Utc::now().timestamp() + ttl)
+    });
+    match engine
+        .scheduler
+        .api_remember_with_validity(&clean_content, req.valid_from, valid_until)
+    {
         Ok((id, labels)) => (
             StatusCode::OK,
             Json(serde_json::json!({"success": true, "id": id, "labels": labels})),

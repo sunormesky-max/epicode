@@ -325,6 +325,8 @@ mod tests {
                 access_count: 0,
                 quality_score: 1.0,
                 memory_type: None,
+                valid_from: None,
+                valid_until: None,
             },
         )
     }

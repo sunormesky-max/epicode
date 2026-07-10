@@ -342,6 +342,16 @@ impl SchedulerCenter {
     }
 
     pub fn api_remember(&self, content: &str) -> Result<(TetraId, Vec<String>), String> {
+        self.api_remember_with_validity(content, None, None)
+    }
+
+    /// Remember a memory with optional temporal validity window.
+    pub fn api_remember_with_validity(
+        &self,
+        content: &str,
+        valid_from: Option<i64>,
+        valid_until: Option<i64>,
+    ) -> Result<(TetraId, Vec<String>), String> {
         self.security
             .validate_content(content)
             .map_err(|_| "content validation failed".to_string())?;
@@ -352,7 +362,13 @@ impl SchedulerCenter {
         } else {
             vec!["general".to_string()]
         };
-        let id = self.gateway.create_memory(content, labels.clone())?;
+        let id = self.gateway.create_memory_with_validity(
+            content,
+            labels.clone(),
+            0,
+            valid_from,
+            valid_until,
+        )?;
         self.persist_tetra(id);
         Ok((id, labels))
     }
@@ -1166,6 +1182,8 @@ impl SchedulerCenter {
                     access_count: 0,
                     quality_score: 1.0,
                     memory_type: Some("bridge".to_string()),
+                    valid_from: None,
+                    valid_until: None,
                 };
                 let tetra = Tetrahedron {
                     id: 0,
@@ -1282,6 +1300,8 @@ impl SchedulerCenter {
                         access_count: t.data.access_count,
                         quality_score: t.data.quality_score,
                         memory_type: t.data.memory_type.clone(),
+                        valid_from: t.data.valid_from,
+                        valid_until: t.data.valid_until,
                     };
                     if let Err(e) = self.space.update_payload(*keep, updated.clone()) {
                         tracing::warn!(
@@ -1332,6 +1352,8 @@ impl SchedulerCenter {
                             access_count: t.data.access_count,
                             quality_score: t.data.quality_score,
                             memory_type: t.data.memory_type.clone(),
+                            valid_from: t.data.valid_from,
+                            valid_until: t.data.valid_until,
                         };
                         if let Err(e) = self.space.update_payload(id, updated) {
                             tracing::warn!(
@@ -1395,6 +1417,8 @@ impl SchedulerCenter {
                         access_count: t.data.access_count,
                         quality_score: t.data.quality_score,
                         memory_type: t.data.memory_type.clone(),
+                        valid_from: t.data.valid_from,
+                        valid_until: t.data.valid_until,
                     };
                     if let Err(e) = self.space.update_payload(*id, updated) {
                         tracing::warn!(
@@ -2458,6 +2482,8 @@ mod tests {
             access_count: 0,
             quality_score: 1.0,
             memory_type: None,
+            valid_from: None,
+            valid_until: None,
         };
         let tetra = Tetrahedron {
             id: 0,
