@@ -350,6 +350,8 @@ mod tests {
             access_count,
             quality_score: 1.0,
             memory_type: None,
+            valid_from: None,
+            valid_until: None,
         };
         let t = Tetrahedron {
             id: 0,
@@ -409,8 +411,10 @@ mod tests {
             enforced: false,
             rationale: None,
             access_count: 0,
-quality_score: 1.0,
-memory_type: None,
+            quality_score: 1.0,
+            memory_type: None,
+            valid_from: None,
+            valid_until: None,
         };
         let young = LifecycleGovernor::effective_importance(&payload, 1);
         let old = LifecycleGovernor::effective_importance(&payload, 100);
@@ -460,8 +464,10 @@ memory_type: None,
             enforced: false,
             rationale: None,
             access_count: 0,
-quality_score: 1.0,
-memory_type: None,
+            quality_score: 1.0,
+            memory_type: None,
+            valid_from: None,
+            valid_until: None,
         };
         let frequent = MemoryPayload {
             content: "test".to_string(),
@@ -476,6 +482,8 @@ memory_type: None,
             access_count: 10,
             quality_score: 1.0,
             memory_type: None,
+            valid_from: None,
+            valid_until: None,
         };
         let imp_no = LifecycleGovernor::effective_importance(&no_access, 10);
         let imp_freq = LifecycleGovernor::effective_importance(&frequent, 10);

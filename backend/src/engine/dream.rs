@@ -55,10 +55,13 @@ impl DreamEngine {
                 new_importance = new_importance.min(0.3);
             }
 
-            let quality_score = new_importance * (1.0 + (access + 1.0).ln()) / (1.0 + age_days / 7.0);
+            let quality_score =
+                new_importance * (1.0 + (access + 1.0).ln()) / (1.0 + age_days / 7.0);
             new_importance = new_importance.clamp(0.1, 3.0);
             let q_clamped = quality_score.clamp(0.01, 10.0);
-            if (new_importance - t.data.importance).abs() > 0.01 || (q_clamped - t.data.quality_score).abs() > 0.01 {
+            if (new_importance - t.data.importance).abs() > 0.01
+                || (q_clamped - t.data.quality_score).abs() > 0.01
+            {
                 if let Some(mut tetra) = space.get_tetrahedron(t.id) {
                     tetra.data.importance = new_importance;
                     tetra.data.quality_score = q_clamped;
@@ -134,7 +137,13 @@ impl DreamEngine {
             let mut candidates: Vec<(u64, f64, bool)> = tetras
                 .iter()
                 .filter(|t| !t.data.enforced)
-                .map(|t| (t.id, t.data.quality_score, t.data.labels.iter().any(|l| l.starts_with("meta-"))))
+                .map(|t| {
+                    (
+                        t.id,
+                        t.data.quality_score,
+                        t.data.labels.iter().any(|l| l.starts_with("meta-")),
+                    )
+                })
                 .collect();
             // Sort by quality_score ascending (lowest first), evict non-meta first
             candidates.sort_by(|a, b| {
@@ -391,8 +400,10 @@ mod tests {
                     enforced: false,
                     rationale: None,
                     access_count: 0,
-quality_score: 1.0,
-memory_type: None,
+                    quality_score: 1.0,
+                    memory_type: None,
+                    valid_from: None,
+                    valid_until: None,
                 },
                 mass: 1.0,
             };
@@ -434,8 +445,10 @@ memory_type: None,
                     enforced: false,
                     rationale: None,
                     access_count: 0,
-quality_score: 1.0,
-memory_type: None,
+                    quality_score: 1.0,
+                    memory_type: None,
+                    valid_from: None,
+                    valid_until: None,
                 },
                 mass: 1.0,
             };

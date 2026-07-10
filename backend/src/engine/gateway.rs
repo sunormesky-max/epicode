@@ -125,6 +125,21 @@ impl GatewayCenter {
         labels: Vec<String>,
         timestamp: i64,
     ) -> Result<TetraId, String> {
+        self.create_memory_with_validity(content, labels, timestamp, None, None)
+    }
+
+    /// Create a memory with optional temporal validity window.
+    ///
+    /// - `valid_from`: Unix seconds when the memory becomes queryable (`None` = now).
+    /// - `valid_until`: Unix seconds when the memory expires (`None` = never).
+    pub fn create_memory_with_validity(
+        &self,
+        content: &str,
+        labels: Vec<String>,
+        timestamp: i64,
+        valid_from: Option<i64>,
+        valid_until: Option<i64>,
+    ) -> Result<TetraId, String> {
         if !self.energy.consume(CREATE_COST) {
             return Err("insufficient energy".into());
         }
@@ -178,6 +193,8 @@ impl GatewayCenter {
             access_count: 0,
             quality_score: 1.0,
             memory_type: None,
+            valid_from,
+            valid_until,
         };
         let tetra = crate::domain::tetra::Tetrahedron {
             id: 0,

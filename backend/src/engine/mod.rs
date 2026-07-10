@@ -3,14 +3,14 @@ pub mod assembler;
 pub mod audit;
 pub mod auto_pipeline;
 pub mod bus;
-pub mod cluster;
 pub mod cache;
 pub mod classifier;
+pub mod cluster;
 pub mod cognitive;
-pub mod decision_center;
 pub mod cognitive_hooks;
 pub mod constitution;
 pub mod crypto;
+pub mod decision_center;
 pub mod digestion;
 pub mod dream;
 pub mod drive;
@@ -50,8 +50,8 @@ use crate::domain::space::Space;
 
 use self::audit::AuditLogger;
 use self::bus::EventBus;
-use self::cluster::{ClusterConfig, ClusterHandle, DistributedBus};
 use self::classifier::CategoryClassifier;
+use self::cluster::{ClusterConfig, ClusterHandle, DistributedBus};
 use self::cognitive::CognitiveEngine;
 use self::embedding::EmbeddingService;
 use self::energy::EnergyCenter;
@@ -166,14 +166,20 @@ impl Engine {
                 cluster_config.heartbeat_interval_ms,
                 cluster_config.heartbeat_timeout_ms,
             ));
-            let ring = parking_lot::RwLock::new(self::cluster::HashRing::new(cluster_config.vnode_count));
+            let ring =
+                parking_lot::RwLock::new(self::cluster::HashRing::new(cluster_config.vnode_count));
             let handle = Arc::new(ClusterHandle {
                 ring,
                 gossip,
                 config: cluster_config.clone(),
             });
             let dbus = DistributedBus::new(bus.sender(), Some(handle.clone()));
-            tracing::info!("[{}] cluster mode enabled: node_id={}, listen={}", uid, node_id, cluster_config.listen_addr);
+            tracing::info!(
+                "[{}] cluster mode enabled: node_id={}, listen={}",
+                uid,
+                node_id,
+                cluster_config.listen_addr
+            );
             (Some(handle), Some(dbus))
         } else {
             tracing::debug!("[{}] cluster mode disabled", uid);
@@ -354,7 +360,9 @@ impl Engine {
             vector,
         ));
 
-        let decision_center = Arc::new(crate::engine::decision_center::DecisionCenter::new(cognitive.clone()));
+        let decision_center = Arc::new(crate::engine::decision_center::DecisionCenter::new(
+            cognitive.clone(),
+        ));
         let scheduler = Arc::new(SchedulerCenter::with_security(
             space.clone(),
             energy.clone(),
@@ -840,6 +848,14 @@ impl Engine {
 
     pub fn stats(&self) -> self::gateway::SpaceStats {
         self.scheduler.api_stats()
+    }
+
+    pub fn search_metrics(&self) -> self::gateway::SearchMetrics {
+        self.scheduler.api_search_metrics()
+    }
+
+    pub fn decision_stats(&self) -> serde_json::Value {
+        self.scheduler.api_decision_stats()
     }
 
     pub fn get_relations(
