@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use axum::body::Body;
+use axum::extract::ws::WebSocket;
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::http::{header::CONTENT_TYPE, HeaderValue};
@@ -9,15 +10,14 @@ use axum::response::{
     Response,
 };
 use axum::Json;
-use axum::extract::ws::WebSocket;
 use futures::stream::Stream;
 use futures::SinkExt;
 use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt as _;
 
 use crate::domain::permission::{Permission, ResourceType, UserRole};
-use crate::engine::Engine;
 use crate::engine::bus::EngineEvent;
+use crate::engine::Engine;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -940,7 +940,6 @@ pub async fn restore_key(
     }
 }
 
-
 // ── WebSocket ──
 
 #[derive(Debug, Serialize)]
@@ -952,18 +951,12 @@ pub struct WsMessage {
 
 fn engine_event_to_ws_message(event: &EngineEvent) -> Option<WsMessage> {
     let (ty, data) = match event {
-        EngineEvent::TetrahedronCreated(id) => (
-            "memory_created",
-            serde_json::json!({"id": id}),
-        ),
+        EngineEvent::TetrahedronCreated(id) => ("memory_created", serde_json::json!({"id": id})),
         EngineEvent::TetrahedronMoved(id, point) => (
             "memory_updated",
             serde_json::json!({"id": id, "position": {"x": point.x, "y": point.y, "z": point.z}}),
         ),
-        EngineEvent::TetrahedronRemoved(id) => (
-            "memory_deleted",
-            serde_json::json!({"id": id}),
-        ),
+        EngineEvent::TetrahedronRemoved(id) => ("memory_deleted", serde_json::json!({"id": id})),
         EngineEvent::ClusterSplit { from, groups } => (
             "cluster_changed",
             serde_json::json!({"from": from, "groups": groups}),
@@ -1003,10 +996,7 @@ async fn send_stats_snapshot(engine: &Engine, socket: &mut WebSocket) {
         .await;
 }
 
-pub async fn ws_handler(
-    State(engine): State<Arc<Engine>>,
-    ws: WebSocketUpgrade,
-) -> Response {
+pub async fn ws_handler(State(engine): State<Arc<Engine>>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |mut socket| async move {
         send_stats_snapshot(&engine, &mut socket).await;
 
@@ -1048,12 +1038,11 @@ pub async fn ws_handler(
     })
 }
 
-
 #[cfg(test)]
 mod ws_tests {
     use super::*;
-    use crate::engine::bus::EngineEvent;
     use crate::domain::vertex::Point3;
+    use crate::engine::bus::EngineEvent;
 
     #[test]
     fn engine_event_to_ws_message_memory_created() {
@@ -1065,10 +1054,20 @@ mod ws_tests {
 
     #[test]
     fn engine_event_to_ws_message_memory_updated() {
-        let event = EngineEvent::TetrahedronMoved(7, Point3 { x: 1.0, y: 2.0, z: 3.0 });
+        let event = EngineEvent::TetrahedronMoved(
+            7,
+            Point3 {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+        );
         let msg = engine_event_to_ws_message(&event).unwrap();
         assert_eq!(msg.r#type, "memory_updated");
-        assert_eq!(msg.data, serde_json::json!({"id": 7, "position": {"x": 1.0, "y": 2.0, "z": 3.0}}));
+        assert_eq!(
+            msg.data,
+            serde_json::json!({"id": 7, "position": {"x": 1.0, "y": 2.0, "z": 3.0}})
+        );
     }
 
     #[test]
@@ -1081,18 +1080,31 @@ mod ws_tests {
 
     #[test]
     fn engine_event_to_ws_message_cluster_split() {
-        let event = EngineEvent::ClusterSplit { from: 1, groups: vec![vec![1, 2], vec![3, 4]] };
+        let event = EngineEvent::ClusterSplit {
+            from: 1,
+            groups: vec![vec![1, 2], vec![3, 4]],
+        };
         let msg = engine_event_to_ws_message(&event).unwrap();
         assert_eq!(msg.r#type, "cluster_changed");
-        assert_eq!(msg.data, serde_json::json!({"from": 1, "groups": [[1, 2], [3, 4]]}));
+        assert_eq!(
+            msg.data,
+            serde_json::json!({"from": 1, "groups": [[1, 2], [3, 4]]})
+        );
     }
 
     #[test]
     fn engine_event_to_ws_message_cluster_merged() {
-        let event = EngineEvent::ClusterMerged { a: 1, b: 2, result: 3 };
+        let event = EngineEvent::ClusterMerged {
+            a: 1,
+            b: 2,
+            result: 3,
+        };
         let msg = engine_event_to_ws_message(&event).unwrap();
         assert_eq!(msg.r#type, "cluster_changed");
-        assert_eq!(msg.data, serde_json::json!({"merged": {"a": 1, "b": 2, "result": 3}}));
+        assert_eq!(
+            msg.data,
+            serde_json::json!({"merged": {"a": 1, "b": 2, "result": 3}})
+        );
     }
 
     #[test]
@@ -1106,7 +1118,9 @@ mod ws_tests {
     #[test]
     fn engine_event_to_ws_message_ignored_events() {
         assert!(engine_event_to_ws_message(&EngineEvent::DecisionTick).is_none());
-        assert!(engine_event_to_ws_message(&EngineEvent::PulseSent { origin: 1, ttl: 3 }).is_none());
+        assert!(
+            engine_event_to_ws_message(&EngineEvent::PulseSent { origin: 1, ttl: 3 }).is_none()
+        );
         assert!(engine_event_to_ws_message(&EngineEvent::AutoPulse { count: 5 }).is_none());
         assert!(engine_event_to_ws_message(&EngineEvent::Shutdown).is_none());
     }

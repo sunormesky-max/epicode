@@ -1149,6 +1149,13 @@ async fn digest_content(
 #[derive(Deserialize)]
 struct RememberRequest {
     content: String,
+    /// Unix timestamp (seconds) when the memory becomes queryable.
+    valid_from: Option<i64>,
+    /// Unix timestamp (seconds) after which the memory is excluded from retrieval.
+    valid_until: Option<i64>,
+    /// Convenience: TTL in seconds from now (sets valid_until = now + ttl_seconds).
+    /// Ignored when valid_until is already set.
+    ttl_seconds: Option<i64>,
 }
 
 async fn remember(
@@ -1170,7 +1177,14 @@ async fn remember(
     if let Err(resp) = require_identity(&engine) {
         return resp;
     }
-    match engine.scheduler.api_remember(&clean_content) {
+    let valid_until = req.valid_until.or_else(|| {
+        req.ttl_seconds
+            .map(|ttl| chrono::Utc::now().timestamp() + ttl)
+    });
+    match engine
+        .scheduler
+        .api_remember_with_validity(&clean_content, req.valid_from, valid_until)
+    {
         Ok((id, labels)) => (
             StatusCode::OK,
             Json(serde_json::json!({"success": true, "id": id, "labels": labels})),
@@ -1583,6 +1597,19 @@ async fn user_stats(
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
     };
     let s = engine.scheduler.api_stats();
+    let search_metrics = engine.search_metrics();
+    let decision_stats = engine.decision_stats();
+    let guard_stats = engine.guard_stats();
+    let (
+        l1_hits,
+        l1_misses,
+        l2_hits,
+        l2_misses,
+        _evictions,
+        cache_hit_ratio,
+        l1_hit_ratio,
+        l2_hit_ratio,
+    ) = engine.cache_stats_snapshot();
     let info = st.user_mgr.user_stats(&user.user_id);
     let is_main = info.as_ref().map(|i| i.parent.is_none()).unwrap_or(false);
     let has_subs = info
@@ -1617,6 +1644,39 @@ async fn user_stats(
     } else {
         own_tetra_count
     };
+    let total_requests = guard_stats.total_requests;
+    let denied_requests = guard_stats.total_denied;
+    let success_requests = total_requests.saturating_sub(denied_requests);
+    let denied_rate = if total_requests > 0 {
+        denied_requests as f64 / total_requests as f64
+    } else {
+        0.0
+    };
+    let search_total = search_metrics.total;
+    let search_hits = search_metrics.hits;
+    let search_hit_ratio = if search_total > 0 {
+        search_hits as f64 / search_total as f64
+    } else {
+        0.0
+    };
+    let decision_total = decision_stats
+        .get("total_decisions")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let decision_avg_latency_ms = decision_stats
+        .get("avg_latency_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let top_labels: Vec<serde_json::Value> = search_metrics
+        .top_labels
+        .iter()
+        .map(|(label, count)| serde_json::json!({"label": label, "count": count}))
+        .collect();
+    let hot_memories: Vec<serde_json::Value> = search_metrics
+        .hot_memories
+        .iter()
+        .map(|(id, access_count)| serde_json::json!({"id": id, "access_count": access_count}))
+        .collect();
     (
         StatusCode::OK,
         Json(serde_json::json!({
@@ -1636,6 +1696,27 @@ async fn user_stats(
                 Some(info) => serde_json::json!({"name": info.system_name, "mission": info.mission, "confirmed": info.confirmed}),
                 None => serde_json::Value::Null,
             },
+            "call_stats": {
+                "total_requests": total_requests,
+                "success_requests": success_requests,
+                "denied_requests": denied_requests,
+                "denied_rate": denied_rate,
+                "search_total": search_total,
+                "search_hits": search_hits,
+                "search_hit_ratio": search_hit_ratio,
+                "search_miss_queries": search_metrics.miss_queries,
+                "top_labels": top_labels,
+                "hot_memories": hot_memories,
+                "decision_total": decision_total,
+                "decision_avg_latency_ms": decision_avg_latency_ms,
+                "cache_hit_ratio": cache_hit_ratio,
+                "cache_l1_hit_ratio": l1_hit_ratio,
+                "cache_l2_hit_ratio": l2_hit_ratio,
+                "cache_l1_hits": l1_hits,
+                "cache_l1_misses": l1_misses,
+                "cache_l2_hits": l2_hits,
+                "cache_l2_misses": l2_misses
+            }
         })),
     )
 }

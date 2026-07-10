@@ -115,6 +115,11 @@ const MIGRATION_ADD_KEY_EVENTS: &str = "CREATE TABLE IF NOT EXISTS key_events (
     INDEX idx_event_timestamp (event_timestamp)
 )";
 
+const MIGRATION_ADD_VALID_FROM: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN valid_from INTEGER DEFAULT NULL";
+const MIGRATION_ADD_VALID_UNTIL: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN valid_until INTEGER DEFAULT NULL";
+
 const MIGRATION_ADD_DELETED_MEMORIES: &str = "CREATE TABLE IF NOT EXISTS deleted_memories (
    id INTEGER PRIMARY KEY,
    tetra_json TEXT NOT NULL,
@@ -209,6 +214,12 @@ impl StorageManager {
             }
             if let Err(e) = conn.execute_batch(MIGRATION_ADD_DELETED_MEMORIES) {
                 tracing::debug!("[Storage] deleted_memories migration skipped: {}", e);
+            }
+            if let Err(e) = conn.execute_batch(MIGRATION_ADD_VALID_FROM) {
+                tracing::debug!("[Storage] valid_from migration skipped: {}", e);
+            }
+            if let Err(e) = conn.execute_batch(MIGRATION_ADD_VALID_UNTIL) {
+                tracing::debug!("[Storage] valid_until migration skipped: {}", e);
             }
         }
 
@@ -351,8 +362,8 @@ impl StorageManager {
         let encrypted_content = self.encrypt_field(&tetra.data.content)?;
 
         conn.execute(
-            "INSERT OR REPLACE INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            "INSERT OR REPLACE INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type, valid_from, valid_until)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 tetra.id,
                 tetra.core.x, tetra.core.y, tetra.core.z,
@@ -369,6 +380,8 @@ impl StorageManager {
                 tetra.data.rationale,
                 tetra.data.access_count as i32,
                 tetra.data.memory_type,
+                tetra.data.valid_from,
+                tetra.data.valid_until,
             ],
         ).map_err(|e| format!("upsert tetra {}: {}", tetra.id, e))?;
         Ok(())
@@ -436,8 +449,8 @@ impl StorageManager {
         let content_hash = tetra.data.content_hash as i64;
         let encrypted_content = self.encrypt_field(&tetra.data.content)?;
         tx.execute(
-            "INSERT OR REPLACE INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            "INSERT OR REPLACE INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type, valid_from, valid_until)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 tetra.id,
                 tetra.core.x, tetra.core.y, tetra.core.z,
@@ -454,6 +467,8 @@ impl StorageManager {
                 tetra.data.rationale,
                 tetra.data.access_count,
                 tetra.data.memory_type,
+                tetra.data.valid_from,
+                tetra.data.valid_until,
             ],
         )
         .map_err(|e| format!("restore tetra {}: {}", tetra.id, e))?;
@@ -651,8 +666,8 @@ impl StorageManager {
                 let content_hash = tetra.data.content_hash as i64;
                 let encrypted_content = self.encrypt_field(&tetra.data.content)?;
                 tx.execute(
-                    "INSERT OR REPLACE INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                    "INSERT OR REPLACE INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type, valid_from, valid_until)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
                     params![
                         tetra.id,
                         tetra.core.x, tetra.core.y, tetra.core.z,
@@ -669,6 +684,8 @@ impl StorageManager {
                         tetra.data.rationale,
                         tetra.data.access_count as i32,
                         tetra.data.memory_type,
+                        tetra.data.valid_from,
+                        tetra.data.valid_until,
                     ],
                 ).map_err(|e| format!("batch upsert {id}: {e}"))?;
                 count += 1;
@@ -803,7 +820,7 @@ impl StorageManager {
     fn load_tetrahedrons(&self, space: &Space) -> Result<usize, String> {
         let conn = self.pool.get().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type FROM tetrahedrons ORDER BY id"
+            "SELECT id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type, valid_from, valid_until FROM tetrahedrons ORDER BY id"
         ).map_err(|e| e.to_string())?;
 
         let rows = stmt
@@ -831,6 +848,8 @@ impl StorageManager {
                 let rationale: Option<String> = row.get(14).unwrap_or(None);
                 let access_count: u32 = row.get::<_, i32>(15).unwrap_or(0) as u32;
                 let memory_type: Option<String> = row.get(16).unwrap_or(None);
+                let valid_from: Option<i64> = row.get(17).unwrap_or(None);
+                let valid_until: Option<i64> = row.get(18).unwrap_or(None);
 
                 let labels: Vec<String> = serde_json::from_str(&labels_json).unwrap_or_else(|e| {
                     tracing::warn!(
@@ -869,6 +888,8 @@ impl StorageManager {
                     rationale,
                     access_count,
                     memory_type,
+                    valid_from,
+                    valid_until,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -893,6 +914,8 @@ impl StorageManager {
                 rationale,
                 access_count,
                 memory_type,
+                valid_from,
+                valid_until,
             ) = row.map_err(|e: rusqlite::Error| e.to_string())?;
             let positions = Tetrahedron::compute_vertices(Point3::new(cx, cy, cz));
             let saved_vertex_ids: Vec<u64> = serde_json::from_str(&vertex_json).unwrap_or_default();
@@ -913,6 +936,8 @@ impl StorageManager {
                     access_count,
                     quality_score: 1.0,
                     memory_type,
+                    valid_from,
+                    valid_until,
                 },
                 mass,
             };
@@ -1025,14 +1050,15 @@ impl StorageManager {
             let encrypted_content = self.encrypt_field(&t.data.content)?;
 
             tx.execute(
-                "INSERT INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                "INSERT INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type, valid_from, valid_until)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
                 params![
                     t.id, t.core.x, t.core.y, t.core.z,
                     encrypted_content, content_hash, labels_json,
                     t.mass, t.data.timestamp, aliases_json, vertex_json,
                     emb_blob, t.data.importance, t.data.enforced as i32,
                     t.data.rationale, t.data.access_count as i32, t.data.memory_type,
+                    t.data.valid_from, t.data.valid_until,
                 ],
             ).map_err(|e| format!("insert tetra {}: {}", t.id, e))?;
         }
@@ -1169,8 +1195,10 @@ mod tests {
                 enforced: false,
                 rationale: None,
                 access_count: 0,
-quality_score: 1.0,
-memory_type: None,
+                quality_score: 1.0,
+                memory_type: None,
+                valid_from: None,
+                valid_until: None,
             },
             mass,
         }

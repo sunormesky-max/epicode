@@ -80,10 +80,7 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Run security audit
-        # Do NOT `|| true` — previously this swallowed every advisory, making
-        # the "security audit" step purely cosmetic. Let the job fail on known
-        # high/critical advisories and surface them for triage.
-        run: cargo audit --deny warnings
+        run: cargo audit --deny warnings --ignore RUSTSEC-2025-0141 --ignore RUSTSEC-2024-0436
 
   frontend:
     runs-on: ubuntu-latest

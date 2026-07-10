@@ -87,6 +87,7 @@ impl DriveEngine {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn observe(
         &mut self,
         tetra_count: usize,

@@ -638,8 +638,10 @@ mod tests {
             enforced: false,
             rationale: None,
             access_count: 0,
-quality_score: 1.0,
-memory_type: None,
+            quality_score: 1.0,
+            memory_type: None,
+            valid_from: None,
+            valid_until: None,
         };
         let similar = vec![(1u64, 0.85f64, 0.5f64, payload)];
         let conflicts = MemoryIntake::check_conflict(

@@ -45,7 +45,13 @@ Then store and search a memory:
 curl -X POST http://localhost:8080/api/v1/remember \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
-  -d '{"content": "Epicode gives AI persistent spatial memory", "labels": ["ai", "memory"]}'
+  -d '{"content": "Epicode gives AI persistent spatial memory"}'
+
+# Store a memory that expires in 7 days
+curl -X POST http://localhost:8080/api/v1/remember \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{"content": "Sprint deadline: ship v1.0 by Friday", "ttl_seconds": 604800}'
 
 curl -X POST http://localhost:8080/api/v1/search \
   -H "Content-Type: application/json" \
@@ -60,10 +66,13 @@ curl -X POST http://localhost:8080/api/v1/search \
 - **Spatial Memory** — memories stored as tetrahedrons in 3D space for natural clustering.
 - **Semantic Search** — BM25 + HNSW hybrid search for natural-language retrieval.
 - **Knowledge Graph** — automatic relationship extraction and dynamic graph updates.
+- **Temporal Validity** — every memory supports `valid_from` / `valid_until` windows and freshness decay scoring, enabling time-aware recall (on par with Zep/Graphiti's core capability).
 - **MCP Integration** — 35 standardized tools for any MCP-compatible AI agent.
 - **SMRP Protocol** — structured memory responses with topology and placement metadata.
 - **Multi-tenant Cloud** — user management, quotas, invite codes, and admin controls.
 - **Self-hosted Defense** — `epicode-guard` watches SSH/Web/honeypot traffic and auto-bans attackers.
+- **Observable** — call-detail stats (request/retrieval/cache/decision metrics) exposed on `/v1/stats`.
+- **Benchmark** — see [BENCHMARK.md](BENCHMARK.md) for quantified latency, throughput, and cache numbers.
 
 ## Architecture
 

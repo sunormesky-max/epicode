@@ -26,6 +26,7 @@ struct CognitiveThought {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum ScheduledTask {
     CreateTetra {
         core: Point3,
@@ -87,7 +88,9 @@ impl SchedulerCenter {
         tick_interval_ms: u64,
         max_energy: f64,
     ) -> Self {
-        let decision_center = Arc::new(crate::engine::decision_center::DecisionCenter::new(cognitive.clone()));
+        let decision_center = Arc::new(crate::engine::decision_center::DecisionCenter::new(
+            cognitive.clone(),
+        ));
         Self::with_security(
             space,
             energy,
@@ -340,6 +343,16 @@ impl SchedulerCenter {
     }
 
     pub fn api_remember(&self, content: &str) -> Result<(TetraId, Vec<String>), String> {
+        self.api_remember_with_validity(content, None, None)
+    }
+
+    /// Remember a memory with optional temporal validity window.
+    pub fn api_remember_with_validity(
+        &self,
+        content: &str,
+        valid_from: Option<i64>,
+        valid_until: Option<i64>,
+    ) -> Result<(TetraId, Vec<String>), String> {
         self.security
             .validate_content(content)
             .map_err(|_| "content validation failed".to_string())?;
@@ -350,7 +363,13 @@ impl SchedulerCenter {
         } else {
             vec!["general".to_string()]
         };
-        let id = self.gateway.create_memory(content, labels.clone())?;
+        let id = self.gateway.create_memory_with_validity(
+            content,
+            labels.clone(),
+            0,
+            valid_from,
+            valid_until,
+        )?;
         self.persist_tetra(id);
         Ok((id, labels))
     }
@@ -499,6 +518,14 @@ impl SchedulerCenter {
 
     pub fn api_stats(&self) -> super::gateway::SpaceStats {
         self.gateway.stats()
+    }
+
+    pub fn api_search_metrics(&self) -> super::gateway::SearchMetrics {
+        self.gateway.search_metrics()
+    }
+
+    pub fn api_decision_stats(&self) -> serde_json::Value {
+        self.decision_center.stats()
     }
 
     pub fn api_load_context(&self, limit: usize) -> Vec<(TetraId, f64, String, Vec<String>)> {
@@ -1156,6 +1183,8 @@ impl SchedulerCenter {
                     access_count: 0,
                     quality_score: 1.0,
                     memory_type: Some("bridge".to_string()),
+                    valid_from: None,
+                    valid_until: None,
                 };
                 let tetra = Tetrahedron {
                     id: 0,
@@ -1272,6 +1301,8 @@ impl SchedulerCenter {
                         access_count: t.data.access_count,
                         quality_score: t.data.quality_score,
                         memory_type: t.data.memory_type.clone(),
+                        valid_from: t.data.valid_from,
+                        valid_until: t.data.valid_until,
                     };
                     if let Err(e) = self.space.update_payload(*keep, updated.clone()) {
                         tracing::warn!(
@@ -1322,6 +1353,8 @@ impl SchedulerCenter {
                             access_count: t.data.access_count,
                             quality_score: t.data.quality_score,
                             memory_type: t.data.memory_type.clone(),
+                            valid_from: t.data.valid_from,
+                            valid_until: t.data.valid_until,
                         };
                         if let Err(e) = self.space.update_payload(id, updated) {
                             tracing::warn!(
@@ -1385,6 +1418,8 @@ impl SchedulerCenter {
                         access_count: t.data.access_count,
                         quality_score: t.data.quality_score,
                         memory_type: t.data.memory_type.clone(),
+                        valid_from: t.data.valid_from,
+                        valid_until: t.data.valid_until,
                     };
                     if let Err(e) = self.space.update_payload(*id, updated) {
                         tracing::warn!(
@@ -1610,7 +1645,12 @@ impl SchedulerCenter {
             };
             let energy_ratio = snap.energy / self.max_energy.max(1.0);
             let tetra_count = snap.tetras.len();
-            let largest_cluster_size = snap.clusters.iter().map(|c| c.tetra_ids.len()).max().unwrap_or(0);
+            let largest_cluster_size = snap
+                .clusters
+                .iter()
+                .map(|c| c.tetra_ids.len())
+                .max()
+                .unwrap_or(0);
             let unexplored_ratio = if tetra_count > 0 {
                 let explored: usize = snap.tetras.iter().filter(|t| t.mass > 1.05).count();
                 1.0 - (explored as f64 / tetra_count as f64)
@@ -2096,7 +2136,6 @@ impl SchedulerCenter {
         }
     }
 
-
     fn reclassify_memories(&self, round: usize, snap: &TickSnapshot) {
         self.last_reclassify_tick.store(snap.tick, Ordering::SeqCst);
         let ctx = super::cognitive_hooks::CognitiveHooksCtx {
@@ -2442,8 +2481,10 @@ mod tests {
             enforced: false,
             rationale: None,
             access_count: 0,
-quality_score: 1.0,
-memory_type: None,
+            quality_score: 1.0,
+            memory_type: None,
+            valid_from: None,
+            valid_until: None,
         };
         let tetra = Tetrahedron {
             id: 0,
@@ -2480,7 +2521,9 @@ memory_type: None,
         let security = Arc::new(SecurityGuard::from_env());
         let storage =
             Arc::new(StorageManager::new(std::path::Path::new("test_data_scheduler")).unwrap());
-        let decision_center = Arc::new(crate::engine::decision_center::DecisionCenter::new(cognitive.clone()));
+        let decision_center = Arc::new(crate::engine::decision_center::DecisionCenter::new(
+            cognitive.clone(),
+        ));
         let scheduler = Arc::new(SchedulerCenter::with_security(
             space.clone(),
             energy.clone(),

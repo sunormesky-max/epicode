@@ -69,10 +69,55 @@ pub struct MemoryPayload {
     pub quality_score: f64,
     #[serde(default)]
     pub memory_type: Option<String>,
+    /// Unix timestamp (seconds) when this memory becomes valid.
+    /// `None` means valid from creation time.
+    #[serde(default)]
+    pub valid_from: Option<i64>,
+    /// Unix timestamp (seconds) after which this memory expires and is excluded from retrieval.
+    /// `None` means no expiry.
+    #[serde(default)]
+    pub valid_until: Option<i64>,
 }
 
 fn default_importance() -> f64 {
     1.0
+}
+
+impl MemoryPayload {
+    /// Returns `true` if this memory is currently valid (not expired, already started).
+    pub fn is_valid_at(&self, now: i64) -> bool {
+        if let Some(from) = self.valid_from {
+            if now < from {
+                return false;
+            }
+        }
+        if let Some(until) = self.valid_until {
+            if now >= until {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Freshness score in [0.0, 1.0].
+    ///
+    /// - If `valid_until` is set: linearly interpolates from 1.0 at creation to 0.0 at expiry.
+    /// - Otherwise: exponential decay with a 30-day half-life, boosted by access frequency.
+    pub fn freshness_score(&self, now: i64) -> f64 {
+        if let Some(until) = self.valid_until {
+            let start = self.valid_from.unwrap_or(self.timestamp);
+            let span = (until - start).max(1) as f64;
+            let elapsed = (now - start).max(0) as f64;
+            return (1.0 - elapsed / span).clamp(0.0, 1.0);
+        }
+        // Exponential decay: half-life = 30 days (2592000 seconds)
+        let age_secs = (now - self.timestamp).max(0) as f64;
+        let half_life = 2_592_000.0_f64;
+        let base = (-age_secs * std::f64::consts::LN_2 / half_life).exp();
+        // Access-frequency bonus: each access slows decay slightly
+        let access_boost = 1.0 + (self.access_count as f64 * 0.05).min(0.5);
+        (base * access_boost).clamp(0.0, 1.0)
+    }
 }
 
 impl Default for MemoryPayload {
@@ -90,6 +135,8 @@ impl Default for MemoryPayload {
             access_count: 0,
             quality_score: 1.0,
             memory_type: None,
+            valid_from: None,
+            valid_until: None,
         }
     }
 }
@@ -262,5 +309,82 @@ mod tests {
     #[test]
     fn volume_known_value() {
         assert!((Tetrahedron::volume() - 0.1178511301977579).abs() < 1e-10);
+    }
+}
+
+#[cfg(test)]
+mod temporal_tests {
+    use super::*;
+
+    fn payload_with_ts(ts: i64) -> MemoryPayload {
+        MemoryPayload {
+            timestamp: ts,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn no_validity_window_always_valid() {
+        let p = payload_with_ts(1_000_000);
+        assert!(p.is_valid_at(0));
+        assert!(p.is_valid_at(i64::MAX));
+    }
+
+    #[test]
+    fn valid_from_blocks_early_access() {
+        let p = MemoryPayload {
+            timestamp: 1000,
+            valid_from: Some(2000),
+            ..Default::default()
+        };
+        assert!(!p.is_valid_at(1500));
+        assert!(p.is_valid_at(2000));
+        assert!(p.is_valid_at(3000));
+    }
+
+    #[test]
+    fn valid_until_expires_memory() {
+        let p = MemoryPayload {
+            timestamp: 1000,
+            valid_until: Some(5000),
+            ..Default::default()
+        };
+        assert!(p.is_valid_at(4999));
+        assert!(!p.is_valid_at(5000));
+        assert!(!p.is_valid_at(9999));
+    }
+
+    #[test]
+    fn freshness_score_decays_over_time() {
+        let now = 1_000_000_i64;
+        let recent = payload_with_ts(now - 86400); // 1 day ago
+        let old = payload_with_ts(now - 30 * 86400); // 30 days ago
+        let very_old = payload_with_ts(now - 365 * 86400); // 1 year ago
+        let f_recent = recent.freshness_score(now);
+        let f_old = old.freshness_score(now);
+        let f_very_old = very_old.freshness_score(now);
+        assert!(f_recent > f_old, "recent={f_recent} should > old={f_old}");
+        assert!(
+            f_old > f_very_old,
+            "old={f_old} should > very_old={f_very_old}"
+        );
+        assert!(f_recent > 0.9, "1-day-old memory should be very fresh");
+    }
+
+    #[test]
+    fn freshness_score_with_valid_until_linear() {
+        let start = 0_i64;
+        let until = 10_000_i64;
+        let p = MemoryPayload {
+            timestamp: start,
+            valid_until: Some(until),
+            ..Default::default()
+        };
+        let at_start = p.freshness_score(0);
+        let at_half = p.freshness_score(5000);
+        let at_end = p.freshness_score(9999);
+        assert!((at_start - 1.0).abs() < 0.01, "at start: {at_start}");
+        assert!((at_half - 0.5).abs() < 0.01, "at half: {at_half}");
+        assert!(at_end < 0.01, "near end: {at_end}");
     }
 }

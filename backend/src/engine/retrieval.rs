@@ -312,6 +312,17 @@ impl RetrievalEngine {
         intent: &SearchIntent,
         max_results: usize,
     ) {
+        let now = chrono::Utc::now().timestamp();
+
+        // Filter out expired or not-yet-valid memories
+        results.retain(|(id, _, _, payload)| {
+            let valid = payload.is_valid_at(now);
+            if !valid {
+                tracing::debug!("[Retrieval] excluded expired memory id={id}");
+            }
+            valid
+        });
+
         for (_id, vec_sim, _bm25, payload) in results.iter_mut() {
             let mut bonus = 0.0_f64;
 
@@ -329,12 +340,16 @@ impl RetrievalEngine {
                 }
             }
 
-            // Temporal recency — exponential decay
-            if intent.temporal_boost > 1.0 {
-                let age_days =
-                    (chrono::Utc::now().timestamp() - payload.timestamp) as f64 / 86400.0;
-                let recency = (-age_days * 0.1).exp();
-                bonus += recency * intent.temporal_boost * 0.15;
+            // Freshness — replaces the raw temporal-recency heuristic.
+            // Uses MemoryPayload::freshness_score() which accounts for valid_until if set.
+            {
+                let freshness = payload.freshness_score(now);
+                let weight = if intent.temporal_boost > 1.0 {
+                    intent.temporal_boost * 0.15
+                } else {
+                    0.05
+                };
+                bonus += freshness * weight;
             }
 
             // Access frequency — logarithmic, capped contribution
@@ -405,6 +420,8 @@ mod tests {
             access_count: 0,
             quality_score: 1.0,
             memory_type: memory_type.map(|s| s.to_string()),
+            valid_from: None,
+            valid_until: None,
         }
     }
 

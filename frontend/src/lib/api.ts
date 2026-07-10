@@ -142,6 +142,27 @@ export interface StatsData {
   has_sub_accounts?: boolean;
   parent_user?: string;
   identity?: { name: string; mission: string; confirmed: boolean } | null;
+  call_stats?: {
+    total_requests: number;
+    success_requests: number;
+    denied_requests: number;
+    denied_rate: number;
+    search_total: number;
+    search_hits: number;
+    search_hit_ratio: number;
+    search_miss_queries: string[];
+    top_labels: { label: string; count: number }[];
+    hot_memories: { id: number; access_count: number }[];
+    decision_total: number;
+    decision_avg_latency_ms: number;
+    cache_hit_ratio: number;
+    cache_l1_hit_ratio: number;
+    cache_l2_hit_ratio: number;
+    cache_l1_hits: number;
+    cache_l1_misses: number;
+    cache_l2_hits: number;
+    cache_l2_misses: number;
+  };
 }
 
 export interface SearchResult {
