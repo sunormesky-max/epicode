@@ -540,6 +540,81 @@ paths:
                         labels: { type: array, items: { type: string } }
                         timestamp: { type: integer }
 
+  /identity/step:
+    post:
+      tags: [Auth]
+      summary: Submit one identity ritual step
+      description: Complete steps 1 through 5 in order, then call `/identity/finalize`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [step, value]
+              properties:
+                step:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                value:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: Identity ritual progress
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  step: { type: integer }
+                  progress:
+                    type: object
+                    properties:
+                      completed: { type: integer }
+                      total: { type: integer, example: 5 }
+                      current_step: { type: integer }
+                  next_prompt: { type: string }
+                  pending:
+                    type: object
+                    properties:
+                      has_name: { type: boolean }
+                      has_mission: { type: boolean }
+                      has_author: { type: boolean }
+                      has_personality: { type: boolean }
+                      has_language: { type: boolean }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /identity/finalize:
+    post:
+      tags: [Auth]
+      summary: Complete the identity ritual
+      responses:
+        "200":
+          description: Identity awakened
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  awakened: { type: boolean }
+                  identity:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      mission: { type: string }
+                      author: { type: string }
+                      personality: { type: string }
+                      language: { type: string }
+                      confirmed: { type: boolean }
+                  message: { type: string }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   /digest:
     post:
       tags: [Ingestion]

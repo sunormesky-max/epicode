@@ -1,6 +1,6 @@
 # Epicode SDK for Python
 
-Python client library for the Epicode API.
+Python client library for the Epicode API (v1.0.2).
 
 ## Installation
 
@@ -15,6 +15,13 @@ pip install epicode-sdk
 from epicode import EpicodeClient
 
 client = EpicodeClient("your-api-key")
+
+# A confirmed identity is required before working with memories.
+for step, value in enumerate(
+    ["MyAssistant", "Help users", "Example author", "Helpful", "English"], start=1
+):
+    client.identity_step(step, value)
+client.identity_finalize()
 
 # Store a memory
 mem = client.remember("The project deadline is June 15.")
@@ -65,7 +72,7 @@ from epicode import EpicodeAdmin
 admin = EpicodeAdmin("your-admin-key")
 
 # Register a new user
-user = admin.register("alice", plan="pro")
+user = admin.register("alice", "a-secure-password", plan="pro")
 print(user.api_key, user.max_memories)
 
 # List users
@@ -78,6 +85,13 @@ print(stats.max_users)
 
 admin.close()
 ```
+
+## API Compatibility
+
+The SDK calls the Cloud API under `/api/v1`. Complete the five identity steps
+and call `identity_finalize()` before storing memories. `dream_cycle()` uses the
+supported MCP JSON-RPC endpoint; graph relations are available through
+`knowledge(id)`.
 
 ## Error Handling
 

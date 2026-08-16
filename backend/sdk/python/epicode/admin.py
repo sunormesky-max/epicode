@@ -35,7 +35,9 @@ class EpicodeAdmin:
         self._base_url = (base_url or self.DEFAULT_BASE_URL).rstrip("/")
         self._timeout = timeout or self.DEFAULT_TIMEOUT
         self._session = session or requests.Session()
-        self._session.headers.update({"X-Admin-Key": self._admin_key, "Content-Type": "application/json"})
+        self._session.headers.update(
+            {"X-Admin-Key": self._admin_key, "Content-Type": "application/json"}
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -58,7 +60,9 @@ class EpicodeAdmin:
         if 200 <= code < 300:
             return body
 
-        message = body.get("error") or body.get("message") or resp.text or f"HTTP {code}"
+        message = (
+            body.get("error") or body.get("message") or resp.text or f"HTTP {code}"
+        )
 
         if code in (401, 403):
             raise AuthenticationError(message, status_code=code, response_body=body)
@@ -77,9 +81,15 @@ class EpicodeAdmin:
     # Public admin API
     # ------------------------------------------------------------------
 
-    def register(self, user_id: str, *, plan: str = "free") -> RegisterResponse:
+    def register(
+        self, user_id: str, password: str, *, plan: str = "free"
+    ) -> RegisterResponse:
         """Register a new user and obtain an API key."""
-        data = self._request("POST", "/register", json={"user_id": user_id, "plan": plan})
+        data = self._request(
+            "POST",
+            "/register",
+            json={"user_id": user_id, "password": password, "plan": plan},
+        )
         return RegisterResponse(
             success=data.get("success", False),
             user_id=data.get("user_id", ""),

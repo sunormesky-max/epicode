@@ -218,12 +218,14 @@ async fn main() {
                            next: middleware::Next| async move {
         let path = request.uri().path().to_string();
         if path.starts_with("/health")
+            || path == "/v1/health"
             || path == "/"
             || path == "/docs"
             || path == "/openapi.yaml"
             || path == "/v1/login"
             || path == "/v1/skills/explore"
             || path == "/stats/public"
+            || path == "/v1/stats/public"
             || path == "/v1/agent-guide"
         {
             return next.run(request).await;
@@ -259,14 +261,14 @@ async fn main() {
             }
         }
 
-        if path.starts_with("/admin") {
+        if path.starts_with("/admin") || path.starts_with("/v1/admin") {
             if let Err(resp) = require_admin(&st.admin_key, &headers) {
                 return resp.into_response();
             }
             return next.run(request).await;
         }
 
-        if path == "/register" {
+        if path == "/register" || path == "/v1/register" {
             return next.run(request).await;
         }
 
@@ -298,11 +300,14 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/v1/health", get(health))
         .route("/v1/agent-guide", get(agent_guide))
         .route("/stats/public", get(public_stats))
+        .route("/v1/stats/public", get(public_stats))
         .route("/docs", get(swagger_ui))
         .route("/openapi.yaml", get(openapi_spec))
         .route("/register", post(register_user))
+        .route("/v1/register", post(register_user))
         .route("/v1/login", post(login_user))
         .route("/v1/digest", post(digest_content))
         .route("/v1/remember", post(remember))
@@ -324,7 +329,9 @@ async fn main() {
         .route("/v1/memories/batch-delete", post(batch_delete_memories))
         .route("/admin/panel", get(admin_panel))
         .route("/admin/users", get(admin_list_users))
+        .route("/v1/admin/users", get(admin_list_users))
         .route("/admin/stats", get(admin_stats))
+        .route("/v1/admin/stats", get(admin_stats))
         .route("/admin/users/list", get(admin_users_list))
         .route("/admin/users/:user_id", get(admin_user_detail))
         .route("/admin/users/:user_id/reset-key", post(admin_reset_key))
@@ -341,6 +348,7 @@ async fn main() {
         .route("/admin/backups/:user_id", get(admin_list_user_backups))
         .route("/admin/purge-pub-skills", post(admin_purge_pub_skills))
         .route("/mcp", post(mcp_endpoint))
+        .route("/v1/mcp", post(mcp_endpoint))
         .route("/v1/subaccounts", get(list_subaccounts))
         .route("/v1/subaccounts/create", post(create_subaccount))
         .route("/v1/subaccounts/:user_id/revoke", post(revoke_subaccount))
