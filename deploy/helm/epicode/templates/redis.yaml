@@ -29,6 +29,12 @@ spec:
               containerPort: 6379
               protocol: TCP
           command: ["redis-server", "--save", "", "--appendonly", "no"]
+          {{- with .Values.probes.redis }}
+          livenessProbe:
+            {{- toYaml .liveness | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .readiness | nindent 12 }}
+          {{- end }}
 ---
 apiVersion: v1
 kind: Service

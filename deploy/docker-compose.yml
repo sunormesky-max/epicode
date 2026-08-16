@@ -6,34 +6,59 @@ services:
     environment:
       RUST_LOG: info
       EPICODE_LISTEN_ADDR: 0.0.0.0:9111
-      EPICODE_ADMIN_KEY: ${EPICODE_ADMIN_KEY}
+      EPICODE_API_KEY: ${EPICODE_API_KEY:?EPICODE_API_KEY is required}
+      EPICODE_ADMIN_KEY: ${EPICODE_ADMIN_KEY:?EPICODE_ADMIN_KEY is required}
       EPICODE_MASTER_KEY: ${EPICODE_MASTER_KEY:-}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
-      REDIS_URL: ${REDIS_URL:-}
+      EPICODE_CORS_ORIGIN: ${EPICODE_CORS_ORIGIN:?EPICODE_CORS_ORIGIN is required}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     volumes:
       - backend-data:/app/data
-    ports:
-      - "9111:9111"
+    expose:
+      - "9111"
     depends_on:
       redis:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9111/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   frontend:
     build:
       context: ../frontend
       dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
+    environment:
+      PORT: "3000"
+      APP_ID: ${APP_ID:?APP_ID is required}
+      APP_SECRET: ${APP_SECRET:?APP_SECRET is required}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      KIMI_AUTH_URL: ${KIMI_AUTH_URL:?KIMI_AUTH_URL is required}
+      KIMI_OPEN_URL: ${KIMI_OPEN_URL:?KIMI_OPEN_URL is required}
+      OWNER_UNION_ID: ${OWNER_UNION_ID:-}
+    expose:
+      - "3000"
 
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   gateway:
     image: nginx:1.27-alpine
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
     ports:
       - "8080:80"
     volumes:

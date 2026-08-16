@@ -2,6 +2,35 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
+  name: {{ .Release.Name }}-api
+  labels:
+    app.kubernetes.io/name: epicode
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  {{- with .Values.ingress.api.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host }}
+      http:
+        paths:
+          # The Cloud backend registers /v1 routes. The NGINX rewrite above
+          # removes the public /api prefix before forwarding.
+          - path: {{ $.Values.ingress.api.path }}
+            pathType: {{ $.Values.ingress.api.pathType }}
+            backend:
+              service:
+                name: {{ $.Release.Name }}-backend
+                port:
+                  number: {{ $.Values.service.backend.port }}
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
   name: {{ .Release.Name }}
   labels:
     app.kubernetes.io/name: epicode
