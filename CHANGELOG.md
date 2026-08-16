@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Backend compilation warnings in `backend/src/engine/mod.rs`.
+- Aligned Python and TypeScript SDK calls with Cloud REST and MCP routes, including
+  identity, dream-cycle, and administrator registration contracts.
 
 
 ## [1.0.1] - 2026-06-21

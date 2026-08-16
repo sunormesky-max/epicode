@@ -143,10 +143,34 @@ print(f"  ✅ Engine status: {health.status}")
 print(f"  🏷️  Version: {health.version}")
 
 # ---------------------------------------------------------------------------
-# Step 2: Session 1 — Learning User Preferences
+# Step 2: Identity Ritual — Establishing the Agent
 # ---------------------------------------------------------------------------
 
-print_banner("Step 2: Session 1 — Learning Preferences", "💬")
+print_banner("Step 2: Identity Ritual — Establishing Aurora", "🪞")
+print("""
+Cloud memory operations require a confirmed identity. Complete the five-step
+ritual once before storing or retrieving memories.
+""")
+
+identity_steps = [
+    "Aurora",
+    "Help people work with calm, clarity, and focus.",
+    "Epicode example",
+    "Thoughtful and concise",
+    "English",
+]
+for step, value in enumerate(identity_steps, start=1):
+    progress = client.identity_step(step, value)
+    print(f"  ✅ Completed identity step {step}; next step: {progress.progress.get('current_step')}")
+
+identity = client.identity_finalize()
+print(f"  🪞 Identity awakened: {identity.identity.get('name')}")
+
+# ---------------------------------------------------------------------------
+# Step 3: Session 1 — Learning User Preferences
+# ---------------------------------------------------------------------------
+
+print_banner("Step 3: Session 1 — Learning Preferences", "💬")
 print("""
 Aurora meets the user for the first time. Each interaction is stored as a
 memory tetrahedron in 3D space. The LLM auto-classifies each memory into a
@@ -197,7 +221,7 @@ print(f"     (from {recall.seed_count} seed matches + {recall.associated_count} 
 print_emotion(recall.emotion)
 
 print(f"\n  📄 Memory file (associative chain):")
-print(f"     {recall.memory_file[:300]}...")
+print(f"     {json.dumps(recall.memory_file or {}, ensure_ascii=False)[:300]}...")
 
 # ---------------------------------------------------------------------------
 # Step 4: Knowledge Graph — Visualizing Relationships
@@ -214,13 +238,9 @@ if stored_ids:
     first_id = stored_ids[0]
     print(f"  🔍 Expanding knowledge for memory: {first_id}")
     knowledge = client.knowledge(first_id)
-    print(f"\n  📊 Found {len(knowledge.relations)} relations:")
-    for rel in knowledge.relations:
+    print(f"\n  📊 Found {knowledge.relations} relations:")
+    for rel in knowledge.details:
         print(f"     • {rel}")
-
-    print(f"\n  🔎 Details:")
-    for key, value in knowledge.details.items():
-        print(f"     • {key}: {value}")
 
 # ---------------------------------------------------------------------------
 # Step 5: Ask — Grounded AI Response with Memory Citations
@@ -260,26 +280,19 @@ consolidation process inspired by human sleep. It:
 This is unique to Epicode. Flat vector databases never self-organize.
 """)
 
-# Trigger dream cycle via the underlying HTTP client (exposed via MCP tool)
-# We use the raw request path since dream_cycle is an MCP tool
 print("  🌙 Triggering dream cycle...")
-try:
-    dream_data = client._request("POST", "/dream")
-    print(f"  ✅ Dream cycle completed!")
-    print(f"\n  📊 Consolidation report:")
-    print(f"     • Connections strengthened: {dream_data.get('strengthened', 'N/A')}")
-    print(f"     • Pruned memories: {dream_data.get('pruned', 'N/A')}")
-    print(f"     • Merged duplicates: {dream_data.get('merged', 'N/A')}")
-    print(f"     • Cluster energy after: {dream_data.get('energy', 'N/A')}")
-except Exception as e:
-    print(f"  ⚠️  Dream cycle not available in this environment: {e}")
-    print("     (This is normal for local development without the scheduler enabled)")
+dream = client.dream_cycle()
+if dream.error:
+    print(f"  ⚠️ Dream cycle failed: {dream.error}")
+else:
+    print("  ✅ Dream cycle completed!")
+    print(json.dumps(dream.result, indent=2, ensure_ascii=False))
 
 # ---------------------------------------------------------------------------
-# Step 7: Identity Ritual — Establishing Self-Model
+# Step 7: Identity Memories — Reinforcing Self-Model
 # ---------------------------------------------------------------------------
 
-print_banner("Step 7: Identity Ritual — Establishing Self-Model", "🪞")
+print_banner("Step 7: Identity Memories — Reinforcing Self-Model", "🪞")
 print("""
 The central hollow cylinder in Epicode has four layers. The deepest layer is
 IDENTITY — where the agent's self-model, persistent preferences, and long-
@@ -353,7 +366,7 @@ print(f"     (from {recall2.seed_count} seeds + {recall2.associated_count} assoc
 print_emotion(recall2.emotion)
 
 print(f"\n  📄 Aurora's internal memory file:")
-print(f"     {recall2.memory_file[:400]}...")
+print(f"     {json.dumps(recall2.memory_file or {}, ensure_ascii=False)[:400]}...")
 
 print(f"\n  💡 Aurora synthesizes:")
 print(f"     'You prefer quiet spaces and your cat Nebula would love a cozy")

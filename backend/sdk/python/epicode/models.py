@@ -16,13 +16,13 @@ class HealthResponse:
 @dataclass(frozen=True)
 class RememberResponse:
     success: bool
-    id: str
+    id: int
     labels: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class SearchResult:
-    id: str
+    id: int
     content: str
     labels: list[str] = field(default_factory=list)
     similarity: float = 0.0
@@ -50,7 +50,7 @@ class RecallResponse:
     total_fragments: int = 0
     associated_count: int = 0
     emotion: Emotion = field(default_factory=Emotion)
-    memory_file: str = ""
+    memory_file: dict[str, list[dict[str, Any]]] | None = None
 
 
 @dataclass(frozen=True)
@@ -59,19 +59,19 @@ class AskResponse:
     question: str = ""
     answer: str = ""
     memory_count: int = 0
-    memories: list[str] = field(default_factory=list)
+    memories: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class CreateNodeResponse:
     success: bool
-    id: str
+    id: int
 
 
 @dataclass(frozen=True)
 class NodeResponse:
     success: bool
-    id: str
+    id: int
     content: str
     labels: list[str] = field(default_factory=list)
 
@@ -79,9 +79,9 @@ class NodeResponse:
 @dataclass(frozen=True)
 class KnowledgeResponse:
     success: bool
-    id: str
-    relations: list[Any] = field(default_factory=list)
-    details: dict[str, Any] = field(default_factory=dict)
+    id: int
+    relations: int = 0
+    details: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -131,75 +131,33 @@ class AdminStatsResponse:
     active_engines: int = 0
     max_users: int = 0
 
-@dataclass(frozen=True)
-class TieredMemoryResult:
-    """A single tiered memory result with knowledge graph associations."""
-    id: str
-    content: str
-    tier: int
-    similarity: float = 0.0
-    kg_associations: list[dict[str, Any]] = field(default_factory=list)
-    emotional_valence: Emotion = field(default_factory=Emotion)
-    spatial_coords: tuple[float, float, float] = (0.0, 0.0, 0.0)
-
-
-@dataclass(frozen=True)
-class RecallWithTiersResponse:
-    """Tiered memory recall response via SMRP (Structured Memory Response Protocol)."""
-    success: bool
-    query: str = ""
-    tiers: list[list[TieredMemoryResult]] = field(default_factory=list)
-    total_results: int = 0
-    knowledge_graph_edges: list[dict[str, Any]] = field(default_factory=list)
-
 
 @dataclass(frozen=True)
 class IdentityStepResponse:
     """Response from an identity ritual step."""
+
     success: bool
     step: int = 0
-    agent_name: str = ""
-    ritual_state: str = ""
-    personality_signature: dict[str, Any] = field(default_factory=dict)
+    progress: dict[str, int] = field(default_factory=dict)
+    next_prompt: str = ""
+    pending: dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
-class DreamCycleResponse:
-    """Response from triggering a background memory consolidation (dream cycle)."""
+class IdentityFinalizeResponse:
+    """Response from completing the identity ritual."""
+
     success: bool
-    cycles_completed: int = 0
-    memories_consolidated: int = 0
-    new_associations: int = 0
-    energy_delta: float = 0.0
+    awakened: bool = False
+    identity: dict[str, Any] = field(default_factory=dict)
+    message: str = ""
 
 
 @dataclass(frozen=True)
-class KnowledgeGraphNode:
-    """A node in the knowledge graph visualization."""
-    id: str
-    label: str
-    content: str
-    x: float = 0.0
-    y: float = 0.0
-    z: float = 0.0
-    tier: int = 1
+class McpToolResponse:
+    """JSON-RPC response returned by an MCP tool call."""
 
-
-@dataclass(frozen=True)
-class KnowledgeGraphEdge:
-    """An edge in the knowledge graph visualization."""
-    source: str
-    target: str
-    relation: str
-    strength: float = 0.5
-
-
-@dataclass(frozen=True)
-class KnowledgeGraphResponse:
-    """Knowledge graph visualization data."""
-    success: bool
-    node_id: str = ""
-    nodes: list[KnowledgeGraphNode] = field(default_factory=list)
-    edges: list[KnowledgeGraphEdge] = field(default_factory=list)
-    clusters: list[dict[str, Any]] = field(default_factory=list)
-
+    jsonrpc: str
+    id: int | str | None
+    result: Any = None
+    error: dict[str, Any] | None = None
