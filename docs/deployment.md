@@ -5,7 +5,7 @@ Epicode now ships with both **Docker Compose** and **Kubernetes** deployment ass
 ## What is included
 
 - `deploy/docker-compose.yml` — local or single-host deployment
-- `deploy/nginx.conf` — reverse proxy that routes `/api/*` to the Rust backend and `/` to the frontend
+- `deploy/nginx.conf` — reverse proxy that routes Cloud `/api/*` requests to the Rust backend, `/api/trpc` to the frontend, and `/` to the frontend
 - `deploy/.env.example` — required environment variables
 - `deploy/kubernetes/epicode.yaml` — namespace, secret template, services, deployments, ingress
 
@@ -21,34 +21,48 @@ Default exposed ports:
 
 | Service | Internal port | External port |
 | --- | --- | --- |
-| frontend | 3000 | 3000 |
-| backend | 9111 | 9111 |
+| frontend | 3000 | none (gateway only) |
+| backend | 9111 | none (gateway only) |
 | nginx gateway | 80 | 8080 |
 
 After startup:
 
-- frontend: `http://localhost:3000`
-- backend health: `http://localhost:9111/health`
 - unified gateway: `http://localhost:8080`
+- backend health through gateway: `http://localhost:8080/health`
 - Swagger UI through gateway: `http://localhost:8080/docs`
 
-## Required environment variables
+The backend, frontend, and Redis containers are intentionally private to the
+Compose network. Use `docker compose exec backend curl -fsS
+http://localhost:9111/health` when debugging the backend directly.
+
+## Production environment contract
 
 | Variable | Purpose |
 | --- | --- |
-| `DEEPSEEK_API_KEY` | LLM-backed ask/recall flows |
-| `EPICODE_ADMIN_KEY` | Cloud admin surface |
+| `EPICODE_API_KEY` | **Required** Cloud backend security key; generate with `openssl rand -base64 32` |
+| `EPICODE_ADMIN_KEY` | **Required** Cloud admin-surface key |
+| `EPICODE_CORS_ORIGIN` | **Required** public origin, such as `https://epicode.example.com` or `http://localhost:8080` |
+| `APP_ID` | **Required** frontend production application ID |
+| `APP_SECRET` | **Required** frontend production application secret |
+| `DATABASE_URL` | **Required** frontend production database URL |
+| `KIMI_AUTH_URL` | **Required** frontend authentication service URL |
+| `KIMI_OPEN_URL` | **Required** frontend open-platform service URL |
 | `EPICODE_MASTER_KEY` | Optional master encryption key |
-| `REDIS_URL` | Optional L2 cache backend |
-| `EPICODE_HOST` | Hostname used by ingress / reverse proxy |
+| `DEEPSEEK_API_KEY` | Optional LLM-backed ask/recall key |
+| `REDIS_URL` | Optional external L2 cache URL; defaults to the bundled Redis service |
+| `OWNER_UNION_ID` | Optional frontend owner identifier |
+
+`deploy/.env.example` contains the complete Compose contract. Replace every
+`replace-me` value before starting a production deployment; Compose fails fast
+when any required variable is missing.
 
 ## Kubernetes
 
 The manifest assumes:
 
-1. an ingress controller is already installed
+1. an **NGINX Ingress Controller** is already installed
 2. the backend and frontend images are published
-3. secrets are supplied through the `epicode-secrets` Secret
+3. every value in the `epicode-secrets` Secret template is replaced
 
 Apply:
 
@@ -58,8 +72,17 @@ kubectl apply -f deploy/kubernetes/epicode.yaml
 
 The ingress routes:
 
-- `/api/*`, `/docs`, `/openapi.yaml`, `/health` → backend
+- `/api/v1/*` → backend `/v1/*` (the API Ingress strips `/api`)
+- `/api/health`, `/api/register`, and `/api/mcp` → corresponding backend routes
+- `/api/trpc` → frontend
+- `/docs`, `/openapi.yaml`, `/health`, `/stats/public` → backend
 - `/` → frontend
+
+The API rewrite uses the NGINX Ingress annotations
+`nginx.ingress.kubernetes.io/use-regex` and
+`nginx.ingress.kubernetes.io/rewrite-target`. Deploying this manifest with a
+different controller requires an equivalent rewrite from `/api/...` to `/...`.
+Both application Services are `ClusterIP`; only the Ingress is public.
 
 ## Image build notes
 
@@ -73,6 +96,7 @@ The ingress routes:
 2. set `REDIS_URL` when enabling the query cache beyond local memory
 3. persist `/app/data` for the backend
 4. keep frontend and backend on the same public host so `/api/*` works without extra client changes
+5. set `EPICODE_CORS_ORIGIN` to that exact public origin
 
 ## TLS / HTTPS
 
@@ -128,14 +152,19 @@ spec:
         claimName: epicode-backend-data
 ```
 
-## Monitoring
+## Health checks
 
-- **Health check**: `GET /health` (no auth) — returns `{"status":"ok"}` and is suitable for liveness/readiness probes
+- **Backend health check**: `GET /health` (no auth) — returns `{"status":"ok"}` and is used for liveness/readiness probes
+- **Frontend health check**: `GET /health` on the frontend container is used only by its container/pod probes; the public gateway's `/health` remains the backend health endpoint
 - **Public stats**: `GET /api/v1/stats/public` — lightweight metrics without auth
 - **Logs**: backend emits structured logs via `tracing`; set `RUST_LOG=info` (or `debug` for troubleshooting)
 - **Metrics endpoint**: planned; for now scrape `/api/v1/stats` with auth
 
-Kubernetes probes example:
+Compose waits for the backend, frontend, and Redis health checks before
+starting the gateway. Kubernetes and Helm use the same `/health` HTTP probes
+for application containers and `redis-cli ping` for Redis.
+
+Kubernetes backend probe example:
 
 ```yaml
 livenessProbe:
@@ -173,7 +202,7 @@ readinessProbe:
 
 | Access path | Base URL |
 |------------|----------|
-| Through Nginx (public) | `https://epicode.cn/api/v1` |
+| Through gateway or NGINX Ingress (public) | `https://epicode.cn/api/v1` |
 | Direct backend (cloud) | `http://localhost:9111/v1` |
 | Direct backend (single-tenant) | `http://localhost:9110/v1` |
 | Health (either) | `http://localhost:9111/health` or `http://localhost:9110/v1/health` |

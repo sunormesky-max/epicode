@@ -13,10 +13,18 @@ metadata:
   namespace: epicode
 type: Opaque
 stringData:
+  EPICODE_API_KEY: replace-me
   DEEPSEEK_API_KEY: replace-me
   EPICODE_ADMIN_KEY: replace-me
   EPICODE_MASTER_KEY: ""
+  EPICODE_CORS_ORIGIN: https://epicode.example.com
   REDIS_URL: redis://epicode-redis:6379
+  APP_ID: replace-me
+  APP_SECRET: replace-me
+  DATABASE_URL: replace-me
+  KIMI_AUTH_URL: replace-me
+  KIMI_OPEN_URL: replace-me
+  OWNER_UNION_ID: ""
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -49,7 +57,18 @@ spec:
           image: redis:7-alpine
           args: ["redis-server", "--save", "", "--appendonly", "no"]
           ports:
-            - containerPort: 6379
+            - name: redis
+              containerPort: 6379
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 2
+            periodSeconds: 10
 ---
 apiVersion: v1
 kind: Service
@@ -57,11 +76,13 @@ metadata:
   name: epicode-redis
   namespace: epicode
 spec:
+  type: ClusterIP
   selector:
     app: epicode-redis
   ports:
-    - port: 6379
-      targetPort: 6379
+    - name: redis
+      port: 6379
+      targetPort: redis
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -88,6 +109,11 @@ spec:
               value: info
             - name: EPICODE_LISTEN_ADDR
               value: 0.0.0.0:9111
+            - name: EPICODE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: epicode-secrets
+                  key: EPICODE_API_KEY
             - name: DEEPSEEK_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -103,6 +129,11 @@ spec:
                 secretKeyRef:
                   name: epicode-secrets
                   key: EPICODE_MASTER_KEY
+            - name: EPICODE_CORS_ORIGIN
+              valueFrom:
+                secretKeyRef:
+                  name: epicode-secrets
+                  key: EPICODE_CORS_ORIGIN
             - name: REDIS_URL
               valueFrom:
                 secretKeyRef:
@@ -111,6 +142,18 @@ spec:
           volumeMounts:
             - name: backend-data
               mountPath: /app/data
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9111
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9111
+            initialDelaySeconds: 5
+            periodSeconds: 10
       volumes:
         - name: backend-data
           persistentVolumeClaim:
@@ -122,10 +165,12 @@ metadata:
   name: epicode-backend
   namespace: epicode
 spec:
+  type: ClusterIP
   selector:
     app: epicode-backend
   ports:
-    - port: 9111
+    - name: http
+      port: 9111
       targetPort: 9111
 ---
 apiVersion: apps/v1
@@ -147,7 +192,53 @@ spec:
         - name: frontend
           image: ghcr.io/sunormesky-max/epicode-frontend:1.0.1
           ports:
-            - containerPort: 3000
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: epicode-secrets
+                  key: APP_ID
+            - name: APP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: epicode-secrets
+                  key: APP_SECRET
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: epicode-secrets
+                  key: DATABASE_URL
+            - name: KIMI_AUTH_URL
+              valueFrom:
+                secretKeyRef:
+                  name: epicode-secrets
+                  key: KIMI_AUTH_URL
+            - name: KIMI_OPEN_URL
+              valueFrom:
+                secretKeyRef:
+                  name: epicode-secrets
+                  key: KIMI_OPEN_URL
+            - name: OWNER_UNION_ID
+              valueFrom:
+                secretKeyRef:
+                  name: epicode-secrets
+                  key: OWNER_UNION_ID
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
 ---
 apiVersion: v1
 kind: Service
@@ -155,11 +246,38 @@ metadata:
   name: epicode-frontend
   namespace: epicode
 spec:
+  type: ClusterIP
   selector:
     app: epicode-frontend
   ports:
-    - port: 3000
-      targetPort: 3000
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: epicode-api
+  namespace: epicode
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /v1/$2
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: epicode.example.com
+      http:
+        paths:
+          # Rewrite public /api/v1/... to the Cloud backend's registered
+          # /v1/... routes. Keeping this matcher narrow prevents it from
+          # swallowing the frontend /api/trpc route.
+          - path: /api/v1(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: epicode-backend
+                port:
+                  number: 9111
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -174,32 +292,64 @@ spec:
     - host: epicode.example.com
       http:
         paths:
-          # Public API prefix is /api/v1. The Ingress routes /api to the
-          # backend; an upstream Nginx or ingress controller strips /api
-          # before forwarding, so the backend receives /v1/... paths.
-          - path: /api
+          - path: /api/trpc
             pathType: Prefix
+            backend:
+              service:
+                name: epicode-frontend
+                port:
+                  number: 3000
+          - path: /api/health
+            pathType: Exact
+            backend:
+              service:
+                name: epicode-backend
+                port:
+                  number: 9111
+          - path: /api/register
+            pathType: Exact
+            backend:
+              service:
+                name: epicode-backend
+                port:
+                  number: 9111
+          - path: /api/mcp
+            pathType: Exact
+            backend:
+              service:
+                name: epicode-backend
+                port:
+                  number: 9111
+          - path: /api/stats/public
+            pathType: Exact
             backend:
               service:
                 name: epicode-backend
                 port:
                   number: 9111
           - path: /docs
-            pathType: Prefix
+            pathType: Exact
             backend:
               service:
                 name: epicode-backend
                 port:
                   number: 9111
           - path: /openapi.yaml
-            pathType: Prefix
+            pathType: Exact
             backend:
               service:
                 name: epicode-backend
                 port:
                   number: 9111
           - path: /health
-            pathType: Prefix
+            pathType: Exact
+            backend:
+              service:
+                name: epicode-backend
+                port:
+                  number: 9111
+          - path: /stats/public
+            pathType: Exact
             backend:
               service:
                 name: epicode-backend

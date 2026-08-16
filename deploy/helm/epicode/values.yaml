@@ -15,14 +15,25 @@ image:
     tag: "1.0.1"
     pullPolicy: IfNotPresent
 
-# Required secrets — provide via --set or external secret manager
+# Required secrets — provide via --set or an external secret manager.
+# Values marked REQUIRED must be set to start the Cloud backend and production
+# frontend. EPICODE_MASTER_KEY, DEEPSEEK_API_KEY, REDIS_URL, and
+# OWNER_UNION_ID are optional.
 env:
+  EPICODE_API_KEY: ""          # REQUIRED
   EPICODE_ADMIN_KEY: ""        # REQUIRED
-  EPICODE_MASTER_KEY: ""       # REQUIRED (32-byte base64)
+  EPICODE_MASTER_KEY: ""       # optional (32-byte base64)
+  EPICODE_CORS_ORIGIN: ""      # REQUIRED public origin, e.g. https://epicode.example.com
   DEEPSEEK_API_KEY: ""         # optional
   REDIS_URL: ""                # optional, enables distributed rate limiting
   RUST_LOG: "info"
   EPICODE_LISTEN_ADDR: "0.0.0.0:9111"
+  APP_ID: ""                   # REQUIRED frontend production configuration
+  APP_SECRET: ""               # REQUIRED frontend production configuration
+  DATABASE_URL: ""             # REQUIRED frontend production configuration
+  KIMI_AUTH_URL: ""            # REQUIRED frontend production configuration
+  KIMI_OPEN_URL: ""            # REQUIRED frontend production configuration
+  OWNER_UNION_ID: ""           # optional
 
 service:
   backend:
@@ -37,16 +48,40 @@ ingress:
   className: "nginx"
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
+  api:
+    path: /api/v1(/|$)(.*)
+    pathType: ImplementationSpecific
+    annotations:
+      nginx.ingress.kubernetes.io/use-regex: "true"
+      nginx.ingress.kubernetes.io/rewrite-target: /v1/$2
   hosts:
     - host: epicode.example.com
       paths:
-        - path: /api
+        - path: /api/trpc
           pathType: Prefix
+          service: frontend
+        - path: /api/health
+          pathType: Exact
+          service: backend
+        - path: /api/register
+          pathType: Exact
+          service: backend
+        - path: /api/mcp
+          pathType: Exact
+          service: backend
+        - path: /api/stats/public
+          pathType: Exact
           service: backend
         - path: /docs
-          pathType: Prefix
+          pathType: Exact
+          service: backend
+        - path: /openapi.yaml
+          pathType: Exact
           service: backend
         - path: /health
+          pathType: Exact
+          service: backend
+        - path: /stats/public
           pathType: Exact
           service: backend
         - path: /
@@ -94,6 +129,30 @@ probes:
         port: 9111
       initialDelaySeconds: 5
       periodSeconds: 10
+  frontend:
+    liveness:
+      httpGet:
+        path: /health
+        port: 3000
+      initialDelaySeconds: 10
+      periodSeconds: 30
+    readiness:
+      httpGet:
+        path: /health
+        port: 3000
+      initialDelaySeconds: 5
+      periodSeconds: 10
+  redis:
+    liveness:
+      exec:
+        command: ["redis-cli", "ping"]
+      initialDelaySeconds: 5
+      periodSeconds: 30
+    readiness:
+      exec:
+        command: ["redis-cli", "ping"]
+      initialDelaySeconds: 2
+      periodSeconds: 10
 
 autoscaling:
   enabled: false
@@ -104,6 +163,8 @@ autoscaling:
 redis:
   enabled: true
   image: redis:7-alpine
+  # REDIS_URL defaults to this bundled instance when enabled. Set
+  # env.REDIS_URL to use an external Redis service instead.
   persistence:
     enabled: false  # cache is rebuildable
 
