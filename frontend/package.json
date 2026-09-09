@@ -60,7 +60,7 @@
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.1",
     "embla-carousel-react": "^8.6.0",
-    "framer-motion": "^12.40.0",
+    "framer-motion": "^13.2.0",
     "hono": "^4.8.3",
     "input-otp": "^1.4.2",
     "jose": "6.1.3",
