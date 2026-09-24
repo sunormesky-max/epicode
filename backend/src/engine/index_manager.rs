@@ -1,4 +1,4 @@
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use std::collections::{HashMap, HashSet};
 
 use crate::domain::space::Space;
@@ -13,7 +13,7 @@ pub struct IndexManager {
     pub content_hash_index: Mutex<HashMap<u64, TetraId>>,
     pub dirty_set: Mutex<HashSet<TetraId>>,
     pub placement_cache: Mutex<HashMap<Vec<String>, Point3>>,
-    pub placement_cache_order: Mutex<Vec<Vec<String>>>,
+    pub placement_cache_order: Mutex<std::collections::VecDeque<Vec<String>>>,
 }
 
 impl IndexManager {
@@ -23,7 +23,7 @@ impl IndexManager {
             content_hash_index: Mutex::new(chash_idx),
             dirty_set: Mutex::new(HashSet::new()),
             placement_cache: Mutex::new(HashMap::new()),
-            placement_cache_order: Mutex::new(Vec::new()),
+            placement_cache_order: Mutex::new(std::collections::VecDeque::new()),
         }
     }
 
@@ -97,13 +97,13 @@ impl IndexManager {
         let mut sorted = labels.to_vec();
         sorted.sort();
         cache.insert(sorted.clone(), pos);
-        order.push(sorted);
+        order.push_back(sorted);
         while cache.len() > 500 {
-            if order.is_empty() {
+            if let Some(old) = order.pop_front() {
+                cache.remove(&old);
+            } else {
                 break;
             }
-            let old = order.remove(0);
-            cache.remove(&old);
         }
     }
 
@@ -114,14 +114,17 @@ impl IndexManager {
         cache.get(&sorted).copied()
     }
 
-    pub fn rebuild_hnsw(&self, hnsw: &Mutex<HnswIndex>, space: &Space) {
+    pub fn rebuild_hnsw(&self, hnsw: &RwLock<HnswIndex>, space: &Space) {
         let tetras = space.all_tetrahedrons();
-        let mut h = hnsw.lock();
-        *h = HnswIndex::new(EMBEDDING_DIM, 16, 200);
+        // M1修复:锁外构建完整新索引,再一次性 swap 进去。
+        // 之前在 write lock 内逐个 insert,N=1200 时持锁数百毫秒到秒级,期间所有 search_knn 全阻塞。
+        let mut new_index = HnswIndex::new(EMBEDDING_DIM, 16, 100); // P1-7: ef_construction 200→100;
         for t in &tetras {
             if !t.data.embedding.is_empty() && t.data.embedding.len() == EMBEDDING_DIM {
-                h.insert(t.id, t.data.embedding.clone());
+                new_index.insert(t.id, t.data.embedding.clone());
             }
         }
+        // 锁持有时间从"重建全程"降到"一次指针交换"
+        *hnsw.write() = new_index;
     }
 }

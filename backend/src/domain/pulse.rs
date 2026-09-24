@@ -24,4 +24,6 @@ pub struct PulseResult {
     pub reached_target: bool,
     pub data: PulseData,
     pub energy_cost: f64,
+    /// 被 pulse 修改了 mass 的 tetra id（供 scheduler 增量持久化）
+    pub dirty_ids: Vec<TetraId>,
 }

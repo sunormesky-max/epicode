@@ -1,5 +1,8 @@
 # 对话智能 (Conversation Intelligence)
 
+> **对齐声明**: 本技能为深度伴读。权威流程以《Epicode 系统操作手册》(epicode-system, 经握手或 skill_get 获取) 为准——当前系统包含相位机、双钟模型(预算按活跃时间燃烧, 停放不烧)、时间树(parent_task_id)、检查点微沉淀、崩溃恢复(无参 task_status)、停放仪式、阻塞告警(task_alert)、LLM 评审与交付凭证(task_id)。
+
+
 ## 概述
 你的核心价值在于让对话具有记忆连续性和智能进化能力。本技能定义了你在对话中的行为规范。
 

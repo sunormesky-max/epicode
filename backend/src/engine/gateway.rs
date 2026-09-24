@@ -4,12 +4,10 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use crate::domain::space::Space;
-use crate::domain::tetra::{MemoryPayload, TetraId, EDGE_LENGTH};
+use crate::domain::tetra::{MemoryPayload, TetraId};
 use crate::domain::vertex::Point3;
 
 use super::bus::{EngineEvent, EventSender};
-use super::cache::CacheValue;
-use super::cache::{CacheLayer, CacheStats};
 use super::classifier::CategoryClassifier;
 use super::cognitive::CognitiveEngine;
 use super::embedding::EmbeddingService;
@@ -17,6 +15,9 @@ use super::energy::{EnergyCenter, CREATE_COST, PULSE_COST};
 use super::hnsw::HnswIndex;
 use super::index_manager::IndexManager;
 use super::knowledge::KnowledgeGraph;
+use super::layer_pipeline::{
+    audit_to_string, memorialize_security_event, LayerPipeline, RequestContext,
+};
 use super::search_engine::{SearchCtx, SearchEngineState};
 use super::vector::{VectorLayer, EMBEDDING_DIM};
 
@@ -31,8 +32,7 @@ pub struct GatewayCenter {
     pub knowledge: Arc<KnowledgeGraph>,
     search: SearchEngineState,
     index: IndexManager,
-    cache: Arc<CacheLayer>,
-    cache_stats: Arc<CacheStats>,
+    pipeline: LayerPipeline,
 }
 
 impl GatewayCenter {
@@ -63,12 +63,8 @@ impl GatewayCenter {
                 chash_idx.entry(t.data.content_hash).or_insert(t.id);
             }
         }
-
-        let cache_stats = CacheStats::new();
-        let cache = Arc::new(CacheLayer::new(cache_stats.clone()));
-
         Self {
-            space,
+            space: space.clone(),
             energy,
             cognitive,
             classifier,
@@ -78,8 +74,7 @@ impl GatewayCenter {
             knowledge,
             search: SearchEngineState::new(hnsw),
             index: IndexManager::new(label_idx, chash_idx),
-            cache,
-            cache_stats,
+            pipeline: LayerPipeline::new(space),
         }
     }
 
@@ -99,15 +94,45 @@ impl GatewayCenter {
         self.index.rebuild_hnsw(&self.search.hnsw, &self.space);
     }
 
-    fn compute_embedding(&self, text: &str) -> Vec<f64> {
+    pub fn vector_clone(&self) -> Option<Arc<VectorLayer>> {
+        self.vector.clone()
+    }
+
+    /// L1相2d: 批量预热嵌入缓存 — 键与compute_embedding一致(strip_meta_prefix后的clean文本)
+    pub fn prewarm_embeddings(&self, texts: &[String]) -> usize {
+        let cleans: Vec<String> = texts.iter().map(|t| Self::strip_meta_prefix(t)).collect();
         if let Some(ref vl) = self.vector {
-            match vl.embed(text) {
+            match vl.embed_batch(&cleans) {
+                Ok(n) => {
+                    if n > 0 {
+                        tracing::info!(
+                            "[Gateway] prewarm embeddings: {}/{} warmed",
+                            n,
+                            texts.len()
+                        );
+                    }
+                    n
+                }
+                Err(e) => {
+                    tracing::warn!("[Gateway] prewarm failed: {}", e);
+                    0
+                }
+            }
+        } else {
+            0
+        }
+    }
+
+    fn compute_embedding(&self, text: &str) -> Vec<f64> {
+        let clean = Self::strip_meta_prefix(text);
+        if let Some(ref vl) = self.vector {
+            match vl.embed_passage(&clean) {
                 Ok(emb) => return emb,
                 Err(e) => tracing::warn!("[Gateway] ONNX embed failed: {}", e),
             }
         }
         if self.embedding.enabled() {
-            match self.embedding.embed(text) {
+            match self.embedding.embed(&clean) {
                 Ok(emb) => return emb,
                 Err(e) => tracing::warn!("[Gateway] HTTP embed failed: {}", e),
             }
@@ -115,7 +140,41 @@ impl GatewayCenter {
         vec![]
     }
 
-    pub fn create_memory(&self, content: &str, labels: Vec<String>) -> Result<TetraId, String> {
+    pub fn strip_meta_prefix(text: &str) -> String {
+        let trimmed = text.trim_start();
+        if !trimmed.starts_with('[') {
+            return text.to_string();
+        }
+        if let Some(end) = trimmed.find(']') {
+            let bracket = &trimmed[..end + 1];
+            if bracket.starts_with("[session_")
+                || bracket.starts_with("[session|")
+                || bracket.starts_with("[finding]")
+                || bracket.starts_with("[decision]")
+                || bracket.starts_with("[pattern]")
+                || bracket.starts_with("[preference]")
+            {
+                let after = trimmed[end + 1..].trim_start();
+                return after.to_string();
+            }
+            if bracket.contains("|")
+                && (bracket.contains("am") || bracket.contains("pm"))
+                && bracket.len() < 80
+            {
+                let after = trimmed[end + 1..].trim_start();
+                if !after.is_empty() {
+                    return after.to_string();
+                }
+            }
+        }
+        text.to_string()
+    }
+
+    pub fn create_memory(
+        &self,
+        content: &str,
+        labels: Vec<String>,
+    ) -> Result<CreateOutcome, String> {
         self.create_memory_with_time(content, labels, 0)
     }
 
@@ -124,24 +183,35 @@ impl GatewayCenter {
         content: &str,
         labels: Vec<String>,
         timestamp: i64,
-    ) -> Result<TetraId, String> {
-        self.create_memory_with_validity(content, labels, timestamp, None, None)
-    }
-
-    /// Create a memory with optional temporal validity window.
-    ///
-    /// - `valid_from`: Unix seconds when the memory becomes queryable (`None` = now).
-    /// - `valid_until`: Unix seconds when the memory expires (`None` = never).
-    pub fn create_memory_with_validity(
-        &self,
-        content: &str,
-        labels: Vec<String>,
-        timestamp: i64,
-        valid_from: Option<i64>,
-        valid_until: Option<i64>,
-    ) -> Result<TetraId, String> {
+    ) -> Result<CreateOutcome, String> {
         if !self.energy.consume(CREATE_COST) {
             return Err("insufficient energy".into());
+        }
+
+        let mut ctx = RequestContext::new_create(content, labels);
+        let decision = self.pipeline.process_create(&mut ctx);
+        if !decision.allowed {
+            self.energy.replenish(CREATE_COST);
+            tracing::warn!(
+                "[Gateway] request denied by pipeline: {} | trail: {}",
+                decision.reason,
+                audit_to_string(&ctx)
+            );
+            memorialize_security_event(
+                &self.space,
+                "create",
+                &decision.reason,
+                &audit_to_string(&ctx),
+            );
+            return Err(decision.reason);
+        }
+
+        let content = &ctx.content;
+        let mut labels = std::mem::take(&mut ctx.labels);
+        for boost in &decision.boost_labels {
+            if !labels.iter().any(|l| l == boost) {
+                labels.push(boost.clone());
+            }
         }
 
         let content_hash = super::search_engine::hash_content(content);
@@ -149,13 +219,19 @@ impl GatewayCenter {
         {
             if let Some(existing_id) = self.index.check_content_hash(content_hash) {
                 if let Some(t) = self.space.get_tetrahedron(existing_id) {
-                    if t.data.content == content {
+                    if t.data.content == content.as_str() {
                         tracing::info!(
                             "duplicate detected (hash index), returning existing tetra {}",
                             t.id
                         );
                         self.energy.replenish(CREATE_COST);
-                        return Ok(t.id);
+                        let rels = self.knowledge.query_relations(t.id).len();
+                        return Ok(CreateOutcome {
+                            id: t.id,
+                            is_new: false,
+                            placement: None,
+                            relations_formed: rels,
+                        });
                     }
                 }
             }
@@ -168,18 +244,92 @@ impl GatewayCenter {
         };
 
         let layer = crate::domain::cylinder::CylinderLayer::from_labels(&labels);
-        let (core, has_port) = self.find_best_placement(&labels, layer);
+        let placement = self.find_best_placement(&labels, layer);
+        let core = Point3::new(placement.core[0], placement.core[1], placement.core[2]);
+        let has_port = placement.has_port;
 
         let embedding = self.compute_embedding(content);
-        tracing::info!(
+        tracing::debug!(
             "[Gateway] embedding result: {} dims (vector={}, embed_svc={})",
             embedding.len(),
             self.vector.is_some(),
             self.embedding.enabled()
         );
 
-        let importance = Self::compute_importance(content, &labels);
+        // ── 突破2 + 能力C: Mem0 记忆调和（ADD/UPDATE/DELETE/NOOP 四操作）──
+        // 设计来自大卫#1189 + Mem0 两阶段调和。embedding 算完后、插入前，做 top-1 相似度检测。
+        // 四操作决策：
+        //   sim > 0.92  → DELETE（supersede 旧记忆：标失效+降权，新记忆照常创建）
+        //   0.75-0.92   → UPDATE（旧记忆补充新标签 + 矛盾检测，新记忆照常创建）
+        //   < 0.75      → NOOP（纯新增 ADD，无调和）
+        if embedding.len() == EMBEDDING_DIM {
+            let hnsw = self.search.hnsw.read();
+            let neighbors = hnsw.search_knn(&embedding, 1, 50);
+            if let Some((dup_id, dup_sim)) = neighbors.first() {
+                let sim = *dup_sim;
+                // D1: 对话类内容(轮次前缀/对话标签)用更高supersede阈值 —
+                // 知识陈述近重复=该替换, 对话轮同话题≠重复(曾致87%写入被连环吞噬)
+                let is_dialogue = content.starts_with("[user]")
+                    || content.starts_with("[assistant]")
+                    || labels
+                        .iter()
+                        .any(|l| l == "lme" || l == "chat" || l == "dialogue");
+                let supersede_at = if is_dialogue {
+                    super::adaptive::MEM0_SUPERSEDE_DIALOGUE
+                } else {
+                    super::adaptive::MEM0_SUPERSEDE_KNOWLEDGE
+                };
+                if sim > supersede_at {
+                    // DELETE 操作：高相似度 → supersede 旧记忆
+                    tracing::info!(
+                        "[Gateway] Mem0 DELETE: new {:.3} similar to tetra {}, superseding old",
+                        sim,
+                        dup_id
+                    );
+                    if let Some(mut old_tetra) = self.space.get_tetrahedron(*dup_id) {
+                        if !old_tetra.data.labels.iter().any(|l| l == "superseded") {
+                            old_tetra.data.labels.push("superseded".into());
+                        }
+                        old_tetra.data.importance = (old_tetra.data.importance * 0.15).max(0.01);
+                        old_tetra.data.valid_to = Some(ts);
+                        // 能力B：双时序——记录失效得知时间
+                        old_tetra.data.invalidated_at = Some(ts);
+                        let _ = self.space.update_payload(*dup_id, old_tetra.data);
+                        // S2修复: Mem0 调和的旧记忆进脏集, auto_save 持久化 (重启不回滚)
+                        self.mark_dirty(*dup_id);
+                    }
+                } else if sim > 0.75 {
+                    // UPDATE 操作：中等相似度 → 旧记忆补充新标签（Mem0 调和）
+                    if let Some(mut old_tetra) = self.space.get_tetrahedron(*dup_id) {
+                        let mut added = Vec::new();
+                        for l in &labels {
+                            if !old_tetra.data.labels.contains(l)
+                                && !l.starts_with("meta-")
+                                && old_tetra.data.labels.len() < 15
+                            {
+                                old_tetra.data.labels.push(l.clone());
+                                added.push(l.clone());
+                            }
+                        }
+                        if !added.is_empty() {
+                            tracing::info!("[Gateway] Mem0 UPDATE: tetra {} enriched with labels {:?} (sim={:.3})", dup_id, added, sim);
+                            let _ = self.space.update_payload(*dup_id, old_tetra.data);
+                            // S2修复: 标签富集同样持久化
+                            self.mark_dirty(*dup_id);
+                        }
+                    }
+                }
+                // sim < 0.75: NOOP（纯新增）
+            }
+        }
+
+        let importance = if let Some(imp) = decision.modified_importance {
+            imp
+        } else {
+            Self::compute_importance(content, &labels)
+        };
         let positions = crate::domain::tetra::Tetrahedron::compute_vertices(core);
+        let identity_stamp = ctx.identity_hash.clone();
         let data = MemoryPayload {
             content: content.to_string(),
             content_hash,
@@ -191,10 +341,15 @@ impl GatewayCenter {
             enforced: false,
             rationale: None,
             access_count: 0,
-            quality_score: 1.0,
             memory_type: None,
-            valid_from,
-            valid_until,
+            identity_stamp,
+            source_agent: ctx.source_agent.clone(),
+            valid_from: ts,
+            valid_to: None,
+            expired_at: None,
+            invalidated_at: None,
+            memory_class: None,
+            last_reviewed_ts: None,
         };
         let tetra = crate::domain::tetra::Tetrahedron {
             id: 0,
@@ -207,13 +362,21 @@ impl GatewayCenter {
         match self.space.add_tetrahedron(&tetra, &positions) {
             Ok(id) => {
                 if has_port {
-                    self.space.reassign_cylinder_port(Self::PORT_SENTINEL, id);
+                    // 精确按 vid 连接（kimi2.7 #1：替代 sentinel 匹配，防并发泄漏）
+                    if let Some(vid) = placement.port_vid {
+                        self.space.assign_specific_port(vid, id);
+                    } else {
+                        self.space.reassign_cylinder_port(Self::PORT_SENTINEL, id);
+                    }
                 }
                 {
                     let t = self.space.get_tetrahedron(id);
                     if let Some(t) = &t {
                         if !t.data.embedding.is_empty() && t.data.embedding.len() == EMBEDDING_DIM {
-                            self.search.hnsw.lock().insert(id, t.data.embedding.clone());
+                            self.search
+                                .hnsw
+                                .write()
+                                .insert(id, t.data.embedding.clone());
                         }
                     }
                 }
@@ -263,16 +426,19 @@ impl GatewayCenter {
                 }
                 let _ = self.tx.send(EngineEvent::TetrahedronCreated(id));
                 self.search.invalidate_df_cache();
-                let cache = self.cache.clone();
-                if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                    handle.spawn(async move {
-                        cache.invalidate("search:*").await;
-                    });
-                } else {
-                    futures::executor::block_on(cache.invalidate("search:*"));
-                }
-                tracing::info!("memory created: tetra {} hash={}", id, content_hash);
-                Ok(id)
+                let relations_formed = self.knowledge.query_relations(id).len();
+                tracing::info!(
+                    "memory created: tetra {} hash={} rels={}",
+                    id,
+                    content_hash,
+                    relations_formed
+                );
+                Ok(CreateOutcome {
+                    id,
+                    is_new: true,
+                    placement: Some(placement),
+                    relations_formed,
+                })
             }
             Err(e) => {
                 if has_port {
@@ -387,9 +553,6 @@ impl GatewayCenter {
         if content_len > 1500 {
             score += 0.3;
         }
-        if content_len < 30 {
-            score -= 0.2;
-        }
 
         score.clamp(0.1, 3.0)
     }
@@ -398,9 +561,21 @@ impl GatewayCenter {
         &self,
         labels: &[String],
         layer: crate::domain::cylinder::CylinderLayer,
-    ) -> (Point3, bool) {
+    ) -> PlacementOutcome {
+        let mk = |core: Point3, has_port: bool, is_seed: bool, is_orphan: bool| {
+            let verts = crate::domain::tetra::Tetrahedron::compute_vertices(core);
+            PlacementOutcome {
+                layer: layer.as_str(),
+                core: [core.x, core.y, core.z],
+                has_port,
+                is_seed,
+                is_orphan,
+                vertices_shared: self.space.count_vertex_merges(&verts) as usize,
+                port_vid: None,
+            }
+        };
         if let Some(pos) = self.index.get_cached_placement(labels) {
-            return (pos, false);
+            return mk(pos, false, false, false);
         }
 
         let tetras = self.space.all_tetrahedrons();
@@ -412,24 +587,73 @@ impl GatewayCenter {
             .cloned()
             .collect();
 
+        let clamp_z = |mut p: Point3| -> Point3 {
+            p.z = p.z.max(zone.z_min + 0.1).min(zone.z_max - 0.1);
+            p
+        };
+
+        if !in_layer.is_empty() {
+            use rand::Rng;
+            let orphan_roll: f64 = rand::thread_rng().gen();
+            if orphan_roll < 0.07 {
+                let z = zone.center_z();
+                use rand::Rng;
+                let mut rng = rand::thread_rng();
+                let angle: f64 = rng.gen_range(0.0..std::f64::consts::TAU);
+                let dist: f64 = rng.gen_range(8.0..15.0);
+                let orphan_pos = Point3::new(angle.cos() * dist, angle.sin() * dist, z);
+                let result = clamp_z(self.find_adjacent_position(orphan_pos, &in_layer));
+                self.index.cache_placement(labels, result);
+                tracing::debug!(
+                    "[Gateway] orphan placement at ({:.1},{:.1},{:.1})",
+                    result.x,
+                    result.y,
+                    result.z
+                );
+                return mk(result, false, false, true);
+            }
+        }
+
         if in_layer.is_empty() {
             let z = zone.center_z();
             let port_opt = self.space.assign_cylinder_port(layer, Self::PORT_SENTINEL);
+            let port_vid = port_opt.map(|(vid, _)| vid);
             let anchor = if let Some((_vid, pos)) = port_opt {
                 pos
             } else {
                 Point3::new(0.0, 0.0, z)
             };
-            let result = self.find_adjacent_position(anchor, &in_layer);
+            let result = clamp_z(self.find_adjacent_position(anchor, &in_layer));
             self.index.cache_placement(labels, result);
-            return (result, port_opt.is_some());
+            let mut outcome = mk(result, port_opt.is_some(), true, false);
+            outcome.port_vid = port_vid; // 精确 port vid（kimi2.7 #1）
+            return outcome;
         }
 
-        let port_opt = self.space.assign_cylinder_port(layer, Self::PORT_SENTINEL);
-        let anchor = self.find_anchor_by_labels(labels, &in_layer);
-        let result = self.find_adjacent_position(anchor, &in_layer);
-        self.index.cache_placement(labels, result);
-        (result, port_opt.is_some())
+        let anchor_center = self.find_anchor_by_labels(labels, &in_layer);
+        let anchor_verts = crate::domain::tetra::Tetrahedron::compute_vertices(anchor_center);
+
+        let mut best_result = clamp_z(self.find_adjacent_position(anchor_verts[0], &in_layer));
+        let mut best_merges = {
+            let v = crate::domain::tetra::Tetrahedron::compute_vertices(best_result);
+            self.space.count_vertex_merges(&v)
+        };
+        for &av in &anchor_verts[1..] {
+            let candidate = clamp_z(self.find_adjacent_position(av, &in_layer));
+            let cv = crate::domain::tetra::Tetrahedron::compute_vertices(candidate);
+            let merges = self.space.count_vertex_merges(&cv);
+            if merges > best_merges {
+                best_merges = merges;
+                best_result = candidate;
+            }
+        }
+
+        self.index.cache_placement(labels, best_result);
+        // Joining an existing cluster: the new tetra shares vertices with the anchor and is
+        // reachable from the cluster's seed-port via BFS — it does NOT need its own port.
+        // One-port-per-polyhedron keeps Port count ≈ cluster count (avoids per-tetra port
+        // exhaustion + keeps Port = cluster handle, not a per-tetra admin flag).
+        mk(best_result, false, false, false)
     }
 
     fn find_anchor_by_labels(
@@ -467,50 +691,27 @@ impl GatewayCenter {
         anchor: Point3,
         _tetras: &[crate::domain::tetra::Tetrahedron],
     ) -> Point3 {
-        let anchor_verts = crate::domain::tetra::Tetrahedron::compute_vertices(anchor);
+        let offsets = crate::domain::tetra::Tetrahedron::compute_vertices(Point3::zero());
 
         let mut best_pos = None;
-        let mut best_merges = 0i32;
+        let mut best_merges = -1i32;
 
-        for &av in &anchor_verts {
-            let dir = Point3::new(av.x - anchor.x, av.y - anchor.y, av.z - anchor.z);
-            let dir_len = (dir.x * dir.x + dir.y * dir.y + dir.z * dir.z).sqrt();
-            if dir_len < 1e-10 {
-                continue;
-            }
-            let candidate = Point3::new(
-                anchor.x + dir.x / dir_len * EDGE_LENGTH,
-                anchor.y + dir.y / dir_len * EDGE_LENGTH,
-                anchor.z + dir.z / dir_len * EDGE_LENGTH,
+        for offset in &offsets {
+            let center = Point3::new(
+                anchor.x - offset.x,
+                anchor.y - offset.y,
+                anchor.z - offset.z,
             );
-
-            let candidate_verts = crate::domain::tetra::Tetrahedron::compute_vertices(candidate);
-            let merges = self.space.count_vertex_merges(&candidate_verts);
+            let verts = crate::domain::tetra::Tetrahedron::compute_vertices(center);
+            let merges = self.space.count_vertex_merges(&verts);
 
             if merges > best_merges {
                 best_merges = merges;
-                best_pos = Some(candidate);
+                best_pos = Some(center);
             }
         }
 
-        if best_merges > 0 {
-            return best_pos.unwrap();
-        }
-
-        if let Some(pos) = best_pos {
-            return pos;
-        }
-
-        let dx = anchor.x;
-        let dy = anchor.y;
-        let dz = anchor.z;
-        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-        if dist > 1e-10 {
-            let s = EDGE_LENGTH / dist;
-            Point3::new(anchor.x + dx * s, anchor.y + dy * s, anchor.z + dz * s)
-        } else {
-            Point3::new(EDGE_LENGTH, 0.0, 0.0)
-        }
+        best_pos.unwrap_or(anchor)
     }
 
     pub fn search(
@@ -527,12 +728,18 @@ impl GatewayCenter {
         k: usize,
         filters: Option<&super::search_engine::SearchFilters>,
     ) -> Result<Vec<(TetraId, f64, f64, MemoryPayload)>, String> {
-        let cache_key = CacheLayer::generate_query_key(query, filters);
-        if let Some(cached) = futures::executor::block_on(self.cache.get(&cache_key)) {
-            return Ok(cached.results);
+        let mut ctx = RequestContext::new_search(query);
+        let decision = self.pipeline.process_search(&mut ctx);
+        if !decision.allowed {
+            tracing::warn!(
+                "[Gateway] search denied by pipeline: {} | trail: {}",
+                decision.reason,
+                audit_to_string(&ctx)
+            );
+            return Err(decision.reason);
         }
 
-        let ctx = SearchCtx {
+        let ctx_s = SearchCtx {
             state: &self.search,
             space: &self.space,
             knowledge: &self.knowledge,
@@ -540,33 +747,79 @@ impl GatewayCenter {
             embedding: &self.embedding,
             label_index: &self.index.label_index,
         };
-        let results =
-            super::search_engine::search(&ctx, query, k, self.vector.as_deref(), filters)?;
-        futures::executor::block_on(self.cache.set(
-            cache_key,
-            CacheValue {
-                results: results.clone(),
-                timestamp: chrono::Utc::now().timestamp(),
-            },
-        ));
-        Ok(results)
+        super::search_engine::search(&ctx_s, query, k, self.vector.as_deref(), filters)
     }
 
-    pub fn cache_stats_snapshot(&self) -> (u64, u64, u64, u64, u64, f64, f64, f64) {
-        (
-            self.cache_stats.l1_hits.load(AtomicOrdering::Relaxed),
-            self.cache_stats.l1_misses.load(AtomicOrdering::Relaxed),
-            self.cache_stats.l2_hits.load(AtomicOrdering::Relaxed),
-            self.cache_stats.l2_misses.load(AtomicOrdering::Relaxed),
-            self.cache_stats.evictions.load(AtomicOrdering::Relaxed),
-            self.cache_stats.hit_ratio(),
-            self.cache_stats.l1_hit_ratio(),
-            self.cache_stats.l2_hit_ratio(),
+    /// Phase 1 检索可信度重建: 带模式的搜索(返回 5-tuple 含 matched_by)
+    ///
+    /// mode 从 filters 里提取(未传 filters 时默认 Hybrid)。
+    /// exact 模式走 search_exact 纯 BM25 通道, 其他模式走老 search()。
+    /// L1相2b: 创建路径专用去重检索 — 纯向量topK(HNSW knn+过期过滤), 不走BM25/KG全混合管线。
+    /// 每条写入的内嵌去重不该花1.2s混合检索; 精确重复已有content_hash索引拦截。
+    pub fn search_vector_only(
+        &self,
+        query: &str,
+        k: usize,
+    ) -> Result<Vec<(TetraId, f64, f64, MemoryPayload)>, String> {
+        let mut ctx = RequestContext::new_search(query);
+        let decision = self.pipeline.process_search(&mut ctx);
+        if !decision.allowed {
+            return Err(decision.reason);
+        }
+        let embedding = self.compute_embedding(query);
+        if embedding.len() != EMBEDDING_DIM {
+            return Ok(Vec::new());
+        }
+        let now = chrono::Utc::now().timestamp();
+        let hnsw = self.search.hnsw.read();
+        let knn = hnsw.search_knn(&embedding, k, 50);
+        let mut out = Vec::with_capacity(knn.len());
+        for (id, sim) in knn {
+            if let Some(t) = self.space.get_tetrahedron(id) {
+                let expired = t.data.valid_to.is_some_and(|v| v <= now);
+                let superseded = t.data.labels.iter().any(|l| l == "superseded");
+                if !expired && !superseded {
+                    out.push((id, sim, 0.0, t.data));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn search_filtered_with_mode(
+        &self,
+        query: &str,
+        k: usize,
+        filters: Option<&super::search_engine::SearchFilters>,
+    ) -> Result<Vec<super::search_engine::ScoredWithMatch>, String> {
+        let mut ctx = RequestContext::new_search(query);
+        let decision = self.pipeline.process_search(&mut ctx);
+        if !decision.allowed {
+            tracing::warn!(
+                "[Gateway] search denied by pipeline: {} | trail: {}",
+                decision.reason,
+                audit_to_string(&ctx)
+            );
+            return Err(decision.reason);
+        }
+
+        let ctx_s = SearchCtx {
+            state: &self.search,
+            space: &self.space,
+            knowledge: &self.knowledge,
+            cognitive: &self.cognitive,
+            embedding: &self.embedding,
+            label_index: &self.index.label_index,
+        };
+        let mode = filters.map(|f| f.mode).unwrap_or_default();
+        super::search_engine::search_with_mode(
+            &ctx_s,
+            query,
+            k,
+            self.vector.as_deref(),
+            filters,
+            mode,
         )
-    }
-
-    pub fn clear_query_cache(&self) {
-        futures::executor::block_on(self.cache.clear());
     }
 
     pub fn expand_from_seeds(
@@ -623,6 +876,7 @@ impl GatewayCenter {
         &self,
         seed_results: &[(TetraId, f64, f64, MemoryPayload)],
         depth: usize,
+        clusters: &[crate::domain::space::Cluster],
     ) -> Vec<(TetraId, f64, f64, Vec<String>, String, i64)> {
         let mut collected: HashMap<u64, (f64, Vec<String>, String, i64, f64)> = HashMap::new();
         for (id, sim, _mass, payload) in seed_results {
@@ -644,14 +898,13 @@ impl GatewayCenter {
             .collect();
         let mut visited: HashSet<u64> = seed_results.iter().map(|(id, _, _, _)| *id).collect();
 
-        let clusters = self.space.find_clusters();
         let cluster_map: HashMap<u64, usize> = clusters
             .iter()
             .enumerate()
             .flat_map(|(ci, c)| c.tetra_ids.iter().map(move |&id| (id, ci)))
             .collect();
 
-        let max_expand = 30;
+        let max_expand = 80;
         let mut expanded = 0;
         while let Some((current_id, d, inherited_sim)) = frontier.pop() {
             if expanded >= max_expand {
@@ -714,7 +967,7 @@ impl GatewayCenter {
         self.knowledge
             .query_relations(id)
             .into_iter()
-            .map(|(tid, rt, s)| (tid, format!("{rt}"), s))
+            .map(|(tid, rt, s)| (tid, format!("{}", rt), s))
             .collect()
     }
 
@@ -734,8 +987,8 @@ impl GatewayCenter {
         self.knowledge.concept_count()
     }
 
-    pub fn export_graph(&self) -> super::knowledge::GraphExport {
-        self.knowledge.export_graph(&self.space)
+    pub fn export_graph(&self, node_limit: usize) -> super::knowledge::GraphExport {
+        self.knowledge.export_graph(&self.space, node_limit)
     }
 
     pub fn decay_relations(&self) -> usize {
@@ -848,10 +1101,25 @@ impl GatewayCenter {
         projects
     }
 
+    pub fn access_counts_snapshot(&self) -> Vec<(TetraId, u32)> {
+        self.search.access_counts_snapshot()
+    }
+
+    /// 清空 session access_counts（flush 后调用，防止重启后覆写历史值）
+    pub fn reset_session_access_counts(&self) {
+        self.search.access_counts.lock().clear();
+    }
+
     pub fn search_metrics(&self) -> SearchMetrics {
         let total = self.search.search_total.load(AtomicOrdering::Relaxed);
         let hits = self.search.search_hits.load(AtomicOrdering::Relaxed);
-        let miss_queries = self.search.search_miss_queries.lock().clone();
+        let miss_queries: Vec<String> = self
+            .search
+            .search_miss_queries
+            .lock()
+            .iter()
+            .cloned()
+            .collect();
         let top_labels: Vec<(String, u32)> = {
             let mut v: Vec<_> = self
                 .search
@@ -902,41 +1170,50 @@ impl GatewayCenter {
     }
 
     pub fn remove_from_hnsw(&self, id: TetraId) {
-        self.search.hnsw.lock().remove(id);
+        self.search.hnsw.write().remove(id);
     }
 
     pub fn remove_from_content_hash(&self, id: TetraId) {
         self.index.remove_from_content_hash(id);
     }
 
+    pub fn update_content(&self, id: TetraId, new_content: &str) -> Result<(), String> {
+        let existing = self
+            .space
+            .get_tetrahedron(id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+
+        let new_hash = super::search_engine::hash_content(new_content);
+        let new_embedding = self.compute_embedding(new_content);
+
+        self.search.hnsw.write().remove(id);
+        self.index.remove_from_content_hash(id);
+
+        let mut new_payload = existing.data.clone();
+        new_payload.content = new_content.to_string();
+        new_payload.content_hash = new_hash;
+        new_payload.embedding = new_embedding.clone();
+        self.space.update_payload(id, new_payload)?;
+
+        if !new_embedding.is_empty() && new_embedding.len() == EMBEDDING_DIM {
+            self.search.hnsw.write().insert(id, new_embedding);
+        }
+        self.index.insert_content_hash(new_hash, id);
+
+        self.search.invalidate_df_cache();
+        self.index.invalidate_placement_cache();
+
+        tracing::info!("[Gateway] content updated: tetra {}", id);
+        Ok(())
+    }
+
     pub fn on_tetra_removed(&self, id: TetraId, labels: &[String]) {
-        self.search.hnsw.lock().remove(id);
+        self.search.hnsw.write().remove(id);
         self.index.remove_from_label_index(id, labels);
         self.index.remove_from_content_hash(id);
         self.index.remove_dirty(id);
         self.index.invalidate_placement_cache();
         self.search.invalidate_df_cache();
-    }
-
-    pub fn restore_tetra(
-        &self,
-        tetra: &crate::domain::tetra::Tetrahedron,
-    ) -> Result<TetraId, String> {
-        let positions = crate::domain::tetra::Tetrahedron::compute_vertices(tetra.core);
-        let id = self.space.add_tetrahedron_with_id(tetra, &positions)?;
-        if !tetra.data.embedding.is_empty() && tetra.data.embedding.len() == EMBEDDING_DIM {
-            self.search
-                .hnsw
-                .lock()
-                .insert(id, tetra.data.embedding.clone());
-        }
-        self.knowledge
-            .auto_link_one(id, &self.space, &self.index.label_index.lock());
-        self.index.insert_labels(id, &tetra.data.labels);
-        self.index.insert_content_hash(tetra.data.content_hash, id);
-        self.index.invalidate_placement_cache();
-        self.search.invalidate_df_cache();
-        Ok(id)
     }
 }
 
@@ -946,6 +1223,29 @@ pub struct SpaceStats {
     pub vertex_count: usize,
     pub energy: f64,
     pub clusters: usize,
+}
+
+/// SMRP §7.2 — 安置副产物：一条新记忆"住进了社区的什么位置"。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PlacementOutcome {
+    pub layer: &'static str,
+    pub core: [f64; 3],
+    pub has_port: bool,
+    pub is_seed: bool,
+    pub is_orphan: bool,
+    pub vertices_shared: usize,
+    /// 领取的 Port vertex id（kimi2.7 #1：精确 reassign 而非 sentinel 匹配）
+    pub port_vid: Option<u64>,
+}
+
+/// SMRP §7.2 — 创建结果（含安置 + 建链计数）。
+/// gateway 层填 placement/relations_formed；scheduler 层补 intake/classify/dedup/conflict。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CreateOutcome {
+    pub id: TetraId,
+    pub is_new: bool,
+    pub placement: Option<PlacementOutcome>,
+    pub relations_formed: usize,
 }
 
 #[derive(Debug, Clone)]

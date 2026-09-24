@@ -1,4 +1,2 @@
-#[derive(Debug, Clone)]
-pub enum ChannelHop {
-    Vertex(super::vertex::VertexId),
-}
+// ChannelHop was unused — PulseEngine implements its own BFS traversal.
+// This file is kept for module compatibility but contains no code.
