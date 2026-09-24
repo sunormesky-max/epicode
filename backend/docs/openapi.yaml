@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Epicode Cloud API
   description: Semantic memory service with ONNX 768-dim vector search, hybrid BM25 retrieval, multi-tenant isolation, and LLM-powered Q&A
-  version: 1.0.0
+  version: 1.0.1
   contact:
     name: Epicode Support
     email: sunormesky@gmail.com
