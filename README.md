@@ -1,204 +1,63 @@
-<div align="center">
+# Epicode — AI 记忆系统
 
-# Epicode
+为 AI 智能体与 LLM 应用提供**持久化记忆**的开源记忆系统：一个带认知生命周期的记忆云。
 
-## Give AI an Unforgettable Memory
+> 记忆不只是存储。Epicode 的记忆会做梦（自动整合）、有意志（自主信号环）、能生长（技能与经验沉淀）、可遗忘（时间效性与归档）。
 
-[![CI](https://github.com/sunormesky-max/epicode/actions/workflows/ci.yml/badge.svg)](https://github.com/sunormesky-max/epicode/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/github/v/release/sunormesky-max/epicode)](https://github.com/sunormesky-max/epicode/releases)
-[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](deploy/docker-compose.yml)
-[![Rust](https://img.shields.io/badge/Rust-1.88+-orange?logo=rust)](https://www.rust-lang.org/)
-[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/v2/github.com/sunormesky-max/epicode/badge)](https://securityscorecards.dev/viewer/?uri=github.com/sunormesky-max/epicode)
-[![Security Policy](https://img.shields.io/badge/Security-Policy-blue)](SECURITY.md)
-[![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen)](CONTRIBUTING.md)
+## 核心特性
 
-[![GitHub stars](https://img.shields.io/github/stars/sunormesky-max/epicode?style=social)](https://github.com/sunormesky-max/epicode/stargazers)
-[![GitHub Discussions](https://img.shields.io/github/discussions/sunormesky-max/epicode)](https://github.com/sunormesky-max/epicode/discussions)
-[![Docs](https://img.shields.io/badge/Docs-epicode.cn-success)](https://epicode.cn/#/docs)
-[![Live Demo](https://img.shields.io/badge/Live-epicode.cn-2ea44f)](https://epicode.cn)
+- **记忆引擎** — 四面体（tetrahedron）记忆结构 + 25 万级关系图 + HNSW 语义检索；存储层 AES-256-GCM 静态加密
+- **双环认知架构** — 潜意识环（dream 整合、脉冲扩散、知识聚类）持续运行；主意识环（episodic focus、自我唤醒）按需点火
+- **意志驱动系统** — 信号队列（warn/suggest/explore/constrain/request）、执行回执（drive_ack）、行为镜像
+- **时间效性** — 记忆带 `valid_from / valid_to` 双时态字段；停止谈判、目标契约（done_when 证据映射）、饱和裁决
+- **MCP 工具面** — 40+ 工具（memory_search / task_complete / kg_query / library_search...），任意 MCP 客户端即插即用
+- **图书馆子系统** — 共享知识集合（批量 ingest、来源溯源、ACL 权限、请求-兑现工作流）
+- **技能生态** — 语义自动触发、三层渐进披露、社区共享
+- **多租户** — 每用户独立引擎与空间、API key 体系、套餐与限额、审计日志
 
-[English](README.md) · [中文](README.zh.md) · [Quick Start](#quick-start) · [Docs](docs/) · [OpenAPI](backend/docs/openapi.yaml) · [Releases](https://github.com/sunormesky-max/epicode/releases)
+## 三核心架构
 
-</div>
+```
+        ┌─────────────────────────────────┐
+        │         记忆基座 (本仓库)         │
+        │  SQLite + HNSW + 加密存储 + 图书馆  │
+        └──────┬──────────┬──────────┬────┘
+               │          │          │
+         ┌─────┴───┐ ┌────┴────┐ ┌───┴─────┐
+         │ 语义核心 │ │ 直觉核心 │ │ 推理核心  │
+         │ ~10ms   │ │ 33ms    │ │ 5-15s   │
+         │ ONNX嵌入 │ │ 决策模型  │ │ LLM(可换)│
+         └─────────┘ └─────────┘ └─────────┘
+```
 
----
+三核心共插同一记忆基座：语义让它可寻，直觉在历史判断上练成，推理结论回流为新记忆。
 
-Epicode is an **open-source spatial AI memory system**. It stores AI memories as tetrahedrons in continuous 3D space, automatically extracts relationships into a knowledge graph, and gives AI agents persistent, cross-session memory.
-
-## Quick Start
-
-The fastest way to run Epicode locally is with Docker Compose:
+## 快速开始
 
 ```bash
-git clone https://github.com/sunormesky-max/epicode.git
-cd epicode/deploy
-cp .env.example .env
-# Edit .env and add your DEEPSEEK_API_KEY and keys
-docker compose up --build -d
+# 构建 (Rust 1.75+)
+cargo build --release --bin epicode-cloud
+
+# 运行 (环境变量见下)
+TETRAMEM_DATA_DIR=/path/to/data \
+LLM_API_KEY=your-llm-key \
+./target/release/epicode-cloud
 ```
 
-Then store and search a memory:
+| 环境变量 | 用途 | 默认 |
+|---|---|---|
+| `TETRAMEM_DATA_DIR` | 数据目录 | 必填 |
+| `LLM_API_KEY` / `LLM_API_BASE` / `LLM_MODEL` | 推理核心（任意 OpenAI 兼容端点） | MiniMax |
+| `EPICODE_PREWARM_PRIMARY` | 启动预热主引擎（内存紧张设 0） | 1 |
+| `EPICODE_LAYA_PRESCREEN` | 直觉核心预筛评审 | 0 |
 
-```bash
-curl -X POST http://localhost:8080/api/v1/remember \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-api-key" \
-  -d '{"content": "Epicode gives AI persistent spatial memory"}'
+健康检查 `GET /health`，API 文档 `GET /openapi.yaml`，MCP 端点 `POST /mcp`。
 
-# Store a memory that expires in 7 days
-curl -X POST http://localhost:8080/api/v1/remember \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-api-key" \
-  -d '{"content": "Sprint deadline: ship v1.0 by Friday", "ttl_seconds": 604800}'
+## 文档
 
-curl -X POST http://localhost:8080/api/v1/search \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-api-key" \
-  -d '{"query": "AI memory"}'
-```
+- [docs/](docs/) — 设计文档与运维手册
+- Constitution（系统宪法）内置于 `src/engine/constitution.rs`
 
-> 💡 **Live demo:** [epicode.cn](https://epicode.cn) · Dashboard screenshot will be added in a follow-up PR.
+## 许可
 
-## Key Features
-
-- **Spatial Memory** — memories stored as tetrahedrons in 3D space for natural clustering.
-- **Semantic Search** — BM25 + HNSW hybrid search for natural-language retrieval.
-- **Knowledge Graph** — automatic relationship extraction and dynamic graph updates.
-- **Temporal Validity** — every memory supports `valid_from` / `valid_until` windows and freshness decay scoring, enabling time-aware recall (on par with Zep/Graphiti's core capability).
-- **MCP Integration** — 35 standardized tools for any MCP-compatible AI agent.
-- **SMRP Protocol** — structured memory responses with topology and placement metadata.
-- **Multi-tenant Cloud** — user management, quotas, invite codes, and admin controls.
-- **Self-hosted Defense** — `epicode-guard` watches SSH/Web/honeypot traffic and auto-bans attackers.
-- **Observable** — call-detail stats (request/retrieval/cache/decision metrics) exposed on `/v1/stats`.
-- **Benchmark** — see [BENCHMARK.md](BENCHMARK.md) for quantified latency, throughput, and cache numbers.
-
-## Architecture
-
-```text
-AI Agent → POST /api/v1/remember
-    → Nginx (strips /api prefix)
-    → Security middleware (API key + rate limit + energy check)
-    → GatewayCenter (embedding → LLM classification → spatial placement)
-    → New tetrahedron placed in Space (auto-merge nearby vertices)
-    → Knowledge graph updated
-    → Scheduler runs background cycles: pulse / link / dedup / dream
-```
-
-Read more in [docs/architecture.md](docs/architecture.md).
-
-## Tech Stack
-
-| Layer | Technologies |
-|-------|--------------|
-| Frontend | React 19 · TypeScript · Vite 7 · Tailwind CSS |
-| Backend | Rust · Axum · Tokio · SQLite · ONNX Runtime |
-| Search | HNSW · BM25 · ONNX embeddings |
-| Cognition | DeepSeek LLM API |
-| Defense | Rust · nftables · firewalld · TCP honeypots |
-| Deployment | Docker · Docker Compose · Kubernetes · Nginx |
-
-## Local Development
-
-```bash
-# Frontend
-cd frontend
-npm install
-npm run dev        # http://localhost:5173
-
-# Backend
-cd backend
-cargo build --release
-cargo test --all-targets
-./target/release/epicode --cloud   # Cloud mode on :9111
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development setup.
-
-## Docker Deploy
-
-```bash
-cd deploy
-cp .env.example .env
-# fill in DEEPSEEK_API_KEY, EPICODE_ADMIN_KEY, EPICODE_MASTER_KEY
-docker compose up --build -d
-```
-
-Visit `http://localhost:8080`. For production details, see [docs/deployment.md](docs/deployment.md).
-
-## Documentation
-
-- [Architecture](docs/architecture.md) — data flow, spatial model, concurrency.
-- [API Reference](docs/api-reference.md) — HTTP endpoints and MCP tools.
-- [MCP Protocol](docs/mcp-protocol.md) — SMRP envelope and agent integration.
-- [Configuration](docs/configuration.md) — environment variables and keys.
-- [Benchmarks](docs/benchmarks.md) — performance numbers and hardware requirements.
-- [Deployment](docs/deployment.md) — Docker, Kubernetes, and bare-metal.
-- [Examples](docs/examples.md) — curl, Node.js, and Python snippets.
-- [Troubleshooting](docs/troubleshooting.md) — common issues and fixes.
-
-## SDK
-
-### Python
-
-```bash
-pip install epicode-sdk
-```
-
-```python
-from epicode import EpicodeClient
-
-client = EpicodeClient("your-api-key")
-client.remember("Project deadline is June 15.")
-results = client.search("deadline")
-```
-
-### TypeScript / JavaScript
-
-```bash
-npm install epicode-sdk
-```
-
-```typescript
-import { EpicodeClient } from "epicode-sdk";
-
-const client = new EpicodeClient("your-api-key");
-await client.remember("Deployed v2.3 to production");
-const results = await client.search("production deploy");
-```
-
-> **Note:** The old package name `tetramem-sdk` is deprecated. Please use `epicode-sdk`.
-
-## Community & Contributing
-
-We welcome contributions!
-
-- [Discussions](https://github.com/sunormesky-max/epicode/discussions) — ask questions and share ideas.
-- [Issues](https://github.com/sunormesky-max/epicode/issues) — bug reports and feature requests.
-- [Contributing Guide](CONTRIBUTING.md) — development setup, commit style, PR process.
-- [Security Policy](SECURITY.md) — report vulnerabilities privately.
-- [Roadmap](ROADMAP.md) — upcoming features and long-term plans.
-
-## License
-
-Epicode is released under the [MIT License](LICENSE).
-
-> **Note on build-time dependencies.** The local embedding engine
-> (`backend/src/engine/vector.rs`) depends on the [`ort`](https://crates.io/crates/ort)
-> crate, which downloads a prebuilt, **MIT-licensed** [ONNX Runtime](https://github.com/microsoft/onnxruntime)
-> from the official `ort-rs` distribution mirror (`cdn.pyke.io`) the first time
-> you build the backend. This is a third-party precompiled binary, not source.
-> To build fully from source or use a system-provided ONNX Runtime instead,
-> set `ORT_STRATEGY=system` / `ORT_LIB_DIR` (or `ORT_STRATEGY=compile`) at build
-> time. See the [`ort` docs](https://docs.rs/ort) for details.
-
----
-
-<div align="center">
-
-[![Star History Chart](https://api.star-history.com/svg?repos=sunormesky-max/epicode&type=Date)](https://star-history.com/#sunormesky-max/epicode&Date)
-
-**Made with ❤️ by [sunormesky-max](https://github.com/sunormesky-max) and contributors.**
-
-</div>
+[MIT](LICENSE) — 商用友好，欢迎共建。
