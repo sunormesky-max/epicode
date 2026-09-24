@@ -179,12 +179,10 @@ impl VectorLayer {
         if blob.is_empty() || !blob.len().is_multiple_of(8) {
             return Vec::new();
         }
-        blob.chunks_exact(8)
-            .map(|chunk| {
-                f64::from_le_bytes([
-                    chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
-                ])
-            })
+        blob.as_chunks::<8>()
+            .0
+            .iter()
+            .map(|chunk| f64::from_le_bytes(*chunk))
             .collect()
     }
 
