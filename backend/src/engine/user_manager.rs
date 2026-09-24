@@ -1,37 +1,60 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use argon2::password_hash::rand_core::OsRng;
-use argon2::password_hash::{PasswordHash, SaltString};
-use argon2::{Algorithm, Argon2, Params, PasswordHasher, PasswordVerifier, Version};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use sha2::{Sha256, Digest};
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 
-use super::crypto::constant_time_eq;
-use super::vector::VectorLayer;
 use super::Engine;
+use super::vector::VectorLayer;
+use super::crypto::{constant_time_eq, constant_time_eq_bytes};
 
-fn hash_password(password: &str) -> Result<String, String> {
-    let salt = SaltString::generate(&mut OsRng);
-    let params =
-        Params::new(65536, 3, 4, Some(32)).map_err(|e| format!("invalid argon2 params: {e}"))?;
-    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    argon2
-        .hash_password(password.as_bytes(), &salt)
-        .map(|h| h.to_string())
-        .map_err(|e| format!("argon2 hash failed: {e}"))
+fn hash_password(password: &str) -> String {
+    use argon2::PasswordHasher;
+    use argon2::password_hash::SaltString;
+    let salt = SaltString::generate(&mut rand::rngs::OsRng);
+    let argon2 = argon2::Argon2::default();
+    match argon2.hash_password(password.as_bytes(), &salt) {
+        Ok(hash) => hash.to_string(),
+        Err(_) => {
+            tracing::error!("[UserManager] argon2 hash failed, falling back to legacy");
+            hash_password_legacy(password)
+        }
+    }
+}
+
+fn hash_password_legacy(password: &str) -> String {
+    let salt: [u8; 32] = rand::random();
+    let mut hasher = Sha256::new();
+    hasher.update(salt);
+    hasher.update(password.as_bytes());
+    let hash = hasher.finalize();
+    format!("{}:{}", B64.encode(salt), B64.encode(hash))
 }
 
 fn verify_password(password: &str, stored: &str) -> bool {
-    if stored.is_empty() {
-        return false;
+    if stored.is_empty() { return false; }
+    if stored.starts_with("$argon2") {
+        use argon2::PasswordHash;
+        use argon2::PasswordVerifier;
+        let hash = match PasswordHash::new(stored) { Ok(h) => h, Err(_) => return false };
+        argon2::Argon2::default().verify_password(password.as_bytes(), &hash).is_ok()
+    } else {
+        verify_password_legacy(password, stored)
     }
-    let Ok(parsed_hash) = PasswordHash::new(stored) else {
-        return false;
-    };
-    Argon2::default()
-        .verify_password(password.as_bytes(), &parsed_hash)
-        .is_ok()
+}
+
+fn verify_password_legacy(password: &str, stored: &str) -> bool {
+    let parts: Vec<&str> = stored.splitn(2, ':').collect();
+    if parts.len() != 2 { return false; }
+    let salt = match B64.decode(parts[0]) { Ok(s) => s, Err(_) => return false };
+    let expected = match B64.decode(parts[1]) { Ok(s) => s, Err(_) => return false };
+    let mut hasher = Sha256::new();
+    hasher.update(&salt);
+    hasher.update(password.as_bytes());
+    let hash = hasher.finalize();
+    constant_time_eq_bytes(&hash, &expected)
 }
 
 const MAX_USERS: usize = 1000;
@@ -51,8 +74,6 @@ pub struct UserInfo {
     pub parent: Option<String>,
     #[serde(default)]
     pub sub_accounts: Vec<String>,
-    #[serde(default)]
-    pub is_admin: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,13 +93,34 @@ impl UserPlan {
     }
 
     pub fn max_embedding_dims(&self) -> usize {
-        768
+        crate::engine::vector::EMBEDDING_DIM
+    }
+}
+
+/// Phase 3 P0: 人格加载状态（Tester-Q契约 #1658）
+/// unknown → warming_up → ready | degraded
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersonaState {
+    Unknown,
+    WarmingUp,
+    Ready,
+    Degraded,
+}
+
+impl Default for PersonaState {
+    fn default() -> Self {
+        PersonaState::Unknown
     }
 }
 
 pub struct UserSlot {
     pub engine: Arc<Engine>,
     pub last_access: std::time::Instant,
+    pub persona_state: PersonaState,
+    pub loop_started: std::sync::atomic::AtomicBool,
+    // α0.2: D-series runtime binding flag (set by cloud runtime register/unregister)
+    pub has_primary: std::sync::atomic::AtomicBool,
 }
 
 pub struct UserManager {
@@ -92,6 +134,8 @@ pub struct UserManager {
     last_backup: RwLock<std::time::Instant>,
     meta_crypto: Option<super::crypto::CryptoEngine>,
     pub_skills: RwLock<Option<Arc<super::skills::SkillEngine>>>,
+    /// Phase 3 P0: 正在加载的用户集合（singleflight 去重）
+    loading_users: parking_lot::Mutex<std::collections::HashSet<String>>,
 }
 
 impl UserManager {
@@ -109,6 +153,7 @@ impl UserManager {
             last_backup: RwLock::new(std::time::Instant::now()),
             meta_crypto,
             pub_skills: RwLock::new(None),
+            loading_users: parking_lot::Mutex::new(std::collections::HashSet::new()),
         }
     }
 
@@ -126,16 +171,15 @@ impl UserManager {
             last_backup: RwLock::new(std::time::Instant::now()),
             meta_crypto,
             pub_skills: RwLock::new(None),
+            loading_users: parking_lot::Mutex::new(std::collections::HashSet::new()),
         }
     }
 
     fn generate_invite_code() -> String {
-        use rand::RngExt;
+        use rand::Rng;
         let chars: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
-        let mut rng = rand::rng();
-        (0..32)
-            .map(|_| chars[rng.random_range(0..chars.len())] as char)
-            .collect()
+        let mut rng = rand::thread_rng();
+        (0..32).map(|_| chars[rng.gen_range(0..chars.len())] as char).collect()
     }
 
     fn load_invite_state(base_data_dir: &std::path::Path) -> (String, Vec<String>) {
@@ -146,9 +190,7 @@ impl UserManager {
                 let data = if let Some(ref crypto) = meta_crypto {
                     match serde_json::from_str::<serde_json::Value>(&raw) {
                         Ok(v) if v.get("__enc").is_some() => {
-                            match crypto
-                                .decrypt_content(v["__enc"].as_str().unwrap_or(""), "__invite__")
-                            {
+                            match crypto.decrypt_content(v["__enc"].as_str().unwrap_or(""), "__invite__") {
                                 Ok(dec) => dec,
                                 Err(_) => raw,
                             }
@@ -160,13 +202,8 @@ impl UserManager {
                 };
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
                     let code = v["current"].as_str().unwrap_or("").to_string();
-                    let used = v["used"]
-                        .as_array()
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|x| x.as_str().map(String::from))
-                                .collect()
-                        })
+                    let used = v["used"].as_array()
+                        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
                         .unwrap_or_default();
                     if !code.is_empty() {
                         return (code, used);
@@ -187,9 +224,7 @@ impl UserManager {
                 let data = if let Some(ref crypto) = meta_crypto {
                     match serde_json::from_str::<serde_json::Value>(&raw) {
                         Ok(v) if v.get("__enc").is_some() => {
-                            match crypto
-                                .decrypt_content(v["__enc"].as_str().unwrap_or(""), "__invite__")
-                            {
+                            match crypto.decrypt_content(v["__enc"].as_str().unwrap_or(""), "__invite__") {
                                 Ok(dec) => dec,
                                 Err(_) => raw,
                             }
@@ -200,13 +235,8 @@ impl UserManager {
                     raw
                 };
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
-                    return v["pending"]
-                        .as_array()
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|x| x.as_str().map(String::from))
-                                .collect()
-                        })
+                    return v["pending"].as_array()
+                        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
                         .unwrap_or_default();
                 }
             }
@@ -221,10 +251,7 @@ impl UserManager {
         let pending = self.pending_codes.read().clone();
         let payload = serde_json::json!({"current": code, "used": used, "pending": pending});
         let output = if let Some(ref crypto) = self.meta_crypto {
-            match crypto.encrypt_content(
-                &serde_json::to_string(&payload).unwrap_or_default(),
-                "__invite__",
-            ) {
+            match crypto.encrypt_content(&serde_json::to_string(&payload).unwrap_or_default(), "__invite__") {
                 Ok(enc) => serde_json::json!({"__enc": enc}).to_string(),
                 Err(_) => serde_json::to_string_pretty(&payload).unwrap_or_default(),
             }
@@ -249,24 +276,20 @@ impl UserManager {
                 self.used_codes.write().push(used_code);
                 drop(pending);
                 self.save_invite_state();
-                tracing::info!(
-                    "[UserManager] pending invite code used, {} remaining",
-                    self.pending_codes.read().len()
-                );
+                tracing::info!("[UserManager] pending invite code used, {} remaining", self.pending_codes.read().len());
                 return Ok(());
             }
         }
 
-        let current = self.invite_code.read();
+        // 原子检查+轮换（kimi2.7 #5：消除 TOCTOU，write lock 持有期间完成检查+轮换）
+        let mut current = self.invite_code.write();
         if !constant_time_eq(code, &current) {
             return Err("invalid or expired invite code".into());
         }
-        drop(current);
-
-        let old = self.invite_code.read().clone();
+        let old = current.clone();
         self.used_codes.write().push(old);
-        let new_code = Self::generate_invite_code();
-        *self.invite_code.write() = new_code.clone();
+        *current = Self::generate_invite_code();
+        drop(current);
         self.save_invite_state();
         tracing::info!("[UserManager] invite code used, rotated new code");
         Ok(())
@@ -297,23 +320,16 @@ impl UserManager {
             return code.clone();
         }
         drop(pending);
-        let mut new_codes = Vec::new();
+        // pending 空时才生成新码（不覆盖已有 pending，只追加）
         let code = Self::generate_invite_code();
-        new_codes.push(code.clone());
-        *self.pending_codes.write() = new_codes;
+        self.pending_codes.write().push(code.clone());
         self.save_invite_state();
         code
     }
 
-    pub fn register(
-        &self,
-        user_id: &str,
-        api_key: &str,
-        plan: UserPlan,
-        password: &str,
-    ) -> Result<UserInfo, String> {
+    pub fn register(&self, user_id: &str, api_key: &str, plan: UserPlan, password: &str) -> Result<UserInfo, String> {
         if password.len() < 6 {
-            return Err("password must be at least 8 characters".into());
+            return Err("password must be at least 6 characters".into());
         }
         if password.len() > 128 {
             return Err("password must be under 128 characters".into());
@@ -329,19 +345,16 @@ impl UserManager {
             return Err("user limit reached".into());
         }
         let max_mem = plan.max_memories();
-        let password_hash =
-            hash_password(password).map_err(|e| format!("failed to hash password: {e}"))?;
         let info = UserInfo {
             user_id: user_id.to_string(),
             api_key: api_key.to_string(),
-            password_hash,
+            password_hash: hash_password(password),
             plan,
             max_memories: max_mem,
             memories_used: 0,
             created_at: chrono::Utc::now().timestamp(),
             parent: None,
             sub_accounts: Vec::new(),
-            is_admin: false,
         };
         db.insert(user_id.to_string(), info.clone());
         let snapshot = db.clone();
@@ -349,28 +362,17 @@ impl UserManager {
         if let Err(e) = self.save_users_db(&snapshot) {
             let mut db = self.users_db.write();
             db.remove(user_id);
-            return Err(format!("failed to persist registration: {e}"));
+            return Err(format!("failed to persist registration: {}", e));
         }
-        tracing::info!(
-            "[UserManager] registered user {} plan={:?} max_memories={}",
-            user_id,
-            info.plan,
-            max_mem
-        );
+        tracing::info!("[UserManager] registered user {} plan={:?} max_memories={}", user_id, info.plan, max_mem);
         Ok(info)
     }
 
     pub fn authenticate(&self, api_key: &str) -> Option<UserInfo> {
         let db = self.users_db.read();
-        let found = db
-            .values()
-            .find(|u| constant_time_eq(&u.api_key, api_key))
-            .cloned();
+        let found = db.values().find(|u| constant_time_eq(&u.api_key, api_key)).cloned();
         if found.is_none() {
-            tracing::debug!(
-                "[UserManager] auth failed for key prefix {}",
-                &api_key.get(..2.min(api_key.len())).unwrap_or("")
-            );
+            tracing::debug!("[UserManager] auth failed for key prefix {}", &api_key.get(..2.min(api_key.len())).unwrap_or(""));
         }
         found
     }
@@ -396,44 +398,31 @@ impl UserManager {
         info.max_memories = plan.max_memories();
         let snapshot = db.clone();
         drop(db);
-        self.save_users_db(&snapshot)
-            .map_err(|e| format!("failed to persist plan: {e}"))?;
-        tracing::info!(
-            "[UserManager] plan set for user {} -> {:?} (max_memories={})",
-            user_id,
-            plan,
-            plan.max_memories()
-        );
+        self.save_users_db(&snapshot).map_err(|e| format!("failed to persist plan: {}", e))?;
+        tracing::info!("[UserManager] plan set for user {} -> {:?} (max_memories={})", user_id, plan, plan.max_memories());
         Ok(())
     }
 
     pub fn set_password(&self, user_id: &str, password: &str) -> Result<(), String> {
-        if password.len() < 8 {
-            return Err("password must be at least 8 characters".into());
+        if password.len() < 6 {
+            return Err("password must be at least 6 characters".into());
         }
         if password.len() > 128 {
             return Err("password must be under 128 characters".into());
         }
         let mut db = self.users_db.write();
         let info = db.get_mut(user_id).ok_or("user not found")?;
-        info.password_hash =
-            hash_password(password).map_err(|e| format!("failed to hash password: {e}"))?;
+        info.password_hash = hash_password(password);
         let snapshot = db.clone();
         drop(db);
-        self.save_users_db(&snapshot)
-            .map_err(|e| format!("failed to persist password: {e}"))?;
+        self.save_users_db(&snapshot).map_err(|e| format!("failed to persist password: {}", e))?;
         tracing::info!("[UserManager] password set for user {}", user_id);
         Ok(())
     }
 
-    pub fn create_subaccount(
-        &self,
-        parent_id: &str,
-        sub_user_id: &str,
-        password: &str,
-    ) -> Result<UserInfo, String> {
+    pub fn create_subaccount(&self, parent_id: &str, sub_user_id: &str, password: &str) -> Result<UserInfo, String> {
         if password.len() < 6 {
-            return Err("password must be at least 8 characters".into());
+            return Err("password must be at least 6 characters".into());
         }
         if password.len() > 128 {
             return Err("password must be under 128 characters".into());
@@ -441,10 +430,7 @@ impl UserManager {
         if sub_user_id.is_empty() || sub_user_id.len() > 64 {
             return Err("user_id must be 1-64 characters".into());
         }
-        if !sub_user_id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
+        if !sub_user_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
             return Err("user_id: only a-z A-Z 0-9 - _ allowed".into());
         }
         let mut db = self.users_db.write();
@@ -458,20 +444,20 @@ impl UserManager {
         if parent_info.sub_accounts.len() >= 10 {
             return Err("maximum 10 sub-accounts per main account".into());
         }
+        if parent_info.sub_accounts.iter().any(|s| s == sub_user_id) {
+            return Err("sub-account already linked".into());  // 防重复（kimi 子账户 bug 根因）
+        }
         let api_key = format!("tm-{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
-        let password_hash =
-            hash_password(password).map_err(|e| format!("failed to hash password: {e}"))?;
         let sub_info = UserInfo {
             user_id: sub_user_id.to_string(),
             api_key: api_key.clone(),
-            password_hash,
+            password_hash: hash_password(password),
             plan: UserPlan::Free,
             max_memories: 0,
             memories_used: 0,
             created_at: chrono::Utc::now().timestamp(),
             parent: Some(parent_id.to_string()),
             sub_accounts: Vec::new(),
-            is_admin: false,
         };
         db.insert(sub_user_id.to_string(), sub_info.clone());
         if let Some(p) = db.get_mut(parent_id) {
@@ -485,24 +471,22 @@ impl UserManager {
             if let Some(p) = db.get_mut(parent_id) {
                 p.sub_accounts.retain(|s| s != sub_user_id);
             }
-            return Err(format!("failed to persist sub-account: {e}"));
+            return Err(format!("failed to persist sub-account: {}", e));
         }
-        tracing::info!(
-            "[UserManager] created sub-account {} under parent {}",
-            sub_user_id,
-            parent_id
-        );
+        tracing::info!("[UserManager] created sub-account {} under parent {}", sub_user_id, parent_id);
         Ok(sub_info)
     }
 
     pub fn list_subaccounts(&self, parent_id: &str) -> Vec<UserInfo> {
         let db = self.users_db.read();
         match db.get(parent_id) {
-            Some(info) => info
-                .sub_accounts
-                .iter()
-                .filter_map(|sid| db.get(sid).cloned())
-                .collect(),
+            Some(info) => {
+                let mut seen = std::collections::HashSet::new();
+                info.sub_accounts.iter()
+                    .filter(|sid| seen.insert((*sid).clone()))  // 去重（修复历史重复）
+                    .filter_map(|sid| db.get(sid).cloned())
+                    .collect()
+            }
             None => Vec::new(),
         }
     }
@@ -519,24 +503,72 @@ impl UserManager {
         db.remove(sub_user_id);
         let snapshot = db.clone();
         drop(db);
-        self.save_users_db(&snapshot)
-            .map_err(|e| format!("failed to persist: {e}"))?;
-        tracing::info!(
-            "[UserManager] revoked sub-account {} from parent {}",
-            sub_user_id,
-            parent_id
-        );
+        self.save_users_db(&snapshot).map_err(|e| format!("failed to persist: {}", e))?;
+        tracing::info!("[UserManager] revoked sub-account {} from parent {}", sub_user_id, parent_id);
         Ok(())
     }
 
     pub fn get_engine(&self, user_id: &str) -> Result<Arc<Engine>, String> {
+        // H6 修复：防御性兜底——防止 ../ 路径遍历逃逸到任意目录
+        if user_id.is_empty() || user_id.len() > 64
+            || !user_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err("invalid user_id".into());
+        }
+
+        // Phase 3 P0: persona_state gate (Tester-Q契约 #1658)
         {
             let slots = self.slots.read();
             if let Some(slot) = slots.get(user_id) {
-                return Ok(slot.engine.clone());
+                match slot.persona_state {
+                    PersonaState::Ready => return Ok(slot.engine.clone()),
+                    PersonaState::WarmingUp => return Err("PERSONA_WARMING_UP".into()),
+                    PersonaState::Degraded => return Err("PERSONA_DEGRADED".into()),
+                    PersonaState::Unknown => {}
+                }
             }
         }
 
+        // P0c/L1: 单飞只拒绝外部并发者; 加载权持有者(helpers spawn_blocking先try_mark_loading)
+        // 调 get_engine_inner —— K1曾在此拒绝自己的调用者, 引擎永远加载不出(19:38失败循环+冻结根因)
+        {
+            let mut loading = self.loading_users.lock();
+            if loading.contains(user_id) {
+                return Err("PERSONA_WARMING_UP".into());
+            }
+            loading.insert(user_id.to_string());
+        }
+        // 双重检查: 拿到loading标记后复查slot(可能在等锁期间别人已完成)
+        {
+            let slots = self.slots.read();
+            if let Some(slot) = slots.get(user_id) {
+                if matches!(slot.persona_state, PersonaState::Ready) {
+                    self.loading_users.lock().remove(user_id);
+                    return Ok(slot.engine.clone());
+                }
+            }
+        }
+
+        // panic加固: 加载中途panic不得永久卡死loading标记(重启才能解) — 接住并转Degraded语义
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.get_engine_inner(user_id)))
+            .unwrap_or_else(|p| {
+                let msg = p.downcast_ref::<&str>().map(|s| s.to_string())
+                    .or_else(|| p.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "unknown panic".into());
+                tracing::error!("[UserManager] persona load PANIC for {}: {}", user_id, msg);
+                Err("PERSONA_LOAD_PANIC".into())
+            });
+        self.loading_users.lock().remove(user_id);
+        result
+    }
+
+    /// L1: 加载权持有者入口(helpers spawn_blocking 用)
+    pub fn get_engine_for_loader(&self, user_id: &str) -> Result<Arc<Engine>, String> {
+        self.get_engine_inner(user_id)
+    }
+
+    /// L1: 真正的加载体 — 仅由持有加载权的调用方使用(get_engine公共层 / helpers spawn_blocking)
+    fn get_engine_inner(&self, user_id: &str) -> Result<Arc<Engine>, String> {
         self.evict_idle();
 
         let user_data_dir = self.base_data_dir.join("users").join(user_id);
@@ -546,15 +578,11 @@ impl UserManager {
             Engine::with_data_dir(user_data_dir)
         };
 
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                let _guard = handle.enter();
-                engine.start_with_interval(120000);
-            }
-            Err(_) => {
-                tracing::warn!("[UserManager] no tokio runtime, engine scheduler will not run");
-            }
-        }
+        // P0-1 修复(Tester-Q契约 #1658): 删除 handle.enter() + start_with_interval
+        // restore 路径只做数据恢复，不启动 cognitive loop
+        // cognitive loop 由 ensure_cognitive_loop_started() 在 async 线程启动
+        // 防止 spawn_blocking 线程里的 cognitive loop 用 ureq 同步 HTTP 饿死 executor
+        tracing::info!("[UserManager] user '{}' — engine data restored (cognitive loop deferred)", user_id);
 
         let engine_arc = Arc::new(engine);
 
@@ -565,9 +593,7 @@ impl UserManager {
                 if info.memories_used != actual_count {
                     tracing::info!(
                         "[UserManager] syncing {} memories_used: {} -> {}",
-                        user_id,
-                        info.memories_used,
-                        actual_count
+                        user_id, info.memories_used, actual_count
                     );
                     info.memories_used = actual_count;
                     let snapshot = db.clone();
@@ -581,20 +607,17 @@ impl UserManager {
 
         {
             let mut slots = self.slots.write();
-            slots.insert(
-                user_id.to_string(),
-                UserSlot {
-                    engine: engine_arc.clone(),
-                    last_access: std::time::Instant::now(),
-                },
-            );
+            slots.insert(user_id.to_string(), UserSlot {
+                engine: engine_arc.clone(),
+                last_access: std::time::Instant::now(),
+                persona_state: PersonaState::Ready,
+                loop_started: std::sync::atomic::AtomicBool::new(false),
+                has_primary: std::sync::atomic::AtomicBool::new(false),
+            });
         }
+        self.loading_users.lock().remove(user_id);
 
-        tracing::info!(
-            "[UserManager] loaded engine for user {} (shared_vector={})",
-            user_id,
-            self.shared_vector.is_some()
-        );
+        tracing::info!("[UserManager] loaded engine for user {} (shared_vector={})", user_id, self.shared_vector.is_some());
         if let Some(ref pub_sk) = *self.pub_skills.read() {
             engine_arc.scheduler.set_pub_skills(pub_sk.clone());
         }
@@ -617,33 +640,53 @@ impl UserManager {
         }
     }
 
-    fn evict_idle(&self) {
-        let mut slots = self.slots.write();
-        if slots.len() < MAX_USERS {
-            return;
-        }
-        let now = std::time::Instant::now();
-        let idle_ids: Vec<String> = slots
-            .iter()
-            .filter(|(_, slot)| now.duration_since(slot.last_access).as_secs() > IDLE_TIMEOUT_SECS)
-            .map(|(id, _)| id.clone())
-            .collect();
-        for id in &idle_ids {
-            if let Some(slot) = slots.remove(id) {
-                slot.engine.request_shutdown();
-                slot.engine.final_save();
-                tracing::info!("[UserManager] evicted idle engine for user {}", id);
-            }
-        }
-        if idle_ids.is_empty() && slots.len() >= MAX_USERS {
-            if let Some((id, _slot)) = slots.iter().min_by_key(|(_, s)| s.last_access) {
-                let id = id.clone();
-                if let Some(slot) = slots.remove(&id) {
+    pub fn evict_idle(&self) {
+        self.evict_idle_with(IDLE_TIMEOUT_SECS, false);
+    }
+
+    /// 压力感知驱逐 (2026-09-23): 内存吃紧时用短门槛提前回收半闲置引擎,
+    /// 避免"空闲40-60分钟(<1h线)+内存已紧"窗口卡住 laya/图书馆员等服务
+    pub fn evict_idle_with(&self, min_idle_secs: u64, pressure: bool) {
+        // H3 修复：锁内只收集要驱逐的 engine Arc，drop 锁后再做 final_save（避免 SQLite I/O 阻塞所有用户）
+        let engines_to_save: Vec<(String, Arc<Engine>)> = {
+            let mut slots = self.slots.write();
+            let now = std::time::Instant::now();
+
+            let idle_ids: Vec<String> = slots.iter()
+                .filter(|(_, slot)| now.duration_since(slot.last_access).as_secs() > min_idle_secs)
+                .map(|(id, _)| id.clone())
+                .collect();
+
+            let mut to_save = Vec::new();
+            for id in &idle_ids {
+                if let Some(slot) = slots.remove(id) {
                     slot.engine.request_shutdown();
-                    slot.engine.final_save();
-                    tracing::warn!("[UserManager] evicted oldest user {} to make room", id);
+                    to_save.push((id.clone(), slot.engine.clone()));
+                    if pressure {
+                        tracing::warn!("[UserManager] pressure-evicted engine for user {} (idle {}s > {}s, mem tight)", id, now.duration_since(slot.last_access).as_secs(), min_idle_secs);
+                    } else {
+                        tracing::info!("[UserManager] evicted idle engine for user {} (idle {}s)", id, now.duration_since(slot.last_access).as_secs());
+                    }
                 }
             }
+
+            if idle_ids.is_empty() && slots.len() >= MAX_USERS {
+                if let Some((id, _slot)) = slots.iter().min_by_key(|(_, s)| s.last_access) {
+                    let id = id.clone();
+                    if let Some(slot) = slots.remove(&id) {
+                        slot.engine.request_shutdown();
+                        to_save.push((id.clone(), slot.engine.clone()));
+                        tracing::warn!("[UserManager] evicted oldest user {} to make room", id);
+                    }
+                }
+            }
+            to_save
+        }; // 锁已 drop
+
+        // 锁外异步保存（不阻塞 authenticate/touch/get_engine）
+        for (id, engine) in engines_to_save {
+            engine.final_save();
+            tracing::info!("[UserManager] saved evicted engine for user {}", id);
         }
     }
 
@@ -657,16 +700,12 @@ impl UserManager {
         if let Some(info) = db.get(user_id) {
             let owner_id = info.parent.as_deref().unwrap_or(user_id);
             let owner = db.get(owner_id).ok_or("owner not found")?;
-            let total_used: usize = db
-                .values()
+            let total_used: usize = db.values()
                 .filter(|u| u.user_id == owner_id || u.parent.as_deref() == Some(owner_id))
                 .map(|u| u.memories_used)
                 .sum();
             if total_used >= owner.max_memories {
-                return Err(format!(
-                    "memory limit reached ({}/{}, shared across account)",
-                    total_used, owner.max_memories
-                ));
+                return Err(format!("memory limit reached ({}/{}, shared across account)", total_used, owner.max_memories));
             }
         }
         Ok(())
@@ -677,16 +716,12 @@ impl UserManager {
         let info = db.get(user_id).ok_or("user not found")?.clone();
         let owner_id = info.parent.as_deref().unwrap_or(user_id);
         let owner = db.get(owner_id).ok_or("owner not found")?.clone();
-        let total_used: usize = db
-            .values()
+        let total_used: usize = db.values()
             .filter(|u| u.user_id == owner_id || u.parent.as_deref() == Some(owner_id))
             .map(|u| u.memories_used)
             .sum();
         if total_used >= owner.max_memories {
-            return Err(format!(
-                "memory limit reached ({}/{}, shared across account)",
-                total_used, owner.max_memories
-            ));
+            return Err(format!("memory limit reached ({}/{}, shared across account)", total_used, owner.max_memories));
         }
         if let Some(info) = db.get_mut(user_id) {
             info.memories_used += 1;
@@ -698,7 +733,7 @@ impl UserManager {
             if let Some(info) = db.get_mut(user_id) {
                 info.memories_used -= 1;
             }
-            return Err(format!("failed to persist memory count: {e}"));
+            return Err(format!("failed to persist memory count: {}", e));
         }
         Ok(())
     }
@@ -714,11 +749,7 @@ impl UserManager {
                 if let Some(info) = db.get_mut(user_id) {
                     info.memories_used -= 1;
                 }
-                tracing::error!(
-                    "[UserManager] failed to persist memory count for {}: {}",
-                    user_id,
-                    e
-                );
+                tracing::error!("[UserManager] failed to persist memory count for {}: {}", user_id, e);
             }
         }
     }
@@ -730,11 +761,7 @@ impl UserManager {
             let snapshot = db.clone();
             drop(db);
             if let Err(e) = self.save_users_db(&snapshot) {
-                tracing::error!(
-                    "[UserManager] failed to persist memory count decrement for {}: {}",
-                    user_id,
-                    e
-                );
+                tracing::error!("[UserManager] failed to persist memory count decrement for {}: {}", user_id, e);
             }
         }
     }
@@ -780,11 +807,7 @@ impl UserManager {
             }
         }
         if ok_count + err_count > 0 {
-            tracing::info!(
-                "[AutoBackup] completed: {} ok, {} errors",
-                ok_count,
-                err_count
-            );
+            tracing::info!("[AutoBackup] completed: {} ok, {} errors", ok_count, err_count);
         }
     }
 
@@ -794,19 +817,15 @@ impl UserManager {
             return;
         }
         let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
-        let dst = self.base_data_dir.join(format!("users_meta_{ts}.json.bak"));
+        let dst = self.base_data_dir.join(format!("users_meta_{}.json.bak", ts));
         if let Err(e) = std::fs::copy(&src, &dst) {
             tracing::error!("[BackupMeta] failed: {}", e);
             return;
         }
         if let Ok(mut entries) = std::fs::read_dir(&self.base_data_dir) {
-            let mut backups: Vec<_> = entries
-                .by_ref()
+            let mut backups: Vec<_> = entries.by_ref()
                 .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.file_name().to_string_lossy().starts_with("users_meta_")
-                        && e.file_name().to_string_lossy().ends_with(".bak")
-                })
+                .filter(|e| e.file_name().to_string_lossy().starts_with("users_meta_") && e.file_name().to_string_lossy().ends_with(".bak"))
                 .collect();
             backups.sort_by_key(|e| e.file_name());
             while backups.len() > 5 {
@@ -818,7 +837,221 @@ impl UserManager {
         }
     }
 
-    pub fn list_users(&self) -> Vec<UserInfo> {
+
+    /// Phase 3 P0: 获取引擎或触发异步加载（singleflight）
+    /// Ok(engine) = Ready 可用
+    /// Err(WarmingUp) = 首次触发，正在后台加载
+    /// Err(Degraded) = 用户不存在或加载失败
+    ///
+    /// 关键：首次请求标记 loading → spawn_blocking 加载 → 立即返回 WarmingUp
+    /// 后续请求看到 loading 直接返回 WarmingUp，不重复加载
+    pub fn get_engine_or_trigger(&self, user_id: &str) -> Result<Arc<Engine>, PersonaState> {
+        // 验证 user_id
+        if user_id.is_empty() || user_id.len() > 64
+            || !user_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(PersonaState::Degraded);
+        }
+
+        // 快速路径 1：slot 已 Ready
+        {
+            let slots = self.slots.read();
+            if let Some(slot) = slots.get(user_id) {
+                match slot.persona_state {
+                    PersonaState::Ready => return Ok(slot.engine.clone()),
+                    PersonaState::WarmingUp => return Err(PersonaState::WarmingUp),
+                    PersonaState::Degraded => return Err(PersonaState::Degraded),
+                    PersonaState::Unknown => {}
+                }
+            }
+        }
+
+        // 快速路径 2：正在加载（singleflight）
+        {
+            let loading = self.loading_users.lock();
+            if loading.contains(user_id) {
+                return Err(PersonaState::WarmingUp);
+            }
+        }
+
+        // 检查用户是否存在
+        let user_exists = {
+            let db = self.users_db.read();
+            db.contains_key(user_id)
+        };
+        if !user_exists {
+            return Err(PersonaState::Degraded);
+        }
+
+        // P0c: 单飞已下沉到 get_engine 内部(K1), 此处不再重复标记
+        // (双重标记会在清理时互相清除, 破坏互斥)
+
+        // 同步加载（当前保持阻塞——真正的 spawn_blocking 需要 Arc<Self>）
+        // 折衷：如果 tokio runtime 存在，在 blocking pool 里加载
+        // 否则直接同步加载
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                // 在 tokio runtime 里——但当前请求可能已经 hold 了 runtime，
+                // 所以用 spawn_blocking 让它不阻塞 async executor
+                // 但 spawn_blocking 是异步的，我们需要同步等待结果
+                // 这在 axum extractor 里不太理想——因为 extractor 是 async 的
+                // 最佳方案：让 AuthedEngine extractor 直接调 async 版本
+                //
+                // 当前折衷：直接同步调 get_engine（保持原有行为）
+                // 但加上 loading 标记和 timeout 保护
+                tracing::info!("[UserManager] persona load triggered for '{}' (sync fallback)", user_id);
+            }
+            Err(_) => {}
+        }
+
+        // 同步加载（实际加载逻辑在 get_engine 里, 单飞/清理都在其中）
+        let result = self.get_engine(user_id);
+
+        match result {
+            Ok(engine) => {
+                tracing::info!("[UserManager] persona READY for '{}'", user_id);
+                Ok(engine)
+            }
+            Err(e) => {
+                tracing::error!("[UserManager] persona load FAILED for '{}': {}", user_id, e);
+                Err(PersonaState::Degraded)
+            }
+        }
+    }
+
+
+    /// Phase 3 P0: 预热用户引擎（启动时调用，非阻塞）
+    /// 为每个已知用户 spawn 后台加载线程，标记 loading
+    /// 加载完成后 slot 自动标记 Ready
+    pub fn prewarm_all(&self) {
+        tracing::info!("[UserManager] prewarm_all: only primary sunorme (no tenant engines)");
+        self.prewarm_primary();
+    }
+
+    pub fn prewarm_primary(&self) {
+        const PRIMARY: &str = "sunorme";
+        tracing::info!("[UserManager] prewarm_primary {}", PRIMARY);
+        match self.get_engine(PRIMARY) {
+            Ok(_) => tracing::info!("[UserManager] prewarm_primary complete"),
+            Err(e) => tracing::warn!("[UserManager] prewarm_primary failed: {}", e),
+        }
+    }
+
+
+    /// Phase 3 P0: 检查用户是否正在加载
+    pub fn is_loading(&self, user_id: &str) -> bool {
+        self.loading_users.lock().contains(user_id)
+    }
+
+    /// S1根治: 原子 check-and-set — 未在加载则标记并返回 true(调用方获得加载权);
+    /// 已在加载返回 false。消除 check-then-act 竞态窗口(双实例根因)。
+    pub fn try_mark_loading(&self, user_id: &str) -> bool {
+        let mut loading = self.loading_users.lock();
+        loading.insert(user_id.to_string())  // HashSet::insert 返回是否新插入
+    }
+
+    /// Phase 3 P0: 标记用户为正在加载（singleflight）— 已由 try_mark_loading 取代, 保留兼容
+    pub fn mark_loading(&self, user_id: &str) {
+        self.loading_users.lock().insert(user_id.to_string());
+    }
+
+    /// Phase 3 P0: 清除加载标记
+    pub fn clear_loading(&self, user_id: &str) {
+        self.loading_users.lock().remove(user_id);
+    }
+
+
+
+    /// Phase 3 P0-3: 通过 API key 查找 user_id
+    pub fn find_user_by_api_key(&self, api_key: &str) -> String {
+        if api_key.is_empty() { return String::new(); }
+        let db = self.users_db.read();
+        for (uid, info) in db.iter() {
+            if info.api_key == api_key {
+                return uid.clone();
+            }
+        }
+        String::new()
+    }
+
+
+    /// Phase 3 P0-3: 只从缓存读 engine（不触发加载）
+    /// 用于 persona_ready 等只读状态端点
+    pub fn vector_ready(&self) -> bool {
+        self.shared_vector.is_some()
+    }
+
+    pub fn try_get_engine_slot(&self, user_id: &str) -> Option<Arc<Engine>> {
+        let slots = self.slots.read();
+        slots.get(user_id).filter(|s| s.persona_state == PersonaState::Ready).map(|s| s.engine.clone())
+    }
+
+    /// 审计终极修复: strict 版 — 加载进行中拒绝, 供直调方 (runtime/mcp_endpoint) 使用,
+    /// 防止在 singleflight 加载未完成时构造第二个 Engine (双 DriveQueue → id 冲突)。
+    /// AuthedEngine 的 singleflight 内部继续用 get_engine (自举需要)。
+    pub fn get_engine_strict(&self, user_id: &str) -> Result<Arc<Engine>, String> {
+        if user_id.is_empty() || user_id.len() > 64
+            || !user_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err("invalid user_id".into());
+        }
+        if self.is_loading(user_id) {
+            return Err("PERSONA_WARMING_UP".into());
+        }
+        self.get_engine(user_id)
+    }
+
+    /// α0.2: runtime primary_executor 绑定标志 (由 cloud 层 register/unregister 更新)
+    pub fn has_primary_executor(&self, user_id: &str) -> bool {
+        let slots = self.slots.read();
+        slots.get(user_id)
+            .map(|s| s.has_primary.load(std::sync::atomic::Ordering::Relaxed))
+            .unwrap_or(false)
+    }
+
+    /// α0.2: 设置 primary 绑定标志
+    pub fn set_has_primary_executor(&self, user_id: &str, val: bool) {
+        let mut slots = self.slots.write();
+        if let Some(s) = slots.get_mut(user_id) {
+            s.has_primary.store(val, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Phase 3 P0-2b: 检查 cognitive loop 是否已启动
+    pub fn is_loop_started(&self, user_id: &str) -> bool {
+        let slots = self.slots.read();
+        slots.get(user_id)
+            .map(|s| s.loop_started.load(std::sync::atomic::Ordering::Relaxed))
+            .unwrap_or(false)
+    }
+
+    /// Phase 3 P0-2b: 标记 cognitive loop 已启动（once 去重）
+    pub fn mark_loop_started(&self, user_id: &str) {
+        let mut slots = self.slots.write();
+        if let Some(s) = slots.get_mut(user_id) {
+            s.loop_started.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Phase 3 P0: 获取用户人格状态（Tester-Q契约 #1658）
+    pub fn get_persona_state(&self, user_id: &str) -> PersonaState {
+        let slots = self.slots.read();
+        match slots.get(user_id) {
+            Some(slot) => slot.persona_state,
+            None => PersonaState::Unknown,
+        }
+    }
+
+    /// Phase 3 P0: 标记用户人格为 Ready（加载完成后调用）
+    pub fn mark_persona_ready(&self, user_id: &str) {
+        let mut slots = self.slots.write();
+        if let Some(slot) = slots.get_mut(user_id) {
+            slot.persona_state = PersonaState::Ready;
+            tracing::info!("[UserManager] persona ready for user '{}'", user_id);
+        }
+    }
+
+        pub fn list_users(&self) -> Vec<UserInfo> {
         let db = self.users_db.read();
         db.values().cloned().collect()
     }
@@ -845,7 +1078,7 @@ impl UserManager {
                 if let Some(info) = db.get_mut(user_id) {
                     info.api_key = old_key;
                 }
-                return Err(format!("failed to persist API key reset: {e}"));
+                return Err(format!("failed to persist API key reset: {}", e));
             }
             tracing::info!("[UserManager] reset API key for user {}", user_id);
             Ok(new_key)
@@ -874,10 +1107,7 @@ impl UserManager {
                     match crypto.decrypt_content(enc_payload, "__meta_db__") {
                         Ok(dec) => dec,
                         Err(e) => {
-                            tracing::warn!(
-                                "[UserManager] decrypt users_meta failed, trying plaintext: {}",
-                                e
-                            );
+                            tracing::warn!("[UserManager] decrypt users_meta failed, trying plaintext: {}", e);
                             raw
                         }
                     }
@@ -896,22 +1126,15 @@ impl UserManager {
                 tracing::error!("[UserManager] failed to parse users_meta.json: {}", e);
                 let corrupted = base_dir.join("users_meta.json.corrupted");
                 let _ = std::fs::rename(&db_path, &corrupted);
-                tracing::error!(
-                    "[UserManager] corrupted file backed up to users_meta.json.corrupted"
-                );
+                tracing::error!("[UserManager] corrupted file backed up to users_meta.json.corrupted");
                 HashMap::new()
             }
         }
     }
 
     pub fn delete_user(&self, user_id: &str) -> Result<(), String> {
-        {
-            let db = self.users_db.read();
-            if let Some(u) = db.get(user_id) {
-                if u.is_admin {
-                    return Err("cannot delete admin".into());
-                }
-            }
+        if user_id == "sunorme" {
+            return Err("cannot delete admin".into());
         }
         {
             let mut db = self.users_db.write();
@@ -926,7 +1149,7 @@ impl UserManager {
         }
         let user_dir = self.base_data_dir.join("users").join(user_id);
         if user_dir.exists() {
-            std::fs::remove_dir_all(&user_dir).map_err(|e| format!("rm dir: {e}"))?;
+            std::fs::remove_dir_all(&user_dir).map_err(|e| format!("rm dir: {}", e))?;
         }
         tracing::info!("[UserManager] deleted user {}", user_id);
         Ok(())
@@ -935,17 +1158,16 @@ impl UserManager {
     fn save_users_db(&self, db: &HashMap<String, UserInfo>) -> Result<(), String> {
         let db_path = self.base_data_dir.join("users_meta.json");
         let tmp_path = self.base_data_dir.join("users_meta.json.tmp");
-        let json = serde_json::to_string_pretty(db).map_err(|e| format!("serialize: {e}"))?;
+        let json = serde_json::to_string_pretty(db).map_err(|e| format!("serialize: {}", e))?;
         let output = if let Some(ref crypto) = self.meta_crypto {
-            let enc = crypto
-                .encrypt_content(&json, "__meta_db__")
-                .map_err(|e| format!("encrypt users_meta: {e}"))?;
+            let enc = crypto.encrypt_content(&json, "__meta_db__")
+                .map_err(|e| format!("encrypt users_meta: {}", e))?;
             serde_json::json!({"__enc": enc}).to_string()
         } else {
             json
         };
-        std::fs::write(&tmp_path, &output).map_err(|e| format!("write tmp: {e}"))?;
-        std::fs::rename(&tmp_path, &db_path).map_err(|e| format!("rename: {e}"))?;
+        std::fs::write(&tmp_path, &output).map_err(|e| format!("write tmp: {}", e))?;
+        std::fs::rename(&tmp_path, &db_path).map_err(|e| format!("rename: {}", e))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

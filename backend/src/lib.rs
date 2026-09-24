@@ -1,4 +1,5 @@
-pub mod api;
+#![recursion_limit = "512"]
+
 pub mod domain;
 pub mod engine;
-pub mod util;
+pub mod api;

@@ -2,11 +2,12 @@ use std::time::Instant;
 
 #[tokio::main]
 async fn main() {
-    let mut engine =
-        epicode::engine::Engine::with_data_dir(std::path::PathBuf::from("data/bench_tmp"));
+    let mut engine = epicode::engine::Engine::with_data_dir(
+        std::path::PathBuf::from("data/bench_tmp")
+    );
     engine.start();
 
-    println!("=== Epicode v1.0.1 Performance Benchmark ===\n");
+    println!("=== Epicode v1.0.0 Performance Benchmark ===\n");
 
     let total_memories = 100;
     let warmup = 5;
@@ -23,14 +24,14 @@ async fn main() {
             write_times.push(elapsed.as_micros() as f64 / 1000.0);
         }
         if result.is_err() && i < 5 {
-            eprintln!("ERROR at {i}: {result:?}");
+            eprintln!("ERROR at {}: {:?}", i, result);
         }
     }
     print_stats("Remember", &write_times, total_memories);
 
     // Phase 2: Search latency
     println!("\n--- Phase 2: Search Latency ---");
-    let queries = [
+    let queries = vec![
         "Rust向量搜索",
         "performance optimization",
         "记忆系统架构设计",
@@ -67,7 +68,7 @@ async fn main() {
     // Phase 4: Recall latency
     println!("\n--- Phase 4: Recall Latency ---");
     let mut recall_times = Vec::new();
-    let recall_queries = ["架构设计", "security", "性能", "cloud", "记忆"];
+    let recall_queries = vec!["架构设计", "security", "性能", "cloud", "记忆"];
     for (round, q) in recall_queries.iter().cycle().take(20).enumerate() {
         let start = Instant::now();
         let _ = engine.scheduler.api_recall(q, 3);
@@ -106,13 +107,13 @@ async fn main() {
         let content = "x".repeat(len);
         let mut times = Vec::new();
         for i in 0..20 {
-            let c = format!("{content}{i}");
+            let c = format!("{}{}", content, i);
             let start = Instant::now();
             let _ = engine.scheduler.api_remember(&c);
             let elapsed = start.elapsed();
             times.push(elapsed.as_micros() as f64 / 1000.0);
         }
-        print_stats(&format!("Write {len}chars"), &times, 20);
+        print_stats(&format!("Write {}chars", len), &times, 20);
     }
 
     // Phase 8: Search with varying result limits
@@ -126,7 +127,7 @@ async fn main() {
             let elapsed = start.elapsed();
             times.push(elapsed.as_micros() as f64 / 1000.0);
         }
-        print_stats(&format!("Search limit={limit}"), &times, 10);
+        print_stats(&format!("Search limit={}", limit), &times, 10);
     }
 
     let stats = engine.scheduler.api_stats();
@@ -150,7 +151,6 @@ fn print_stats(name: &str, times: &[f64], count: usize) {
     let p99 = sorted[(sorted.len() as f64 * 0.99) as usize];
     let min = sorted[0];
     let max = sorted[sorted.len() - 1];
-    println!(
-        "{name} (n={count}) avg={avg:.1}ms p50={p50:.1}ms p95={p95:.1}ms p99={p99:.1}ms min={min:.1}ms max={max:.1}ms"
-    );
+    println!("{} (n={}) avg={:.1}ms p50={:.1}ms p95={:.1}ms p99={:.1}ms min={:.1}ms max={:.1}ms",
+        name, count, avg, p50, p95, p99, min, max);
 }

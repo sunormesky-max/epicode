@@ -1,13 +1,12 @@
 use std::path::PathBuf;
 
 fn main() {
-    tracing_subscriber::fmt().with_env_filter("info").init();
+    tracing_subscriber::fmt()
+        .with_env_filter("info")
+        .init();
 
     let args: Vec<String> = std::env::args().collect();
-    let data_dir = args
-        .get(1)
-        .map(|s| s.as_str())
-        .unwrap_or("/var/lib/epicode");
+    let data_dir = args.get(1).map(|s| s.as_str()).unwrap_or("/var/lib/epicode");
     let data_path = PathBuf::from(data_dir);
 
     let model_dir = {
@@ -15,8 +14,7 @@ fn main() {
             PathBuf::from("models"),
             PathBuf::from("/opt/epicode/models"),
         ];
-        candidates
-            .into_iter()
+        candidates.into_iter()
             .find(|d| d.join("model.onnx").exists())
             .unwrap_or_else(|| PathBuf::from("models"))
     };
@@ -25,14 +23,11 @@ fn main() {
     let vector = match epicode::engine::vector::VectorLayer::load(&model_dir) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("FATAL: cannot load VectorLayer: {e}");
+            eprintln!("FATAL: cannot load VectorLayer: {}", e);
             std::process::exit(1);
         }
     };
-    println!(
-        "VectorLayer loaded ({} dims)",
-        epicode::engine::vector::EMBEDDING_DIM
-    );
+    println!("VectorLayer loaded ({} dims)", epicode::engine::vector::EMBEDDING_DIM);
 
     let users_dir = data_path.join("users");
     if !users_dir.exists() {
@@ -43,7 +38,7 @@ fn main() {
     let entries = match std::fs::read_dir(&users_dir) {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("Cannot read users dir: {e}");
+            eprintln!("Cannot read users dir: {}", e);
             std::process::exit(1);
         }
     };
@@ -59,7 +54,7 @@ fn main() {
         }
 
         total_users += 1;
-        print!("[{user_id}] ");
+        print!("[{}] ", user_id);
 
         let conn = match rusqlite::Connection::open_with_flags(
             &db_path,
@@ -67,7 +62,7 @@ fn main() {
         ) {
             Ok(c) => c,
             Err(e) => {
-                println!("SKIP (cannot open db: {e})");
+                println!("SKIP (cannot open db: {})", e);
                 continue;
             }
         };
@@ -75,7 +70,7 @@ fn main() {
         let mut stmt = match conn.prepare("SELECT id, content FROM tetrahedrons ORDER BY id") {
             Ok(s) => s,
             Err(e) => {
-                println!("SKIP (cannot prepare: {e})");
+                println!("SKIP (cannot prepare: {})", e);
                 continue;
             }
         };
@@ -87,7 +82,7 @@ fn main() {
         }) {
             Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
             Err(e) => {
-                println!("SKIP (query failed: {e})");
+                println!("SKIP (query failed: {})", e);
                 continue;
             }
         };
@@ -112,13 +107,13 @@ fn main() {
                     ) {
                         Ok(_) => updated += 1,
                         Err(e) => {
-                            eprintln!("  update failed for {id}: {e}");
+                            eprintln!("  update failed for {}: {}", id, e);
                             failed += 1;
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("  embed failed for {id}: {e}");
+                    eprintln!("  embed failed for {}: {}", id, e);
                     failed += 1;
                 }
             }
@@ -126,10 +121,10 @@ fn main() {
 
         drop(conn);
         total_migrated += updated;
-        println!("{updated} migrated, {failed} failed");
+        println!("{} migrated, {} failed", updated, failed);
     }
 
     println!("\n=== Migration Complete ===");
-    println!("Users: {total_users}");
-    println!("Total memories migrated: {total_migrated}");
+    println!("Users: {}", total_users);
+    println!("Total memories migrated: {}", total_migrated);
 }

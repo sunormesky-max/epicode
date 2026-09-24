@@ -34,18 +34,10 @@ impl RetrievalEngine {
         let lower = query.to_lowercase();
 
         // Temporal intent
-        if lower.contains("昨天")
-            || lower.contains("前天")
-            || lower.contains("recent")
-            || lower.contains("latest")
-            || lower.contains("最近")
-            || lower.contains("上次")
-            || lower.contains("last time")
-            || lower.contains("上一次")
-            || lower.contains("刚才")
-            || lower.contains("just now")
-            || lower.contains("今天")
-            || lower.contains("today")
+        if lower.contains("昨天") || lower.contains("前天") || lower.contains("recent")
+            || lower.contains("latest") || lower.contains("最近") || lower.contains("上次")
+            || lower.contains("last time") || lower.contains("上一次") || lower.contains("刚才")
+            || lower.contains("just now") || lower.contains("今天") || lower.contains("today")
         {
             intent.temporal_boost = 2.5;
             intent.primary_intent = "temporal".to_string();
@@ -58,21 +50,11 @@ impl RetrievalEngine {
         }
 
         // Fix/troubleshoot intent
-        if lower.contains("怎么修")
-            || lower.contains("怎么解决")
-            || lower.contains("how to fix")
-            || lower.contains("解决")
-            || lower.contains("修复")
-            || lower.contains("debug")
-            || lower.contains("troubleshoot")
-            || lower.contains("报错")
-            || lower.contains("error")
-            || lower.contains("crash")
-            || lower.contains("panic")
-            || lower.contains("bug")
-            || lower.contains("不工作")
-            || lower.contains("不生效")
-            || lower.contains("失败")
+        if lower.contains("怎么修") || lower.contains("怎么解决") || lower.contains("how to fix")
+            || lower.contains("解决") || lower.contains("修复") || lower.contains("debug")
+            || lower.contains("troubleshoot") || lower.contains("报错") || lower.contains("error")
+            || lower.contains("crash") || lower.contains("panic") || lower.contains("bug")
+            || lower.contains("不工作") || lower.contains("不生效") || lower.contains("失败")
         {
             intent.type_boosts.insert("bugfix".to_string(), 2.5);
             intent.type_boosts.insert("pattern".to_string(), 1.5);
@@ -82,15 +64,9 @@ impl RetrievalEngine {
         }
 
         // Decision/rationale intent
-        if lower.contains("为什么")
-            || lower.contains("决定")
-            || lower.contains("decided")
-            || lower.contains("why")
-            || lower.contains("为什么选")
-            || lower.contains("reason")
-            || lower.contains("原因")
-            || lower.contains("为什么用")
-            || lower.contains("rationale")
+        if lower.contains("为什么") || lower.contains("决定") || lower.contains("decided")
+            || lower.contains("why") || lower.contains("为什么选") || lower.contains("reason")
+            || lower.contains("原因") || lower.contains("为什么用") || lower.contains("rationale")
             || lower.contains("为什么不用")
         {
             intent.type_boosts.insert("decision".to_string(), 2.5);
@@ -100,16 +76,10 @@ impl RetrievalEngine {
         }
 
         // Convention/pattern intent
-        if lower.contains("规范")
-            || lower.contains("约定")
-            || lower.contains("convention")
-            || lower.contains("怎么写")
-            || lower.contains("怎么用")
-            || lower.contains("how to")
-            || lower.contains("best practice")
-            || lower.contains("正确方式")
-            || lower.contains("standard")
-            || lower.contains("惯例")
+        if lower.contains("规范") || lower.contains("约定") || lower.contains("convention")
+            || lower.contains("怎么写") || lower.contains("怎么用") || lower.contains("how to")
+            || lower.contains("best practice") || lower.contains("正确方式")
+            || lower.contains("standard") || lower.contains("惯例")
         {
             intent.type_boosts.insert("pattern".to_string(), 2.5);
             if intent.primary_intent == "general" {
@@ -118,12 +88,8 @@ impl RetrievalEngine {
         }
 
         // Architecture/design intent
-        if lower.contains("架构")
-            || lower.contains("设计")
-            || lower.contains("architecture")
-            || lower.contains("design")
-            || lower.contains("结构")
-            || lower.contains("模块")
+        if lower.contains("架构") || lower.contains("设计") || lower.contains("architecture")
+            || lower.contains("design") || lower.contains("结构") || lower.contains("模块")
         {
             intent.type_boosts.insert("decision".to_string(), 1.5);
             intent.type_boosts.insert("pattern".to_string(), 1.5);
@@ -133,14 +99,9 @@ impl RetrievalEngine {
         }
 
         // Security intent
-        if lower.contains("安全")
-            || lower.contains("漏洞")
-            || lower.contains("vulnerability")
-            || lower.contains("xss")
-            || lower.contains("csrf")
-            || lower.contains("注入")
-            || lower.contains("攻击")
-            || lower.contains("封禁")
+        if lower.contains("安全") || lower.contains("漏洞") || lower.contains("vulnerability")
+            || lower.contains("xss") || lower.contains("csrf") || lower.contains("注入")
+            || lower.contains("攻击") || lower.contains("封禁")
         {
             intent.type_boosts.insert("security".to_string(), 2.0);
             if intent.primary_intent == "general" {
@@ -149,14 +110,9 @@ impl RetrievalEngine {
         }
 
         // Performance intent
-        if lower.contains("性能")
-            || lower.contains("优化")
-            || lower.contains("performance")
-            || lower.contains("慢")
-            || lower.contains("slow")
-            || lower.contains("latency")
-            || lower.contains("吞吐")
-            || lower.contains("throughput")
+        if lower.contains("性能") || lower.contains("优化") || lower.contains("performance")
+            || lower.contains("慢") || lower.contains("slow") || lower.contains("latency")
+            || lower.contains("吞吐") || lower.contains("throughput")
         {
             intent.type_boosts.insert("finding".to_string(), 1.8);
             if intent.primary_intent == "general" {
@@ -165,17 +121,10 @@ impl RetrievalEngine {
         }
 
         // Comparison intent
-        if lower.contains("对比")
-            || lower.contains("比较")
-            || lower.contains("vs")
-            || lower.contains("versus")
-            || lower.contains("区别")
-            || lower.contains("不同")
-            || lower.contains("difference")
-            || lower.contains("还是")
-            || lower.contains("哪个好")
-            || lower.contains("哪个")
-            || lower.contains("which is better")
+        if lower.contains("对比") || lower.contains("比较") || lower.contains("vs")
+            || lower.contains("versus") || lower.contains("区别") || lower.contains("不同")
+            || lower.contains("difference") || lower.contains("还是")
+            || lower.contains("哪个好") || lower.contains("哪个") || lower.contains("which is better")
         {
             intent.type_boosts.insert("decision".to_string(), 2.0);
             intent.type_boosts.insert("finding".to_string(), 1.5);
@@ -196,47 +145,23 @@ impl RetrievalEngine {
 
     fn detect_label_boosts(lower: &str, boosts: &mut HashMap<String, f64>) {
         let keywords: &[(&str, &str)] = &[
-            ("部署", "deployment"),
-            ("deploy", "deployment"),
-            ("发布", "deployment"),
-            ("安全", "security"),
-            ("security", "security"),
-            ("前端", "frontend"),
-            ("frontend", "frontend"),
-            ("react", "frontend"),
-            ("后端", "backend"),
-            ("backend", "backend"),
-            ("rust", "rust"),
-            ("编译", "build"),
-            ("cargo", "build"),
-            ("build", "build"),
-            ("nginx", "nginx"),
-            ("防火墙", "firewall"),
-            ("firewall", "firewall"),
-            ("数据库", "database"),
-            ("sqlite", "database"),
-            ("db", "database"),
-            ("mcp", "mcp"),
-            ("guard", "guard"),
-            ("docker", "docker"),
-            ("容器", "docker"),
-            ("https", "https"),
-            ("证书", "ssl"),
-            ("ssl", "ssl"),
-            ("certbot", "ssl"),
-            ("测试", "testing"),
-            ("test", "testing"),
-            ("git", "git"),
-            ("github", "github"),
-            ("配置", "config"),
-            ("config", "config"),
+            ("部署", "deployment"), ("deploy", "deployment"), ("发布", "deployment"),
+            ("安全", "security"), ("security", "security"),
+            ("前端", "frontend"), ("frontend", "frontend"), ("react", "frontend"),
+            ("后端", "backend"), ("backend", "backend"), ("rust", "rust"),
+            ("编译", "build"), ("cargo", "build"), ("build", "build"),
+            ("nginx", "nginx"), ("防火墙", "firewall"), ("firewall", "firewall"),
+            ("数据库", "database"), ("sqlite", "database"), ("db", "database"),
+            ("mcp", "mcp"), ("guard", "guard"),
+            ("docker", "docker"), ("容器", "docker"),
+            ("https", "https"), ("证书", "ssl"), ("ssl", "ssl"), ("certbot", "ssl"),
+            ("测试", "testing"), ("test", "testing"),
+            ("git", "git"), ("github", "github"),
+            ("配置", "config"), ("config", "config"),
         ];
         for (kw, label) in keywords {
             if lower.contains(kw) {
-                boosts
-                    .entry(label.to_string())
-                    .and_modify(|v| *v = (*v).max(1.5))
-                    .or_insert(1.5);
+                boosts.entry(label.to_string()).and_modify(|v| *v = (*v).max(1.5)).or_insert(1.5);
             }
         }
     }
@@ -249,10 +174,7 @@ impl RetrievalEngine {
             ("安全", &["security", "vulnerability", "CVE"]),
             ("修复", &["fix", "patch", "resolve", "hotfix"]),
             ("错误", &["error", "bug", "crash", "panic"]),
-            (
-                "性能",
-                &["performance", "optimization", "latency", "throughput"],
-            ),
+            ("性能", &["performance", "optimization", "latency", "throughput"]),
             ("架构", &["architecture", "design", "structure"]),
             ("数据库", &["database", "sqlite", "postgres", "db"]),
             ("前端", &["frontend", "react", "UI", "dashboard"]),
@@ -280,20 +202,13 @@ impl RetrievalEngine {
     fn extract_exclusions(lower: &str) -> Vec<String> {
         let mut exclusions = Vec::new();
         let patterns: &[&str] = &[
-            "不要用",
-            "不要",
-            "不用",
-            "避免",
-            "except ",
-            "without ",
-            "exclude ",
-            "not ",
+            "不要用", "不要", "不用", "避免",
+            "except ", "without ", "exclude ", "not ",
         ];
         for pat in patterns {
             if let Some(pos) = lower.find(pat) {
                 let after = &lower[pos + pat.len()..];
-                let word = after
-                    .split(|c: char| c.is_whitespace() || !c.is_ascii_alphanumeric())
+                let word = after.split(|c: char| c.is_whitespace() || !c.is_ascii_alphanumeric())
                     .next()
                     .unwrap_or("")
                     .to_string();
@@ -312,17 +227,6 @@ impl RetrievalEngine {
         intent: &SearchIntent,
         max_results: usize,
     ) {
-        let now = chrono::Utc::now().timestamp();
-
-        // Filter out expired or not-yet-valid memories
-        results.retain(|(id, _, _, payload)| {
-            let valid = payload.is_valid_at(now);
-            if !valid {
-                tracing::debug!("[Retrieval] excluded expired memory id={id}");
-            }
-            valid
-        });
-
         for (_id, vec_sim, _bm25, payload) in results.iter_mut() {
             let mut bonus = 0.0_f64;
 
@@ -340,16 +244,12 @@ impl RetrievalEngine {
                 }
             }
 
-            // Freshness — replaces the raw temporal-recency heuristic.
-            // Uses MemoryPayload::freshness_score() which accounts for valid_until if set.
-            {
-                let freshness = payload.freshness_score(now);
-                let weight = if intent.temporal_boost > 1.0 {
-                    intent.temporal_boost * 0.15
-                } else {
-                    0.05
-                };
-                bonus += freshness * weight;
+            // Temporal recency — exponential decay
+            if intent.temporal_boost > 1.0 {
+                let age_days =
+                    (chrono::Utc::now().timestamp() - payload.timestamp) as f64 / 86400.0;
+                let recency = (-age_days * 0.1).exp();
+                bonus += recency * intent.temporal_boost * 0.15;
             }
 
             // Access frequency — logarithmic, capped contribution
@@ -365,9 +265,7 @@ impl RetrievalEngine {
             // Expanded term match — check if content contains any expanded terms
             if !intent.expanded_terms.is_empty() {
                 let content_lower = payload.content.to_lowercase();
-                let match_count = intent
-                    .expanded_terms
-                    .iter()
+                let match_count = intent.expanded_terms.iter()
                     .filter(|t| content_lower.contains(t.as_str()))
                     .count();
                 bonus += match_count as f64 * 0.04;
@@ -376,19 +274,13 @@ impl RetrievalEngine {
             // Negative filtering — heavy penalty for excluded terms
             if !intent.exclude_terms.is_empty() {
                 let content_lower = payload.content.to_lowercase();
-                let exclude_hits = intent
-                    .exclude_terms
-                    .iter()
+                let exclude_hits = intent.exclude_terms.iter()
                     .filter(|t| content_lower.contains(t.as_str()))
                     .count();
                 if exclude_hits > 0 {
                     bonus -= 0.5 * exclude_hits as f64;
-                    tracing::info!(
-                        "[Retrieval] negative filter: id={} penalized -{:.2} (hits={})",
-                        _id,
-                        0.3 * exclude_hits as f64,
-                        exclude_hits
-                    );
+                    tracing::info!("[Retrieval] negative filter: id={} penalized -{:.2} (hits={})",
+                        _id, 0.3 * exclude_hits as f64, exclude_hits);
                 }
             }
 
@@ -398,6 +290,36 @@ impl RetrievalEngine {
 
         results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         results.truncate(max_results);
+    }
+
+    /// Phase 1 检索可信度重建: Exact 模式专用 — 只做 exclude 负过滤, 不做 boost/重排
+    ///
+    /// 设计: exact 模式短路了语义 rerank(会覆盖精确 BM25 分), 但 exclude_terms
+    /// (查询里的"排除"语义)是有用的负过滤, 即使 exact 模式也应生效。
+    /// 此函数只对含 exclude term 的结果施加惩罚, 保持 search() 返回的精确顺序。
+    pub fn apply_exclude_only(
+        results: &mut Vec<(u64, f64, f64, MemoryPayload)>,
+        intent: &SearchIntent,
+    ) {
+        if intent.exclude_terms.is_empty() {
+            return;
+        }
+        for (_id, score, _bm25, payload) in results.iter_mut() {
+            let content_lower = payload.content.to_lowercase();
+            let exclude_hits = intent.exclude_terms.iter()
+                .filter(|t| content_lower.contains(t.as_str())).count();
+            if exclude_hits > 0 {
+                *score -= 0.5 * exclude_hits as f64;
+                tracing::info!(
+                    "[Retrieval] exact-mode exclude filter: id={} penalized -{:.2} (hits={})",
+                    _id, 0.5 * exclude_hits as f64, exclude_hits
+                );
+            }
+        }
+        // 重排一次(exclude 惩罚可能改变顺序), 但不加任何 boost
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // 过滤掉被 exclude 压到 0 以下的结果
+        results.retain(|(_, score, _, _)| *score > 0.0);
     }
 }
 
@@ -418,10 +340,14 @@ mod tests {
             enforced: false,
             rationale: None,
             access_count: 0,
-            quality_score: 1.0,
             memory_type: memory_type.map(|s| s.to_string()),
-            valid_from: None,
-            valid_until: None,
+            identity_stamp: None,
+            source_agent: None,
+        valid_from: 0, valid_to: None,
+        last_reviewed_ts: None,
+        expired_at: None,
+        invalidated_at: None,
+        memory_class: None,
         }
     }
 
@@ -493,25 +419,14 @@ mod tests {
 
     #[test]
     fn negative_filter_penalizes() {
-        let firewalld = make_payload(
-            "Use firewalld for all blocking rules on the server",
-            vec!["firewall"],
-            Some("decision"),
-        );
-        let nft = make_payload(
-            "Use nft direct table for blocking rules on the server",
-            vec!["firewall"],
-            Some("decision"),
-        );
+        let firewalld = make_payload("Use firewalld for all blocking rules on the server", vec!["firewall"], Some("decision"));
+        let nft = make_payload("Use nft direct table for blocking rules on the server", vec!["firewall"], Some("decision"));
         let mut results = vec![
             (1u64, 0.6f64, 0.5f64, firewalld),
             (2u64, 0.5f64, 0.5f64, nft),
         ];
         let intent = RetrievalEngine::parse_intent("不要用firewalld怎么配置");
         RetrievalEngine::rerank(&mut results, &intent, 10);
-        assert_eq!(
-            results[0].0, 2,
-            "nft should outrank firewalld when excluded"
-        );
+        assert_eq!(results[0].0, 2, "nft should outrank firewalld when excluded");
     }
 }

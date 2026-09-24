@@ -11,6 +11,15 @@ pub enum Param {
     PulseBudget,
 }
 
+/// D1发现的缺陷修复: Mem0 调和阈值类别感知 — 对话类记忆(同会话轮次天然高相似)
+/// 曾用统一0.92, LongMemEval试点628写入仅存86(87%被连环supersede且不进检索)
+pub const MEM0_SUPERSEDE_KNOWLEDGE: f64 = 0.92;
+pub const MEM0_SUPERSEDE_DIALOGUE: f64 = 0.985; // 对话类: 仅近乎完全重复才替换
+/// F7单一事实源: 提示词与代码共用同一份参数默认值, 手抄即bug(50vs10谎言教训)
+pub const DEFAULT_FISSION_ENTROPY: f64 = 0.3;
+pub const DEFAULT_FISSION_MIN_SIZE: f64 = 6.0;
+pub const FISSION_LLM_COOLDOWN_TICKS: u64 = 10;
+
 impl Param {
     pub fn all() -> &'static [Param] {
         &[
@@ -26,8 +35,8 @@ impl Param {
 
     fn default_value(&self) -> f64 {
         match self {
-            Param::FissionEntropyThreshold => 0.3,
-            Param::FissionMinClusterSize => 6.0,
+            Param::FissionEntropyThreshold => DEFAULT_FISSION_ENTROPY,
+            Param::FissionMinClusterSize => DEFAULT_FISSION_MIN_SIZE,
             Param::MergeDistance => 5.0,
             Param::MergeLabelSimilarity => 0.2,
             Param::DreamInterval => 50.0,
@@ -127,10 +136,7 @@ impl AdaptiveParams {
     }
 
     pub fn get(&self, param: Param) -> f64 {
-        self.params
-            .get(&param)
-            .map(|s| s.value)
-            .unwrap_or_else(|| param.default_value())
+        self.params.get(&param).map(|s| s.value).unwrap_or_else(|| param.default_value())
     }
 
     pub fn get_u(&self, param: Param) -> usize {
@@ -143,7 +149,11 @@ impl AdaptiveParams {
         }
     }
 
-    pub fn adapt_from_outcome(&mut self, action: super::outcome::ActionType, effectiveness: f64) {
+    pub fn adapt_from_outcome(
+        &mut self,
+        action: super::outcome::ActionType,
+        effectiveness: f64,
+    ) {
         use super::outcome::ActionType;
         match action {
             ActionType::Fission => {

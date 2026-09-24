@@ -1,21 +1,17 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::DefaultBodyLimit;
-use axum::middleware;
-use axum::routing::{get, post};
 use axum::Router;
+use axum::routing::{get, post};
+use axum::middleware;
+use axum::response::IntoResponse;
 use tokio::net::TcpListener;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use epicode::api::routes;
-use epicode::api::server;
 use epicode::engine::Engine;
-
-fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(format!("EPICODE_{}", name))
-        .or_else(|_| std::env::var(format!("TETRAMEM_{}", name)))
-}
+use epicode::engine::security::SecurityResult;
 
 #[tokio::main]
 async fn main() {
@@ -43,8 +39,7 @@ async fn main() {
         "DISABLED"
     };
 
-    tracing::info!(
-        "Engine fired. Energy: {:.1}, Brain: {}, Security: {}",
+    tracing::info!("Engine fired. Energy: {:.1}, Brain: {}, Security: {}",
         engine.energy.available(),
         cognitive_status,
         security_status,
@@ -52,30 +47,63 @@ async fn main() {
 
     let state = Arc::new(engine);
 
-    // Public API routes exposed under the `/v1` namespace.
-    // The included Nginx reverse proxy strips `/api` before forwarding, so the
-    // public prefix is `/api/v1` while the backend sees `/v1`.
-    let v1_routes = Router::new()
-        .route("/ws", get(routes::ws_handler))
+    let security_fn = |axum::extract::State(engine): axum::extract::State<Arc<Engine>>,
+                        headers: axum::http::HeaderMap,
+                        request: axum::extract::Request,
+                        next: axum::middleware::Next| async move {
+        let guard = engine.guard.clone();
+        let path = request.uri().path().to_string();
+        let method = request.method().clone().to_string();
+        let action = format!("{} {}", method, path);
+
+        if path == "/" || path == "/dashboard" || path.starts_with("/health") {
+            return next.run(request).await;
+        }
+
+        let api_key = headers
+            .get("X-API-Key")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+
+        match guard.full_check(api_key, &action) {
+            Ok(_client_id) => next.run(request).await,
+            Err((result, _detail)) => {
+                let status = match result {
+                    SecurityResult::DeniedAuth => axum::http::StatusCode::UNAUTHORIZED,
+                    SecurityResult::DeniedRateLimit => axum::http::StatusCode::TOO_MANY_REQUESTS,
+                    SecurityResult::DeniedValidation => axum::http::StatusCode::BAD_REQUEST,
+                    SecurityResult::DeniedConstitution => axum::http::StatusCode::FORBIDDEN,
+                    SecurityResult::DeniedEnergy => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    SecurityResult::Allowed => axum::http::StatusCode::OK,
+                };
+                (status, axum::Json(serde_json::json!({
+                    "success": false,
+                    "error": format!("{:?}", result),
+                    "action": action,
+                }))).into_response()
+            }
+        }
+    };
+
+    let app = Router::new()
+        .route("/", get(routes::dashboard))
+        .route("/dashboard", get(routes::dashboard))
         .route("/health", get(routes::health))
+        .route("/constitution", get(routes::constitution))
+        .route("/sse", get(routes::sse_stream))
+        .route("/config", get(routes::get_config).post(routes::update_config))
+        .route("/security/stats", get(routes::security_stats))
+        .route("/security/audit", get(routes::security_audit))
         .route("/remember", post(routes::remember))
         .route("/ask", post(routes::ask))
         .route("/nodes", post(routes::create_node))
         .route("/nodes", get(routes::list_nodes))
-        .route(
-            "/nodes/:id",
-            get(routes::get_node).delete(routes::delete_node),
-        )
-        .route("/trash", get(routes::list_deleted_nodes))
-        .route("/trash/:id/restore", post(routes::restore_node))
+        .route("/nodes/:id", get(routes::get_node))
         .route("/search", post(routes::search))
         .route("/recall", post(routes::recall))
         .route("/pulse", post(routes::send_pulse))
         .route("/stats", get(routes::stats))
-        .route(
-            "/identity",
-            get(routes::get_identity).post(routes::confirm_identity),
-        )
+        .route("/identity", get(routes::get_identity).post(routes::confirm_identity))
         .route("/knowledge", post(routes::knowledge_relations))
         .route("/concepts", get(routes::concepts))
         .route("/dream", post(routes::dream_cycle))
@@ -84,63 +112,15 @@ async fn main() {
         .route("/mcp", post(routes::mcp))
         .route("/timeline", get(routes::timeline))
         .route("/backups", get(routes::list_backups))
-        .with_state(state.clone());
-
-    let app = Router::new()
-        .route("/", get(routes::dashboard))
-        .route("/dashboard", get(routes::dashboard))
-        .route("/constitution", get(routes::constitution))
-        .route("/sse", get(routes::sse_stream))
-        .route(
-            "/config",
-            get(routes::get_config).post(routes::update_config),
-        )
-        .route("/security/stats", get(routes::security_stats))
-        .route("/security/audit", get(routes::security_audit))
-        .route("/admin/cache/stats", get(routes::cache_stats))
-        .route("/admin/cache/clear", post(routes::clear_cache))
-        .route(
-            "/admin/permissions",
-            post(routes::grant_permission).get(routes::get_user_permissions),
-        )
-        .route("/admin/permissions/revoke", post(routes::revoke_permission))
-        .route("/admin/audit/logs", get(routes::get_audit_logs))
-        .route(
-            "/user/permissions",
-            get(routes::get_current_user_permissions),
-        )
-        .route("/admin/keys/current", get(routes::get_current_key))
-        .route("/admin/keys/list", get(routes::list_keys))
-        .route("/admin/keys/rotate", post(routes::rotate_key))
-        .route("/admin/keys/revoke", post(routes::revoke_key))
-        .route("/admin/keys/restore", post(routes::restore_key))
-        .route("/admin/keys/events", get(routes::get_key_events))
-        .nest("/v1", v1_routes)
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            epicode::api::middleware::security_layer,
-        ))
-        .layer(middleware::from_fn(server::security_headers_middleware))
-        .layer(server::cors_layer(
-            &server::default_cors_origin(),
-            server::default_cors_headers(),
-        ))
+        .layer(middleware::from_fn_with_state(state.clone(), security_fn))
+        .layer(CorsLayer::new()
+            .allow_origin("http://127.0.0.1:9110".parse::<axum::http::HeaderValue>().unwrap())
+            .allow_methods(Any)
+            .allow_headers(Any))
         .layer(TraceLayer::new_for_http())
-        // Cap request bodies at 10 MiB to prevent oversized-payload DoS. The
-        // largest legitimate request is /remember (content + labels + meta),
-        // which is comfortably under this; anything bigger is almost certainly
-        // abuse or a client bug.
-        .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
         .with_state(state.clone());
 
-    let listen_addr = env_var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9110".to_string());
-    let addr: SocketAddr = match listen_addr.parse() {
-        Ok(a) => a,
-        Err(e) => {
-            tracing::error!("FATAL: invalid listen address '{}': {}", listen_addr, e);
-            std::process::exit(1);
-        }
-    };
+    let addr: SocketAddr = "127.0.0.1:9110".parse().unwrap();
     let listener = match TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {

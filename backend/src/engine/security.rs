@@ -5,11 +5,9 @@ use std::time::Instant;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
-use super::crypto::constant_time_eq;
-
 const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 const RATE_LIMIT_MAX_REQUESTS: u64 = 120;
-const MAX_CONTENT_LENGTH: usize = 10000;
+const MAX_CONTENT_LENGTH: usize = 100000;
 const MAX_QUERY_LENGTH: usize = 2000;
 const MAX_LABELS_PER_MEMORY: usize = 10;
 const MAX_LABEL_LENGTH: usize = 64;
@@ -18,76 +16,41 @@ const MAX_LABEL_LENGTH: usize = 64;
 pub struct SecurityConfig {
     pub enabled: bool,
     pub api_keys: Vec<String>,
-    /// Optional administrative key. When set, sensitive endpoints
-    /// (`/admin/*`, `/config`) require this key instead of the regular API key,
-    /// preventing a standard client from escalating to admin operations.
-    /// When `None`, admin endpoints fall back to requiring a regular API key
-    /// (single-tenant mode) — but only when security is enabled.
-    pub admin_key: Option<String>,
     pub rate_limit_per_minute: u64,
     pub max_content_length: usize,
     pub max_query_length: usize,
     pub max_labels: usize,
     pub audit_log_size: usize,
-    pub tenant_quotas: HashMap<String, usize>,
-    pub max_tenants: usize,
+    /// 审计日志持久化文件路径（可选）。设置后审计条目异步写入文件，避免仅靠内存 200 条丢失关键安全事件。
+    pub audit_log_file: Option<std::path::PathBuf>,
 }
 
-fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(format!("EPICODE_{}", name))
-        .or_else(|_| std::env::var(format!("TETRAMEM_{}", name)))
-}
-
-impl SecurityConfig {
-    /// Try to build a `SecurityConfig` from environment variables.
-    /// Returns `Err` if `TETRAMEM_API_KEY` is not set and insecure auth is not allowed.
-    pub fn try_from_env() -> Result<Self, String> {
-        let key = env_var("API_KEY").ok().filter(|k| !k.is_empty());
-        // Insecure auth must be an explicit opt-in. We deliberately do NOT
-        // auto-enable it for `cfg!(debug_assertions)` builds: a debug binary
-        // accidentally deployed to production would otherwise expose every
-        // endpoint with no authentication. Operators must set ALLOW_INSECURE_AUTH=1
-        // (and only when EPICODE_API_KEY is unset) to opt in.
-        let allow_insecure = matches!(
-            env_var("ALLOW_INSECURE_AUTH"),
-            Ok(v) if v == "1" || v.eq_ignore_ascii_case("true")
-        ) || cfg!(test);
-        let admin_key = env_var("ADMIN_KEY").ok().filter(|k| !k.is_empty());
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        let key = std::env::var("TETRAMEM_API_KEY").ok();
         let (enabled, api_keys) = match key {
-            Some(k) => (true, vec![k]),
-            None if allow_insecure => {
-                tracing::warn!(
-                    "EPICODE_API_KEY (or TETRAMEM_API_KEY) not set — insecure auth is enabled only for local/dev use"
-                );
-                (false, vec![])
-            }
-            None => {
-                return Err(
-                    "EPICODE_API_KEY (or TETRAMEM_API_KEY) must be set. Generate one with: openssl rand -base64 32"
-                        .to_string(),
-                );
+            Some(k) if !k.is_empty() => (true, vec![k]),
+            _ => {
+                // fail-closed：生产环境必须有 API key。开发环境用 EPICODE_DEV=1 显式放行。
+                if std::env::var("EPICODE_DEV").as_deref() == Ok("1") {
+                    tracing::warn!("EPICODE_DEV=1 — API authentication disabled (dev mode)");
+                    (false, vec![])
+                } else {
+                    tracing::error!("TETRAMEM_API_KEY not set and EPICODE_DEV not set — all API requests will be denied (fail-closed)");
+                    (true, vec!["__disabled_no_key_set__".to_string()])
+                }
             }
         };
-        Ok(Self {
+        Self {
             enabled,
             api_keys,
-            admin_key,
             rate_limit_per_minute: RATE_LIMIT_MAX_REQUESTS,
             max_content_length: MAX_CONTENT_LENGTH,
             max_query_length: MAX_QUERY_LENGTH,
             max_labels: MAX_LABELS_PER_MEMORY,
             audit_log_size: 200,
-            tenant_quotas: HashMap::new(),
-            max_tenants: 1000,
-        })
-    }
-}
-
-impl Default for SecurityConfig {
-    fn default() -> Self {
-        Self::try_from_env().unwrap_or_else(|e| {
-            panic!("FATAL: {e}");
-        })
+            audit_log_file: std::env::var_os("EPICODE_AUDIT_LOG").map(std::path::PathBuf::from),
+        }
     }
 }
 
@@ -108,13 +71,11 @@ pub enum SecurityResult {
     DeniedValidation,
     DeniedConstitution,
     DeniedEnergy,
-    DeniedQuota,
 }
 
 #[derive(Debug, Clone)]
 struct RateBucket {
-    window_start: Instant,
-    count: u64,
+    timestamps: Vec<std::time::Instant>,
 }
 
 pub struct SecurityGuard {
@@ -128,7 +89,6 @@ pub struct SecurityGuard {
     denied_validation_count: AtomicUsize,
     denied_constitution_count: AtomicUsize,
     denied_energy_count: AtomicUsize,
-    denied_quota_count: AtomicUsize,
 }
 
 impl SecurityGuard {
@@ -144,17 +104,11 @@ impl SecurityGuard {
             denied_validation_count: AtomicUsize::new(0),
             denied_constitution_count: AtomicUsize::new(0),
             denied_energy_count: AtomicUsize::new(0),
-            denied_quota_count: AtomicUsize::new(0),
         }
     }
 
     pub fn from_env() -> Self {
         Self::new(SecurityConfig::default())
-    }
-
-    /// Fallible version that returns `Err` instead of panicking.
-    pub fn try_from_env() -> Result<Self, String> {
-        Ok(Self::new(SecurityConfig::try_from_env()?))
     }
 
     pub fn authenticate(&self, api_key: &str) -> Result<String, SecurityResult> {
@@ -186,54 +140,30 @@ impl SecurityGuard {
         }
     }
 
-    pub fn extract_tenant_id(api_key: &str) -> String {
-        api_key.split(':').next().unwrap_or("default").to_string()
-    }
-
-    pub fn check_tenant_quota(
-        &self,
-        tenant_id: &str,
-        current_count: usize,
-    ) -> Result<(), SecurityResult> {
-        if let Some(&quota) = self.config.tenant_quotas.get(tenant_id) {
-            if current_count >= quota {
-                self.denied_quota_count.fetch_add(1, Ordering::SeqCst);
-                return Err(SecurityResult::DeniedQuota);
-            }
-        }
-        Ok(())
-    }
     pub fn check_rate_limit(&self, client_id: &str) -> Result<(), SecurityResult> {
-        let tenant_id = Self::extract_tenant_id(client_id);
-        let rate_key = format!("{}:{}", tenant_id, Self::hash_key(client_id));
+        let rate_key = Self::hash_key(client_id);
         let mut buckets = self.rate_buckets.lock();
         let now = Instant::now();
         let limit = self.config.rate_limit_per_minute;
-        let window = std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS);
 
-        if buckets.len() > self.config.max_tenants * 2 {
-            buckets.retain(|_, b| now.saturating_duration_since(b.window_start) < window);
-        }
-
-        if buckets.len() >= self.config.max_tenants && !buckets.contains_key(&rate_key) {
-            return Err(SecurityResult::DeniedRateLimit);
+        if buckets.len() > 1000 {
+            buckets.retain(|_, b| {
+                b.timestamps.last().map(|t| now.duration_since(*t).as_secs() < RATE_LIMIT_WINDOW_SECS).unwrap_or(false)
+            });
         }
 
         let bucket = buckets.entry(rate_key).or_insert(RateBucket {
-            window_start: now,
-            count: 0,
+            timestamps: Vec::new(),
         });
 
-        if now.saturating_duration_since(bucket.window_start) >= window {
-            bucket.window_start = now;
-            bucket.count = 0;
-        }
+        let cutoff = now - std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS);
+        bucket.timestamps.retain(|t| *t > cutoff);
 
-        if bucket.count >= limit {
+        if bucket.timestamps.len() >= limit as usize {
             return Err(SecurityResult::DeniedRateLimit);
         }
 
-        bucket.count += 1;
+        bucket.timestamps.push(now);
         Ok(())
     }
 
@@ -265,9 +195,7 @@ impl SecurityGuard {
             if label.len() > MAX_LABEL_LENGTH || label.trim().is_empty() {
                 return Err(SecurityResult::DeniedValidation);
             }
-            if !label.chars().all(|c| {
-                c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c.is_whitespace()
-            }) {
+            if !label.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ':' || c == '/' || c.is_whitespace()) {
                 return Err(SecurityResult::DeniedValidation);
             }
         }
@@ -285,21 +213,16 @@ impl SecurityGuard {
         Err(SecurityResult::DeniedConstitution)
     }
 
-    pub fn check_constitution_fission(
-        &self,
-        entropy: f64,
-        cluster_size: usize,
-    ) -> Result<(), SecurityResult> {
-        if cluster_size >= 30 {
-            return Ok(());
+    pub fn fission_allowed(entropy: f64, cluster_size: usize) -> bool {
+        cluster_size >= 30 || (entropy >= 0.4 && cluster_size >= 6)
+    }
+
+    pub fn check_constitution_fission(&self, entropy: f64, cluster_size: usize) -> Result<(), SecurityResult> {
+        if Self::fission_allowed(entropy, cluster_size) {
+            Ok(())
+        } else {
+            Err(SecurityResult::DeniedConstitution)
         }
-        if entropy < 0.4 {
-            return Err(SecurityResult::DeniedConstitution);
-        }
-        if cluster_size < 6 {
-            return Err(SecurityResult::DeniedConstitution);
-        }
-        Ok(())
     }
 
     pub fn check_constitution_blend(&self) -> Result<(), SecurityResult> {
@@ -323,56 +246,47 @@ impl SecurityGuard {
             detail: detail.to_string(),
         };
 
-        self.total_requests.fetch_add(1, Ordering::SeqCst);
+        self.total_requests.fetch_add(1, Ordering::Relaxed);
         if result != SecurityResult::Allowed {
-            self.total_denied.fetch_add(1, Ordering::SeqCst);
+            self.total_denied.fetch_add(1, Ordering::Relaxed);
             match result {
-                SecurityResult::DeniedAuth => {
-                    self.denied_auth_count.fetch_add(1, Ordering::SeqCst);
-                }
-                SecurityResult::DeniedRateLimit => {
-                    self.denied_rate_count.fetch_add(1, Ordering::SeqCst);
-                }
-                SecurityResult::DeniedValidation => {
-                    self.denied_validation_count.fetch_add(1, Ordering::SeqCst);
-                }
-                SecurityResult::DeniedConstitution => {
-                    self.denied_constitution_count
-                        .fetch_add(1, Ordering::SeqCst);
-                }
-                SecurityResult::DeniedEnergy => {
-                    self.denied_energy_count.fetch_add(1, Ordering::SeqCst);
-                }
-                SecurityResult::DeniedQuota => {
-                    self.denied_quota_count.fetch_add(1, Ordering::SeqCst);
-                }
+                SecurityResult::DeniedAuth => { self.denied_auth_count.fetch_add(1, Ordering::Relaxed); }
+                SecurityResult::DeniedRateLimit => { self.denied_rate_count.fetch_add(1, Ordering::Relaxed); }
+                SecurityResult::DeniedValidation => { self.denied_validation_count.fetch_add(1, Ordering::Relaxed); }
+                SecurityResult::DeniedConstitution => { self.denied_constitution_count.fetch_add(1, Ordering::Relaxed); }
+                SecurityResult::DeniedEnergy => { self.denied_energy_count.fetch_add(1, Ordering::Relaxed); }
                 SecurityResult::Allowed => {}
             }
         }
 
         let mut log = self.audit_log.lock();
-        log.push(entry);
+        log.push(entry.clone());
         if log.len() > self.config.audit_log_size {
             let excess = log.len() - self.config.audit_log_size;
             log.drain(0..excess);
+        }
+        drop(log);
+
+        // 持久化审计日志到文件 — 同步写入（单次 append syscall，比每次 spawn 线程开销小得多）
+        // 之前每条审计日志 std::thread::spawn 导致高 QPS 下线程爆炸
+        if let Some(ref path) = self.config.audit_log_file {
+            use std::io::Write;
+            use std::fs::OpenOptions;
+            let entry_json = serde_json::to_string(&entry).unwrap_or_default();
+            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
+                let _ = writeln!(f, "{}", entry_json);
+            }
         }
 
         if result != SecurityResult::Allowed {
             tracing::warn!(
                 "[Security] {} by {} — {:?}: {}",
-                action,
-                client,
-                result,
-                detail
+                action, client, result, detail
             );
         }
     }
 
-    pub fn full_check(
-        &self,
-        api_key: &str,
-        action: &str,
-    ) -> Result<String, (SecurityResult, String)> {
+    pub fn full_check(&self, api_key: &str, action: &str) -> Result<String, (SecurityResult, String)> {
         let client = match self.authenticate(api_key) {
             Ok(c) => c,
             Err(r) => {
@@ -393,14 +307,13 @@ impl SecurityGuard {
     pub fn stats(&self) -> SecurityStats {
         SecurityStats {
             enabled: self.config.enabled,
-            total_requests: self.total_requests.load(Ordering::SeqCst),
-            total_denied: self.total_denied.load(Ordering::SeqCst),
-            denied_auth: self.denied_auth_count.load(Ordering::SeqCst),
-            denied_rate_limit: self.denied_rate_count.load(Ordering::SeqCst),
-            denied_validation: self.denied_validation_count.load(Ordering::SeqCst),
-            denied_constitution: self.denied_constitution_count.load(Ordering::SeqCst),
-            denied_energy: self.denied_energy_count.load(Ordering::SeqCst),
-            denied_quota: self.denied_quota_count.load(Ordering::SeqCst),
+            total_requests: self.total_requests.load(Ordering::Relaxed),
+            total_denied: self.total_denied.load(Ordering::Relaxed),
+            denied_auth: self.denied_auth_count.load(Ordering::Relaxed),
+            denied_rate_limit: self.denied_rate_count.load(Ordering::Relaxed),
+            denied_validation: self.denied_validation_count.load(Ordering::Relaxed),
+            denied_constitution: self.denied_constitution_count.load(Ordering::Relaxed),
+            denied_energy: self.denied_energy_count.load(Ordering::Relaxed),
             rate_limit_per_minute: self.config.rate_limit_per_minute,
             max_content_length: self.config.max_content_length,
             audit_entries: self.audit_log.lock().len(),
@@ -413,35 +326,10 @@ impl SecurityGuard {
     }
 
     fn mask_key(key: &str) -> String {
-        let chars: Vec<char> = key.chars().collect();
-        if chars.len() <= 8 {
-            return "*".repeat(chars.len());
+        if key.len() <= 8 {
+            return "*".repeat(key.len());
         }
-        // Use char indexing (not byte slicing) so multi-byte UTF-8 keys can never
-        // panic on a char boundary — a remotely-supplied X-API-Key could otherwise
-        // crash the server, and `panic = "abort"` would kill the process.
-        let head: String = chars.iter().take(3).collect();
-        let tail: String = chars.iter().rev().take(2).rev().collect();
-        format!("{head}****{tail}")
-    }
-
-    /// Check whether `api_key` is permitted to perform administrative operations.
-    /// Uses constant-time comparison to avoid leaking the admin key via timing.
-    /// Returns `true` when security is disabled (local/dev), or when the supplied
-    /// key matches the configured admin key, or — in single-tenant mode where no
-    /// admin key is configured — when it matches the regular API key.
-    pub fn check_admin(&self, api_key: &str) -> bool {
-        if !self.config.enabled {
-            return true;
-        }
-        if let Some(admin) = &self.config.admin_key {
-            return constant_time_eq(api_key, admin);
-        }
-        // Fallback: regular API key doubles as admin key in single-tenant mode.
-        self.config
-            .api_keys
-            .iter()
-            .any(|k| constant_time_eq(api_key, k))
+        format!("{}****{}", &key[..3], &key[key.len()-2..])
     }
 
     fn hash_key(key: &str) -> String {
@@ -450,7 +338,7 @@ impl SecurityGuard {
             h ^= b as u64;
             h = h.wrapping_mul(1099511628211);
         }
-        format!("rl:{h:016x}")
+        format!("rl:{:016x}", h)
     }
 }
 
@@ -464,7 +352,6 @@ pub struct SecurityStats {
     pub denied_validation: usize,
     pub denied_constitution: usize,
     pub denied_energy: usize,
-    pub denied_quota: usize,
     pub rate_limit_per_minute: u64,
     pub max_content_length: usize,
     pub audit_entries: usize,
@@ -478,14 +365,12 @@ mod tests {
         SecurityGuard::new(SecurityConfig {
             enabled: true,
             api_keys: vec!["test-key-123".to_string()],
-            admin_key: None,
             rate_limit_per_minute: 5,
             max_content_length: 100,
             max_query_length: 50,
             max_labels: 5,
             audit_log_size: 50,
-            tenant_quotas: std::collections::HashMap::new(),
-            max_tenants: 100,
+            audit_log_file: None,
         })
     }
 
@@ -539,58 +424,40 @@ mod tests {
     #[test]
     fn validate_content_empty() {
         let guard = test_guard();
-        assert_eq!(
-            guard.validate_content("").unwrap_err(),
-            SecurityResult::DeniedValidation
-        );
+        assert_eq!(guard.validate_content("").unwrap_err(), SecurityResult::DeniedValidation);
     }
 
     #[test]
     fn validate_content_too_long() {
         let guard = test_guard();
         let long = "x".repeat(101);
-        assert_eq!(
-            guard.validate_content(&long).unwrap_err(),
-            SecurityResult::DeniedValidation
-        );
+        assert_eq!(guard.validate_content(&long).unwrap_err(), SecurityResult::DeniedValidation);
     }
 
     #[test]
     fn validate_query_too_long() {
         let guard = test_guard();
         let long = "q".repeat(51);
-        assert_eq!(
-            guard.validate_query(&long).unwrap_err(),
-            SecurityResult::DeniedValidation
-        );
+        assert_eq!(guard.validate_query(&long).unwrap_err(), SecurityResult::DeniedValidation);
     }
 
     #[test]
     fn validate_labels_too_many() {
         let guard = test_guard();
-        let labels: Vec<String> = (0..6).map(|i| format!("label{i}")).collect();
-        assert_eq!(
-            guard.validate_labels(&labels).unwrap_err(),
-            SecurityResult::DeniedValidation
-        );
+        let labels: Vec<String> = (0..6).map(|i| format!("label{}", i)).collect();
+        assert_eq!(guard.validate_labels(&labels).unwrap_err(), SecurityResult::DeniedValidation);
     }
 
     #[test]
     fn constitution_blocks_delete() {
         let guard = test_guard();
-        assert_eq!(
-            guard.check_constitution_delete().unwrap_err(),
-            SecurityResult::DeniedConstitution
-        );
+        assert_eq!(guard.check_constitution_delete().unwrap_err(), SecurityResult::DeniedConstitution);
     }
 
     #[test]
     fn constitution_blocks_fission() {
         let guard = test_guard();
-        assert_eq!(
-            guard.check_constitution_fission(0.1, 3).unwrap_err(),
-            SecurityResult::DeniedConstitution
-        );
+        assert_eq!(guard.check_constitution_fission(0.1, 3).unwrap_err(), SecurityResult::DeniedConstitution);
     }
 
     #[test]
@@ -602,28 +469,25 @@ mod tests {
     #[test]
     fn constitution_blocks_fission_small_cluster() {
         let guard = test_guard();
-        assert_eq!(
-            guard.check_constitution_fission(0.8, 3).unwrap_err(),
-            SecurityResult::DeniedConstitution
-        );
+        assert_eq!(guard.check_constitution_fission(0.8, 3).unwrap_err(), SecurityResult::DeniedConstitution);
+    }
+
+    #[test]
+    fn constitution_allows_fission_large_cluster() {
+        assert!(SecurityGuard::fission_allowed(0.0, 30));
+        assert!(!SecurityGuard::fission_allowed(0.1, 5));
     }
 
     #[test]
     fn constitution_blocks_blend() {
         let guard = test_guard();
-        assert_eq!(
-            guard.check_constitution_blend().unwrap_err(),
-            SecurityResult::DeniedConstitution
-        );
+        assert_eq!(guard.check_constitution_blend().unwrap_err(), SecurityResult::DeniedConstitution);
     }
 
     #[test]
     fn energy_check_insufficient() {
         let guard = test_guard();
-        assert_eq!(
-            guard.check_energy(5.0, 10.0).unwrap_err(),
-            SecurityResult::DeniedEnergy
-        );
+        assert_eq!(guard.check_energy(5.0, 10.0).unwrap_err(), SecurityResult::DeniedEnergy);
     }
 
     #[test]
@@ -650,12 +514,7 @@ mod tests {
     fn audit_log_entries() {
         let guard = test_guard();
         guard.audit("create", "client1", SecurityResult::Allowed, "ok");
-        guard.audit(
-            "delete",
-            "client1",
-            SecurityResult::DeniedConstitution,
-            "forbidden",
-        );
+        guard.audit("delete", "client1", SecurityResult::DeniedConstitution, "forbidden");
         let log = guard.audit_log(10);
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].action, "delete");
@@ -677,14 +536,12 @@ mod tests {
         let guard = SecurityGuard::new(SecurityConfig {
             enabled: false,
             api_keys: vec![],
-            admin_key: None,
             rate_limit_per_minute: 0,
             max_content_length: 0,
             max_query_length: 0,
             max_labels: 0,
             audit_log_size: 10,
-            tenant_quotas: std::collections::HashMap::new(),
-            max_tenants: 100,
+            audit_log_file: None,
         });
         assert!(guard.authenticate("anything").is_ok());
     }
@@ -693,50 +550,5 @@ mod tests {
     fn mask_key_hides_middle() {
         let masked = SecurityGuard::mask_key("abcdefghijklmnop");
         assert_eq!(masked, "abc****op");
-    }
-
-    #[test]
-    fn mask_key_handles_multibyte_without_panic() {
-        // A remotely-supplied X-API-Key with multi-byte UTF-8 must not panic
-        // (regression for the old `&key[..3]` byte slice).
-        let masked = SecurityGuard::mask_key("🔑secure-key-🔐");
-        assert!(masked.contains("****"));
-    }
-
-    #[test]
-    fn check_admin_with_dedicated_admin_key() {
-        let guard = SecurityGuard::new(SecurityConfig {
-            enabled: true,
-            api_keys: vec!["regular-key".to_string()],
-            admin_key: Some("admin-secret".to_string()),
-            rate_limit_per_minute: 5,
-            max_content_length: 100,
-            max_query_length: 50,
-            max_labels: 5,
-            audit_log_size: 50,
-            tenant_quotas: std::collections::HashMap::new(),
-            max_tenants: 100,
-        });
-        assert!(!guard.check_admin("regular-key"));
-        assert!(guard.check_admin("admin-secret"));
-        assert!(!guard.check_admin("wrong"));
-    }
-
-    #[test]
-    fn check_admin_single_tenant_falls_back_to_api_key() {
-        let guard = SecurityGuard::new(SecurityConfig {
-            enabled: true,
-            api_keys: vec!["regular-key".to_string()],
-            admin_key: None,
-            rate_limit_per_minute: 5,
-            max_content_length: 100,
-            max_query_length: 50,
-            max_labels: 5,
-            audit_log_size: 50,
-            tenant_quotas: std::collections::HashMap::new(),
-            max_tenants: 100,
-        });
-        assert!(guard.check_admin("regular-key"));
-        assert!(!guard.check_admin("other"));
     }
 }

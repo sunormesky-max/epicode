@@ -1,42 +1,31 @@
+//! ⚠️ **DEPRECATED** — 单实例旧版路由（端口 9110）。
+//!
+//! 生产环境使用 `bin/cloud.rs`（端口 9111），此模块仅保留兼容。
+//! 不含独立的认证绕过逻辑——认证由 `main.rs` 中间件层处理。
+//! 若后续不再需要单实例模式，可安全删除此文件及 `main.rs`。
+
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::ws::WebSocket;
-use axum::extract::{Path, Query, State, WebSocketUpgrade};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::http::{header::CONTENT_TYPE, HeaderValue};
-use axum::response::{
-    sse::{Event, Sse},
-    Response,
-};
+use axum::response::{Response, sse::{Event, Sse}};
 use axum::Json;
 use futures::stream::Stream;
-use futures::SinkExt;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio_stream::StreamExt as _;
 
-use crate::domain::permission::{Permission, ResourceType, UserRole};
-use crate::engine::bus::EngineEvent;
 use crate::engine::Engine;
-use chrono::Utc;
-use uuid::Uuid;
 
 // ── Dashboard ──
 
-fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(format!("EPICODE_{}", name))
-        .or_else(|_| std::env::var(format!("TETRAMEM_{}", name)))
-}
-
 pub async fn dashboard() -> Response {
     let html = include_str!("dashboard.html");
-    let mut response = Response::new(Body::from(html));
-    *response.status_mut() = StatusCode::OK;
-    response.headers_mut().insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/html; charset=utf-8"),
-    );
-    response
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/html; charset=utf-8")
+        .body(Body::from(html))
+        .unwrap()
 }
 
 // ── Request types ──
@@ -88,50 +77,16 @@ pub struct IdentityConfirmRequest {
     pub confirm_token: Option<String>,
 }
 
-// ── 权限管理请求类型 ──
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GrantPermissionRequest {
-    pub user_id: String,
-    pub resource_id: String,
-    pub resource_type: String,
-    pub role: String,
-    pub tenant_id: String,
-    pub granted_by: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RevokePermissionRequest {
-    pub permission_id: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetPermissionsQuery {
-    pub user_id: Option<String>,
-    pub offset: Option<usize>,
-    pub limit: Option<usize>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AuditLogsQuery {
-    pub start: Option<i64>,
-    pub end: Option<i64>,
-    pub offset: Option<usize>,
-    pub limit: Option<usize>,
-}
-
 // ── Handlers ──
 
 pub async fn remember(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<RememberRequest>,
 ) -> Json<serde_json::Value> {
-    if let Err(r) = engine.validate_content(&req.content) {
-        return Json(
-            serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
-        );
+    if let Err(r) = engine.guard.validate_content(&req.content) {
+        return Json(serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}));
     }
-    match engine.remember_async(&req.content).await {
+    match engine.scheduler.api_remember(&req.content) {
         Ok((id, labels)) => Json(serde_json::json!({"success": true, "id": id, "labels": labels})),
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
@@ -141,21 +96,19 @@ pub async fn ask(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<AskRequest>,
 ) -> Json<serde_json::Value> {
-    if let Err(r) = engine.validate_query(&req.question) {
-        return Json(
-            serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
-        );
+    if let Err(r) = engine.guard.validate_query(&req.question) {
+        return Json(serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}));
     }
     let depth = req.depth.unwrap_or(2).min(10);
-    match engine.ask_async(&req.question, depth).await {
-        Ok(result) => Json(
-            serde_json::json!({"success": true, "question": result["question"], "answer": result["answer"], "memories": result["memories"], "memory_count": result["memory_count"]}),
-        ),
+    match engine.scheduler.api_ask(&req.question, depth) {
+        Ok(result) => Json(serde_json::json!({"success": true, "question": result["question"], "answer": result["answer"], "memories": result["memories"], "memory_count": result["memory_count"]})),
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
 }
 
-pub async fn constitution(State(_engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
+pub async fn constitution(
+    State(_engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
     let text = crate::engine::constitution::CONSTITUTION;
     let articles: Vec<&str> = text.split("## ").skip(1).collect();
     let mut parsed = serde_json::Map::new();
@@ -163,10 +116,7 @@ pub async fn constitution(State(_engine): State<Arc<Engine>>) -> Json<serde_json
         if let Some(title_end) = article.find('\n') {
             let title = &article[..title_end].trim();
             let body = &article[title_end..].trim();
-            parsed.insert(
-                title.to_string(),
-                serde_json::Value::String(body.to_string()),
-            );
+            parsed.insert(title.to_string(), serde_json::Value::String(body.to_string()));
         }
     }
     Json(serde_json::json!({
@@ -178,9 +128,11 @@ pub async fn constitution(State(_engine): State<Arc<Engine>>) -> Json<serde_json
     }))
 }
 
-pub async fn health(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let stats = engine.stats();
-    let health_report = engine.cylinder_health();
+pub async fn health(
+    State(engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
+    let stats = engine.scheduler.api_stats();
+    let health_report = engine.space().cylinder_health();
     Json(serde_json::json!({
         "status": "ok", "version": env!("CARGO_PKG_VERSION"),
         "tetra_count": stats.tetra_count,
@@ -188,10 +140,10 @@ pub async fn health(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value
         "energy": stats.energy,
         "clusters": stats.clusters,
         "cylinder": {
-            "radius": engine.cylinder_radius(),
-            "height": engine.cylinder_height(),
-            "total_ports": engine.cylinder_port_count(),
-            "identity_confirmed": engine.is_identity_confirmed(),
+            "radius": engine.space().cylinder_radius(),
+            "height": engine.space().cylinder_height(),
+            "total_ports": engine.space().cylinder_port_count(),
+            "identity_confirmed": engine.space().is_identity_confirmed(),
         },
         "health": {
             "total_ports": health_report.total_ports,
@@ -200,8 +152,10 @@ pub async fn health(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value
     }))
 }
 
-pub async fn get_identity(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    match engine.identity_info() {
+pub async fn get_identity(
+    State(engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
+    match engine.space().identity_info() {
         Some(info) => Json(serde_json::json!({
             "success": true,
             "identity": {
@@ -227,90 +181,69 @@ pub async fn confirm_identity(
     if req.name.is_empty() {
         return Json(serde_json::json!({"success": false, "error": "name is required"}));
     }
-    let expected_token = match env_var("IDENTITY_TOKEN") {
+    let expected_token = match std::env::var("TETRAMEM_IDENTITY_TOKEN") {
         Ok(t) if !t.is_empty() => t,
         _ => {
-            return Json(
-                serde_json::json!({"success": false, "error": "EPICODE_IDENTITY_TOKEN (or TETRAMEM_IDENTITY_TOKEN) not configured. Set env var and restart."}),
-            );
+            return Json(serde_json::json!({"success": false, "error": "TETRAMEM_IDENTITY_TOKEN not configured. Set env var and restart."}));
         }
     };
     if req.confirm_token.as_deref() != Some(&expected_token) {
         return Json(serde_json::json!({"success": false, "error": "invalid confirm_token"}));
     }
-    if engine.is_identity_confirmed() {
-        return Json(
-            serde_json::json!({"success": false, "error": "identity already confirmed, reset required to change"}),
-        );
+    if engine.space().is_identity_confirmed() {
+        return Json(serde_json::json!({"success": false, "error": "identity already confirmed, reset required to change"}));
     }
-    match engine.confirm_identity(
+    engine.space().confirm_identity(
         req.name,
         req.mission,
         req.author,
         req.extra.unwrap_or_default(),
-    ) {
-        Ok(()) => {
-            Json(serde_json::json!({"success": true, "message": "identity confirmed and sealed"}))
-        }
-        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
-    }
+    );
+    Json(serde_json::json!({"success": true, "message": "identity confirmed and sealed"}))
 }
 
 pub async fn create_node(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<CreateRequest>,
 ) -> Json<serde_json::Value> {
-    if let Err(r) = engine.validate_content(&req.content) {
-        return Json(
-            serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
-        );
+    if let Err(r) = engine.guard.validate_content(&req.content) {
+        return Json(serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}));
     }
     let user_labels = req.labels.clone().unwrap_or_default();
-    if let Err(r) = engine.validate_labels(&user_labels) {
-        return Json(
-            serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
-        );
+    if let Err(r) = engine.guard.validate_labels(&user_labels) {
+        return Json(serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}));
     }
-    match engine
-        .create_memory_with_time_async(
-            req.content.clone(),
-            user_labels,
-            req.timestamp
-                .unwrap_or_else(|| chrono::Utc::now().timestamp()),
-        )
-        .await
-    {
-        Ok(id) => Json(serde_json::json!({"success": true, "id": id, "status": "created"})),
+    match engine.scheduler.api_create_memory_with_time(&req.content, user_labels, req.timestamp.unwrap_or_else(|| chrono::Utc::now().timestamp())) {
+        Ok((id, is_new)) => {
+            let status = if is_new { "created" } else { "exists" };
+            Json(serde_json::json!({"success": true, "id": id, "status": status}))
+        }
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
 }
 
-pub async fn list_nodes(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let all = engine.list_nodes(500);
+pub async fn list_nodes(
+    State(engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
+    let all = engine.scheduler.api_list_nodes_limit(500);
     let total = all.len();
-    let nodes: Vec<serde_json::Value> = all
-        .into_iter()
-        .take(200)
-        .map(|(id, payload)| {
-            serde_json::json!({
-                "id": id,
-                "content": payload.content,
-                "content_hash": payload.content_hash,
-                "labels": serde_json::to_value(&payload.labels).unwrap_or_default(),
-                "timestamp": payload.timestamp,
-            })
+    let nodes: Vec<serde_json::Value> = all.into_iter().take(200).map(|(id, payload)| {
+        serde_json::json!({
+            "id": id,
+            "content": payload.content,
+            "content_hash": payload.content_hash,
+            "labels": serde_json::to_value(&payload.labels).unwrap_or_default(),
+            "timestamp": payload.timestamp,
         })
-        .collect();
-    Json(
-        serde_json::json!({"success": true, "nodes": nodes, "total": total, "returned": nodes.len()}),
-    )
+    }).collect();
+    Json(serde_json::json!({"success": true, "nodes": nodes, "total": total, "returned": nodes.len()}))
 }
 
 pub async fn get_node(
     State(engine): State<Arc<Engine>>,
     Path(id): Path<u64>,
 ) -> Json<serde_json::Value> {
-    match engine.get_node(id) {
+        match engine.scheduler.api_get_node(id) {
         Some(payload) => Json(serde_json::json!({
             "success": true, "id": id,
             "content": payload.content,
@@ -322,69 +255,32 @@ pub async fn get_node(
     }
 }
 
-pub async fn delete_node(
-    State(engine): State<Arc<Engine>>,
-    Path(id): Path<u64>,
-) -> Json<serde_json::Value> {
-    match engine.delete_memory_async(id).await {
-        Ok(restored_id) => Json(
-            serde_json::json!({"success": true, "deleted": restored_id, "mode": "soft_delete"}),
-        ),
-        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
-    }
-}
-
-pub async fn list_deleted_nodes(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    match engine.list_deleted_memories() {
-        Ok(items) => {
-            Json(serde_json::json!({"success": true, "items": items, "total": items.len()}))
-        }
-        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
-    }
-}
-
-pub async fn restore_node(
-    State(engine): State<Arc<Engine>>,
-    Path(id): Path<u64>,
-) -> Json<serde_json::Value> {
-    match engine.restore_memory_async(id).await {
-        Ok(restored_id) => Json(serde_json::json!({"success": true, "restored": restored_id})),
-        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
-    }
-}
-
 pub async fn search(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<SearchRequest>,
 ) -> Json<serde_json::Value> {
-    if let Err(r) = engine.validate_query(&req.query) {
-        return Json(
-            serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
-        );
+    if let Err(r) = engine.guard.validate_query(&req.query) {
+        return Json(serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}));
     }
-    let limit = req.limit.unwrap_or(20).min(200);
+    let requested_limit = req.limit.unwrap_or(20);
+    let limit = requested_limit.min(200);
     let filters = crate::engine::search_engine::SearchFilters {
         since_ts: req.from_time,
         until_ts: req.to_time,
         ..Default::default()
     };
     let has_filters = filters.since_ts.is_some() || filters.until_ts.is_some();
-    match engine
-        .search_filtered_async(
-            req.query.clone(),
-            limit,
-            if has_filters { Some(filters) } else { None },
-        )
-        .await
-    {
+        match engine.scheduler.api_search_filtered(&req.query, limit, if has_filters { Some(&filters) } else { None }) {
         Ok(results) => {
             let items: Vec<serde_json::Value> = results.into_iter()
                 .map(|(id, sim, mass, payload)| {
                 serde_json::json!({"id": id, "similarity": sim, "mass": mass, "content": payload.content, "content_hash": payload.content_hash, "labels": payload.labels, "timestamp": payload.timestamp})
             }).collect();
-            Json(
-                serde_json::json!({"success": true, "query": req.query, "results": items, "total": items.len()}),
-            )
+            let mut resp = serde_json::json!({"success": true, "query": req.query, "results": items, "total": items.len()});
+            if requested_limit > 200 {
+                resp["warning"] = serde_json::json!("limit capped at 200; use offset to paginate");
+            }
+            Json(resp)
         }
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
@@ -394,7 +290,7 @@ pub async fn send_pulse(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<PulseRequest>,
 ) -> Json<serde_json::Value> {
-    match engine.pulse_async(req.origin, req.ttl.unwrap_or(5)).await {
+        match engine.scheduler.api_pulse(req.origin, req.ttl.unwrap_or(5)) {
         Ok(result) => Json(serde_json::json!({
             "success": true,
             "origin": result.origin,
@@ -408,8 +304,10 @@ pub async fn send_pulse(
     }
 }
 
-pub async fn stats(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let s = engine.stats();
+pub async fn stats(
+    State(engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
+        let s = engine.scheduler.api_stats();
     Json(serde_json::json!({
         "success": true,
         "tetra_count": s.tetra_count,
@@ -425,16 +323,15 @@ pub async fn recall(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<RecallRequest>,
 ) -> Json<serde_json::Value> {
-    if let Err(r) = engine.validate_query(&req.query) {
-        return Json(
-            serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}),
-        );
+    if let Err(r) = engine.guard.validate_query(&req.query) {
+        return Json(serde_json::json!({"success": false, "error": format!("validation: {:?}", r)}));
     }
     let max_depth = req.depth.unwrap_or(2).min(10);
-    match engine.recall_async(&req.query, max_depth).await {
+    match engine.scheduler.api_recall(&req.query, max_depth) {
         Ok(result) => Json(serde_json::json!({
             "success": true,
             "query": result["query"],
+            "results": result["results"],
             "memory_file": result["memory_file"],
             "seed_count": result["seed_count"],
             "associated_count": result["associated_count"],
@@ -456,19 +353,20 @@ pub async fn knowledge_relations(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<KGRelationRequest>,
 ) -> Json<serde_json::Value> {
-    let rels = engine.get_relations(req.id);
+    let rels = engine.scheduler.api_get_relations(req.id);
     let total = rels.len();
-    let items: Vec<serde_json::Value> = rels
-        .into_iter()
-        .map(|(tid, rt, s)| serde_json::json!({"target": tid, "type": rt, "strength": s}))
-        .collect();
+    let items: Vec<serde_json::Value> = rels.into_iter().map(|(tid, rt, s)| {
+        serde_json::json!({"target": tid, "type": rt, "strength": s})
+    }).collect();
     Json(serde_json::json!({
         "success": true, "id": req.id, "relations": items, "total": total,
     }))
 }
 
-pub async fn concepts(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let concepts = engine.get_concepts();
+pub async fn concepts(
+    State(engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
+    let concepts = engine.scheduler.api_get_concepts();
     Json(serde_json::json!({
         "success": true,
         "concepts": concepts.into_iter().map(|(label, count)| {
@@ -479,8 +377,10 @@ pub async fn concepts(State(engine): State<Arc<Engine>>) -> Json<serde_json::Val
 
 // ── Dream ──
 
-pub async fn dream_cycle(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    match engine.dream_async().await {
+pub async fn dream_cycle(
+    State(engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
+    match engine.scheduler.api_dream(false) {
         Ok(report) => Json(serde_json::json!({"success": true, "report": report})),
         Err(e) => Json(serde_json::json!({"success": false, "error": e})),
     }
@@ -497,41 +397,40 @@ pub async fn reasoning_analogies(
     State(engine): State<Arc<Engine>>,
     Json(req): Json<AnalogiesRequest>,
 ) -> Json<serde_json::Value> {
-    let analogies = engine
-        .scheduler
-        .api_reason_analogies(req.min_confidence.unwrap_or(0.3));
+    let analogies = engine.scheduler.api_reason_analogies(req.min_confidence.unwrap_or(0.3));
     Json(serde_json::json!({"success": true, "analogies": analogies}))
 }
 
-pub async fn reasoning_patterns(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    match engine.reason_patterns_async().await {
-        Ok(patterns) => Json(serde_json::json!({"success": true, "patterns": patterns})),
-        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
-    }
+pub async fn reasoning_patterns(
+    State(engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
+    let patterns = engine.scheduler.api_reason_patterns();
+    Json(serde_json::json!({"success": true, "patterns": patterns}))
 }
 
 // ── MCP ──
 
-pub async fn mcp(State(engine): State<Arc<Engine>>, body: String) -> Json<serde_json::Value> {
+pub async fn mcp(
+    State(engine): State<Arc<Engine>>,
+    body: String,
+) -> Json<serde_json::Value> {
     if body.len() > 100_000 {
-        return Json(
-            serde_json::json!({"jsonrpc":"2.0","error":{"code":-32000,"message":"request too large, max 100KB"}}),
-        );
+        return Json(serde_json::json!({"jsonrpc":"2.0","error":{"code":-32000,"message":"request too large, max 100KB"}}));
     }
     let handler = crate::engine::mcp::McpHandler::new(engine);
     let resp = handler.process_json(&body);
     match serde_json::from_str::<serde_json::Value>(&resp) {
         Ok(v) => Json(v),
-        Err(_) => Json(
-            serde_json::json!({"jsonrpc":"2.0","error":{"code":-32700,"message":"parse error"}}),
-        ),
+        Err(_) => Json(serde_json::json!({"jsonrpc":"2.0","error":{"code":-32700,"message":"parse error"}}))
     }
 }
 
 // ── Security ──
 
-pub async fn security_stats(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let stats = engine.guard_stats();
+pub async fn security_stats(
+    State(engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
+    let stats = engine.guard.stats();
     Json(serde_json::json!({
         "success": true,
         "enabled": stats.enabled,
@@ -548,8 +447,10 @@ pub async fn security_stats(State(engine): State<Arc<Engine>>) -> Json<serde_jso
     }))
 }
 
-pub async fn security_audit(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let entries = engine.guard_audit_log(50);
+pub async fn security_audit(
+    State(engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
+    let entries = engine.guard.audit_log(50);
     Json(serde_json::json!({
         "success": true,
         "entries": entries,
@@ -557,34 +458,12 @@ pub async fn security_audit(State(engine): State<Arc<Engine>>) -> Json<serde_jso
     }))
 }
 
-pub async fn cache_stats(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let (l1_hits, l1_misses, l2_hits, l2_misses, evictions, hit_ratio, l1_hit_ratio, l2_hit_ratio) =
-        engine.cache_stats_snapshot();
-    Json(serde_json::json!({
-        "success": true,
-        "l1_hits": l1_hits,
-        "l1_misses": l1_misses,
-        "l2_hits": l2_hits,
-        "l2_misses": l2_misses,
-        "evictions": evictions,
-        "hit_ratio": hit_ratio,
-        "l1_hit_ratio": l1_hit_ratio,
-        "l2_hit_ratio": l2_hit_ratio,
-    }))
-}
-
-pub async fn clear_cache(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    engine.clear_query_cache();
-    Json(serde_json::json!({
-        "success": true,
-        "message": "query cache cleared",
-    }))
-}
-
-pub async fn list_backups(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let backups = engine.storage_list_backups();
-    let tetra_count = engine.storage_tetra_count();
-    let rel_count = engine.storage_relation_count();
+pub async fn list_backups(
+    State(engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
+    let backups = engine.storage.list_backups();
+    let tetra_count = engine.storage.tetra_count();
+    let rel_count = engine.storage.relation_count();
     Json(serde_json::json!({
         "success": true,
         "backups": backups,
@@ -596,28 +475,23 @@ pub async fn list_backups(State(engine): State<Arc<Engine>>) -> Json<serde_json:
 
 // ── Timeline ──
 
-pub async fn timeline(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let mut nodes: Vec<serde_json::Value> = engine
-        .scheduler
-        .api_list_nodes_limit(500)
-        .into_iter()
-        .map(|(id, payload)| {
-            serde_json::json!({
-                "id": id,
-                "content": payload.content,
-                "content_hash": payload.content_hash,
-                "labels": payload.labels,
-                "timestamp": payload.timestamp,
-                "time_ago_secs": chrono::Utc::now().timestamp() - payload.timestamp,
-            })
+pub async fn timeline(
+    State(engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
+    let mut nodes: Vec<serde_json::Value> = engine.scheduler.api_list_nodes_limit(500).into_iter().map(|(id, payload)| {
+        serde_json::json!({
+            "id": id,
+            "content": payload.content,
+            "content_hash": payload.content_hash,
+            "labels": payload.labels,
+            "timestamp": payload.timestamp,
+            "time_ago_secs": chrono::Utc::now().timestamp() - payload.timestamp,
         })
-        .collect();
+    }).collect();
     nodes.sort_by(|a, b| b["timestamp"].as_i64().cmp(&a["timestamp"].as_i64()));
     let total = nodes.len();
     nodes.truncate(200);
-    Json(
-        serde_json::json!({"success": true, "events": nodes, "total": total, "returned": nodes.len()}),
-    )
+    Json(serde_json::json!({"success": true, "events": nodes, "total": total, "returned": nodes.len()}))
 }
 
 // ── SSE Real-time Stream ──
@@ -626,47 +500,40 @@ pub async fn sse_stream(
     State(engine): State<Arc<Engine>>,
 ) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
     let tick_counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let stream = tokio_stream::wrappers::IntervalStream::new(tokio::time::interval(
-        std::time::Duration::from_secs(1),
-    ))
-    .map(move |_| {
+    let stream = tokio_stream::wrappers::IntervalStream::new(
+        tokio::time::interval(std::time::Duration::from_secs(1))
+    ).map(move |_| {
         let tick = tick_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let stats = engine.stats();
-        let db_tetra = engine.storage_tetra_count();
-        let db_rel = engine.storage_relation_count();
-        let cognitive_enabled = engine.cognitive_enabled();
-        let sec = engine.guard_stats();
+        let stats = engine.scheduler.api_stats();
+        let db_tetra = engine.storage.tetra_count();
+        let db_rel = engine.storage.relation_count();
+        let cognitive_enabled = engine.cognitive.enabled();
+        let sec = engine.guard.stats();
 
-        let cluster_data: Vec<serde_json::Value> = if tick.is_multiple_of(5) {
-            let clusters = engine.find_clusters();
-            clusters
-                .iter()
-                .enumerate()
-                .map(|(i, c)| {
-                    let labels: Vec<String> = c
-                        .tetra_ids
-                        .iter()
-                        .filter_map(|id| engine.get_tetrahedron(*id))
-                        .flat_map(|t| t.data.labels.clone())
-                        .collect();
-                    serde_json::json!({
-                        "id": i,
-                        "size": c.tetra_ids.len(),
-                        "members": c.tetra_ids,
-                        "labels": labels
-                    })
+        let cluster_data: Vec<serde_json::Value> = if tick % 5 == 0 {
+            let clusters = engine.space().find_clusters();
+            clusters.iter().enumerate().map(|(i, c)| {
+                let labels: Vec<String> = c.tetra_ids.iter()
+                    .filter_map(|id| engine.space().get_tetrahedron(*id))
+                    .flat_map(|t| t.data.labels.clone())
+                    .collect();
+                serde_json::json!({
+                    "id": i,
+                    "size": c.tetra_ids.len(),
+                    "members": c.tetra_ids,
+                    "labels": labels
                 })
-                .collect()
+            }).collect()
         } else {
             vec![]
         };
 
         let cyl_data = {
             serde_json::json!({
-                "radius": engine.cylinder_radius(),
-                "height": engine.cylinder_height(),
-                "ports": engine.cylinder_port_count(),
-                "identity_confirmed": engine.is_identity_confirmed(),
+                "radius": engine.space().cylinder_radius(),
+                "height": engine.space().cylinder_height(),
+                "ports": engine.space().cylinder_port_count(),
+                "identity_confirmed": engine.space().is_identity_confirmed(),
             })
         };
         let data = serde_json::json!({
@@ -686,7 +553,7 @@ pub async fn sse_stream(
         Ok(Event::default().data(data.to_string()))
     });
     Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(5)),
+        axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(5))
     )
 }
 
@@ -699,20 +566,22 @@ pub struct UpdateConfigRequest {
     pub tick_interval_ms: Option<u64>,
 }
 
-pub async fn get_config(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let meta_model = engine.storage_get_meta("cognitive_model");
-    let meta_tick = engine.storage_get_meta("tick_interval_ms");
+pub async fn get_config(
+    State(engine): State<Arc<Engine>>,
+) -> Json<serde_json::Value> {
+    let meta_model = engine.storage.get_meta("cognitive_model");
+    let meta_tick = engine.storage.get_meta("tick_interval_ms");
     Json(serde_json::json!({
         "success": true,
         "cognitive": {
-            "enabled": engine.cognitive_enabled(),
+            "enabled": engine.cognitive.enabled(),
             "model": meta_model.unwrap_or_else(|| "deepseek-chat".into()),
         },
         "tick_interval_ms": meta_tick.unwrap_or_else(|| "1000".into()),
         "security": {
-            "enabled": engine.guard_config().enabled,
-            "rate_limit": engine.guard_config().rate_limit_per_minute,
-            "max_content_length": engine.guard_config().max_content_length,
+            "enabled": engine.guard.config.enabled,
+            "rate_limit": engine.guard.config.rate_limit_per_minute,
+            "max_content_length": engine.guard.config.max_content_length,
         },
     }))
 }
@@ -722,9 +591,7 @@ pub async fn update_config(
     Json(req): Json<UpdateConfigRequest>,
 ) -> Json<serde_json::Value> {
     if let Some(_key) = &req.api_key {
-        return Json(
-            serde_json::json!({"success": false, "error": "API key cannot be changed via API. Set EPICODE_API_KEY (or TETRAMEM_API_KEY) env var and restart."}),
-        );
+        return Json(serde_json::json!({"success": false, "error": "API key cannot be changed via API. Set TETRAMEM_API_KEY env var and restart."}));
     }
     let mut entries: Vec<(&str, String)> = Vec::new();
     if let Some(model) = &req.model {
@@ -735,393 +602,9 @@ pub async fn update_config(
     }
     if !entries.is_empty() {
         let refs: Vec<(&str, &str)> = entries.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        if let Err(e) = engine.storage_set_meta_batch(&refs) {
+        if let Err(e) = engine.storage.set_meta_batch(&refs) {
             return Json(serde_json::json!({"success": false, "error": e}));
         }
     }
-    Json(
-        serde_json::json!({"success": true, "message": "Config saved. Restart required for some changes."}),
-    )
-}
-
-// ── 权限管理处理器 ──
-
-pub async fn grant_permission(
-    State(engine): State<Arc<Engine>>,
-    Json(req): Json<GrantPermissionRequest>,
-) -> Json<serde_json::Value> {
-    let resource_type = match ResourceType::from_str(&req.resource_type) {
-        Some(rt) => rt,
-        None => {
-            return Json(serde_json::json!({"success": false, "error": "Invalid resource_type"}))
-        }
-    };
-
-    let role = match UserRole::from_str(&req.role) {
-        Some(r) => r,
-        None => return Json(serde_json::json!({"success": false, "error": "Invalid role"})),
-    };
-
-    let permission = Permission {
-        id: Uuid::new_v4().to_string(),
-        user_id: req.user_id,
-        resource_id: req.resource_id,
-        resource_type,
-        role,
-        granted_at: Utc::now(),
-        granted_by: req.granted_by,
-        tenant_id: req.tenant_id,
-        revoked_at: None,
-    };
-
-    match engine.grant_permission(permission) {
-        Ok(id) => Json(serde_json::json!({"success": true, "permission_id": id})),
-        Err(e) => Json(serde_json::json!({"success": false, "error": e.to_string()})),
-    }
-}
-
-pub async fn revoke_permission(
-    State(engine): State<Arc<Engine>>,
-    Json(req): Json<RevokePermissionRequest>,
-) -> Json<serde_json::Value> {
-    match engine.revoke_permission(&req.permission_id) {
-        Ok(()) => Json(serde_json::json!({"success": true})),
-        Err(e) => Json(serde_json::json!({"success": false, "error": e.to_string()})),
-    }
-}
-
-pub async fn get_user_permissions(
-    State(engine): State<Arc<Engine>>,
-    Query(params): Query<GetPermissionsQuery>,
-) -> Json<serde_json::Value> {
-    match params.user_id {
-        Some(user_id) => match engine.get_user_permissions(&user_id) {
-            Ok(perms) => Json(serde_json::json!({"success": true, "permissions": perms})),
-            Err(e) => Json(serde_json::json!({"success": false, "error": e.to_string()})),
-        },
-        None => Json(serde_json::json!({"success": false, "error": "user_id is required"})),
-    }
-}
-
-pub async fn get_audit_logs(
-    State(engine): State<Arc<Engine>>,
-    Query(params): Query<AuditLogsQuery>,
-) -> Json<serde_json::Value> {
-    let offset = params.offset.unwrap_or(0);
-    let limit = params.limit.unwrap_or(50);
-
-    match engine.get_audit_logs(offset, limit) {
-        Ok((logs, total)) => Json(serde_json::json!({
-            "success": true,
-            "logs": logs,
-            "total": total,
-            "offset": offset,
-            "limit": limit
-        })),
-        Err(e) => Json(serde_json::json!({"success": false, "error": e.to_string()})),
-    }
-}
-
-pub async fn get_current_user_permissions(
-    State(engine): State<Arc<Engine>>,
-) -> Json<serde_json::Value> {
-    let user_id = &engine.user_id;
-    match engine.get_user_permissions(user_id) {
-        Ok(perms) => Json(serde_json::json!({"success": true, "permissions": perms})),
-        Err(e) => Json(serde_json::json!({"success": false, "error": e.to_string()})),
-    }
-}
-
-// ── Key Rotation ──
-
-pub async fn get_current_key(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let kr = engine.key_rotation.lock();
-    let current_id = kr.get_current_key_id();
-    Json(serde_json::json!({
-        "success": true,
-        "current_key_id": current_id,
-    }))
-}
-
-pub async fn list_keys(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let kr = engine.key_rotation.lock();
-    let keys = kr.list_active_keys();
-    let key_list: Vec<serde_json::Value> = keys
-        .into_iter()
-        .map(|(id, meta)| {
-            serde_json::json!({
-                "key_id": id,
-                "created_at": meta.created_at.to_rfc3339(),
-                "rotated_at": meta.rotated_at.map(|t| t.to_rfc3339()),
-                "revoked_at": meta.revoked_at.map(|t| t.to_rfc3339()),
-                "status": format!("{:?}", meta.status),
-                "version": meta.version,
-            })
-        })
-        .collect();
-    Json(serde_json::json!({
-        "success": true,
-        "keys": key_list,
-        "total": key_list.len(),
-    }))
-}
-
-pub async fn rotate_key(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let mut kr = engine.key_rotation.lock();
-    match kr.rotate_key() {
-        Ok(event) => {
-            let event_str = format!("{event:?}");
-            Json(serde_json::json!({
-                "success": true,
-                "message": "Key rotated successfully",
-                "event": event_str,
-            }))
-        }
-        Err(e) => Json(serde_json::json!({
-            "success": false,
-            "error": e,
-        })),
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RevokeKeyRequest {
-    pub key_id: String,
-    pub reason: String,
-}
-
-pub async fn revoke_key(
-    State(engine): State<Arc<Engine>>,
-    Json(req): Json<RevokeKeyRequest>,
-) -> Json<serde_json::Value> {
-    let mut kr = engine.key_rotation.lock();
-    match kr.revoke_key(&req.key_id, &req.reason) {
-        Ok(event) => {
-            let event_str = format!("{event:?}");
-            Json(serde_json::json!({
-                "success": true,
-                "message": "Key revoked successfully",
-                "event": event_str,
-            }))
-        }
-        Err(e) => Json(serde_json::json!({
-            "success": false,
-            "error": e,
-        })),
-    }
-}
-
-pub async fn get_key_events(State(engine): State<Arc<Engine>>) -> Json<serde_json::Value> {
-    let kr = engine.key_rotation.lock();
-    let events = kr.get_events();
-    let event_list: Vec<serde_json::Value> = events
-        .into_iter()
-        .map(|e| serde_json::json!({"event": format!("{:?}", e)}))
-        .collect();
-    Json(serde_json::json!({
-        "success": true,
-        "events": event_list,
-        "total": event_list.len(),
-    }))
-}
-
-pub async fn restore_key(
-    State(engine): State<Arc<Engine>>,
-    Json(req): Json<RevokeKeyRequest>,
-) -> Json<serde_json::Value> {
-    let mut kr = engine.key_rotation.lock();
-    match kr.restore_key(&req.key_id) {
-        Ok(event) => Json(serde_json::json!({
-            "success": true,
-            "message": "Key restored successfully",
-            "event": format!("{:?}", event),
-        })),
-        Err(e) => Json(serde_json::json!({"success": false, "error": e})),
-    }
-}
-
-// ── WebSocket ──
-
-#[derive(Debug, Serialize)]
-pub struct WsMessage {
-    pub r#type: String,
-    pub data: serde_json::Value,
-    pub timestamp: i64,
-}
-
-fn engine_event_to_ws_message(event: &EngineEvent) -> Option<WsMessage> {
-    let (ty, data) = match event {
-        EngineEvent::TetrahedronCreated(id) => ("memory_created", serde_json::json!({"id": id})),
-        EngineEvent::TetrahedronMoved(id, point) => (
-            "memory_updated",
-            serde_json::json!({"id": id, "position": {"x": point.x, "y": point.y, "z": point.z}}),
-        ),
-        EngineEvent::TetrahedronRemoved(id) => ("memory_deleted", serde_json::json!({"id": id})),
-        EngineEvent::ClusterSplit { from, groups } => (
-            "cluster_changed",
-            serde_json::json!({"from": from, "groups": groups}),
-        ),
-        EngineEvent::ClusterMerged { a, b, result } => (
-            "cluster_changed",
-            serde_json::json!({"merged": {"a": a, "b": b, "result": result}}),
-        ),
-        EngineEvent::EnergyLow { remaining } => (
-            "energy_changed",
-            serde_json::json!({"remaining": remaining}),
-        ),
-        _ => return None,
-    };
-    Some(WsMessage {
-        r#type: ty.to_string(),
-        data,
-        timestamp: Utc::now().timestamp(),
-    })
-}
-
-async fn send_stats_snapshot(engine: &Engine, socket: &mut WebSocket) {
-    let stats = serde_json::json!({
-        "tetra_count": engine.storage_tetra_count(),
-        "clusters": engine.space.find_clusters().len(),
-        "energy": engine.energy.available(),
-    });
-    let msg = WsMessage {
-        r#type: "stats".to_string(),
-        data: stats,
-        timestamp: Utc::now().timestamp(),
-    };
-    let _ = socket
-        .send(axum::extract::ws::Message::Text(
-            serde_json::to_string(&msg).unwrap_or_default().into(),
-        ))
-        .await;
-}
-
-pub async fn ws_handler(State(engine): State<Arc<Engine>>, ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(move |mut socket| async move {
-        send_stats_snapshot(&engine, &mut socket).await;
-
-        let mut rx = engine.bus.subscribe();
-        loop {
-            match tokio::time::timeout(tokio::time::Duration::from_secs(30), rx.recv()).await {
-                Ok(Ok(event)) => {
-                    if let EngineEvent::Shutdown = event {
-                        let _ = socket.close().await;
-                        break;
-                    }
-                    if let Some(msg) = engine_event_to_ws_message(&event) {
-                        let text = match serde_json::to_string(&msg) {
-                            Ok(t) => t,
-                            Err(_) => continue,
-                        };
-                        if socket
-                            .send(axum::extract::ws::Message::Text(text.into()))
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                }
-                Ok(Err(_)) => break,
-                Err(_) => {
-                    // send ping to keep connection alive
-                    if socket
-                        .send(axum::extract::ws::Message::Ping(vec![].into()))
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            }
-        }
-    })
-}
-
-#[cfg(test)]
-mod ws_tests {
-    use super::*;
-    use crate::domain::vertex::Point3;
-    use crate::engine::bus::EngineEvent;
-
-    #[test]
-    fn engine_event_to_ws_message_memory_created() {
-        let event = EngineEvent::TetrahedronCreated(42);
-        let msg = engine_event_to_ws_message(&event).unwrap();
-        assert_eq!(msg.r#type, "memory_created");
-        assert_eq!(msg.data, serde_json::json!({"id": 42}));
-    }
-
-    #[test]
-    fn engine_event_to_ws_message_memory_updated() {
-        let event = EngineEvent::TetrahedronMoved(
-            7,
-            Point3 {
-                x: 1.0,
-                y: 2.0,
-                z: 3.0,
-            },
-        );
-        let msg = engine_event_to_ws_message(&event).unwrap();
-        assert_eq!(msg.r#type, "memory_updated");
-        assert_eq!(
-            msg.data,
-            serde_json::json!({"id": 7, "position": {"x": 1.0, "y": 2.0, "z": 3.0}})
-        );
-    }
-
-    #[test]
-    fn engine_event_to_ws_message_memory_deleted() {
-        let event = EngineEvent::TetrahedronRemoved(99);
-        let msg = engine_event_to_ws_message(&event).unwrap();
-        assert_eq!(msg.r#type, "memory_deleted");
-        assert_eq!(msg.data, serde_json::json!({"id": 99}));
-    }
-
-    #[test]
-    fn engine_event_to_ws_message_cluster_split() {
-        let event = EngineEvent::ClusterSplit {
-            from: 1,
-            groups: vec![vec![1, 2], vec![3, 4]],
-        };
-        let msg = engine_event_to_ws_message(&event).unwrap();
-        assert_eq!(msg.r#type, "cluster_changed");
-        assert_eq!(
-            msg.data,
-            serde_json::json!({"from": 1, "groups": [[1, 2], [3, 4]]})
-        );
-    }
-
-    #[test]
-    fn engine_event_to_ws_message_cluster_merged() {
-        let event = EngineEvent::ClusterMerged {
-            a: 1,
-            b: 2,
-            result: 3,
-        };
-        let msg = engine_event_to_ws_message(&event).unwrap();
-        assert_eq!(msg.r#type, "cluster_changed");
-        assert_eq!(
-            msg.data,
-            serde_json::json!({"merged": {"a": 1, "b": 2, "result": 3}})
-        );
-    }
-
-    #[test]
-    fn engine_event_to_ws_message_energy_changed() {
-        let event = EngineEvent::EnergyLow { remaining: 12.5 };
-        let msg = engine_event_to_ws_message(&event).unwrap();
-        assert_eq!(msg.r#type, "energy_changed");
-        assert_eq!(msg.data, serde_json::json!({"remaining": 12.5}));
-    }
-
-    #[test]
-    fn engine_event_to_ws_message_ignored_events() {
-        assert!(engine_event_to_ws_message(&EngineEvent::DecisionTick).is_none());
-        assert!(
-            engine_event_to_ws_message(&EngineEvent::PulseSent { origin: 1, ttl: 3 }).is_none()
-        );
-        assert!(engine_event_to_ws_message(&EngineEvent::AutoPulse { count: 5 }).is_none());
-        assert!(engine_event_to_ws_message(&EngineEvent::Shutdown).is_none());
-    }
+    Json(serde_json::json!({"success": true, "message": "Config saved. Restart required for some changes."}))
 }

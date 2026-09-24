@@ -2,6 +2,21 @@ use super::vertex::{Point3, VertexId};
 
 pub type TetraId = u64;
 
+/// Lightweight metadata for snapshots — excludes embedding vector (8KB savings/tetra).
+#[derive(Debug, Clone)]
+pub struct TetraMeta {
+    pub id: TetraId,
+    pub core: Point3,
+    pub mass: f64,
+    pub content: String,
+    pub content_hash: u64,
+    pub labels: Vec<String>,
+    pub importance: f64,
+    pub enforced: bool,
+    pub access_count: u32,
+    pub timestamp: i64,
+}
+
 pub const VERTEX_COUNT: usize = 4;
 pub const EDGE_COUNT: usize = 6;
 pub const FACE_COUNT: usize = 4;
@@ -25,28 +40,25 @@ const fn canonical_offsets() -> [Point3; 4] {
     let half = 0.5;
     let z = 0.3535533905932738;
     [
-        Point3 {
-            x: half,
-            y: 0.0,
-            z: -z,
-        },
-        Point3 {
-            x: -half,
-            y: 0.0,
-            z: -z,
-        },
-        Point3 { x: 0.0, y: half, z },
-        Point3 {
-            x: 0.0,
-            y: -half,
-            z,
-        },
+        Point3 { x: half, y: 0.0,  z: -z },
+        Point3 { x: -half, y: 0.0, z: -z },
+        Point3 { x: 0.0,  y: half, z },
+        Point3 { x: 0.0,  y: -half, z },
     ]
 }
 
-const EDGES: [(usize, usize); EDGE_COUNT] = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
+const EDGES: [(usize, usize); EDGE_COUNT] = [
+    (0, 1), (0, 2), (0, 3),
+    (1, 2), (1, 3),
+    (2, 3),
+];
 
-const FACES: [[usize; 3]; FACE_COUNT] = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]];
+const FACES: [[usize; 3]; FACE_COUNT] = [
+    [0, 2, 1],
+    [0, 1, 3],
+    [0, 3, 2],
+    [1, 2, 3],
+];
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MemoryPayload {
@@ -66,58 +78,39 @@ pub struct MemoryPayload {
     #[serde(default)]
     pub access_count: u32,
     #[serde(default)]
-    pub quality_score: f64,
-    #[serde(default)]
     pub memory_type: Option<String>,
-    /// Unix timestamp (seconds) when this memory becomes valid.
-    /// `None` means valid from creation time.
     #[serde(default)]
-    pub valid_from: Option<i64>,
-    /// Unix timestamp (seconds) after which this memory expires and is excluded from retrieval.
-    /// `None` means no expiry.
+    pub identity_stamp: Option<String>,
     #[serde(default)]
-    pub valid_until: Option<i64>,
+    pub source_agent: Option<String>,
+    #[serde(default)]
+    pub valid_from: i64,
+    #[serde(default)]
+    pub valid_to: Option<i64>,
+    /// 能力B: Zep 双时序模型 — 事实实际失效的发生时间。
+    /// 与 valid_to 的区别：valid_to 是"不再有效的时间点"，
+    /// expired_at 是"事实本身在现实中失效的时间"（可能早于系统得知）。
+    /// 例：用户 1 月换了工作，3 月才告诉 AI → expired_at=1月, invalidated_at=3月。
+    #[serde(default)]
+    pub expired_at: Option<i64>,
+    /// 能力B: 系统得知该事实失效的时间（矛盾检测/用户纠正触发）。
+    #[serde(default)]
+    pub invalidated_at: Option<i64>,
+    /// P1记忆分层：permanent（长期知识）/ session（会话上下文）/ bridge（桥接临时）
+    /// permanent: 永不自动衰减，用户主动创建的知识
+    /// session: 会话级，governor 自动过期（默认7天）
+    /// bridge: 桥接临时记忆，最快过期（默认1天）
+    #[serde(default)]
+    pub memory_class: Option<String>,
+    /// 突破3: 遗忘曲线 — 最后复习时间（搜索命中/access时更新）。
+    /// None 时 fallback 到 timestamp（创建年龄）。
+    /// governor effective_importance 按此值算衰减，而非创建年龄。
+    #[serde(default)]
+    pub last_reviewed_ts: Option<i64>,
 }
 
 fn default_importance() -> f64 {
     1.0
-}
-
-impl MemoryPayload {
-    /// Returns `true` if this memory is currently valid (not expired, already started).
-    pub fn is_valid_at(&self, now: i64) -> bool {
-        if let Some(from) = self.valid_from {
-            if now < from {
-                return false;
-            }
-        }
-        if let Some(until) = self.valid_until {
-            if now >= until {
-                return false;
-            }
-        }
-        true
-    }
-
-    /// Freshness score in [0.0, 1.0].
-    ///
-    /// - If `valid_until` is set: linearly interpolates from 1.0 at creation to 0.0 at expiry.
-    /// - Otherwise: exponential decay with a 30-day half-life, boosted by access frequency.
-    pub fn freshness_score(&self, now: i64) -> f64 {
-        if let Some(until) = self.valid_until {
-            let start = self.valid_from.unwrap_or(self.timestamp);
-            let span = (until - start).max(1) as f64;
-            let elapsed = (now - start).max(0) as f64;
-            return (1.0 - elapsed / span).clamp(0.0, 1.0);
-        }
-        // Exponential decay: half-life = 30 days (2592000 seconds)
-        let age_secs = (now - self.timestamp).max(0) as f64;
-        let half_life = 2_592_000.0_f64;
-        let base = (-age_secs * std::f64::consts::LN_2 / half_life).exp();
-        // Access-frequency bonus: each access slows decay slightly
-        let access_boost = 1.0 + (self.access_count as f64 * 0.05).min(0.5);
-        (base * access_boost).clamp(0.0, 1.0)
-    }
 }
 
 impl Default for MemoryPayload {
@@ -133,15 +126,20 @@ impl Default for MemoryPayload {
             enforced: false,
             rationale: None,
             access_count: 0,
-            quality_score: 1.0,
             memory_type: None,
-            valid_from: None,
-            valid_until: None,
+            identity_stamp: None,
+            source_agent: None,
+            valid_from: 0,
+            valid_to: None,
+            expired_at: None,
+            invalidated_at: None,
+            memory_class: None,
+            last_reviewed_ts: None,
         }
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Tetrahedron {
     pub id: TetraId,
     pub vertex_ids: [VertexId; VERTEX_COUNT],
@@ -155,26 +153,10 @@ impl Tetrahedron {
     pub fn compute_vertices(center: Point3) -> [Point3; VERTEX_COUNT] {
         let offsets = canonical_offsets();
         [
-            Point3::new(
-                center.x + offsets[0].x,
-                center.y + offsets[0].y,
-                center.z + offsets[0].z,
-            ),
-            Point3::new(
-                center.x + offsets[1].x,
-                center.y + offsets[1].y,
-                center.z + offsets[1].z,
-            ),
-            Point3::new(
-                center.x + offsets[2].x,
-                center.y + offsets[2].y,
-                center.z + offsets[2].z,
-            ),
-            Point3::new(
-                center.x + offsets[3].x,
-                center.y + offsets[3].y,
-                center.z + offsets[3].z,
-            ),
+            Point3::new(center.x + offsets[0].x, center.y + offsets[0].y, center.z + offsets[0].z),
+            Point3::new(center.x + offsets[1].x, center.y + offsets[1].y, center.z + offsets[1].z),
+            Point3::new(center.x + offsets[2].x, center.y + offsets[2].y, center.z + offsets[2].z),
+            Point3::new(center.x + offsets[3].x, center.y + offsets[3].y, center.z + offsets[3].z),
         ]
     }
 
@@ -203,7 +185,9 @@ impl Tetrahedron {
 
     /// Verify that the computed centroid matches the core point.
     pub fn verify_core(positions: &[Point3; VERTEX_COUNT], core: Point3) -> bool {
-        let refs: [&Point3; 4] = [&positions[0], &positions[1], &positions[2], &positions[3]];
+        let refs: [&Point3; 4] = [
+            &positions[0], &positions[1], &positions[2], &positions[3],
+        ];
         Point3::centroid(&refs).distance_to(&core) < SHAPE_EPSILON
     }
 
@@ -231,10 +215,8 @@ mod tests {
         let pos = positions(Point3::zero());
         for &(i, j) in Tetrahedron::edges() {
             let d = pos[i].distance_to(&pos[j]);
-            assert!(
-                (d - EDGE_LENGTH).abs() < 1e-10,
-                "edge ({i},{j}) = {d}, expected {EDGE_LENGTH}"
-            );
+            assert!((d - EDGE_LENGTH).abs() < 1e-10,
+                "edge ({},{}) = {}, expected {}", i, j, d, EDGE_LENGTH);
         }
     }
 
@@ -262,10 +244,8 @@ mod tests {
         let pos = positions(Point3::zero());
         for p in &pos {
             let d = p.distance_to(&Point3::zero());
-            assert!(
-                (d - expected).abs() < 1e-10,
-                "vertex-center dist = {d}, expected {expected}"
-            );
+            assert!((d - expected).abs() < 1e-10,
+                "vertex-center dist = {}, expected {}", d, expected);
         }
     }
 
@@ -309,82 +289,5 @@ mod tests {
     #[test]
     fn volume_known_value() {
         assert!((Tetrahedron::volume() - 0.1178511301977579).abs() < 1e-10);
-    }
-}
-
-#[cfg(test)]
-mod temporal_tests {
-    use super::*;
-
-    fn payload_with_ts(ts: i64) -> MemoryPayload {
-        MemoryPayload {
-            timestamp: ts,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn no_validity_window_always_valid() {
-        let p = payload_with_ts(1_000_000);
-        assert!(p.is_valid_at(0));
-        assert!(p.is_valid_at(i64::MAX));
-    }
-
-    #[test]
-    fn valid_from_blocks_early_access() {
-        let p = MemoryPayload {
-            timestamp: 1000,
-            valid_from: Some(2000),
-            ..Default::default()
-        };
-        assert!(!p.is_valid_at(1500));
-        assert!(p.is_valid_at(2000));
-        assert!(p.is_valid_at(3000));
-    }
-
-    #[test]
-    fn valid_until_expires_memory() {
-        let p = MemoryPayload {
-            timestamp: 1000,
-            valid_until: Some(5000),
-            ..Default::default()
-        };
-        assert!(p.is_valid_at(4999));
-        assert!(!p.is_valid_at(5000));
-        assert!(!p.is_valid_at(9999));
-    }
-
-    #[test]
-    fn freshness_score_decays_over_time() {
-        let now = 1_000_000_i64;
-        let recent = payload_with_ts(now - 86400); // 1 day ago
-        let old = payload_with_ts(now - 30 * 86400); // 30 days ago
-        let very_old = payload_with_ts(now - 365 * 86400); // 1 year ago
-        let f_recent = recent.freshness_score(now);
-        let f_old = old.freshness_score(now);
-        let f_very_old = very_old.freshness_score(now);
-        assert!(f_recent > f_old, "recent={f_recent} should > old={f_old}");
-        assert!(
-            f_old > f_very_old,
-            "old={f_old} should > very_old={f_very_old}"
-        );
-        assert!(f_recent > 0.9, "1-day-old memory should be very fresh");
-    }
-
-    #[test]
-    fn freshness_score_with_valid_until_linear() {
-        let start = 0_i64;
-        let until = 10_000_i64;
-        let p = MemoryPayload {
-            timestamp: start,
-            valid_until: Some(until),
-            ..Default::default()
-        };
-        let at_start = p.freshness_score(0);
-        let at_half = p.freshness_score(5000);
-        let at_end = p.freshness_score(9999);
-        assert!((at_start - 1.0).abs() < 0.01, "at start: {at_start}");
-        assert!((at_half - 0.5).abs() < 0.01, "at half: {at_half}");
-        assert!(at_end < 0.01, "near end: {at_end}");
     }
 }

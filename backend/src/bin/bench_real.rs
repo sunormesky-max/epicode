@@ -2,19 +2,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use epicode::engine::mcp::McpHandler;
 use epicode::engine::Engine;
-
-fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(format!("EPICODE_{}", name))
-        .or_else(|_| std::env::var(format!("TETRAMEM_{}", name)))
-}
+use epicode::engine::mcp::McpHandler;
 
 #[tokio::main]
 async fn main() {
     std::env::set_var("EMBEDDING_API_URL", "disabled://none");
 
-    let data_dir = env_var("DATA_DIR")
+    let data_dir = std::env::var("TETRAMEM_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("data_bench"));
     if data_dir.exists() {
@@ -31,42 +26,18 @@ async fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(100);
 
-    eprintln!("=== Epicode Benchmark: {mem_count} memories ===");
+    eprintln!("=== Epicode Benchmark: {} memories ===", mem_count);
 
     // Phase 1: Create memories
-    let categories = [
-        (
-            "architecture",
-            "System uses microservices with event-driven communication pattern",
-        ),
-        (
-            "bug",
-            "Memory leak in connection pool caused by unclosed handles in async tasks",
-        ),
-        (
-            "decision",
-            "Chose PostgreSQL over MongoDB for ACID compliance requirements",
-        ),
-        (
-            "pattern",
-            "Always use circuit breaker pattern for external service calls",
-        ),
-        (
-            "preference",
-            "User prefers dark theme with monospace fonts for code review",
-        ),
-        (
-            "session",
-            "Implemented OAuth2 flow and fixed token refresh edge cases",
-        ),
-        (
-            "finding",
-            "Query performance degrades linearly with JOIN count above 5 tables",
-        ),
-        (
-            "convention",
-            "All API endpoints return consistent JSON error format with code field",
-        ),
+    let categories = vec![
+        ("architecture", "System uses microservices with event-driven communication pattern"),
+        ("bug", "Memory leak in connection pool caused by unclosed handles in async tasks"),
+        ("decision", "Chose PostgreSQL over MongoDB for ACID compliance requirements"),
+        ("pattern", "Always use circuit breaker pattern for external service calls"),
+        ("preference", "User prefers dark theme with monospace fonts for code review"),
+        ("session", "Implemented OAuth2 flow and fixed token refresh edge cases"),
+        ("finding", "Query performance degrades linearly with JOIN count above 5 tables"),
+        ("convention", "All API endpoints return consistent JSON error format with code field"),
     ];
 
     let t0 = Instant::now();
@@ -75,17 +46,12 @@ async fn main() {
 
     for i in 0..mem_count {
         let (cat, template) = &categories[i % categories.len()];
-        let content = format!(
-            "[{cat}] {template} — instance #{i} with unique context about {cat} operations"
-        );
+        let content = format!("[{}] {} — instance #{} with unique context about {} operations", 
+            cat, template, i, cat);
         let labels = vec![cat.to_string(), format!("bench-{}", i % 10)];
 
-        let raw = format!(
-            r#"{{"jsonrpc":"2.0","id":{},"method":"tools/call","params":{{"name":"memory_create","arguments":{{"content":"{}","labels":{}}}}}}}"#,
-            i,
-            content.replace('"', "\\\""),
-            serde_json::to_string(&labels).unwrap()
-        );
+        let raw = format!(r#"{{"jsonrpc":"2.0","id":{},"method":"tools/call","params":{{"name":"memory_create","arguments":{{"content":"{}","labels":{}}}}}}}"#,
+            i, content.replace('"', "\\\""), serde_json::to_string(&labels).unwrap());
 
         let t = Instant::now();
         let resp = handler.process_json(&raw);
@@ -106,17 +72,14 @@ async fn main() {
         }
     }
     let create_total = t0.elapsed();
-    eprintln!(
-        "Create: {} memories in {}ms (avg {}ms, p95 {}ms, max {}ms)",
-        mem_count,
-        create_total.as_millis(),
+    eprintln!("Create: {} memories in {}ms (avg {}ms, p95 {}ms, max {}ms)",
+        mem_count, create_total.as_millis(),
         create_times.iter().sum::<u64>() as f64 / create_times.len() as f64,
         percentile(&create_times, 95),
-        create_times.iter().max().unwrap_or(&0)
-    );
+        create_times.iter().max().unwrap_or(&0));
 
     // Phase 2: Search
-    let queries = [
+    let queries = vec![
         "memory leak connection pool",
         "microservices architecture pattern",
         "database selection decision",
@@ -134,11 +97,8 @@ async fn main() {
     let t1 = Instant::now();
 
     for (qi, query) in queries.iter().cycle().take(mem_count / 2).enumerate() {
-        let raw = format!(
-            r#"{{"jsonrpc":"2.0","id":{},"method":"tools/call","params":{{"name":"memory_search","arguments":{{"query":"{}","limit":5}}}}}}"#,
-            1000 + qi,
-            query
-        );
+        let raw = format!(r#"{{"jsonrpc":"2.0","id":{},"method":"tools/call","params":{{"name":"memory_search","arguments":{{"query":"{}","limit":5}}}}}}"#,
+            1000 + qi, query);
 
         let t = Instant::now();
         let resp = handler.process_json(&raw);
@@ -159,33 +119,24 @@ async fn main() {
         }
     }
     let search_total = t1.elapsed();
-    eprintln!(
-        "Search: {} queries in {}ms (avg {}ms, p95 {}ms, max {}ms)",
-        mem_count / 2,
-        search_total.as_millis(),
+    eprintln!("Search: {} queries in {}ms (avg {}ms, p95 {}ms, max {}ms)",
+        mem_count / 2, search_total.as_millis(),
         search_times.iter().sum::<u64>() as f64 / search_times.len() as f64,
         percentile(&search_times, 95),
-        search_times.iter().max().unwrap_or(&0)
-    );
+        search_times.iter().max().unwrap_or(&0));
 
     if !search_sims.is_empty() {
         let avg_sim = search_sims.iter().sum::<f64>() / search_sims.len() as f64;
         let max_sim = search_sims.iter().fold(0.0f64, |a, b| a.max(*b));
         let above_05 = search_sims.iter().filter(|s| **s > 0.5).count();
-        eprintln!(
-            "Search quality: avg_sim={:.3}, max_sim={:.3}, >0.5: {}/{} ({:.0}%)",
-            avg_sim,
-            max_sim,
-            above_05,
-            search_sims.len(),
-            above_05 as f64 / search_sims.len() as f64 * 100.0
-        );
+        eprintln!("Search quality: avg_sim={:.3}, max_sim={:.3}, >0.5: {}/{} ({:.0}%)",
+            avg_sim, max_sim, above_05, search_sims.len(), above_05 as f64 / search_sims.len() as f64 * 100.0);
     }
 
     // Phase 3: Recall
     let t2 = Instant::now();
     let recall_raw = r#"{"jsonrpc":"2.0","id":2000,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"system architecture decisions","depth":2}}}"#;
-    let _resp = handler.process_json(recall_raw);
+    let _resp = handler.process_json(&recall_raw);
     let recall_time = t2.elapsed();
     eprintln!("Recall: {}ms", recall_time.as_millis());
 
@@ -194,7 +145,7 @@ async fn main() {
     let resp = handler.process_json(stats_raw);
     if let Ok(p) = serde_json::from_str::<serde_json::Value>(&resp) {
         if let Some(inner) = p["result"]["content"][0]["text"].as_str() {
-            eprintln!("Stats: {inner}");
+            eprintln!("Stats: {}", inner);
         }
     }
 
@@ -214,7 +165,7 @@ async fn main() {
     let resp = handler.process_json(observe_raw);
     if let Ok(p) = serde_json::from_str::<serde_json::Value>(&resp) {
         if let Some(inner) = p["result"]["content"][0]["text"].as_str() {
-            eprintln!("context_observe: {inner}");
+            eprintln!("context_observe: {}", inner);
         }
     }
 
@@ -226,15 +177,13 @@ async fn main() {
     eprintln!("ctx_load: {}ms", ctx_time.as_millis());
 
     // Memory usage
-    if let Ok(mem) = std::fs::metadata("data_bench/epicode.db") {
+    if let Ok(mem) = std::fs::metadata(format!("data_bench/epicode.db")) {
         eprintln!("DB size: {}KB", mem.len() / 1024);
     }
 }
 
 fn percentile(data: &[u64], p: u64) -> u64 {
-    if data.is_empty() {
-        return 0;
-    }
+    if data.is_empty() { return 0; }
     let mut sorted = data.to_vec();
     sorted.sort();
     let idx = ((p as f64 / 100.0) * (sorted.len() - 1) as f64).round() as usize;

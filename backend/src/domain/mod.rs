@@ -1,7 +1,5 @@
-pub mod channel;
-pub mod cylinder;
-pub mod permission;
-pub mod pulse;
-pub mod space;
-pub mod tetra;
 pub mod vertex;
+pub mod tetra;
+pub mod space;
+pub mod pulse;
+pub mod cylinder;
