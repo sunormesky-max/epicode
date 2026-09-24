@@ -1,5 +1,8 @@
 # 上下文管理 (Context Management)
 
+> **对齐声明**: 本技能为深度伴读。权威流程以《Epicode 系统操作手册》(epicode-system, 经握手或 skill_get 获取) 为准——当前系统包含相位机、双钟模型(预算按活跃时间燃烧, 停放不烧)、时间树(parent_task_id)、检查点微沉淀、崩溃恢复(无参 task_status)、停放仪式、阻塞告警(task_alert)、LLM 评审与交付凭证(task_id)。
+
+
 ## 概述
 你需要维护跨对话轮次的上下文连续性。本技能教你如何正确管理对话状态和用户上下文。
 

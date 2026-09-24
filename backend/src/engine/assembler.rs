@@ -8,6 +8,7 @@ enum SectionKind {
     LatestSession,
     ProjectContext,
     ActiveDecisions,
+    UserPreferences,
     Constraints,
     KnownPatterns,
     KnownBlockers,
@@ -26,6 +27,10 @@ impl SectionKind {
                 "decision" | "comparison" | "architecture" => 95,
                 "fix" => 50,
                 _ => 70,
+            },
+            Self::UserPreferences => match intent {
+                "general" | "" => 75,
+                _ => 45,
             },
             Self::Constraints => match intent {
                 "pattern" | "fix" => 85,
@@ -72,6 +77,7 @@ impl ContextAssembler {
         let mut project_ctx: Vec<&(u64, MemoryPayload)> = Vec::new();
         let mut constraints: Vec<String> = Vec::new();
         let mut blockers: Vec<&(u64, MemoryPayload)> = Vec::new();
+        let mut preferences: Vec<&(u64, MemoryPayload)> = Vec::new();
 
         for m in memories {
             let labels: HashSet<&str> = m.1.labels.iter().map(|s| s.as_str()).collect();
@@ -93,15 +99,22 @@ impl ContextAssembler {
             if labels.contains("project-context") || labels.contains("architecture") {
                 project_ctx.push(m);
             }
-            if labels.contains("bug") {
+            if labels.contains("bug") || labels.contains("bugfix") {
                 let lower = m.1.content.to_lowercase();
                 if lower.contains("blocked")
                     || lower.contains("阻塞")
                     || lower.contains("unresolved")
                     || lower.contains("未解决")
+                    || lower.contains("todo")
+                    || lower.contains("pending")
+                    || lower.contains("not working")
+                    || lower.contains("crash")
                 {
                     blockers.push(m);
                 }
+            }
+            if labels.contains("preference") {
+                preferences.push(m);
             }
         }
 
@@ -122,7 +135,7 @@ impl ContextAssembler {
             let time_desc = format_time_ago(age_hours);
             sections.push(Section {
                 kind: SectionKind::LatestSession,
-                title: format!("## Latest Session ({time_desc})"),
+                title: format!("## Latest Session ({})", time_desc),
                 body: truncate(&session.1.content, 800),
                 token_estimate: estimate_tokens(&session.1.content, 800),
             });
@@ -164,6 +177,26 @@ impl ContextAssembler {
                 sections.push(Section {
                     kind: SectionKind::ActiveDecisions,
                     title: "## Active Decisions".to_string(),
+                    body,
+                    token_estimate: tokens,
+                });
+            }
+        }
+
+        if !preferences.is_empty() {
+            let mut body = String::new();
+            for p in preferences.iter().take(5) {
+                if used_ids.contains(&p.0) {
+                    continue;
+                }
+                used_ids.insert(p.0);
+                body.push_str(&format!("\n- {}", truncate(&p.1.content, 120)));
+            }
+            if !body.is_empty() {
+                let tokens = body.len() / 4;
+                sections.push(Section {
+                    kind: SectionKind::UserPreferences,
+                    title: "## User Preferences".to_string(),
                     body,
                     token_estimate: tokens,
                 });
@@ -270,7 +303,7 @@ fn format_time_ago(age_hours: i64) -> String {
     if age_hours < 1 {
         "just now".to_string()
     } else if age_hours < 24 {
-        format!("{age_hours}h ago")
+        format!("{}h ago", age_hours)
     } else {
         format!("{}d ago", age_hours / 24)
     }
@@ -323,10 +356,10 @@ mod tests {
                 enforced: false,
                 rationale: None,
                 access_count: 0,
-                quality_score: 1.0,
                 memory_type: None,
-                valid_from: None,
-                valid_until: None,
+                identity_stamp: None,
+                source_agent: None,
+                ..Default::default()
             },
         )
     }
@@ -365,7 +398,8 @@ mod tests {
         let count = result.matches("Important session").count();
         assert!(
             count <= 1,
-            "content should not appear more than once, got {count} times"
+            "content should not appear more than once, got {} times",
+            count
         );
     }
 

@@ -64,7 +64,7 @@ tr:hover td{background:#1f1f35}
   <div class="login-box">
     <h2>Admin Login</h2>
     <input type="password" id="adminKeyInput" placeholder="Enter Admin Key" autocomplete="off">
-    <input type="text" id="baseUrlInput" placeholder="API Base URL" value="http://localhost:9111">
+    <input type="text" id="baseUrlInput" placeholder="API Base URL" value="https://epicode.cn/api">
     <button onclick="doLogin()">Connect</button>
   </div>
 </div>
@@ -105,7 +105,6 @@ tr:hover td{background:#1f1f35}
 <script>
 let BASE = '';
 let ADMIN_KEY = '';
-let _userKeys = {};
 
 function api(method, path, body) {
   const opts = { method, headers: { 'X-Admin-Key': ADMIN_KEY, 'Content-Type': 'application/json' } };
@@ -159,13 +158,12 @@ async function loadUsers() {
     tbody.innerHTML = d.users.map(u => {
       const planClass = u.plan === 'Pro' ? 'pro' : u.plan === 'Enterprise' ? 'enterprise' : 'free';
       const date = new Date(u.created_at * 1000).toLocaleDateString();
-      _userKeys[u.user_id] = u.api_key;
       const keyMasked = u.api_key.substring(0, 8) + '...' + u.api_key.substring(u.api_key.length - 4);
       return `<tr>
         <td><strong>${u.user_id}</strong></td>
         <td><span class="badge badge-${planClass}">${u.plan || 'Free'}</span></td>
         <td>${u.memories_used} / ${u.max_memories}</td>
-        <td><span class="key" onclick="copyKey('${u.user_id}')">${keyMasked}</span></td>
+        <td><span class="key" onclick="copyKey('${u.api_key}')" title="${u.api_key}">${keyMasked}</span></td>
         <td>${date}</td>
         <td><button class="btn btn-danger" onclick="doResetKey('${u.user_id}')">Reset Key</button></td>
       </tr>`;
@@ -173,12 +171,9 @@ async function loadUsers() {
   } catch(e) { toast(e.message, true); }
 }
 
-function copyKey(uid) {
-  const key = _userKeys[uid];
-  if (key) {
-    navigator.clipboard.writeText(key);
-    toast('API key copied');
-  }
+function copyKey(key) {
+  navigator.clipboard.writeText(key);
+  toast('API key copied');
 }
 
 async function doResetKey(userId) {
