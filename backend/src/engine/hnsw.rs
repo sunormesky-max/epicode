@@ -353,7 +353,10 @@ mod tests {
         assert!(!results.is_empty(), "should return at least one result");
         // 点1(自身)与点2余弦相似仅差~0.5%(浮点噪声级), HNSW随机建图下名次可互换 — 断言成员关系而非死名次
         assert!(results.iter().any(|r| r.0 == 1), "should contain point 1");
-        assert!(results[0].0 == 1 || results[0].0 == 2, "top result should be 1 or 2");
+        assert!(
+            results[0].0 == 1 || results[0].0 == 2,
+            "top result should be 1 or 2"
+        );
     }
 
     #[test]
