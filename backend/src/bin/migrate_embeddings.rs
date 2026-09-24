@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
 fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
     let args: Vec<String> = std::env::args().collect();
-    let data_dir = args.get(1).map(|s| s.as_str()).unwrap_or("/var/lib/epicode");
+    let data_dir = args
+        .get(1)
+        .map(|s| s.as_str())
+        .unwrap_or("/var/lib/epicode");
     let data_path = PathBuf::from(data_dir);
 
     let model_dir = {
@@ -14,7 +15,8 @@ fn main() {
             PathBuf::from("models"),
             PathBuf::from("/opt/epicode/models"),
         ];
-        candidates.into_iter()
+        candidates
+            .into_iter()
             .find(|d| d.join("model.onnx").exists())
             .unwrap_or_else(|| PathBuf::from("models"))
     };
@@ -27,7 +29,10 @@ fn main() {
             std::process::exit(1);
         }
     };
-    println!("VectorLayer loaded ({} dims)", epicode::engine::vector::EMBEDDING_DIM);
+    println!(
+        "VectorLayer loaded ({} dims)",
+        epicode::engine::vector::EMBEDDING_DIM
+    );
 
     let users_dir = data_path.join("users");
     if !users_dir.exists() {

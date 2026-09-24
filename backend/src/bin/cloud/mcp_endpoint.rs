@@ -20,7 +20,9 @@ pub async fn mcp_endpoint(
 ) -> axum::response::Response {
     let (parts, body_parts) = body.into_parts();
 
-    let api_key = parts.headers.get("X-API-Key")
+    let api_key = parts
+        .headers
+        .get("X-API-Key")
         .or_else(|| headers.get("X-API-Key"))
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
@@ -28,43 +30,60 @@ pub async fn mcp_endpoint(
     let user_info = match st.user_mgr.authenticate(api_key) {
         Some(u) => u,
         None => {
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-                "jsonrpc": "2.0", "id": null,
-                "error": {"code": -32001, "message": "invalid API key"}
-            }))).into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "jsonrpc": "2.0", "id": null,
+                    "error": {"code": -32001, "message": "invalid API key"}
+                })),
+            )
+                .into_response();
         }
     };
 
     let bytes = match body::to_bytes(body_parts, 1024 * 1024).await {
         Ok(b) => b,
         Err(e) => {
-            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-                "jsonrpc": "2.0", "id": null,
-                "error": {"code": -32700, "message": format!("read body failed: {}", e)}
-            }))).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "jsonrpc": "2.0", "id": null,
+                    "error": {"code": -32700, "message": format!("read body failed: {}", e)}
+                })),
+            )
+                .into_response();
         }
     };
 
-    let raw_body = match String::from_utf8(bytes.to_vec()) {
-        Ok(s) => s,
-        Err(e) => {
-            let pos = e.utf8_error().valid_up_to();
-            let byte_preview: Vec<u8> = bytes.iter().take(64).cloned().collect();
-            tracing::error!(
+    let raw_body =
+        match String::from_utf8(bytes.to_vec()) {
+            Ok(s) => s,
+            Err(e) => {
+                let pos = e.utf8_error().valid_up_to();
+                let byte_preview: Vec<u8> = bytes.iter().take(64).cloned().collect();
+                tracing::error!(
                 "[MCP] invalid UTF-8 body: valid_up_to={} error={:?} first_64_bytes_hex={:02x?}",
                 pos, e, byte_preview
             );
-            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-                "jsonrpc": "2.0", "id": null,
-                "error": {"code": -32700, "message": "request body is not valid UTF-8"}
-            }))).into_response();
-        }
-    };
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "jsonrpc": "2.0", "id": null,
+                        "error": {"code": -32700, "message": "request body is not valid UTF-8"}
+                    })),
+                )
+                    .into_response();
+            }
+        };
     if raw_body.trim().is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "jsonrpc": "2.0", "id": null,
-            "error": {"code": -32700, "message": "empty body"}
-        }))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "jsonrpc": "2.0", "id": null,
+                "error": {"code": -32700, "message": "empty body"}
+            })),
+        )
+            .into_response();
     }
 
     let engine = match st.user_mgr.get_engine_strict(&user_info.user_id) {
@@ -72,39 +91,53 @@ pub async fn mcp_endpoint(
         Err(e) => {
             // Phase 3 P0: PERSONA_WARMING_UP 不假空（Tester-Q契约 #1658）
             if e == "PERSONA_WARMING_UP" || e == "PERSONA_DEGRADED" {
-                let code = if e == "PERSONA_WARMING_UP" { "PERSONA_WARMING_UP" } else { "PERSONA_DEGRADED" };
-                return (StatusCode::OK, Json(serde_json::json!({
-                    "jsonrpc": "2.0", "id": null,
+                let code = if e == "PERSONA_WARMING_UP" {
+                    "PERSONA_WARMING_UP"
+                } else {
+                    "PERSONA_DEGRADED"
+                };
+                return (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "jsonrpc": "2.0", "id": null,
 
 
-                    "result": {
-                        "protocol": {
-                            "ok": false,
-                            "error": {
-                                "code": code,
-                                "message": "persona runtime loading; retry later",
-                                "retryable": true,
-                                "retry_after_ms": 5000
+                        "result": {
+                            "protocol": {
+                                "ok": false,
+                                "error": {
+                                    "code": code,
+                                    "message": "persona runtime loading; retry later",
+                                    "retryable": true,
+                                    "retry_after_ms": 5000
+                                }
+                            },
+                            "data": null,
+                            "status": {
+                                "persona": {"state": "warming_up", "phase": "restore"}
                             }
-                        },
-                        "data": null,
-                        "status": {
-                            "persona": {"state": "warming_up", "phase": "restore"}
                         }
-                    }
-                }))).into_response();
+                    })),
+                )
+                    .into_response();
             }
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "jsonrpc": "2.0", "id": null,
-                "error": {"code": -32603, "message": e}
-            }))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "jsonrpc": "2.0", "id": null,
+                    "error": {"code": -32603, "message": e}
+                })),
+            )
+                .into_response();
         }
     };
 
     let engine_for_guard = engine.clone();
     // D §14.1 (MCP): drive_ack requires primary_executor binding (与 REST 对齐)
-    let req_parsed: Option<serde_json::Value> = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
-    let is_drive_ack = req_parsed.as_ref()
+    let req_parsed: Option<serde_json::Value> =
+        serde_json::from_slice::<serde_json::Value>(&bytes).ok();
+    let is_drive_ack = req_parsed
+        .as_ref()
         .map(|v| {
             v["method"].as_str() == Some("tools/call")
                 && v["params"]["name"].as_str() == Some("drive_ack")
@@ -112,7 +145,8 @@ pub async fn mcp_endpoint(
         .unwrap_or(false);
 
     // α0.3 (MCP): identity_finalize 出生流程门禁 (防身份抢注, 与 REST 对齐)
-    let is_finalize = req_parsed.as_ref()
+    let is_finalize = req_parsed
+        .as_ref()
         .map(|v| {
             v["method"].as_str() == Some("tools/call")
                 && v["params"]["name"].as_str() == Some("identity_finalize")
@@ -120,13 +154,18 @@ pub async fn mcp_endpoint(
         .unwrap_or(false);
     if is_finalize {
         let require_binding = std::env::var("REQUIRE_BINDING_FOR_IDENTITY")
-            .map(|v| v != "0").unwrap_or(true);
+            .map(|v| v != "0")
+            .unwrap_or(true);
         if require_binding {
             // 语义修正: 仅已确认身份后的 re-finalize 需 binding; 首次放行(先名后手)
             let already_confirmed = engine_for_guard.space.identity_info().is_some();
             if already_confirmed {
-                let bound = st.primary_executors.read().get(&user_info.user_id)
-                    .filter(|b| !b.is_expired()).is_some();
+                let bound = st
+                    .primary_executors
+                    .read()
+                    .get(&user_info.user_id)
+                    .filter(|b| !b.is_expired())
+                    .is_some();
                 if !bound {
                     return (StatusCode::FORBIDDEN, Json(serde_json::json!({
                         "jsonrpc": "2.0", "id": req_parsed.as_ref().and_then(|v| v["id"].as_i64()),
@@ -138,8 +177,12 @@ pub async fn mcp_endpoint(
     }
 
     if is_drive_ack {
-        let binding = st.primary_executors.read().get(&user_info.user_id)
-            .filter(|b| !b.is_expired()).cloned();
+        let binding = st
+            .primary_executors
+            .read()
+            .get(&user_info.user_id)
+            .filter(|b| !b.is_expired())
+            .cloned();
         match binding {
             None => {
                 return (StatusCode::FORBIDDEN, Json(serde_json::json!({
@@ -153,14 +196,22 @@ pub async fn mcp_endpoint(
             }
             Some(b) => {
                 // D §14.5: e2e=false blocks high/critical auto-execute
-                let drive_id = req_parsed.as_ref()
+                let drive_id = req_parsed
+                    .as_ref()
                     .and_then(|v| v["params"]["arguments"]["drive_id"].as_u64())
                     .unwrap_or(0);
-                let sig = engine_for_guard.scheduler().drive_queue().peek_unacked(200)
-                    .into_iter().find(|s| s.id == drive_id);
+                let sig = engine_for_guard
+                    .scheduler()
+                    .drive_queue()
+                    .peek_unacked(200)
+                    .into_iter()
+                    .find(|s| s.id == drive_id);
                 if let Some(ref s) = sig {
-                    let is_high = matches!(s.urgency,
-                        epicode::engine::drive::DriveUrgency::High | epicode::engine::drive::DriveUrgency::Critical);
+                    let is_high = matches!(
+                        s.urgency,
+                        epicode::engine::drive::DriveUrgency::High
+                            | epicode::engine::drive::DriveUrgency::Critical
+                    );
                     if is_high && !b.e2e_enabled {
                         return (StatusCode::FORBIDDEN, Json(serde_json::json!({
                             "jsonrpc": "2.0", "id": req_parsed.and_then(|v| v["id"].as_i64()),
@@ -188,11 +239,12 @@ pub async fn mcp_endpoint(
         });
     }
 
-    let handler = McpHandler::with_pub_skills(engine, st.pub_skills.clone())
-        .with_quota(epicode::engine::mcp::QuotaContext {
+    let handler = McpHandler::with_pub_skills(engine, st.pub_skills.clone()).with_quota(
+        epicode::engine::mcp::QuotaContext {
             user_mgr: Arc::clone(&st.user_mgr),
             user_id: user_info.user_id.clone(),
-        });
+        },
+    );
     let t_start = std::time::Instant::now();
     let resp = handler.process_json(&raw_body);
     let elapsed = t_start.elapsed();
@@ -207,7 +259,12 @@ pub async fn mcp_endpoint(
         }
         Err(_) => "parse_error".to_string(),
     };
-    tracing::info!("[MCP] user={} tool={} elapsed={}ms", user_info.user_id, tool_name, elapsed.as_millis());
+    tracing::info!(
+        "[MCP] user={} tool={} elapsed={}ms",
+        user_info.user_id,
+        tool_name,
+        elapsed.as_millis()
+    );
     match serde_json::from_str::<serde_json::Value>(&resp) {
         Ok(v) => {
             let mut response = (StatusCode::OK, Json(v)).into_response();
@@ -218,11 +275,19 @@ pub async fn mcp_endpoint(
             response
         }
         Err(e) => {
-            tracing::error!("MCP response parse error: {} — raw: {}", e, truncate_str(&resp, 200));
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "jsonrpc": "2.0", "id": null,
-                "error": {"code": -32603, "message": "internal error"}
-            }))).into_response()
+            tracing::error!(
+                "MCP response parse error: {} — raw: {}",
+                e,
+                truncate_str(&resp, 200)
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "jsonrpc": "2.0", "id": null,
+                    "error": {"code": -32603, "message": "internal error"}
+                })),
+            )
+                .into_response()
         }
     }
 }

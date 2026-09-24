@@ -53,14 +53,20 @@ impl VectorLayer {
             .commit_from_file(&model_path)
             .map_err(|e| format!("ONNX session: {}", e))?;
 
-        let tokenizer = Tokenizer::from_file(&tokenizer_path)
-            .map_err(|e| format!("tokenizer load: {}", e))?;
+        let tokenizer =
+            Tokenizer::from_file(&tokenizer_path).map_err(|e| format!("tokenizer load: {}", e))?;
 
-        let input_names: Vec<String> = session.inputs().iter().map(|i| i.name().to_string()).collect();
+        let input_names: Vec<String> = session
+            .inputs()
+            .iter()
+            .map(|i| i.name().to_string())
+            .collect();
         let has_token_type_ids = input_names.iter().any(|n| n == "token_type_ids");
         let first_output = session.outputs()[0].name().to_string();
 
-        let dummy = tokenizer.encode("x", true).map_err(|e| format!("tokenize: {}", e))?;
+        let dummy = tokenizer
+            .encode("x", true)
+            .map_err(|e| format!("tokenize: {}", e))?;
         let dummy_ids = dummy.get_ids();
         let dummy_mask = dummy.get_attention_mask();
         let dummy_len = dummy_ids.len();
@@ -69,11 +75,18 @@ impl VectorLayer {
             ("attention_mask", make_int64_tensor(dummy_mask, dummy_len)?),
         ]);
         if has_token_type_ids {
-            dummy_inputs.insert("token_type_ids", make_int64_tensor(dummy.get_type_ids(), dummy_len)?);
+            dummy_inputs.insert(
+                "token_type_ids",
+                make_int64_tensor(dummy.get_type_ids(), dummy_len)?,
+            );
         }
-        let dummy_out = session.run(dummy_inputs).map_err(|e| format!("dummy run: {}", e))?;
+        let dummy_out = session
+            .run(dummy_inputs)
+            .map_err(|e| format!("dummy run: {}", e))?;
         let output_tensor = dummy_out.get(&*first_output).ok_or("no output")?;
-        let (shape, _data) = output_tensor.try_extract_tensor::<f32>().map_err(|e| format!("extract: {}", e))?;
+        let (shape, _data) = output_tensor
+            .try_extract_tensor::<f32>()
+            .map_err(|e| format!("extract: {}", e))?;
         let dim = shape.last().copied().unwrap_or(EMBEDDING_DIM as i64) as usize;
         drop(dummy_out);
 
@@ -122,26 +135,35 @@ impl VectorLayer {
     pub fn embed_batch_vecs(&self, texts: &[String]) -> Result<Vec<Vec<f64>>, String> {
         if !self.use_cls_pool {
             let mut out = Vec::with_capacity(texts.len());
-            for t in texts { out.push(self._embed(t).unwrap_or_default()); }
+            for t in texts {
+                out.push(self._embed(t).unwrap_or_default());
+            }
             return Ok(out);
         }
-        let truncated: Vec<String> = texts.iter()
-            .map(|t| t.chars().take(MAX_INPUT_CHARS).collect()).collect();
+        let truncated: Vec<String> = texts
+            .iter()
+            .map(|t| t.chars().take(MAX_INPUT_CHARS).collect())
+            .collect();
         let mut need: Vec<usize> = Vec::new();
         {
             let cache = self.cache.lock();
             for (i, t) in truncated.iter().enumerate() {
-                if !cache.contains_key(t) { need.push(i); }
+                if !cache.contains_key(t) {
+                    need.push(i);
+                }
             }
         }
-        if need.is_empty() { return Ok(Vec::new()); }
+        if need.is_empty() {
+            return Ok(Vec::new());
+        }
         // 内存压力门：系统可用内存不足时延迟批量预热（缓存未命中路径可惰性重试）。
         // 防止午夜多引擎恢复时 ONNX 批量推理与引擎装载叠加成工作集爆炸
         // （2026-09-06 两次规则重启的根因：RSS 5-6.8G + swap 耗尽 → ONNX 超时风暴）。
         #[cfg(target_os = "linux")]
         {
             if let Ok(mi) = std::fs::read_to_string("/proc/meminfo") {
-                let avail_kb = mi.lines()
+                let avail_kb = mi
+                    .lines()
                     .find(|l| l.starts_with("MemAvailable:"))
                     .and_then(|l| l.split_whitespace().nth(1))
                     .and_then(|v| v.parse::<u64>().ok())
@@ -155,13 +177,21 @@ impl VectorLayer {
                 }
             }
         }
-        let disabled_until = self.onnx_disabled_until.load(std::sync::atomic::Ordering::Relaxed);
+        let disabled_until = self
+            .onnx_disabled_until
+            .load(std::sync::atomic::Ordering::Relaxed);
         if disabled_until > 0 {
             let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-            if now < disabled_until { return Ok(Vec::new()); }
-            self.onnx_disabled_until.store(0, std::sync::atomic::Ordering::Relaxed);
-            self.active_inference_threads.store(0, std::sync::atomic::Ordering::Relaxed);
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            if now < disabled_until {
+                return Ok(Vec::new());
+            }
+            self.onnx_disabled_until
+                .store(0, std::sync::atomic::Ordering::Relaxed);
+            self.active_inference_threads
+                .store(0, std::sync::atomic::Ordering::Relaxed);
         }
         let mut warmed = 0usize;
         let mut result: Vec<Option<Vec<f64>>> = vec![None; texts.len()];
@@ -170,7 +200,9 @@ impl VectorLayer {
             let mut ids_rows: Vec<Vec<i64>> = Vec::with_capacity(idxs.len());
             let mut mask_rows: Vec<Vec<i64>> = Vec::with_capacity(idxs.len());
             for &i in &idxs {
-                let e = self.tokenizer.encode(truncated[i].as_str(), true)
+                let e = self
+                    .tokenizer
+                    .encode(truncated[i].as_str(), true)
                     .map_err(|er| format!("tokenize: {}", er))?;
                 ids_rows.push(e.get_ids().iter().map(|&x| x as i64).collect());
                 mask_rows.push(e.get_attention_mask().iter().map(|&x| x as i64).collect());
@@ -180,13 +212,22 @@ impl VectorLayer {
             let mut flat_ids = vec![0i64; b * max_len];
             let mut flat_mask = vec![0i64; b * max_len];
             for r in 0..b {
-                for (c, v) in ids_rows[r].iter().enumerate() { flat_ids[r * max_len + c] = *v; }
-                for (c, v) in mask_rows[r].iter().enumerate() { flat_mask[r * max_len + c] = *v; }
+                for (c, v) in ids_rows[r].iter().enumerate() {
+                    flat_ids[r * max_len + c] = *v;
+                }
+                for (c, v) in mask_rows[r].iter().enumerate() {
+                    flat_mask[r * max_len + c] = *v;
+                }
             }
-            let active = self.active_inference_threads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let active = self
+                .active_inference_threads
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if active >= MAX_CONCURRENT_ONNX {
-                self.active_inference_threads.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-                tracing::warn!("[VectorLayer] batch ONNX concurrency limit reached, partial prewarm");
+                self.active_inference_threads
+                    .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                tracing::warn!(
+                    "[VectorLayer] batch ONNX concurrency limit reached, partial prewarm"
+                );
                 break;
             }
             let (tx, rx) = std::sync::mpsc::channel();
@@ -200,20 +241,28 @@ impl VectorLayer {
                 let result: Result<Vec<f32>, String> = (|| {
                     let mut session = session_arc.lock();
                     let ids_t = ort::value::Tensor::from_array(([b, max_len], ids_flat))
-                        .map_err(|e| format!("ids tensor: {}", e))?.into_dyn();
+                        .map_err(|e| format!("ids tensor: {}", e))?
+                        .into_dyn();
                     let mask_t = ort::value::Tensor::from_array(([b, max_len], mask_flat))
-                        .map_err(|e| format!("mask tensor: {}", e))?.into_dyn();
-                    let mut inputs = HashMap::from([("input_ids", ids_t), ("attention_mask", mask_t)]);
+                        .map_err(|e| format!("mask tensor: {}", e))?
+                        .into_dyn();
+                    let mut inputs =
+                        HashMap::from([("input_ids", ids_t), ("attention_mask", mask_t)]);
                     if input_names.iter().any(|n| n == "token_type_ids") {
                         let tt: Vec<i64> = vec![0; b * max_len];
-                        let t = ort::value::Tensor::from_array(([b, max_len], tt.into_boxed_slice()))
-                            .map_err(|e| format!("tt tensor: {}", e))?.into_dyn();
+                        let t =
+                            ort::value::Tensor::from_array(([b, max_len], tt.into_boxed_slice()))
+                                .map_err(|e| format!("tt tensor: {}", e))?
+                                .into_dyn();
                         inputs.insert("token_type_ids", t);
                     }
                     let outputs = session.run(inputs).map_err(|e| format!("ort run: {}", e))?;
-                    let t = outputs.get(&*first_output_name)
+                    let t = outputs
+                        .get(&*first_output_name)
                         .ok_or_else(|| format!("no output: {}", first_output_name))?;
-                    let (_s, data) = t.try_extract_tensor::<f32>().map_err(|e| format!("extract: {}", e))?;
+                    let (_s, data) = t
+                        .try_extract_tensor::<f32>()
+                        .map_err(|e| format!("extract: {}", e))?;
                     Ok(data.to_vec())
                 })();
                 let _ = tx.send(result);
@@ -222,18 +271,27 @@ impl VectorLayer {
             let raw = match rx.recv_timeout(std::time::Duration::from_secs(60)) {
                 Ok(Ok(d)) => d,
                 Ok(Err(e)) => return Err(e),
-                Err(_) => { tracing::error!("[VectorLayer] batch ONNX timeout (60s), partial prewarm"); break; }
+                Err(_) => {
+                    tracing::error!("[VectorLayer] batch ONNX timeout (60s), partial prewarm");
+                    break;
+                }
             };
             for (row, &i) in idxs.iter().enumerate() {
                 let start = row * max_len * self.dim;
-                if raw.len() < start + self.dim { continue; }
+                if raw.len() < start + self.dim {
+                    continue;
+                }
                 let emb = l2_normalize(&cls_pool(&raw[start..start + self.dim], self.dim));
                 let mut cache = self.cache.lock();
                 let mut order = self.cache_order.lock();
                 cache.insert(truncated[i].clone(), emb.clone());
                 order.push_back(truncated[i].clone());
                 while cache.len() > 1000 {
-                    if let Some(old) = order.pop_front() { cache.remove(&old); } else { break; }
+                    if let Some(old) = order.pop_front() {
+                        cache.remove(&old);
+                    } else {
+                        break;
+                    }
                 }
                 warmed += 1;
                 result[i] = Some(emb);
@@ -254,7 +312,9 @@ impl VectorLayer {
         }
 
         // ONNX 禁用检查：超时窗口内跳过推理，到期后自动恢复重试
-        let disabled_until = self.onnx_disabled_until.load(std::sync::atomic::Ordering::Relaxed);
+        let disabled_until = self
+            .onnx_disabled_until
+            .load(std::sync::atomic::Ordering::Relaxed);
         if disabled_until > 0 {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -265,10 +325,13 @@ impl VectorLayer {
             }
             // 冷却窗口已过，清除禁用标志和线程计数器，允许重新尝试
             tracing::info!("[VectorLayer] ONNX cooldown expired, re-enabling inference attempts");
-            self.onnx_disabled_until.store(0, std::sync::atomic::Ordering::Relaxed);
-            self.active_inference_threads.store(0, std::sync::atomic::Ordering::Relaxed);
+            self.onnx_disabled_until
+                .store(0, std::sync::atomic::Ordering::Relaxed);
+            self.active_inference_threads
+                .store(0, std::sync::atomic::Ordering::Relaxed);
         }
-        let encoding = self.tokenizer
+        let encoding = self
+            .tokenizer
             .encode(truncated.as_str(), true)
             .map_err(|e| format!("tokenize: {}", e))?;
 
@@ -282,10 +345,16 @@ impl VectorLayer {
             // → tokio worker 饿死 → accept 停 → 全系统假死。
 
             // 并发线程数保护：如果已有太多推理线程在等锁（死锁场景），不再 spawn 新线程
-            let active = self.active_inference_threads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let active = self
+                .active_inference_threads
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if active >= MAX_CONCURRENT_ONNX {
-                self.active_inference_threads.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-                tracing::warn!("[VectorLayer] ONNX concurrency limit reached ({}), skipping inference", active);
+                self.active_inference_threads
+                    .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                tracing::warn!(
+                    "[VectorLayer] ONNX concurrency limit reached ({}), skipping inference",
+                    active
+                );
                 return Ok(vec![]);
             }
 
@@ -296,7 +365,9 @@ impl VectorLayer {
             let active_counter = self.active_inference_threads.clone();
             let type_ids = if self.has_token_type_ids {
                 Some(encoding.get_type_ids().to_vec())
-            } else { None };
+            } else {
+                None
+            };
             let ids_vec = ids.to_vec();
             let mask_vec = mask.to_vec();
 
@@ -305,7 +376,10 @@ impl VectorLayer {
                     let mut session = session_arc.lock();
                     let mut inputs = HashMap::from([
                         ("input_ids", make_int64_tensor(&ids_vec, ids_vec.len())?),
-                        ("attention_mask", make_int64_tensor(&mask_vec, mask_vec.len())?),
+                        (
+                            "attention_mask",
+                            make_int64_tensor(&mask_vec, mask_vec.len())?,
+                        ),
                     ]);
                     if input_names_clone.iter().any(|n| n == "token_type_ids") {
                         if let Some(ref tids) = type_ids {
@@ -313,9 +387,11 @@ impl VectorLayer {
                         }
                     }
                     let outputs = session.run(inputs).map_err(|e| format!("ort run: {}", e))?;
-                    let output_tensor = outputs.get(&*first_output_name)
+                    let output_tensor = outputs
+                        .get(&*first_output_name)
                         .ok_or_else(|| format!("no output: {}", first_output_name))?;
-                    let (_shape, data) = output_tensor.try_extract_tensor::<f32>()
+                    let (_shape, data) = output_tensor
+                        .try_extract_tensor::<f32>()
                         .map_err(|e| format!("extract tensor: {}", e))?;
                     Ok(data.to_vec())
                 })();
@@ -333,13 +409,19 @@ impl VectorLayer {
                 Ok(Ok(data)) => data,
                 Ok(Err(e)) => return Err(e),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    let fails = self.session_lock_failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    let fails = self
+                        .session_lock_failures
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        + 1;
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
                     tracing::error!("[VectorLayer] ONNX inference timeout (10s) — disabling ONNX for {}s (failures={}). Searches will use BM25 keyword only until recovery.", ONNX_DISABLE_COOLDOWN_SECS, fails);
-                    self.onnx_disabled_until.store(now + ONNX_DISABLE_COOLDOWN_SECS, std::sync::atomic::Ordering::Relaxed);
+                    self.onnx_disabled_until.store(
+                        now + ONNX_DISABLE_COOLDOWN_SECS,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
                     return Ok(vec![]);
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
@@ -363,7 +445,9 @@ impl VectorLayer {
             while cache.len() > 1000 {
                 if let Some(old) = order.pop_front() {
                     cache.remove(&old);
-                } else { break; }
+                } else {
+                    break;
+                }
             }
         }
 
@@ -409,7 +493,11 @@ impl VectorLayer {
             return Vec::new();
         }
         blob.chunks_exact(8)
-            .map(|chunk| f64::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7]]))
+            .map(|chunk| {
+                f64::from_le_bytes([
+                    chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
+                ])
+            })
             .collect()
     }
 
@@ -523,18 +611,17 @@ mod tests {
     #[test]
     fn best_sim_prefers_embedding() {
         let sim = VectorLayer::best_similarity(
-            &[1.0, 0.0], &["rust".into()],
-            &[0.9, 0.1], &["python".into()],
+            &[1.0, 0.0],
+            &["rust".into()],
+            &[0.9, 0.1],
+            &["python".into()],
         );
         assert!(sim > 0.8);
     }
 
     #[test]
     fn best_sim_falls_back_to_labels() {
-        let sim = VectorLayer::best_similarity(
-            &[], &["rust".into()],
-            &[], &["rust".into()],
-        );
+        let sim = VectorLayer::best_similarity(&[], &["rust".into()], &[], &["rust".into()]);
         assert!((sim - 1.0).abs() < 1e-10);
     }
 
@@ -578,25 +665,48 @@ mod tests {
             }
         };
         if emb.len() != EMBEDDING_DIM {
-            eprintln!("skipping embed test: output dim={} expected={}", emb.len(), EMBEDDING_DIM);
+            eprintln!(
+                "skipping embed test: output dim={} expected={}",
+                emb.len(),
+                EMBEDDING_DIM
+            );
             return;
         }
         let norm: f64 = emb.iter().map(|x| x * x).sum::<f64>().sqrt();
         if norm < 0.01 {
-            eprintln!("skipping embed test: embedding norm={} (likely model mismatch)", norm);
+            eprintln!(
+                "skipping embed test: embedding norm={} (likely model mismatch)",
+                norm
+            );
             return;
         }
-        assert!((norm - 1.0).abs() < 0.01, "embedding should be normalized, norm={}", norm);
+        assert!(
+            (norm - 1.0).abs() < 0.01,
+            "embedding should be normalized, norm={}",
+            norm
+        );
 
         let emb2 = layer.embed("Rust ownership and borrowing").expect("embed2");
         let sim = VectorLayer::cosine_similarity(&emb, &emb2);
-        assert!(sim < 0.9, "unrelated texts should not be too similar: {}", sim);
+        assert!(
+            sim < 0.9,
+            "unrelated texts should not be too similar: {}",
+            sim
+        );
 
-        let emb3 = layer.embed("quantum tunneling in semiconductors").expect("embed3");
+        let emb3 = layer
+            .embed("quantum tunneling in semiconductors")
+            .expect("embed3");
         assert_eq!(emb, emb3, "cache should return identical vector");
 
-        let emb4 = layer.embed("quantum mechanical tunneling through semiconductor barriers").expect("embed4");
+        let emb4 = layer
+            .embed("quantum mechanical tunneling through semiconductor barriers")
+            .expect("embed4");
         let sim_related = VectorLayer::cosine_similarity(&emb, &emb4);
-        assert!(sim_related > 0.5, "similar texts should have high similarity: {}", sim_related);
+        assert!(
+            sim_related > 0.5,
+            "similar texts should have high similarity: {}",
+            sim_related
+        );
     }
 }

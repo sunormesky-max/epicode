@@ -83,9 +83,10 @@ impl ContextAssembler {
             let labels: HashSet<&str> = m.1.labels.iter().map(|s| s.as_str()).collect();
 
             if (labels.contains("session-summary") || labels.contains("session"))
-                && (latest_session.is_none() || m.1.timestamp > latest_session.unwrap().1.timestamp) {
-                    latest_session = Some(m);
-                }
+                && (latest_session.is_none() || m.1.timestamp > latest_session.unwrap().1.timestamp)
+            {
+                latest_session = Some(m);
+            }
             if labels.contains("decision") && (now - m.1.timestamp) < day_secs * 14 {
                 recent_decisions.push(m);
             }
@@ -100,10 +101,14 @@ impl ContextAssembler {
             }
             if labels.contains("bug") || labels.contains("bugfix") {
                 let lower = m.1.content.to_lowercase();
-                if lower.contains("blocked") || lower.contains("阻塞")
-                    || lower.contains("unresolved") || lower.contains("未解决")
-                    || lower.contains("todo") || lower.contains("pending")
-                    || lower.contains("not working") || lower.contains("crash")
+                if lower.contains("blocked")
+                    || lower.contains("阻塞")
+                    || lower.contains("unresolved")
+                    || lower.contains("未解决")
+                    || lower.contains("todo")
+                    || lower.contains("pending")
+                    || lower.contains("not working")
+                    || lower.contains("crash")
                 {
                     blockers.push(m);
                 }
@@ -152,10 +157,16 @@ impl ContextAssembler {
         if !recent_decisions.is_empty() {
             let mut body = String::new();
             for d in recent_decisions.iter().take(8) {
-                if used_ids.contains(&d.0) { continue; }
+                if used_ids.contains(&d.0) {
+                    continue;
+                }
                 used_ids.insert(d.0);
                 let line = if let Some(ref r) = d.1.rationale {
-                    format!("\n- {} — why: {}", truncate(&d.1.content, 120), truncate(r, 80))
+                    format!(
+                        "\n- {} — why: {}",
+                        truncate(&d.1.content, 120),
+                        truncate(r, 80)
+                    )
                 } else {
                     format!("\n- {}", truncate(&d.1.content, 150))
                 };
@@ -175,7 +186,9 @@ impl ContextAssembler {
         if !preferences.is_empty() {
             let mut body = String::new();
             for p in preferences.iter().take(5) {
-                if used_ids.contains(&p.0) { continue; }
+                if used_ids.contains(&p.0) {
+                    continue;
+                }
                 used_ids.insert(p.0);
                 body.push_str(&format!("\n- {}", truncate(&p.1.content, 120)));
             }
@@ -207,7 +220,9 @@ impl ContextAssembler {
         if !patterns.is_empty() {
             let mut body = String::new();
             for p in patterns.iter().take(6) {
-                if used_ids.contains(&p.0) { continue; }
+                if used_ids.contains(&p.0) {
+                    continue;
+                }
                 used_ids.insert(p.0);
                 body.push_str(&format!("\n- {}", truncate(&p.1.content, 120)));
             }
@@ -225,7 +240,9 @@ impl ContextAssembler {
         if !blockers.is_empty() {
             let mut body = String::new();
             for b in blockers.iter().take(5) {
-                if used_ids.contains(&b.0) { continue; }
+                if used_ids.contains(&b.0) {
+                    continue;
+                }
                 used_ids.insert(b.0);
                 body.push_str(&format!("\n- {}", truncate(&b.1.content, 120)));
             }
@@ -296,7 +313,8 @@ fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        let boundary = s.char_indices()
+        let boundary = s
+            .char_indices()
             .take_while(|(i, _)| *i < max)
             .last()
             .map(|(i, c)| i + c.len_utf8())
@@ -325,29 +343,41 @@ mod tests {
     use crate::domain::tetra::MemoryPayload;
 
     fn make_mem(id: u64, content: &str, labels: Vec<&str>) -> (u64, MemoryPayload) {
-        (id, MemoryPayload {
-            content: content.to_string(),
-            content_hash: 0,
-            labels: labels.iter().map(|s| s.to_string()).collect(),
-            timestamp: chrono::Utc::now().timestamp(),
-            aliases: vec![],
-            embedding: vec![],
-            importance: 1.0,
-            enforced: false,
-            rationale: None,
-            access_count: 0,
-            memory_type: None,
-        identity_stamp: None,
-        source_agent: None, ..Default::default()
-        })
+        (
+            id,
+            MemoryPayload {
+                content: content.to_string(),
+                content_hash: 0,
+                labels: labels.iter().map(|s| s.to_string()).collect(),
+                timestamp: chrono::Utc::now().timestamp(),
+                aliases: vec![],
+                embedding: vec![],
+                importance: 1.0,
+                enforced: false,
+                rationale: None,
+                access_count: 0,
+                memory_type: None,
+                identity_stamp: None,
+                source_agent: None,
+                ..Default::default()
+            },
+        )
     }
 
     #[test]
     fn assemble_basic_sections() {
         let memories = vec![
-            make_mem(1, "Session summary for today: deployed v1.0.0", vec!["session-summary"]),
+            make_mem(
+                1,
+                "Session summary for today: deployed v1.0.0",
+                vec!["session-summary"],
+            ),
             make_mem(2, "Use nft instead of firewalld", vec!["decision"]),
-            make_mem(3, "Always use atomic replace for deployment", vec!["pattern"]),
+            make_mem(
+                3,
+                "Always use atomic replace for deployment",
+                vec!["pattern"],
+            ),
         ];
         let enforced: Vec<(u64, String, Vec<String>)> = vec![];
         let result = ContextAssembler::assemble(&memories, &enforced, 10, "general");
@@ -358,23 +388,38 @@ mod tests {
 
     #[test]
     fn dedup_no_repeat() {
-        let mem = make_mem(1, "Important session + decision hybrid content", vec!["session-summary", "decision"]);
+        let mem = make_mem(
+            1,
+            "Important session + decision hybrid content",
+            vec!["session-summary", "decision"],
+        );
         let enforced: Vec<(u64, String, Vec<String>)> = vec![];
         let result = ContextAssembler::assemble(&[mem], &enforced, 10, "general");
         let count = result.matches("Important session").count();
-        assert!(count <= 1, "content should not appear more than once, got {} times", count);
+        assert!(
+            count <= 1,
+            "content should not appear more than once, got {} times",
+            count
+        );
     }
 
     #[test]
     fn fix_intent_prioritizes_blockers() {
         let session = make_mem(1, "Session summary", vec!["session-summary"]);
-        let bug = make_mem(2, "Bug in deployment — blocked by port 9111 still occupied. Unresolved.", vec!["bug"]);
+        let bug = make_mem(
+            2,
+            "Bug in deployment — blocked by port 9111 still occupied. Unresolved.",
+            vec!["bug"],
+        );
         let enforced: Vec<(u64, String, Vec<String>)> = vec![];
         let result = ContextAssembler::assemble(&[session, bug], &enforced, 10, "fix");
         let blocker_pos = result.find("Known Blockers");
         let session_pos = result.find("Latest Session");
         if let (Some(bp), Some(sp)) = (blocker_pos, session_pos) {
-            assert!(bp < sp, "blockers should come before session for fix intent");
+            assert!(
+                bp < sp,
+                "blockers should come before session for fix intent"
+            );
         }
     }
 

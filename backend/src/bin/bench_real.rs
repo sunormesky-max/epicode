@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use epicode::engine::Engine;
 use epicode::engine::mcp::McpHandler;
+use epicode::engine::Engine;
 
 #[tokio::main]
 async fn main() {
@@ -30,14 +30,38 @@ async fn main() {
 
     // Phase 1: Create memories
     let categories = vec![
-        ("architecture", "System uses microservices with event-driven communication pattern"),
-        ("bug", "Memory leak in connection pool caused by unclosed handles in async tasks"),
-        ("decision", "Chose PostgreSQL over MongoDB for ACID compliance requirements"),
-        ("pattern", "Always use circuit breaker pattern for external service calls"),
-        ("preference", "User prefers dark theme with monospace fonts for code review"),
-        ("session", "Implemented OAuth2 flow and fixed token refresh edge cases"),
-        ("finding", "Query performance degrades linearly with JOIN count above 5 tables"),
-        ("convention", "All API endpoints return consistent JSON error format with code field"),
+        (
+            "architecture",
+            "System uses microservices with event-driven communication pattern",
+        ),
+        (
+            "bug",
+            "Memory leak in connection pool caused by unclosed handles in async tasks",
+        ),
+        (
+            "decision",
+            "Chose PostgreSQL over MongoDB for ACID compliance requirements",
+        ),
+        (
+            "pattern",
+            "Always use circuit breaker pattern for external service calls",
+        ),
+        (
+            "preference",
+            "User prefers dark theme with monospace fonts for code review",
+        ),
+        (
+            "session",
+            "Implemented OAuth2 flow and fixed token refresh edge cases",
+        ),
+        (
+            "finding",
+            "Query performance degrades linearly with JOIN count above 5 tables",
+        ),
+        (
+            "convention",
+            "All API endpoints return consistent JSON error format with code field",
+        ),
     ];
 
     let t0 = Instant::now();
@@ -46,12 +70,18 @@ async fn main() {
 
     for i in 0..mem_count {
         let (cat, template) = &categories[i % categories.len()];
-        let content = format!("[{}] {} — instance #{} with unique context about {} operations", 
-            cat, template, i, cat);
+        let content = format!(
+            "[{}] {} — instance #{} with unique context about {} operations",
+            cat, template, i, cat
+        );
         let labels = vec![cat.to_string(), format!("bench-{}", i % 10)];
 
-        let raw = format!(r#"{{"jsonrpc":"2.0","id":{},"method":"tools/call","params":{{"name":"memory_create","arguments":{{"content":"{}","labels":{}}}}}}}"#,
-            i, content.replace('"', "\\\""), serde_json::to_string(&labels).unwrap());
+        let raw = format!(
+            r#"{{"jsonrpc":"2.0","id":{},"method":"tools/call","params":{{"name":"memory_create","arguments":{{"content":"{}","labels":{}}}}}}}"#,
+            i,
+            content.replace('"', "\\\""),
+            serde_json::to_string(&labels).unwrap()
+        );
 
         let t = Instant::now();
         let resp = handler.process_json(&raw);
@@ -72,11 +102,14 @@ async fn main() {
         }
     }
     let create_total = t0.elapsed();
-    eprintln!("Create: {} memories in {}ms (avg {}ms, p95 {}ms, max {}ms)",
-        mem_count, create_total.as_millis(),
+    eprintln!(
+        "Create: {} memories in {}ms (avg {}ms, p95 {}ms, max {}ms)",
+        mem_count,
+        create_total.as_millis(),
         create_times.iter().sum::<u64>() as f64 / create_times.len() as f64,
         percentile(&create_times, 95),
-        create_times.iter().max().unwrap_or(&0));
+        create_times.iter().max().unwrap_or(&0)
+    );
 
     // Phase 2: Search
     let queries = vec![
@@ -97,8 +130,11 @@ async fn main() {
     let t1 = Instant::now();
 
     for (qi, query) in queries.iter().cycle().take(mem_count / 2).enumerate() {
-        let raw = format!(r#"{{"jsonrpc":"2.0","id":{},"method":"tools/call","params":{{"name":"memory_search","arguments":{{"query":"{}","limit":5}}}}}}"#,
-            1000 + qi, query);
+        let raw = format!(
+            r#"{{"jsonrpc":"2.0","id":{},"method":"tools/call","params":{{"name":"memory_search","arguments":{{"query":"{}","limit":5}}}}}}"#,
+            1000 + qi,
+            query
+        );
 
         let t = Instant::now();
         let resp = handler.process_json(&raw);
@@ -119,18 +155,27 @@ async fn main() {
         }
     }
     let search_total = t1.elapsed();
-    eprintln!("Search: {} queries in {}ms (avg {}ms, p95 {}ms, max {}ms)",
-        mem_count / 2, search_total.as_millis(),
+    eprintln!(
+        "Search: {} queries in {}ms (avg {}ms, p95 {}ms, max {}ms)",
+        mem_count / 2,
+        search_total.as_millis(),
         search_times.iter().sum::<u64>() as f64 / search_times.len() as f64,
         percentile(&search_times, 95),
-        search_times.iter().max().unwrap_or(&0));
+        search_times.iter().max().unwrap_or(&0)
+    );
 
     if !search_sims.is_empty() {
         let avg_sim = search_sims.iter().sum::<f64>() / search_sims.len() as f64;
         let max_sim = search_sims.iter().fold(0.0f64, |a, b| a.max(*b));
         let above_05 = search_sims.iter().filter(|s| **s > 0.5).count();
-        eprintln!("Search quality: avg_sim={:.3}, max_sim={:.3}, >0.5: {}/{} ({:.0}%)",
-            avg_sim, max_sim, above_05, search_sims.len(), above_05 as f64 / search_sims.len() as f64 * 100.0);
+        eprintln!(
+            "Search quality: avg_sim={:.3}, max_sim={:.3}, >0.5: {}/{} ({:.0}%)",
+            avg_sim,
+            max_sim,
+            above_05,
+            search_sims.len(),
+            above_05 as f64 / search_sims.len() as f64 * 100.0
+        );
     }
 
     // Phase 3: Recall
@@ -183,7 +228,9 @@ async fn main() {
 }
 
 fn percentile(data: &[u64], p: u64) -> u64 {
-    if data.is_empty() { return 0; }
+    if data.is_empty() {
+        return 0;
+    }
     let mut sorted = data.to_vec();
     sorted.sort();
     let idx = ((p as f64 / 100.0) * (sorted.len() - 1) as f64).round() as usize;

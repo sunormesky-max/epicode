@@ -69,14 +69,10 @@ pub fn ensure_system_skills(engine: &SkillEngine) {
     let skip_update = std::env::var("EPICODE_SKIP_SKILL_SYNC").ok().as_deref() == Some("1");
 
     let existing = engine.list_system();
-    let existing_by_name: std::collections::HashMap<String, &Skill> = existing
-        .iter()
-        .map(|s| (s.name.clone(), s))
-        .collect();
-    let existing_by_id: std::collections::HashMap<u64, &Skill> = existing
-        .iter()
-        .map(|s| (s.id, s))
-        .collect();
+    let existing_by_name: std::collections::HashMap<String, &Skill> =
+        existing.iter().map(|s| (s.name.clone(), s)).collect();
+    let existing_by_id: std::collections::HashMap<u64, &Skill> =
+        existing.iter().map(|s| (s.id, s)).collect();
 
     for (idx, (name, desc, md)) in SYSTEM_SKILLS.iter().enumerate() {
         let target_id = 900_000 + idx as u64;
@@ -86,15 +82,31 @@ pub fn ensure_system_skills(engine: &SkillEngine) {
             let stored_hash = existing_skill.review_note.as_deref().unwrap_or("");
             if stored_hash != seed_hash {
                 if skip_update {
-                    tracing::info!("[SystemSkills] skip update '{}' (EPICODE_SKIP_SKILL_SYNC=1)", name);
+                    tracing::info!(
+                        "[SystemSkills] skip update '{}' (EPICODE_SKIP_SKILL_SYNC=1)",
+                        name
+                    );
                 } else {
-                    match engine.update(existing_skill.id, Some(md.to_string()), Some("1.0.0".to_string())) {
+                    match engine.update(
+                        existing_skill.id,
+                        Some(md.to_string()),
+                        Some("1.0.0".to_string()),
+                    ) {
                         Ok(_) => {
                             let _ = engine.set_description(existing_skill.id, desc.to_string());
-                            engine.set_system_review_note(existing_skill.id, format!("seed:{}", seed_hash));
-                            tracing::info!("[SystemSkills] updated '{}' (id={}) — content/desc changed", name, existing_skill.id);
+                            engine.set_system_review_note(
+                                existing_skill.id,
+                                format!("seed:{}", seed_hash),
+                            );
+                            tracing::info!(
+                                "[SystemSkills] updated '{}' (id={}) — content/desc changed",
+                                name,
+                                existing_skill.id
+                            );
                         }
-                        Err(e) => tracing::warn!("[SystemSkills] failed to update '{}': {}", name, e),
+                        Err(e) => {
+                            tracing::warn!("[SystemSkills] failed to update '{}': {}", name, e)
+                        }
                     }
                 }
             } else {
@@ -107,7 +119,11 @@ pub fn ensure_system_skills(engine: &SkillEngine) {
         }
 
         if existing_by_id.contains_key(&target_id) {
-            tracing::warn!("[SystemSkills] id {} occupied by different skill, skipping '{}'", target_id, name);
+            tracing::warn!(
+                "[SystemSkills] id {} occupied by different skill, skipping '{}'",
+                target_id,
+                name
+            );
             continue;
         }
 
@@ -118,9 +134,14 @@ pub fn ensure_system_skills(engine: &SkillEngine) {
     }
 
     // S2: 描述批量对齐(SKIP门控之外 — 精写触发描述对全部已装系统技能生效, 单persist防风暴)
-    let desc_pairs: Vec<(u64, String)> = SYSTEM_SKILLS.iter().filter_map(|(name, desc, _)| {
-        existing_by_name.get(*name).map(|s| (s.id, desc.to_string()))
-    }).collect();
+    let desc_pairs: Vec<(u64, String)> = SYSTEM_SKILLS
+        .iter()
+        .filter_map(|(name, desc, _)| {
+            existing_by_name
+                .get(*name)
+                .map(|s| (s.id, desc.to_string()))
+        })
+        .collect();
     let n = engine.backfill_descriptions(&desc_pairs);
     if n > 0 {
         tracing::info!("[SystemSkills] S2 backfilled {} trigger descriptions", n);
@@ -131,21 +152,34 @@ pub fn ensure_system_skills(engine: &SkillEngine) {
 /// 用于源文件更新后把新内容推入 SkillEngine DB (如 playbook A2.5 序修正)
 pub fn force_sync_system_skills(engine: &SkillEngine) {
     let existing = engine.list_system();
-    let existing_by_name: std::collections::HashMap<String, &Skill> = existing
-        .iter().map(|s| (s.name.clone(), s)).collect();
+    let existing_by_name: std::collections::HashMap<String, &Skill> =
+        existing.iter().map(|s| (s.name.clone(), s)).collect();
     for (idx, (name, desc, md)) in SYSTEM_SKILLS.iter().enumerate() {
         let target_id = 900_000 + idx as u64;
         let seed_hash = content_hash(&format!("{}|{}", md, desc));
         if let Some(&existing_skill) = existing_by_name.get(*name) {
             let stored_hash = existing_skill.review_note.as_deref().unwrap_or("");
             if stored_hash != seed_hash {
-                match engine.update(existing_skill.id, Some(md.to_string()), Some("1.0.0".to_string())) {
+                match engine.update(
+                    existing_skill.id,
+                    Some(md.to_string()),
+                    Some("1.0.0".to_string()),
+                ) {
                     Ok(_) => {
                         let _ = engine.set_description(existing_skill.id, desc.to_string());
-                        let _ = engine.set_system_review_note(existing_skill.id, format!("seed:{}", seed_hash));
-                        tracing::info!("[SystemSkills] FORCE updated '{}' (id={})", name, existing_skill.id);
+                        let _ = engine.set_system_review_note(
+                            existing_skill.id,
+                            format!("seed:{}", seed_hash),
+                        );
+                        tracing::info!(
+                            "[SystemSkills] FORCE updated '{}' (id={})",
+                            name,
+                            existing_skill.id
+                        );
                     }
-                    Err(e) => tracing::warn!("[SystemSkills] force update '{}' failed: {}", name, e),
+                    Err(e) => {
+                        tracing::warn!("[SystemSkills] force update '{}' failed: {}", name, e)
+                    }
                 }
             }
         } else {

@@ -29,8 +29,7 @@ impl PulseEngine {
         let snapshot: HashMap<TetraId, &crate::domain::tetra::Tetrahedron> =
             all.iter().map(|t| (t.id, t)).collect();
 
-        let origin_tetra = snapshot.get(&origin)
-            .ok_or("origin not found")?;
+        let origin_tetra = snapshot.get(&origin).ok_or("origin not found")?;
 
         let mut visited_set: HashSet<TetraId> = HashSet::new();
         visited_set.insert(origin);
@@ -48,15 +47,19 @@ impl PulseEngine {
         };
 
         for (tid, hop) in &cluster_tetras {
-            if !visited_set.insert(*tid) { continue; }
+            if !visited_set.insert(*tid) {
+                continue;
+            }
             visited.push(*tid);
 
             if let Some(nt) = snapshot.get(tid) {
                 collected_hashes.push(nt.data.content_hash);
 
                 let sim = crate::engine::vector::VectorLayer::best_similarity(
-                    &origin_tetra.data.embedding, &origin_tetra.data.labels,
-                    &nt.data.embedding, &nt.data.labels,
+                    &origin_tetra.data.embedding,
+                    &origin_tetra.data.labels,
+                    &nt.data.embedding,
+                    &nt.data.labels,
                 );
 
                 if *hop <= 1 && sim > 0.3 {
@@ -65,8 +68,12 @@ impl PulseEngine {
 
                 mass_updates.push((*tid, 0.02 * sim.max(0.1)));
 
-                kg.add_relation(origin, *tid,
-                    crate::engine::knowledge::RelationType::Related, sim.max(0.1));
+                kg.add_relation(
+                    origin,
+                    *tid,
+                    crate::engine::knowledge::RelationType::Related,
+                    sim.max(0.1),
+                );
             }
         }
 
@@ -82,12 +89,17 @@ impl PulseEngine {
                     let b = visited[j];
                     if let (Some(ta), Some(tb)) = (snapshot.get(&a), snapshot.get(&b)) {
                         let sim = crate::engine::vector::VectorLayer::best_similarity(
-                            &ta.data.embedding, &ta.data.labels,
-                            &tb.data.embedding, &tb.data.labels,
+                            &ta.data.embedding,
+                            &ta.data.labels,
+                            &tb.data.embedding,
+                            &tb.data.labels,
                         );
-                        kg.add_relation(a, b,
+                        kg.add_relation(
+                            a,
+                            b,
                             crate::engine::knowledge::RelationType::SimilarTo,
-                            (sim + boost).min(1.0));
+                            (sim + boost).min(1.0),
+                        );
                     }
                 }
             }
@@ -157,8 +169,12 @@ impl PulseEngine {
                 report.data_collected.push(t.data.embedding.clone());
                 report.content_hashes.push(t.data.content_hash);
 
-                kg.add_relation(origin, *tid,
-                    crate::engine::knowledge::RelationType::Related, 0.5);
+                kg.add_relation(
+                    origin,
+                    *tid,
+                    crate::engine::knowledge::RelationType::Related,
+                    0.5,
+                );
             }
         }
 
@@ -168,13 +184,20 @@ impl PulseEngine {
 
         tracing::info!(
             "[Pulse] star-topology from port {} (layer {:?}): visited {} tetras, returned={}",
-            port_vid, layer, report.tetras_visited, report.returned
+            port_vid,
+            layer,
+            report.tetras_visited,
+            report.returned
         );
 
         Ok(report)
     }
 
-    fn bfs_cluster_from_port(space: &Space, port_vid: VertexId, max_hops: usize) -> Vec<(TetraId, usize)> {
+    fn bfs_cluster_from_port(
+        space: &Space,
+        port_vid: VertexId,
+        max_hops: usize,
+    ) -> Vec<(TetraId, usize)> {
         let seeds = space.tetras_connected_to_port(port_vid);
         if seeds.is_empty() {
             return vec![];
@@ -191,7 +214,9 @@ impl PulseEngine {
         }
 
         while let Some((current, dist)) = queue.pop_front() {
-            if dist >= max_hops { continue; }
+            if dist >= max_hops {
+                continue;
+            }
             for nid in space.neighbors_of(current) {
                 if visited.insert(nid) {
                     results.push((nid, dist + 1));
@@ -224,8 +249,25 @@ mod tests {
             let core = Point3::new(i as f64 * 1.0, 0.0, 0.0);
             let pos = Tetrahedron::compute_vertices(core);
             let t = Tetrahedron {
-                id: 0, vertex_ids: [0; 4], core,
-                data: MemoryPayload { content: text.to_string(), content_hash: i as u64, labels: labels.clone(), timestamp: 0, aliases: vec![], embedding: vec![], importance: 1.0, enforced: false, rationale: None, access_count: 0, memory_type: None, identity_stamp: None, source_agent: None, ..Default::default() },
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: MemoryPayload {
+                    content: text.to_string(),
+                    content_hash: i as u64,
+                    labels: labels.clone(),
+                    timestamp: 0,
+                    aliases: vec![],
+                    embedding: vec![],
+                    importance: 1.0,
+                    enforced: false,
+                    rationale: None,
+                    access_count: 0,
+                    memory_type: None,
+                    identity_stamp: None,
+                    source_agent: None,
+                    ..Default::default()
+                },
                 mass: 1.0,
             };
             space.add_tetrahedron(&t, &pos).unwrap();
@@ -237,8 +279,12 @@ mod tests {
     #[test]
     fn pulse_visits_origin() {
         let (space, kg) = setup();
-        let r = PulseEngine::send(&space, &kg, PulseType::Neural { temperature: 0.8 }, 0, 5).unwrap();
-        assert!(r.data.visited_tetras.len() >= 1, "pulse should visit at least origin");
+        let r =
+            PulseEngine::send(&space, &kg, PulseType::Neural { temperature: 0.8 }, 0, 5).unwrap();
+        assert!(
+            r.data.visited_tetras.len() >= 1,
+            "pulse should visit at least origin"
+        );
     }
 
     #[test]
@@ -259,26 +305,42 @@ mod tests {
         );
         let verts = Tetrahedron::compute_vertices(center);
         let t = Tetrahedron {
-            id: 0, vertex_ids: [0; 4], core: center,
+            id: 0,
+            vertex_ids: [0; 4],
+            core: center,
             data: MemoryPayload {
-                content: "star pulse test".into(), content_hash: 999, labels: vec!["test".into()],
-                timestamp: 0, aliases: vec![], embedding: vec![0.5; 4], importance: 1.0,
-                enforced: false, rationale: None, access_count: 0, memory_type: None,
-                identity_stamp: None, source_agent: None,
-            valid_from: 0, valid_to: None,
-            expired_at: None, invalidated_at: None, memory_class: None,
-            last_reviewed_ts: None,
+                content: "star pulse test".into(),
+                content_hash: 999,
+                labels: vec!["test".into()],
+                timestamp: 0,
+                aliases: vec![],
+                embedding: vec![0.5; 4],
+                importance: 1.0,
+                enforced: false,
+                rationale: None,
+                access_count: 0,
+                memory_type: None,
+                identity_stamp: None,
+                source_agent: None,
+                valid_from: 0,
+                valid_to: None,
+                expired_at: None,
+                invalidated_at: None,
+                memory_class: None,
+                last_reviewed_ts: None,
             },
             mass: 1.0,
         };
         let tid = space.add_tetrahedron(&t, &verts).unwrap();
 
         let tet = space.get_tetrahedron(tid).unwrap();
-        assert!(tet.vertex_ids.contains(&port_vid), "tetra should share port vertex");
+        assert!(
+            tet.vertex_ids.contains(&port_vid),
+            "tetra should share port vertex"
+        );
 
-        let report = PulseEngine::send_from_port(
-            &space, &kg, port_vid, CylinderLayer::Instinct, 3,
-        ).unwrap();
+        let report =
+            PulseEngine::send_from_port(&space, &kg, port_vid, CylinderLayer::Instinct, 3).unwrap();
 
         assert!(report.returned, "pulse should return to port");
         assert!(report.tetras_visited >= 1, "should visit at least 1 tetra");
@@ -293,6 +355,9 @@ mod tests {
         let (port_vid, _) = ports[0];
 
         let result = PulseEngine::send_from_port(&space, &kg, port_vid, CylinderLayer::Instinct, 3);
-        assert!(result.is_err(), "should fail when no tetra connected to port");
+        assert!(
+            result.is_err(),
+            "should fail when no tetra connected to port"
+        );
     }
 }

@@ -22,7 +22,9 @@ impl EmbeddingService {
         let api_key = std::env::var("EMBEDDING_API_KEY")
             .or_else(|_| std::env::var("SILICONFLOW_API_KEY"))
             .unwrap_or_default();
-        let is_ollama = api_url.contains("11434") || api_url.contains("localhost") || api_url.contains("127.0.0.1");
+        let is_ollama = api_url.contains("11434")
+            || api_url.contains("localhost")
+            || api_url.contains("127.0.0.1");
 
         Self {
             client: ureq::AgentBuilder::new().build(),
@@ -52,9 +54,12 @@ impl EmbeddingService {
             }
         }
 
-        let is_ollama = self.api_url.contains("11434") || self.api_url.contains("localhost") || self.api_url.contains("127.0.0.1");
+        let is_ollama = self.api_url.contains("11434")
+            || self.api_url.contains("localhost")
+            || self.api_url.contains("127.0.0.1");
 
-        let mut req = self.client
+        let mut req = self
+            .client
             .post(&self.api_url)
             .timeout(std::time::Duration::from_secs(3))
             .set("Content-Type", "application/json");
@@ -77,21 +82,26 @@ impl EmbeddingService {
 
         // 瞬时网络错误重试 1 次（500ms 间隔），避免抖动导致静默空 embedding
         let resp: serde_json::Value = match req.send_json(body.clone()) {
-            Ok(r) => r.into_json().map_err(|e| format!("embedding JSON: {}", e))?,
+            Ok(r) => r
+                .into_json()
+                .map_err(|e| format!("embedding JSON: {}", e))?,
             Err(e) => {
                 let is_transient = matches!(e, ureq::Error::Transport(_));
                 if is_transient {
                     tracing::warn!("[Embedding] transient error ({}), retrying after 500ms", e);
                     std::thread::sleep(std::time::Duration::from_millis(500));
                     // 重建请求（ureq Request 被 send_json 消耗）
-                    let mut retry_req = self.client
+                    let mut retry_req = self
+                        .client
                         .post(&self.api_url)
                         .timeout(std::time::Duration::from_secs(3))
                         .set("Content-Type", "application/json");
                     if !self.api_key.is_empty() {
-                        retry_req = retry_req.set("Authorization", &format!("Bearer {}", self.api_key));
+                        retry_req =
+                            retry_req.set("Authorization", &format!("Bearer {}", self.api_key));
                     }
-                    retry_req.send_json(body)
+                    retry_req
+                        .send_json(body)
                         .map_err(|e| format!("embedding HTTP retry: {}", e))?
                         .into_json()
                         .map_err(|e| format!("embedding JSON: {}", e))?
@@ -127,7 +137,9 @@ impl EmbeddingService {
             cache.insert(truncated.clone(), embedding.clone());
             order.push(truncated);
             while cache.len() > 100 {
-                if order.is_empty() { break; }
+                if order.is_empty() {
+                    break;
+                }
                 let old = order.remove(0);
                 cache.remove(&old);
             }
@@ -166,12 +178,18 @@ mod tests {
 
     #[test]
     fn cosine_empty_vectors() {
-        assert_eq!(super::super::vector::VectorLayer::cosine_similarity(&[], &[]), 0.0);
+        assert_eq!(
+            super::super::vector::VectorLayer::cosine_similarity(&[], &[]),
+            0.0
+        );
     }
 
     #[test]
     fn cosine_different_lengths() {
-        assert_eq!(super::super::vector::VectorLayer::cosine_similarity(&[1.0], &[1.0, 2.0]), 0.0);
+        assert_eq!(
+            super::super::vector::VectorLayer::cosine_similarity(&[1.0], &[1.0, 2.0]),
+            0.0
+        );
     }
 
     #[test]
@@ -198,7 +216,9 @@ mod tests {
         let emb_b = vec![0.9, 0.1, 0.0];
         let labels_a = vec!["rust".to_string()];
         let labels_b = vec!["python".to_string()];
-        let sim = super::super::vector::VectorLayer::best_similarity(&emb_a, &labels_a, &emb_b, &labels_b);
+        let sim = super::super::vector::VectorLayer::best_similarity(
+            &emb_a, &labels_a, &emb_b, &labels_b,
+        );
         assert!(sim > 0.8);
     }
 
@@ -206,7 +226,8 @@ mod tests {
     fn best_sim_falls_back_to_labels() {
         let labels_a = vec!["rust".to_string()];
         let labels_b = vec!["rust".to_string()];
-        let sim = super::super::vector::VectorLayer::best_similarity(&[], &labels_a, &[], &labels_b);
+        let sim =
+            super::super::vector::VectorLayer::best_similarity(&[], &labels_a, &[], &labels_b);
         assert!((sim - 1.0).abs() < 1e-10);
     }
 

@@ -18,22 +18,38 @@
 //! - [`admin`]        管理端 + 静态入口（panel / swagger / openapi / smrp-spec）
 //! - [`mcp_endpoint`] HTTP /mcp JSON-RPC 端点
 
-#[path = "cloud/admin.rs"] mod admin;
-#[path = "cloud/archive.rs"] mod archive;
-#[path = "cloud/auth.rs"] mod auth;
-#[path = "cloud/health.rs"] mod health;
-#[path = "cloud/helpers.rs"] mod helpers;
-#[path = "cloud/identity.rs"] mod identity;
-#[path = "cloud/mcp_endpoint.rs"] mod mcp_endpoint;
-#[path = "cloud/memory.rs"] mod memory;
-#[path = "cloud/runtime.rs"] mod runtime;
-#[path = "cloud/consciousness.rs"] mod consciousness;
-#[path = "cloud/skill.rs"] mod skill;
-#[path = "cloud/state.rs"] mod state;
-#[path = "cloud/subaccount.rs"] mod subaccount;
-#[path = "cloud/apikey.rs"] mod apikey;
-#[path = "cloud/library.rs"] mod library;
-#[path = "cloud/tcp.rs"] mod tcp;
+#[path = "cloud/admin.rs"]
+mod admin;
+#[path = "cloud/apikey.rs"]
+mod apikey;
+#[path = "cloud/archive.rs"]
+mod archive;
+#[path = "cloud/auth.rs"]
+mod auth;
+#[path = "cloud/consciousness.rs"]
+mod consciousness;
+#[path = "cloud/health.rs"]
+mod health;
+#[path = "cloud/helpers.rs"]
+mod helpers;
+#[path = "cloud/identity.rs"]
+mod identity;
+#[path = "cloud/library.rs"]
+mod library;
+#[path = "cloud/mcp_endpoint.rs"]
+mod mcp_endpoint;
+#[path = "cloud/memory.rs"]
+mod memory;
+#[path = "cloud/runtime.rs"]
+mod runtime;
+#[path = "cloud/skill.rs"]
+mod skill;
+#[path = "cloud/state.rs"]
+mod state;
+#[path = "cloud/subaccount.rs"]
+mod subaccount;
+#[path = "cloud/tcp.rs"]
+mod tcp;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -57,9 +73,7 @@ use tcp::run_tcp_server;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
-        .with_env_filter(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into())
-        )
+        .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()))
         .init();
 
     tracing::info!("Epicode Cloud v1.0.0 — starting...");
@@ -67,14 +81,14 @@ async fn main() {
     let admin_key = std::env::var("TETRAMEM_ADMIN_KEY")
         .expect("FATAL: TETRAMEM_ADMIN_KEY environment variable must be set");
 
-    let listen_addr = std::env::var("TETRAMEM_LISTEN_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:9111".into());
+    let listen_addr =
+        std::env::var("TETRAMEM_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9111".into());
 
     let cors_origin = std::env::var("TETRAMEM_CORS_ORIGIN")
         .unwrap_or_else(|e| { tracing::warn!("[CORS] TETRAMEM_CORS_ORIGIN not set or invalid ({}), falling back to https://epicode.cn", e); "https://epicode.cn".into() });
 
     let data_dir = std::path::PathBuf::from(
-        std::env::var("TETRAMEM_DATA_DIR").unwrap_or_else(|_| "data".into())
+        std::env::var("TETRAMEM_DATA_DIR").unwrap_or_else(|_| "data".into()),
     );
     if let Err(e) = std::fs::create_dir_all(&data_dir) {
         tracing::error!("FATAL: cannot create data dir {:?}: {}", data_dir, e);
@@ -85,13 +99,27 @@ async fn main() {
     // L1 图书馆: 全局库(独立SQLite, 复用共享VectorLayer — 零额外模型内存)
     let library_state = {
         let lib_db = std::path::PathBuf::from(
-            std::env::var("TETRAMEM_DATA_DIR").unwrap_or_else(|_| "/var/lib/tetramem".to_string()))
-            .join("library.db");
+            std::env::var("TETRAMEM_DATA_DIR").unwrap_or_else(|_| "/var/lib/tetramem".to_string()),
+        )
+        .join("library.db");
         match epicode::engine::library::LibraryStore::open(&lib_db, shared_vector.clone()) {
-            Ok(ls) => { tracing::info!("[Library] store ready ({} chunks): {}", ls.chunk_count(), lib_db.display()); std::sync::Arc::new(ls) }
+            Ok(ls) => {
+                tracing::info!(
+                    "[Library] store ready ({} chunks): {}",
+                    ls.chunk_count(),
+                    lib_db.display()
+                );
+                std::sync::Arc::new(ls)
+            }
             Err(e) => {
                 tracing::error!("[Library] open failed: {} — degraded memory mode", e);
-                std::sync::Arc::new(epicode::engine::library::LibraryStore::open(std::path::Path::new(":memory:"), shared_vector.clone()).expect("memory library"))
+                std::sync::Arc::new(
+                    epicode::engine::library::LibraryStore::open(
+                        std::path::Path::new(":memory:"),
+                        shared_vector.clone(),
+                    )
+                    .expect("memory library"),
+                )
             }
         }
     };
@@ -105,7 +133,8 @@ async fn main() {
 
     let pub_skills_dir = data_dir.join("pub_skills");
     let pub_skills = {
-        let pub_storage = Arc::new(StorageManager::new(&pub_skills_dir).expect("pub_skills storage init failed"));
+        let pub_storage =
+            Arc::new(StorageManager::new(&pub_skills_dir).expect("pub_skills storage init failed"));
         Arc::new(SkillEngine::new(pub_storage))
     };
     // 紧急修复：启动时 set_vector 触发 254 技能全量 reindex，在主线程同步执行死锁。
@@ -144,10 +173,12 @@ async fn main() {
 
     let rate_limits: Arc<Mutex<HashMap<String, RateBucket>>> = Arc::new(Mutex::new(HashMap::new()));
     let api_call_counts: Arc<Mutex<HashMap<String, u64>>> = Arc::new(Mutex::new(HashMap::new()));
-    let api_calls_daily: Arc<Mutex<HashMap<String, HashMap<String, u64>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let api_calls_daily: Arc<Mutex<HashMap<String, HashMap<String, u64>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     // 智能化突破：创建认知洞察广播通道
-    let (insight_tx, _insight_rx) = tokio::sync::broadcast::channel::<epicode::engine::insight::InsightEvent>(256);
+    let (insight_tx, _insight_rx) =
+        tokio::sync::broadcast::channel::<epicode::engine::insight::InsightEvent>(256);
     // 把 insight_tx 注入所有用户的引擎，让认知引擎能 emit 洞察事件
     {
         let tx_clone = insight_tx.clone();
@@ -180,11 +211,19 @@ async fn main() {
     ];
     let cors = CorsLayer::new()
         .allow_origin([
-            cors_origin.parse::<axum::http::HeaderValue>().unwrap_or_else(|_| "https://epicode.cn".parse().unwrap()),
-            "http://localhost:3000".parse().unwrap(),  // 本地 dev（kimi #11）
+            cors_origin
+                .parse::<axum::http::HeaderValue>()
+                .unwrap_or_else(|_| "https://epicode.cn".parse().unwrap()),
+            "http://localhost:3000".parse().unwrap(), // 本地 dev（kimi #11）
             "http://127.0.0.1:3000".parse().unwrap(),
         ])
-        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE, axum::http::Method::OPTIONS])
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::PUT,
+            axum::http::Method::DELETE,
+            axum::http::Method::OPTIONS,
+        ])
         .allow_headers(allowed_headers);
 
     let app = Router::new()
@@ -211,7 +250,10 @@ async fn main() {
         .route("/v1/library/acl", post(library::set_acl))
         .route("/v1/library/ingest", post(library::ingest))
         .route("/v1/library/search", post(library::search))
-        .route("/v1/library/requests", post(library::submit_request).get(library::list_requests))
+        .route(
+            "/v1/library/requests",
+            post(library::submit_request).get(library::list_requests),
+        )
         .route("/v1/library/requests/handle", post(library::handle_request))
         .route("/v1/library/visibility", post(library::set_visibility))
         .route("/v1/search", post(memory::search))
@@ -223,29 +265,61 @@ async fn main() {
         .route("/v1/graph/analysis", get(memory::graph_analysis))
         .route("/v1/graph/export", get(memory::graph_export))
         .route("/v1/stats", get(memory::user_stats))
-        .route("/v1/identity", get(identity::user_identity).put(identity::update_identity_http))
+        .route(
+            "/v1/identity",
+            get(identity::user_identity).put(identity::update_identity_http),
+        )
         .route("/v1/personality/export", get(memory::export_personality))
         .route("/v1/personality/import", post(memory::import_personality))
         .route("/v1/knowledge/cards", get(memory::knowledge_cards))
         .route("/v1/identity/confirm", post(identity::confirm_identity))
         .route("/v1/identity/step", post(identity::identity_step_http))
-        .route("/v1/identity/finalize", post(identity::identity_finalize_http))
+        .route(
+            "/v1/identity/finalize",
+            post(identity::identity_finalize_http),
+        )
         .route("/v1/timeline", get(memory::timeline))
-        .route("/v1/memories/:id", get(memory::get_memory).delete(memory::delete_memory).put(memory::update_memory_content))
+        .route(
+            "/v1/memories/:id",
+            get(memory::get_memory)
+                .delete(memory::delete_memory)
+                .put(memory::update_memory_content),
+        )
         .route("/v1/memories/:id/forget", post(memory::forget_memory))
-        .route("/v1/memories/batch-delete", post(memory::batch_delete_memories))
-        .route("/v1/memories/bulk-quarantine", post(memory::bulk_quarantine))
+        .route(
+            "/v1/memories/batch-delete",
+            post(memory::batch_delete_memories),
+        )
+        .route(
+            "/v1/memories/bulk-quarantine",
+            post(memory::bulk_quarantine),
+        )
         .route("/v1/memories/bulk-restore", post(memory::bulk_restore))
         .route("/v1/memories/noise-stats", get(memory::noise_stats))
-        .route("/v1/memories/noise-candidates", get(memory::noise_candidates))
+        .route(
+            "/v1/memories/noise-candidates",
+            get(memory::noise_candidates),
+        )
         .route("/v1/kg/quality", get(memory::kg_quality))
         .route("/v1/operations/dry-run", post(memory::operations_dry_run))
         .route("/v1/operations/confirm", post(memory::operations_confirm))
-        .route("/v1/operations/audit-log", get(memory::operations_audit_log))
+        .route(
+            "/v1/operations/audit-log",
+            get(memory::operations_audit_log),
+        )
         // P4-2: Contradiction Queue (矛盾队列)
-        .route("/v1/memories/contradictions", post(memory::list_contradictions))
-        .route("/v1/memories/contradictions/resolve", post(memory::resolve_contradiction))
-        .route("/v1/memories/contradictions/archive", post(memory::archive_contradiction))
+        .route(
+            "/v1/memories/contradictions",
+            post(memory::list_contradictions),
+        )
+        .route(
+            "/v1/memories/contradictions/resolve",
+            post(memory::resolve_contradiction),
+        )
+        .route(
+            "/v1/memories/contradictions/archive",
+            post(memory::archive_contradiction),
+        )
         // P4-3: Project Switch (项目隔离)
         .route("/v1/projects", get(memory::list_projects))
         .route("/v1/projects/switch", post(memory::switch_project))
@@ -271,7 +345,12 @@ async fn main() {
         .route("/v1/docs", get(memory::list_docs))
         .route("/v1/archive/tree", get(archive::archive_tree))
         .route("/v1/archive/node", post(archive::archive_create_node))
-        .route("/v1/archive/node/:id", get(archive::archive_get_node).put(archive::archive_edit_node).delete(archive::archive_delete_node))
+        .route(
+            "/v1/archive/node/:id",
+            get(archive::archive_get_node)
+                .put(archive::archive_edit_node)
+                .delete(archive::archive_delete_node),
+        )
         .route("/v1/archive/merge", post(archive::archive_merge))
         .route("/v1/archive/move", post(archive::archive_move))
         .route("/v1/archive/import", post(archive::archive_import))
@@ -280,48 +359,103 @@ async fn main() {
         .route("/admin/stats", get(admin::admin_stats))
         .route("/admin/users/list", get(admin::admin_users_list))
         .route("/admin/users/:user_id", get(admin::admin_user_detail))
-        .route("/admin/users/:user_id/reset-key", post(admin::admin_reset_key))
-        .route("/admin/users/:user_id/set-password", post(admin::admin_set_password))
-        .route("/admin/users/:user_id/set-plan", post(admin::admin_set_plan))
-        .route("/admin/users/:user_id/delete", post(admin::admin_delete_user))
-        .route("/admin/users/:user_id/memories/:id/purge", post(admin::admin_purge_memory))
-        .route("/admin/invites/generate", post(admin::admin_generate_invites))
+        .route(
+            "/admin/users/:user_id/reset-key",
+            post(admin::admin_reset_key),
+        )
+        .route(
+            "/admin/users/:user_id/set-password",
+            post(admin::admin_set_password),
+        )
+        .route(
+            "/admin/users/:user_id/set-plan",
+            post(admin::admin_set_plan),
+        )
+        .route(
+            "/admin/users/:user_id/delete",
+            post(admin::admin_delete_user),
+        )
+        .route(
+            "/admin/users/:user_id/memories/:id/purge",
+            post(admin::admin_purge_memory),
+        )
+        .route(
+            "/admin/invites/generate",
+            post(admin::admin_generate_invites),
+        )
         .route("/admin/invites/list", get(admin::admin_list_invites))
         .route("/admin/backup", post(admin::admin_backup_all))
         .route("/admin/backup/:user_id", post(admin::admin_backup_user))
-        .route("/admin/backups/:user_id", get(admin::admin_list_user_backups))
-        .route("/admin/purge-pub-skills", post(admin::admin_purge_pub_skills))
+        .route(
+            "/admin/backups/:user_id",
+            get(admin::admin_list_user_backups),
+        )
+        .route(
+            "/admin/purge-pub-skills",
+            post(admin::admin_purge_pub_skills),
+        )
         .route("/admin/reindex", post(admin::admin_reindex))
         .route("/admin/scavenge", post(admin::admin_scavenge))
         .route("/admin/skills/pending", get(admin::admin_pending_skills))
-        .route("/admin/skills/resync-system", post(admin::admin_resync_system_skills))
-        .route("/admin/skills/optimize-descriptions", post(admin::admin_optimize_descriptions))
-        .route("/admin/skills/:id/approve", post(admin::admin_approve_skill))
+        .route(
+            "/admin/skills/resync-system",
+            post(admin::admin_resync_system_skills),
+        )
+        .route(
+            "/admin/skills/optimize-descriptions",
+            post(admin::admin_optimize_descriptions),
+        )
+        .route(
+            "/admin/skills/:id/approve",
+            post(admin::admin_approve_skill),
+        )
         .route("/admin/skills/:id/reject", post(admin::admin_reject_skill))
         .route("/mcp", post(mcp_endpoint::mcp_endpoint))
         .route("/v1/subaccounts", get(subaccount::list_subaccounts))
-        .route("/v1/subaccounts/create", post(subaccount::create_subaccount))
-        .route("/v1/subaccounts/:user_id/revoke", post(subaccount::revoke_subaccount))
-        .route("/v1/skills", get(skill::list_skills).post(skill::create_skill))
+        .route(
+            "/v1/subaccounts/create",
+            post(subaccount::create_subaccount),
+        )
+        .route(
+            "/v1/subaccounts/:user_id/revoke",
+            post(subaccount::revoke_subaccount),
+        )
+        .route(
+            "/v1/skills",
+            get(skill::list_skills).post(skill::create_skill),
+        )
         .route("/v1/skills/pending", get(skill::list_pending_skills))
         .route("/v1/skills/search", post(skill::search_skills))
         .route("/v1/skills/public", get(skill::list_public_skills))
         .route("/v1/skills/explore", get(skill::explore_public_skills))
         .route("/v1/skills/public/:id/pull", post(skill::pull_public_skill))
-        .route("/v1/skills/:id", get(skill::get_skill).put(skill::update_skill).delete(skill::delete_skill))
+        .route(
+            "/v1/skills/:id",
+            get(skill::get_skill)
+                .put(skill::update_skill)
+                .delete(skill::delete_skill),
+        )
         .route("/v1/skills/:id/publish", post(skill::publish_skill))
         .route("/v1/skills/:id/link", post(skill::link_skill_memory))
-        .layer(middleware::from_fn_with_state(state.clone(), auth::auth_middleware))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::auth_middleware,
+        ))
         .layer(middleware::from_fn(security_headers_middleware))
         .layer(middleware::from_fn(helpers::request_id_middleware))
-        .layer(tower_http::limit::RequestBodyLimitLayer::new(2 * 1024 * 1024))
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(
+            2 * 1024 * 1024,
+        ))
         .layer(cors)
         .layer(TraceLayer::new_for_http());
 
     {
         // L1 cache-cap: prewarm可关(EPICODE_PREWARM_PRIMARY=0) — sunorme引擎3-4G驻留是0G主因
         // 关闭后引擎按需懒加载(首次访问时), 避免开机即占满内存
-        if std::env::var("EPICODE_PREWARM_PRIMARY").map(|v| v != "0").unwrap_or(true) {
+        if std::env::var("EPICODE_PREWARM_PRIMARY")
+            .map(|v| v != "0")
+            .unwrap_or(true)
+        {
             let mgr = user_mgr.clone();
             tokio::spawn(async move {
                 let _ = tokio::task::spawn_blocking(move || mgr.prewarm_primary()).await;
@@ -362,7 +496,10 @@ async fn main() {
                 .unwrap_or(false);
         if activated {
             use std::os::unix::io::FromRawFd;
-            tracing::info!("Epicode Cloud socket-activated: inheriting fd 3 (systemd holds {})", addr);
+            tracing::info!(
+                "Epicode Cloud socket-activated: inheriting fd 3 (systemd holds {})",
+                addr
+            );
             let std_l = unsafe { std::net::TcpListener::from_raw_fd(3) };
             std_l.set_nonblocking(true).ok();
             match tokio::net::TcpListener::from_std(std_l) {
@@ -417,19 +554,31 @@ async fn main() {
                     break;
                 }
                 // 压力感知驱逐 (2026-09-23): 可用内存吃紧时用10分钟短门槛提前回收半闲置引擎
-                let avail_mb = std::fs::read_to_string("/proc/meminfo").ok()
-                    .and_then(|s| s.lines().find(|l| l.starts_with("MemAvailable:"))
-                        .and_then(|l| l.split_whitespace().nth(1)
-                            .and_then(|v| v.parse::<u64>().ok())))
+                let avail_mb = std::fs::read_to_string("/proc/meminfo")
+                    .ok()
+                    .and_then(|s| {
+                        s.lines()
+                            .find(|l| l.starts_with("MemAvailable:"))
+                            .and_then(|l| {
+                                l.split_whitespace()
+                                    .nth(1)
+                                    .and_then(|v| v.parse::<u64>().ok())
+                            })
+                    })
                     .map(|kb| kb / 1024)
                     .unwrap_or(u64::MAX);
                 if avail_mb < 2800 {
-                    tracing::warn!("[evict-sweep] mem avail {}MB < 2800MB, pressure sweep (idle>600s)", avail_mb);
+                    tracing::warn!(
+                        "[evict-sweep] mem avail {}MB < 2800MB, pressure sweep (idle>600s)",
+                        avail_mb
+                    );
                     mgr.evict_idle_with(600, true);
                 } else {
                     mgr.evict_idle();
                 }
-                unsafe { malloc_trim(0); } // 每轮清扫后归还自由堆给OS
+                unsafe {
+                    malloc_trim(0);
+                } // 每轮清扫后归还自由堆给OS
             }
         });
     }
@@ -450,7 +599,8 @@ async fn main() {
                 // rate_limits: 清除窗口过期且计数为0的 bucket
                 {
                     let mut m = rl.lock();
-                    let cutoff = std::time::Instant::now() - std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS * 2);
+                    let cutoff = std::time::Instant::now()
+                        - std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS * 2);
                     m.retain(|_, bucket| bucket.window_start > cutoff || bucket.count > 0);
                 }
                 // api_call_counts: 保留最近活跃的 client_id（>0 且总量 ≤5000）
@@ -461,15 +611,23 @@ async fn main() {
                         sorted.sort_by(|a, b| b.1.cmp(&a.1));
                         sorted.truncate(5000);
                         m.clear();
-                        for (k, v) in sorted { m.insert(k, v); }
+                        for (k, v) in sorted {
+                            m.insert(k, v);
+                        }
                     }
                 }
                 // api_calls_daily: flush 到各用户 db + 只保留最近 90 天
                 {
                     let mut m = dc.lock();
                     // flush: 对每个 api_key，把当日计数写入对应用户的 db
-                    let entries: Vec<(String, Vec<(String, u64)>)> = m.iter()
-                        .map(|(api_key, daily)| (api_key.clone(), daily.iter().map(|(d,c)| (d.clone(), *c)).collect()))
+                    let entries: Vec<(String, Vec<(String, u64)>)> = m
+                        .iter()
+                        .map(|(api_key, daily)| {
+                            (
+                                api_key.clone(),
+                                daily.iter().map(|(d, c)| (d.clone(), *c)).collect(),
+                            )
+                        })
                         .collect();
                     // 清空内存（已 flush，下次从 db 读）
                     m.clear();
@@ -507,28 +665,32 @@ async fn main() {
         });
     }
 
-    if let Err(e) = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .with_graceful_shutdown(async {
-            #[cfg(unix)]
-            {
-                let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+    if let Err(e) = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async {
+        #[cfg(unix)]
+        {
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
                     .expect("failed to install SIGTERM handler");
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {
-                        tracing::info!("Received SIGINT, shutting down...");
-                    }
-                    _ = sigterm.recv() => {
-                        tracing::info!("Received SIGTERM, shutting down...");
-                    }
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("Received SIGINT, shutting down...");
+                }
+                _ = sigterm.recv() => {
+                    tracing::info!("Received SIGTERM, shutting down...");
                 }
             }
-            #[cfg(not(unix))]
-            {
-                tokio::signal::ctrl_c().await.ok();
-                tracing::info!("Shutting down...");
-            }
-        })
-        .await
+        }
+        #[cfg(not(unix))]
+        {
+            tokio::signal::ctrl_c().await.ok();
+            tracing::info!("Shutting down...");
+        }
+    })
+    .await
     {
         tracing::error!("Server error: {}", e);
     }
@@ -539,7 +701,10 @@ async fn main() {
         if active_tasks_counter.load(std::sync::atomic::Ordering::Relaxed) == 0 {
             break;
         }
-        tracing::info!("Waiting for {} active tasks...", active_tasks_counter.load(std::sync::atomic::Ordering::Relaxed));
+        tracing::info!(
+            "Waiting for {} active tasks...",
+            active_tasks_counter.load(std::sync::atomic::Ordering::Relaxed)
+        );
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
     user_mgr.final_save_all();

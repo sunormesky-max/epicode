@@ -1,5 +1,5 @@
-use std::collections::{HashMap, HashSet};
 use parking_lot::{Mutex, RwLock};
+use std::collections::{HashMap, HashSet};
 
 use crate::domain::space::Space;
 use crate::domain::tetra::TetraId;
@@ -17,10 +17,7 @@ pub struct IndexManager {
 }
 
 impl IndexManager {
-    pub fn new(
-        label_idx: HashMap<String, Vec<TetraId>>,
-        chash_idx: HashMap<u64, TetraId>,
-    ) -> Self {
+    pub fn new(label_idx: HashMap<String, Vec<TetraId>>, chash_idx: HashMap<u64, TetraId>) -> Self {
         Self {
             label_index: Mutex::new(label_idx),
             content_hash_index: Mutex::new(chash_idx),
@@ -104,7 +101,9 @@ impl IndexManager {
         while cache.len() > 500 {
             if let Some(old) = order.pop_front() {
                 cache.remove(&old);
-            } else { break; }
+            } else {
+                break;
+            }
         }
     }
 

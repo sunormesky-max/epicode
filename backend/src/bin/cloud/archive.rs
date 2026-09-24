@@ -17,8 +17,26 @@ pub async fn archive_tree(
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || scheduler.api_archive_tree()).await;
     match result {
-        Ok(tree) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "archive_tree", tree))),
-        Err(e) => { tracing::error!("archive_tree task error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "archive_tree", 500, "internal error"))) },
+        Ok(tree) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "archive_tree",
+                tree,
+            )),
+        ),
+        Err(e) => {
+            tracing::error!("archive_tree task error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "archive_tree",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -38,12 +56,45 @@ pub async fn archive_create_node(
 ) -> (StatusCode, Json<serde_json::Value>) {
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || {
-        scheduler.api_archive_create_node(req.parent_id, &req.node_type, &req.title, &req.content, req.category.as_deref())
-    }).await;
+        scheduler.api_archive_create_node(
+            req.parent_id,
+            &req.node_type,
+            &req.title,
+            &req.content,
+            req.category.as_deref(),
+        )
+    })
+    .await;
     match result {
-        Ok(Ok(id)) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "archive_create", serde_json::json!({"id": id})))),
-        Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "archive_create", 400, &e))),
-        Err(e) => { tracing::error!("archive_create task error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "archive_create", 500, "internal error"))) },
+        Ok(Ok(id)) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "archive_create",
+                serde_json::json!({"id": id}),
+            )),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "archive_create",
+                400,
+                &e,
+            )),
+        ),
+        Err(e) => {
+            tracing::error!("archive_create task error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "archive_create",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -66,31 +117,66 @@ pub async fn archive_get_node(
     match result {
         Ok(Some(payload)) => {
             // 从标签解析类型和分类
-            let node_type = payload.labels.iter()
+            let node_type = payload
+                .labels
+                .iter()
                 .find(|l| l.starts_with("archive."))
                 .map(|l| l.strip_prefix("archive.").unwrap_or(l).to_string())
                 .unwrap_or_else(|| "doc".to_string());
-            let category = payload.labels.iter()
+            let category = payload
+                .labels
+                .iter()
                 .find_map(|l| l.strip_prefix("category:"))
-                .unwrap_or("").to_string();
-            let status = if payload.labels.iter().any(|l| l == "archived") { "archived" }
-                else if payload.labels.iter().any(|l| l == "merged") { "merged" }
-                else { "active" };
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "archive_node", serde_json::json!({
-                "id": id,
-                "type": node_type,
-                "title": payload.content.lines().next().unwrap_or("").trim_start_matches("# ").to_string(),
-                "content": payload.content,
-                "category": category,
-                "chars": payload.content.len(),
-                "status": status,
-                "labels": payload.labels,
-                "timestamp": payload.timestamp,
-                "importance": payload.importance,
-            }))))
+                .unwrap_or("")
+                .to_string();
+            let status = if payload.labels.iter().any(|l| l == "archived") {
+                "archived"
+            } else if payload.labels.iter().any(|l| l == "merged") {
+                "merged"
+            } else {
+                "active"
+            };
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "archive_node",
+                    serde_json::json!({
+                        "id": id,
+                        "type": node_type,
+                        "title": payload.content.lines().next().unwrap_or("").trim_start_matches("# ").to_string(),
+                        "content": payload.content,
+                        "category": category,
+                        "chars": payload.content.len(),
+                        "status": status,
+                        "labels": payload.labels,
+                        "timestamp": payload.timestamp,
+                        "importance": payload.importance,
+                    }),
+                )),
+            )
         }
-        Ok(None) => (StatusCode::NOT_FOUND, Json(epicode::engine::smrp::envelope_err(&engine, "archive_node", 404, "node not found"))),
-        Err(e) => { tracing::error!("archive_node error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "archive_node", 500, "internal error"))) },
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "archive_node",
+                404,
+                "node not found",
+            )),
+        ),
+        Err(e) => {
+            tracing::error!("archive_node error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "archive_node",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -101,12 +187,44 @@ pub async fn archive_edit_node(
 ) -> (StatusCode, Json<serde_json::Value>) {
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || {
-        scheduler.api_archive_edit_node(id, req.title.as_deref(), req.content.as_deref(), req.category.as_deref())
-    }).await;
+        scheduler.api_archive_edit_node(
+            id,
+            req.title.as_deref(),
+            req.content.as_deref(),
+            req.category.as_deref(),
+        )
+    })
+    .await;
     match result {
-        Ok(Ok(())) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "archive_edit", serde_json::json!({"id": id})))),
-        Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "archive_edit", 400, &e))),
-        Err(e) => { tracing::error!("archive_edit task error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "archive_edit", 500, "internal error"))) },
+        Ok(Ok(())) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "archive_edit",
+                serde_json::json!({"id": id}),
+            )),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "archive_edit",
+                400,
+                &e,
+            )),
+        ),
+        Err(e) => {
+            tracing::error!("archive_edit task error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "archive_edit",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -115,13 +233,37 @@ pub async fn archive_delete_node(
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let scheduler = engine.scheduler.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        scheduler.api_archive_delete_node(id)
-    }).await;
+    let result = tokio::task::spawn_blocking(move || scheduler.api_archive_delete_node(id)).await;
     match result {
-        Ok(Ok(())) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "archive_delete", serde_json::json!({"id": id})))),
-        Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "archive_delete", 400, &e))),
-        Err(e) => { tracing::error!("archive_delete task error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "archive_delete", 500, "internal error"))) },
+        Ok(Ok(())) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "archive_delete",
+                serde_json::json!({"id": id}),
+            )),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "archive_delete",
+                400,
+                &e,
+            )),
+        ),
+        Err(e) => {
+            tracing::error!("archive_delete task error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "archive_delete",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -140,11 +282,38 @@ pub async fn archive_merge(
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || {
         scheduler.api_archive_merge(&req.source_ids, &req.title, req.category.as_deref())
-    }).await;
+    })
+    .await;
     match result {
-        Ok(Ok(id)) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "archive_merge", serde_json::json!({"id": id})))),
-        Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "archive_merge", 400, &e))),
-        Err(e) => { tracing::error!("archive_merge task error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "archive_merge", 500, "internal error"))) },
+        Ok(Ok(id)) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "archive_merge",
+                serde_json::json!({"id": id}),
+            )),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "archive_merge",
+                400,
+                &e,
+            )),
+        ),
+        Err(e) => {
+            tracing::error!("archive_merge task error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "archive_merge",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -161,11 +330,38 @@ pub async fn archive_move(
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || {
         scheduler.api_archive_move(req.node_id, req.new_parent_id)
-    }).await;
+    })
+    .await;
     match result {
-        Ok(Ok(())) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "archive_move", serde_json::json!({"id": req.node_id})))),
-        Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "archive_move", 400, &e))),
-        Err(e) => { tracing::error!("archive_move task error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "archive_move", 500, "internal error"))) },
+        Ok(Ok(())) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "archive_move",
+                serde_json::json!({"id": req.node_id}),
+            )),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "archive_move",
+                400,
+                &e,
+            )),
+        ),
+        Err(e) => {
+            tracing::error!("archive_move task error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "archive_move",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -201,8 +397,34 @@ pub async fn archive_import(
         Ok(serde_json::json!({"root_id": root_id, "project_id": project_id, "imported": imported, "count": imported.len()}))
     }).await;
     match result {
-        Ok(Ok(data)) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "archive_import", data))),
-        Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "archive_import", 400, &e))),
-        Err(e) => { tracing::error!("archive_import task error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "archive_import", 500, "internal error"))) },
+        Ok(Ok(data)) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "archive_import",
+                data,
+            )),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "archive_import",
+                400,
+                &e,
+            )),
+        ),
+        Err(e) => {
+            tracing::error!("archive_import task error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "archive_import",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }

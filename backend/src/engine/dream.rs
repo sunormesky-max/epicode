@@ -1,6 +1,6 @@
-use crate::engine::vector::VectorLayer;
 use crate::domain::space::Space;
 use crate::engine::knowledge::KnowledgeGraph;
+use crate::engine::vector::VectorLayer;
 #[derive(Debug, Clone)]
 pub struct DreamResult {
     pub memories_consolidated: usize,
@@ -15,7 +15,10 @@ pub struct DreamResult {
 pub struct DreamEngine;
 
 impl DreamEngine {
-    pub fn recompute_importance(space: &Space, access_counts: &std::collections::HashMap<u64, u32>) -> usize {
+    pub fn recompute_importance(
+        space: &Space,
+        access_counts: &std::collections::HashMap<u64, u32>,
+    ) -> usize {
         let tetras = space.all_tetrahedrons();
         let mut updated = 0;
         let now_ts = std::time::SystemTime::now()
@@ -39,9 +42,13 @@ impl DreamEngine {
             }
 
             let content_lower = t.data.content.to_lowercase();
-            if content_lower.contains("架构") || content_lower.contains("architecture")
-                || content_lower.contains("决策") || content_lower.contains("decision")
-                || content_lower.contains("关键") || content_lower.contains("critical") {
+            if content_lower.contains("架构")
+                || content_lower.contains("architecture")
+                || content_lower.contains("决策")
+                || content_lower.contains("decision")
+                || content_lower.contains("关键")
+                || content_lower.contains("critical")
+            {
                 new_importance = new_importance.max(2.0);
             }
 
@@ -70,32 +77,33 @@ impl DreamEngine {
         consolidate_depth: usize,
         dry_run: bool,
     ) -> DreamResult {
-        let tetras = {
-            let all = space.all_tetrahedrons();
-            // 巩固范围限幅：语料增长后单次全量巩固的工作集可达数 GB
-            // （2026-09-06/07 连续三晚 RSS 5-6.8G + swap 耗尽 + 三次规则重启，单夜 consolidated=10169）。
-            // 按小时轮转窗口，每周期最多处理 1500 条，多周期滚动覆盖全库——语义不变，仅限节奏。
-            const MAX_CONSOLIDATION_PER_CYCLE: usize = 1500;
-            if all.len() <= MAX_CONSOLIDATION_PER_CYCLE {
-                all
-            } else {
-                let hour_slot = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as usize
-                    / 3600;
-                let start = (hour_slot * MAX_CONSOLIDATION_PER_CYCLE) % all.len();
-                let mut window = Vec::with_capacity(MAX_CONSOLIDATION_PER_CYCLE);
-                for k in 0..MAX_CONSOLIDATION_PER_CYCLE {
-                    window.push(all[(start + k) % all.len()].clone());
-                }
-                tracing::info!(
+        let tetras =
+            {
+                let all = space.all_tetrahedrons();
+                // 巩固范围限幅：语料增长后单次全量巩固的工作集可达数 GB
+                // （2026-09-06/07 连续三晚 RSS 5-6.8G + swap 耗尽 + 三次规则重启，单夜 consolidated=10169）。
+                // 按小时轮转窗口，每周期最多处理 1500 条，多周期滚动覆盖全库——语义不变，仅限节奏。
+                const MAX_CONSOLIDATION_PER_CYCLE: usize = 1500;
+                if all.len() <= MAX_CONSOLIDATION_PER_CYCLE {
+                    all
+                } else {
+                    let hour_slot = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as usize
+                        / 3600;
+                    let start = (hour_slot * MAX_CONSOLIDATION_PER_CYCLE) % all.len();
+                    let mut window = Vec::with_capacity(MAX_CONSOLIDATION_PER_CYCLE);
+                    for k in 0..MAX_CONSOLIDATION_PER_CYCLE {
+                        window.push(all[(start + k) % all.len()].clone());
+                    }
+                    tracing::info!(
                     "[AutoDream] consolidation window: {}/{} tetras this cycle (rotating cap {})",
                     window.len(), all.len(), MAX_CONSOLIDATION_PER_CYCLE
                 );
-                window
-            }
-        };
+                    window
+                }
+            };
         if tetras.len() < 2 {
             return DreamResult {
                 memories_consolidated: tetras.len(),
@@ -122,7 +130,11 @@ impl DreamEngine {
             .unwrap_or_default()
             .as_secs() as f64;
         for t in &tetras {
-            let is_junk = t.data.labels.iter().any(|l| l == "junk" || l == "quarantine");
+            let is_junk = t
+                .data
+                .labels
+                .iter()
+                .any(|l| l == "junk" || l == "quarantine");
             let is_low_mass = t.mass < 0.1;
             let age_days = (now_ts - t.data.timestamp as f64) / 86400.0;
             let is_old_low_importance = age_days > 30.0 && t.data.importance < 0.3;
@@ -138,19 +150,34 @@ impl DreamEngine {
                 }
                 evicted_ids.push(t.id);
                 junk_evicted += 1;
-                if junk_evicted >= 10 { break; }
+                if junk_evicted >= 10 {
+                    break;
+                }
             }
         }
 
         if junk_evicted > 0 {
-            insights.push(format!("quarantined {} low-quality memories (no deletion)", junk_evicted));
+            insights.push(format!(
+                "quarantined {} low-quality memories (no deletion)",
+                junk_evicted
+            ));
         }
 
         // Refresh after eviction (only if we actually removed something)
-        let tetras = if junk_evicted > 0 && !dry_run { space.all_tetrahedrons() } else { tetras };
+        let tetras = if junk_evicted > 0 && !dry_run {
+            space.all_tetrahedrons()
+        } else {
+            tetras
+        };
 
         let non_meta: Vec<usize> = (0..tetras.len())
-            .filter(|i| !tetras[*i].data.labels.iter().any(|l| l.starts_with("meta-")))
+            .filter(|i| {
+                !tetras[*i]
+                    .data
+                    .labels
+                    .iter()
+                    .any(|l| l.starts_with("meta-"))
+            })
             .collect();
 
         // Phase 2: Find and merge high-similarity pairs (duplicates)
@@ -164,10 +191,14 @@ impl DreamEngine {
                 for wj in (wi + 1)..non_meta.len() {
                     let i = non_meta[wi];
                     let j = non_meta[wj];
-                    if merged_ids.contains(&tetras[i].id) || merged_ids.contains(&tetras[j].id) { continue; }
+                    if merged_ids.contains(&tetras[i].id) || merged_ids.contains(&tetras[j].id) {
+                        continue;
+                    }
                     let sim = VectorLayer::best_similarity(
-                        &tetras[i].data.embedding, &tetras[i].data.labels,
-                        &tetras[j].data.embedding, &tetras[j].data.labels,
+                        &tetras[i].data.embedding,
+                        &tetras[i].data.labels,
+                        &tetras[j].data.embedding,
+                        &tetras[j].data.labels,
                     );
                     if sim > merge_threshold {
                         merge_pairs.push((i, j, sim));
@@ -180,20 +211,28 @@ impl DreamEngine {
             // 全量扫描召回率~100% vs random sampling ~5%。
             for wi in 0..non_meta.len() {
                 let i = non_meta[wi];
-                if merged_ids.contains(&tetras[i].id) { continue; }
+                if merged_ids.contains(&tetras[i].id) {
+                    continue;
+                }
                 for wj in (wi + 1)..non_meta.len() {
                     let j = non_meta[wj];
-                    if merged_ids.contains(&tetras[j].id) { continue; }
+                    if merged_ids.contains(&tetras[j].id) {
+                        continue;
+                    }
                     let sim = VectorLayer::best_similarity(
-                        &tetras[i].data.embedding, &tetras[i].data.labels,
-                        &tetras[j].data.embedding, &tetras[j].data.labels,
+                        &tetras[i].data.embedding,
+                        &tetras[i].data.labels,
+                        &tetras[j].data.embedding,
+                        &tetras[j].data.labels,
                     );
                     if sim > merge_threshold {
                         merge_pairs.push((i, j, sim));
                     }
                 }
                 // 早退：找到足够多的合并对就停止
-                if merge_pairs.len() >= consolidate_depth * 3 { break; }
+                if merge_pairs.len() >= consolidate_depth * 3 {
+                    break;
+                }
             }
         }
 
@@ -202,8 +241,12 @@ impl DreamEngine {
         for (i, j, sim) in merge_pairs.iter().take(consolidate_depth) {
             let ta = &tetras[*i];
             let tb = &tetras[*j];
-            if merged_ids.contains(&ta.id) || merged_ids.contains(&tb.id) { continue; }
-            if space.get_tetrahedron(ta.id).is_none() || space.get_tetrahedron(tb.id).is_none() { continue; }
+            if merged_ids.contains(&ta.id) || merged_ids.contains(&tb.id) {
+                continue;
+            }
+            if space.get_tetrahedron(ta.id).is_none() || space.get_tetrahedron(tb.id).is_none() {
+                continue;
+            }
 
             let (keep_id, remove_id, _keep_mass) = if ta.mass >= tb.mass {
                 (ta.id, tb.id, ta.mass)
@@ -233,17 +276,32 @@ impl DreamEngine {
             merged_remove_ids.push(remove_id);
             duplicates_merged += 1;
 
-            insights.push(format!("superseded #{remove_id} into #{keep_id} (sim={sim:.3}, no deletion)"));
+            insights.push(format!(
+                "superseded #{remove_id} into #{keep_id} (sim={sim:.3}, no deletion)"
+            ));
         }
 
         if duplicates_merged > 0 {
-            insights.push(format!("consolidated {} duplicate pairs", duplicates_merged));
+            insights.push(format!(
+                "consolidated {} duplicate pairs",
+                duplicates_merged
+            ));
         }
 
         // Phase 3: Form connections for moderately similar pairs
-        let tetras = if !dry_run { space.all_tetrahedrons() } else { tetras };
+        let tetras = if !dry_run {
+            space.all_tetrahedrons()
+        } else {
+            tetras
+        };
         let non_meta: Vec<usize> = (0..tetras.len())
-            .filter(|i| !tetras[*i].data.labels.iter().any(|l| l.starts_with("meta-")))
+            .filter(|i| {
+                !tetras[*i]
+                    .data
+                    .labels
+                    .iter()
+                    .any(|l| l.starts_with("meta-"))
+            })
             .collect();
 
         let mut pairs: Vec<(usize, usize, f64)> = Vec::new();
@@ -253,8 +311,10 @@ impl DreamEngine {
                     let i = non_meta[wi];
                     let j = non_meta[wj];
                     let sim = VectorLayer::best_similarity(
-                        &tetras[i].data.embedding, &tetras[i].data.labels,
-                        &tetras[j].data.embedding, &tetras[j].data.labels,
+                        &tetras[i].data.embedding,
+                        &tetras[i].data.labels,
+                        &tetras[j].data.embedding,
+                        &tetras[j].data.labels,
                     );
                     if sim > replay_strength {
                         pairs.push((i, j, sim));
@@ -267,11 +327,19 @@ impl DreamEngine {
                 use rand::Rng;
                 let wi = rng.gen_range(0..non_meta.len());
                 let wj = rng.gen_range(0..non_meta.len());
-                if wi == wj { continue; }
-                let (i, j) = if wi < wj { (non_meta[wi], non_meta[wj]) } else { (non_meta[wj], non_meta[wi]) };
+                if wi == wj {
+                    continue;
+                }
+                let (i, j) = if wi < wj {
+                    (non_meta[wi], non_meta[wj])
+                } else {
+                    (non_meta[wj], non_meta[wi])
+                };
                 let sim = VectorLayer::best_similarity(
-                    &tetras[i].data.embedding, &tetras[i].data.labels,
-                    &tetras[j].data.embedding, &tetras[j].data.labels,
+                    &tetras[i].data.embedding,
+                    &tetras[i].data.labels,
+                    &tetras[j].data.embedding,
+                    &tetras[j].data.labels,
                 );
                 if sim > replay_strength {
                     pairs.push((i, j, sim));
@@ -286,9 +354,17 @@ impl DreamEngine {
             for &(i, j, sim) in pairs.iter().take(50) {
                 let id_i = tetras[i].id;
                 let id_j = tetras[j].id;
-                knowledge.add_relation(id_i, id_j, crate::engine::knowledge::RelationType::SimilarTo, sim);
+                knowledge.add_relation(
+                    id_i,
+                    id_j,
+                    crate::engine::knowledge::RelationType::SimilarTo,
+                    sim,
+                );
             }
-            tracing::info!("[Dream] Phase 3: created {} KG edges from semantic pairs", pairs.len().min(50));
+            tracing::info!(
+                "[Dream] Phase 3: created {} KG edges from semantic pairs",
+                pairs.len().min(50)
+            );
         }
 
         // Phase 4: Cluster analysis + central tetra
@@ -339,12 +415,32 @@ mod tests {
             ("hello there", vec!["greeting".to_string()]),
             ("goodbye moon", vec!["farewell".to_string()]),
             ("hello universe", vec!["greeting".to_string()]),
-        ].iter().enumerate() {
+        ]
+        .iter()
+        .enumerate()
+        {
             let core = Point3::new(i as f64, 0.0, 0.0);
             let pos = Tetrahedron::compute_vertices(core);
             let t = Tetrahedron {
-                id: 0, vertex_ids: [0; 4], core,
-                data: MemoryPayload { content: text.to_string(), content_hash: 0, labels: labels.clone(), timestamp: 0, aliases: vec![], embedding: vec![], importance: 1.0, enforced: false, rationale: None, access_count: 0, memory_type: None, identity_stamp: None, source_agent: None, ..Default::default() },
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: MemoryPayload {
+                    content: text.to_string(),
+                    content_hash: 0,
+                    labels: labels.clone(),
+                    timestamp: 0,
+                    aliases: vec![],
+                    embedding: vec![],
+                    importance: 1.0,
+                    enforced: false,
+                    rationale: None,
+                    access_count: 0,
+                    memory_type: None,
+                    identity_stamp: None,
+                    source_agent: None,
+                    ..Default::default()
+                },
                 mass: 1.0,
             };
             space.add_tetrahedron(&t, &pos).unwrap();
@@ -371,8 +467,25 @@ mod tests {
             let core = Point3::new(i as f64, 0.0, 0.0);
             let pos = Tetrahedron::compute_vertices(core);
             let t = Tetrahedron {
-                id: 0, vertex_ids: [0; 4], core,
-                data: MemoryPayload { content: String::new(), content_hash: 0, labels: vec!["same".to_string()], timestamp: 0, aliases: vec![], embedding: vec![], importance: 1.0, enforced: false, rationale: None, access_count: 0, memory_type: None, identity_stamp: None, source_agent: None, ..Default::default() },
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: MemoryPayload {
+                    content: String::new(),
+                    content_hash: 0,
+                    labels: vec!["same".to_string()],
+                    timestamp: 0,
+                    aliases: vec![],
+                    embedding: vec![],
+                    importance: 1.0,
+                    enforced: false,
+                    rationale: None,
+                    access_count: 0,
+                    memory_type: None,
+                    identity_stamp: None,
+                    source_agent: None,
+                    ..Default::default()
+                },
                 mass: 1.0,
             };
             space.add_tetrahedron(&t, &pos).unwrap();
@@ -381,7 +494,11 @@ mod tests {
         let result = DreamEngine::cycle(&space, &KnowledgeGraph::new(), 0.5, 5, false);
         let has_cluster = result.insights.iter().any(|i| i.contains("cluster"));
         if !has_cluster {
-            eprintln!("WARN: dream cycle produced {} insights but none mention 'cluster': {:?}", result.insights.len(), result.insights);
+            eprintln!(
+                "WARN: dream cycle produced {} insights but none mention 'cluster': {:?}",
+                result.insights.len(),
+                result.insights
+            );
         }
     }
 
@@ -393,8 +510,15 @@ mod tests {
             let core = Point3::new(i as f64, 0.0, 0.0);
             let pos = Tetrahedron::compute_vertices(core);
             let t = Tetrahedron {
-                id: 0, vertex_ids: [0; 4], core,
-                data: MemoryPayload { content: format!("normal memory {}", i), labels: vec!["normal".to_string()], importance: 1.0, ..Default::default() },
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: MemoryPayload {
+                    content: format!("normal memory {}", i),
+                    labels: vec!["normal".to_string()],
+                    importance: 1.0,
+                    ..Default::default()
+                },
                 mass: 1.0,
             };
             space.add_tetrahedron(&t, &pos).unwrap();
@@ -402,8 +526,15 @@ mod tests {
         let core = Point3::new(10.0, 0.0, 0.0);
         let pos = Tetrahedron::compute_vertices(core);
         let junk = Tetrahedron {
-            id: 0, vertex_ids: [0; 4], core,
-            data: MemoryPayload { content: "junk".to_string(), labels: vec!["junk".to_string()], importance: 0.05, ..Default::default() },
+            id: 0,
+            vertex_ids: [0; 4],
+            core,
+            data: MemoryPayload {
+                content: "junk".to_string(),
+                labels: vec!["junk".to_string()],
+                importance: 0.05,
+                ..Default::default()
+            },
             mass: 0.05,
         };
         space.add_tetrahedron(&junk, &pos).unwrap();
@@ -413,13 +544,26 @@ mod tests {
         let result = DreamEngine::cycle(&space, &KnowledgeGraph::new(), 0.2, 5, false);
 
         // INVARIANT: nothing deleted
-        assert_eq!(space.tetra_count(), count_before, "dream deleted memories — constitution §4.5 violation");
-        let junk_still = space.all_tetrahedrons().iter().any(|t| t.data.content == "junk");
+        assert_eq!(
+            space.tetra_count(),
+            count_before,
+            "dream deleted memories — constitution §4.5 violation"
+        );
+        let junk_still = space
+            .all_tetrahedrons()
+            .iter()
+            .any(|t| t.data.content == "junk");
         assert!(junk_still, "quarantined junk was deleted!");
         // junk was quarantined (in evicted_ids) and now carries the quarantine label
         assert!(result.junk_evicted >= 1, "junk should be quarantined");
         let all = space.all_tetrahedrons();
-        let jq = all.iter().find(|t| t.data.content == "junk").expect("junk missing");
-        assert!(jq.data.labels.iter().any(|l| l == "quarantine"), "junk not labeled quarantine");
+        let jq = all
+            .iter()
+            .find(|t| t.data.content == "junk")
+            .expect("junk missing");
+        assert!(
+            jq.data.labels.iter().any(|l| l == "quarantine"),
+            "junk not labeled quarantine"
+        );
     }
 }

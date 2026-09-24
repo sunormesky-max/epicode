@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
 use parking_lot::Mutex;
-use std::path::Path;
 use parking_lot::RwLock;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use crate::domain::space::Space;
 use crate::domain::tetra::TetraId;
@@ -91,14 +91,17 @@ impl KnowledgeGraph {
     }
 
     /// F4: 取增量(并把队列还给调用方) — 空返回时调用方应回退全量
-    pub fn drain_pending_relations(&self) -> (Vec<Relation>, Vec<(TetraId, TetraId, RelationType)>) {
+    pub fn drain_pending_relations(
+        &self,
+    ) -> (Vec<Relation>, Vec<(TetraId, TetraId, RelationType)>) {
         let ups = std::mem::take(&mut *self.pending_upserts.lock());
         let dels = std::mem::take(&mut *self.pending_deletes.lock());
         (ups, dels)
     }
     pub fn set_loading(&self, v: bool) {
         self.loading.store(v, std::sync::atomic::Ordering::Relaxed);
-        if !v { // 加载结束: 清空加载期误入队的残留
+        if !v {
+            // 加载结束: 清空加载期误入队的残留
             self.pending_upserts.lock().clear();
             self.pending_deletes.lock().clear();
         }
@@ -109,7 +112,8 @@ impl KnowledgeGraph {
     }
 
     pub fn clear_dirty(&self) {
-        self.dirty.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.dirty
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn rebuild_adj_index(&self, relations: &[Relation]) -> HashMap<TetraId, Vec<usize>> {
@@ -121,21 +125,38 @@ impl KnowledgeGraph {
         idx
     }
 
-    pub fn add_relation(&self, source: TetraId, target: TetraId, rel_type: RelationType, strength: f64) {
+    pub fn add_relation(
+        &self,
+        source: TetraId,
+        target: TetraId,
+        rel_type: RelationType,
+        strength: f64,
+    ) {
         self.add_relation_at(source, target, rel_type, strength, 0);
     }
 
-    pub fn add_relation_at(&self, source: TetraId, target: TetraId, rel_type: RelationType, strength: f64, tick: u64) {
+    pub fn add_relation_at(
+        &self,
+        source: TetraId,
+        target: TetraId,
+        rel_type: RelationType,
+        strength: f64,
+        tick: u64,
+    ) {
         let mut relations = self.relations.write();
         // 归属关系(BelongsTo/MergedInto)做单向去重——只检查相同方向
         // 其他关系(similar/contradicts等)做双向去重
-        let exists = if rel_type == RelationType::BelongsTo || rel_type == RelationType::MergedInto {
-            relations.iter().any(|r| r.source == source && r.target == target && r.relation_type == rel_type)
+        let exists = if rel_type == RelationType::BelongsTo || rel_type == RelationType::MergedInto
+        {
+            relations
+                .iter()
+                .any(|r| r.source == source && r.target == target && r.relation_type == rel_type)
         } else {
-            relations.iter().any(|r|
-                (r.source == source && r.target == target || r.source == target && r.target == source)
-                && r.relation_type == rel_type
-            )
+            relations.iter().any(|r| {
+                (r.source == source && r.target == target
+                    || r.source == target && r.target == source)
+                    && r.relation_type == rel_type
+            })
         };
         if exists {
             return;
@@ -145,13 +166,19 @@ impl KnowledgeGraph {
             let src_count = adj.get(&source).map(|v| v.len()).unwrap_or(0);
             let tgt_count = adj.get(&target).map(|v| v.len()).unwrap_or(0);
             // 归属关系不受数量限制（否则高连接度的旧节点无法加入档案库层级）
-            let is_structural = rel_type == RelationType::BelongsTo || rel_type == RelationType::MergedInto;
-            if !is_structural && (src_count >= MAX_RELATIONS_PER_NODE || tgt_count >= MAX_RELATIONS_PER_NODE) {
+            let is_structural =
+                rel_type == RelationType::BelongsTo || rel_type == RelationType::MergedInto;
+            if !is_structural
+                && (src_count >= MAX_RELATIONS_PER_NODE || tgt_count >= MAX_RELATIONS_PER_NODE)
+            {
                 return;
             }
         }
         let new_rel = Relation {
-            source, target, relation_type: rel_type, strength,
+            source,
+            target,
+            relation_type: rel_type,
+            strength,
             created_tick: tick,
         };
         relations.push(new_rel.clone());
@@ -165,7 +192,8 @@ impl KnowledgeGraph {
     pub fn remove_relations_for(&self, id: TetraId) {
         let mut relations = self.relations.write();
         let before = relations.len();
-        let removed: Vec<(TetraId, TetraId, RelationType)> = relations.iter()
+        let removed: Vec<(TetraId, TetraId, RelationType)> = relations
+            .iter()
             .filter(|r| r.source == id || r.target == id)
             .map(|r| (r.source, r.target, r.relation_type.clone()))
             .collect();
@@ -183,7 +211,8 @@ impl KnowledgeGraph {
     pub fn remove_relation(&self, source: TetraId, target: TetraId, rel_type: RelationType) {
         let mut relations = self.relations.write();
         let before = relations.len();
-        relations.retain(|r| !(r.source == source && r.target == target && r.relation_type == rel_type));
+        relations
+            .retain(|r| !(r.source == source && r.target == target && r.relation_type == rel_type));
         if relations.len() < before {
             *self.adj_index.write() = self.rebuild_adj_index(&relations);
             if !self.loading.load(std::sync::atomic::Ordering::Relaxed) {
@@ -220,12 +249,12 @@ impl KnowledgeGraph {
         }
     }
 
-
     pub fn query_relations(&self, id: TetraId) -> Vec<(TetraId, RelationType, f64)> {
         let relations = self.relations.read();
         let adj = self.adj_index.read();
         match adj.get(&id) {
-            Some(indices) => indices.iter()
+            Some(indices) => indices
+                .iter()
                 .filter_map(|&i| relations.get(i))
                 .map(|r| {
                     let other = if r.source == id { r.target } else { r.source };
@@ -236,14 +265,15 @@ impl KnowledgeGraph {
         }
     }
 
-
     pub fn auto_link(&self, space: &Space, threshold: f64) {
         let tetras = space.all_tetrahedrons();
         for i in 0..tetras.len() {
             for j in (i + 1)..tetras.len() {
                 let sim = VectorLayer::best_similarity(
-                    &tetras[i].data.embedding, &tetras[i].data.labels,
-                    &tetras[j].data.embedding, &tetras[j].data.labels,
+                    &tetras[i].data.embedding,
+                    &tetras[i].data.labels,
+                    &tetras[j].data.embedding,
+                    &tetras[j].data.labels,
                 );
                 if sim > threshold {
                     self.add_relation(tetras[i].id, tetras[j].id, RelationType::SimilarTo, sim);
@@ -252,12 +282,18 @@ impl KnowledgeGraph {
         }
     }
 
-    pub fn auto_link_one(&self, new_id: TetraId, space: &Space, label_index: &std::collections::HashMap<String, Vec<TetraId>>) {
+    pub fn auto_link_one(
+        &self,
+        new_id: TetraId,
+        space: &Space,
+        label_index: &std::collections::HashMap<String, Vec<TetraId>>,
+    ) {
         let new_tetra = match space.get_tetrahedron(new_id) {
             Some(t) => t,
             None => return,
         };
-        let mut candidate_ids: std::collections::HashSet<TetraId> = std::collections::HashSet::new();
+        let mut candidate_ids: std::collections::HashSet<TetraId> =
+            std::collections::HashSet::new();
         for label in &new_tetra.data.labels {
             if let Some(ids) = label_index.get(label) {
                 for &id in ids {
@@ -267,7 +303,8 @@ impl KnowledgeGraph {
                 }
             }
         }
-        let mut candidates: Vec<_> = candidate_ids.iter()
+        let mut candidates: Vec<_> = candidate_ids
+            .iter()
             .filter_map(|&id| space.get_tetrahedron(id))
             .collect();
         if candidates.len() < 5 {
@@ -275,7 +312,9 @@ impl KnowledgeGraph {
             for t in &all {
                 if t.id != new_id && !candidates.iter().any(|c| c.id == t.id) {
                     candidates.push(t.clone());
-                    if candidates.len() >= 20 { break; }
+                    if candidates.len() >= 20 {
+                        break;
+                    }
                 }
             }
         } else {
@@ -288,8 +327,10 @@ impl KnowledgeGraph {
 
         for t in &candidates {
             let sim = VectorLayer::best_similarity(
-                &new_tetra.data.embedding, &new_tetra.data.labels,
-                &t.data.embedding, &t.data.labels,
+                &new_tetra.data.embedding,
+                &new_tetra.data.labels,
+                &t.data.embedding,
+                &t.data.labels,
             );
             if sim > 0.3 {
                 self.add_relation(new_id, t.id, RelationType::SimilarTo, sim);
@@ -356,7 +397,10 @@ impl KnowledgeGraph {
                 if sim > 0.7 && new_tetra.data.timestamp > t.data.timestamp {
                     let mut new_labels_to_add: Vec<String> = Vec::new();
                     for label in &new_tetra.data.labels {
-                        if !t.data.labels.contains(label) && !label.starts_with("meta-") && !label.starts_with("entity:") {
+                        if !t.data.labels.contains(label)
+                            && !label.starts_with("meta-")
+                            && !label.starts_with("entity:")
+                        {
                             new_labels_to_add.push(label.clone());
                         }
                     }
@@ -391,11 +435,7 @@ impl KnowledgeGraph {
         removed
     }
 
-    pub fn multi_hop(
-        &self,
-        seeds: &[TetraId],
-        max_hops: usize,
-    ) -> Vec<(TetraId, f64)> {
+    pub fn multi_hop(&self, seeds: &[TetraId], max_hops: usize) -> Vec<(TetraId, f64)> {
         let relations = self.relations.read();
         let adj = self.adj_index.read();
         let mut visited: HashSet<TetraId> = seeds.iter().copied().collect();
@@ -451,11 +491,7 @@ impl KnowledgeGraph {
     /// - Default: 2 hops (balanced)
     ///
     /// Then trims to max_results.
-    pub fn multi_hop_adaptive(
-        &self,
-        seeds: &[TetraId],
-        max_results: usize,
-    ) -> Vec<(TetraId, f64)> {
+    pub fn multi_hop_adaptive(&self, seeds: &[TetraId], max_results: usize) -> Vec<(TetraId, f64)> {
         if seeds.is_empty() {
             return Vec::new();
         }
@@ -480,7 +516,10 @@ impl KnowledgeGraph {
 
         tracing::debug!(
             "[P3 multi_hop_adaptive] seeds={} avg_degree={:.1} -> depth={} (cap={})",
-            seeds.len(), avg_degree, depth, max_results
+            seeds.len(),
+            avg_degree,
+            depth,
+            max_results
         );
 
         let mut results = self.multi_hop(seeds, depth);
@@ -492,7 +531,8 @@ impl KnowledgeGraph {
 
     pub fn update_concepts(&self, tetras: &[(TetraId, Vec<String>)]) {
         let mut concepts = self.concepts.write();
-        let labels_map: HashMap<TetraId, &Vec<String>> = tetras.iter().map(|(id, l)| (*id, l)).collect();
+        let labels_map: HashMap<TetraId, &Vec<String>> =
+            tetras.iter().map(|(id, l)| (*id, l)).collect();
 
         for &(id, ref labels) in tetras {
             let mut best: Option<(usize, f64)> = None;
@@ -526,7 +566,10 @@ impl KnowledgeGraph {
                             id: next_id,
                             centroid: vec![],
                             member_count: 1,
-                            label: labels.first().cloned().unwrap_or_else(|| format!("cluster_{}", next_id)),
+                            label: labels
+                                .first()
+                                .cloned()
+                                .unwrap_or_else(|| format!("cluster_{}", next_id)),
                             member_ids: vec![id],
                         });
                     }
@@ -543,7 +586,8 @@ impl KnowledgeGraph {
 
     pub fn get_top_concepts(&self, limit: usize) -> Vec<(String, u64)> {
         let concepts = self.concepts.read();
-        let mut labeled: Vec<(String, u64)> = concepts.iter()
+        let mut labeled: Vec<(String, u64)> = concepts
+            .iter()
             .map(|c| (c.label.clone(), c.member_count))
             .collect();
         labeled.sort_by_key(|b| std::cmp::Reverse(b.1));
@@ -559,25 +603,33 @@ impl KnowledgeGraph {
         let total_count = tetras.len();
         let truncated = node_limit > 0 && total_count > node_limit;
         if truncated {
-            tetras.sort_by(|a, b| b.mass.partial_cmp(&a.mass).unwrap_or(std::cmp::Ordering::Equal));
+            tetras.sort_by(|a, b| {
+                b.mass
+                    .partial_cmp(&a.mass)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             tetras.truncate(node_limit);
         }
 
         let mut node_map: HashMap<TetraId, GraphNodeExport> = HashMap::new();
         for t in &tetras {
-            node_map.insert(t.id, GraphNodeExport {
-                id: t.id,
-                content: t.data.content.chars().take(200).collect(),
-                labels: t.data.labels.clone(),
-                mass: t.mass,
-                timestamp: t.data.timestamp as u64,
-                core_x: t.core.x,
-                core_y: t.core.y,
-                core_z: t.core.z,
-            });
+            node_map.insert(
+                t.id,
+                GraphNodeExport {
+                    id: t.id,
+                    content: t.data.content.chars().take(200).collect(),
+                    labels: t.data.labels.clone(),
+                    mass: t.mass,
+                    timestamp: t.data.timestamp as u64,
+                    core_x: t.core.x,
+                    core_y: t.core.y,
+                    core_z: t.core.z,
+                },
+            );
         }
 
-        let edge_exports: Vec<GraphEdgeExport> = relations.iter()
+        let edge_exports: Vec<GraphEdgeExport> = relations
+            .iter()
             .filter(|r| node_map.contains_key(&r.source) && node_map.contains_key(&r.target))
             .map(|r| GraphEdgeExport {
                 source: r.source,
@@ -587,7 +639,8 @@ impl KnowledgeGraph {
             })
             .collect();
 
-        let concept_exports: Vec<ConceptExport> = concepts.iter()
+        let concept_exports: Vec<ConceptExport> = concepts
+            .iter()
             .map(|c| {
                 let mut ids = c.member_ids.clone();
                 ids.truncate(50);
@@ -606,26 +659,37 @@ impl KnowledgeGraph {
                 *label_freq.entry(l.clone()).or_insert(0) += 1;
             }
         }
-        let mut top_labels: Vec<(String, usize)> = label_freq.into_iter()
+        let mut top_labels: Vec<(String, usize)> = label_freq
+            .into_iter()
             .filter(|(l, _)| !l.starts_with("meta-") && !l.starts_with("entity:"))
             .collect();
         top_labels.sort_by_key(|b| std::cmp::Reverse(b.1));
         top_labels.truncate(30);
 
         let clusters = space.find_clusters();
-        let cluster_exports: Vec<ClusterExport> = clusters.iter()
+        let cluster_exports: Vec<ClusterExport> = clusters
+            .iter()
             .take(20)
             .map(|c| {
-                let cluster_labels: HashMap<String, usize> = c.tetra_ids.iter()
+                let cluster_labels: HashMap<String, usize> = c
+                    .tetra_ids
+                    .iter()
                     .filter_map(|id| space.get_tetrahedron(*id))
                     .flat_map(|t| t.data.labels.clone())
-                    .fold(HashMap::new(), |mut acc, l| { *acc.entry(l).or_insert(0) += 1; acc });
+                    .fold(HashMap::new(), |mut acc, l| {
+                        *acc.entry(l).or_insert(0) += 1;
+                        acc
+                    });
                 let mut sorted: Vec<(String, usize)> = cluster_labels.into_iter().collect();
                 sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
                 ClusterExport {
                     size: c.tetra_ids.len(),
                     member_ids: c.tetra_ids.iter().take(50).copied().collect(),
-                    top_labels: sorted.iter().take(3).map(|(l, c)| serde_json::json!({"label": l, "count": c})).collect(),
+                    top_labels: sorted
+                        .iter()
+                        .take(3)
+                        .map(|(l, c)| serde_json::json!({"label": l, "count": c}))
+                        .collect(),
                 }
             })
             .collect();
@@ -635,11 +699,15 @@ impl KnowledgeGraph {
         {
             let mut tetra_cluster: HashMap<TetraId, usize> = HashMap::new();
             for (ci, c) in clusters.iter().enumerate() {
-                for &tid in &c.tetra_ids { tetra_cluster.insert(tid, ci); }
+                for &tid in &c.tetra_ids {
+                    tetra_cluster.insert(tid, ci);
+                }
             }
             let mut pair_count: HashMap<(usize, usize), usize> = HashMap::new();
             for r in relations.iter() {
-                if let (Some(&ci), Some(&cj)) = (tetra_cluster.get(&r.source), tetra_cluster.get(&r.target)) {
+                if let (Some(&ci), Some(&cj)) =
+                    (tetra_cluster.get(&r.source), tetra_cluster.get(&r.target))
+                {
                     if ci != cj {
                         let key = if ci < cj { (ci, cj) } else { (cj, ci) };
                         *pair_count.entry(key).or_insert(0) += 1;
@@ -665,7 +733,10 @@ impl KnowledgeGraph {
             inter_cluster_edges,
             concepts: concept_exports,
             clusters: cluster_exports,
-            top_labels: top_labels.into_iter().map(|(l, c)| serde_json::json!({"label": l, "count": c})).collect(),
+            top_labels: top_labels
+                .into_iter()
+                .map(|(l, c)| serde_json::json!({"label": l, "count": c}))
+                .collect(),
             total_nodes: total_count,
             total_edges: relations.len(),
         }
@@ -674,7 +745,10 @@ impl KnowledgeGraph {
     pub fn save(&self, path: &Path) -> Result<(), String> {
         let relations = self.relations.read().clone();
         let concepts = self.concepts.read().clone();
-        let snapshot = KgSnapshot { relations, concepts };
+        let snapshot = KgSnapshot {
+            relations,
+            concepts,
+        };
         let json = serde_json::to_string_pretty(&snapshot).map_err(|e| e.to_string())?;
         let tmp = path.with_extension("tmp");
         std::fs::write(&tmp, &json).map_err(|e| e.to_string())?;
@@ -718,7 +792,9 @@ impl KnowledgeGraph {
 
     pub fn merge_duplicate_concepts(&self) -> usize {
         let mut concepts = self.concepts.write();
-        if concepts.len() <= 1 { return 0; }
+        if concepts.len() <= 1 {
+            return 0;
+        }
 
         let mut groups: std::collections::HashMap<String, Vec<usize>> = HashMap::new();
         for (i, c) in concepts.iter().enumerate() {
@@ -731,7 +807,9 @@ impl KnowledgeGraph {
         let mut to_update: Vec<(usize, u64, Vec<u64>)> = Vec::new();
 
         for indices in groups.values() {
-            if indices.len() <= 1 { continue; }
+            if indices.len() <= 1 {
+                continue;
+            }
             let primary = indices[0];
             let mut total_count = concepts[primary].member_count;
             let mut all_ids = concepts[primary].member_ids.clone();
@@ -765,7 +843,11 @@ impl KnowledgeGraph {
 
         if merged_count > 0 {
             self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
-            tracing::info!("[KG] merged {} duplicate concepts, {} remaining", merged_count, concepts.len());
+            tracing::info!(
+                "[KG] merged {} duplicate concepts, {} remaining",
+                merged_count,
+                concepts.len()
+            );
         }
         merged_count
     }
@@ -788,18 +870,24 @@ impl KnowledgeGraph {
         let mut components: Vec<usize> = Vec::new();
         let mut stack: Vec<TetraId>;
         for &id in connected.iter() {
-            if visited.contains(&id) { continue; }
+            if visited.contains(&id) {
+                continue;
+            }
             stack = vec![id];
             let mut comp_size = 0usize;
             while let Some(cur) = stack.pop() {
-                if visited.contains(&cur) { continue; }
+                if visited.contains(&cur) {
+                    continue;
+                }
                 visited.insert(cur);
                 comp_size += 1;
                 if let Some(indices) = adj.get(&cur) {
                     for &i in indices {
                         let r = &relations[i];
                         let n = if r.source == cur { r.target } else { r.source };
-                        if !visited.contains(&n) { stack.push(n); }
+                        if !visited.contains(&n) {
+                            stack.push(n);
+                        }
                     }
                 }
             }
@@ -813,15 +901,23 @@ impl KnowledgeGraph {
         };
 
         let avg_degree = if total_tetras > 0 {
-            connected.iter().map(|id| adj.get(id).map(|v| v.len()).unwrap_or(0) as f64).sum::<f64>() / total_tetras as f64
-        } else { 0.0 };
+            connected
+                .iter()
+                .map(|id| adj.get(id).map(|v| v.len()).unwrap_or(0) as f64)
+                .sum::<f64>()
+                / total_tetras as f64
+        } else {
+            0.0
+        };
 
         let density = if total_tetras > 1 {
             (2.0 * total_relations as f64) / (total_tetras as f64 * (total_tetras as f64 - 1.0))
-        } else { 0.0 };
+        } else {
+            0.0
+        };
 
-        let rel_type_counts: HashMap<String, usize> = relations.iter()
-            .fold(HashMap::new(), |mut m, r| {
+        let rel_type_counts: HashMap<String, usize> =
+            relations.iter().fold(HashMap::new(), |mut m, r| {
                 let key = format!("{}", r.relation_type);
                 *m.entry(key).or_insert(0) += 1;
                 m
@@ -878,7 +974,9 @@ fn extract_entities(content: &str) -> Vec<String> {
 
         // UPPER_SNAKE_CASE: all uppercase + underscores, length > 4
         if has_underscore
-            && token.chars().all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
+            && token
+                .chars()
+                .all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
             && token.len() > 4
         {
             entities.insert(token.to_lowercase());
@@ -894,7 +992,11 @@ fn extract_entities(content: &str) -> Vec<String> {
 
     entities.into_iter().collect()
 }
-fn label_jaccard(labels: &[String], concept_member_ids: &[TetraId], labels_map: &HashMap<TetraId, &Vec<String>>) -> f64 {
+fn label_jaccard(
+    labels: &[String],
+    concept_member_ids: &[TetraId],
+    labels_map: &HashMap<TetraId, &Vec<String>>,
+) -> f64 {
     if concept_member_ids.is_empty() || labels.is_empty() {
         return 0.0;
     }
@@ -913,7 +1015,11 @@ fn label_jaccard(labels: &[String], concept_member_ids: &[TetraId], labels_map: 
     let label_set: HashSet<&str> = labels.iter().map(|s| s.as_str()).collect();
     let intersection = label_set.intersection(&concept_labels).count();
     let union = label_set.union(&concept_labels).count();
-    if union == 0 { 0.0 } else { intersection as f64 / union as f64 }
+    if union == 0 {
+        0.0
+    } else {
+        intersection as f64 / union as f64
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -1001,8 +1107,25 @@ mod tests {
             let core = Point3::zero();
             let pos = Tetrahedron::compute_vertices(core);
             let t = Tetrahedron {
-                id: 0, vertex_ids: [0; 4], core,
-                data: crate::domain::tetra::MemoryPayload { content: text.to_string(), content_hash: 0, labels, timestamp: 0, aliases: vec![], embedding: vec![], importance: 1.0, enforced: false, rationale: None, access_count: 0, memory_type: None, identity_stamp: None, source_agent: None, ..Default::default() },
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: crate::domain::tetra::MemoryPayload {
+                    content: text.to_string(),
+                    content_hash: 0,
+                    labels,
+                    timestamp: 0,
+                    aliases: vec![],
+                    embedding: vec![],
+                    importance: 1.0,
+                    enforced: false,
+                    rationale: None,
+                    access_count: 0,
+                    memory_type: None,
+                    identity_stamp: None,
+                    source_agent: None,
+                    ..Default::default()
+                },
                 mass: 1.0,
             };
             space.add_tetrahedron(&t, &pos).unwrap();
@@ -1041,7 +1164,11 @@ mod tests {
         for _ in 0..100 {
             kg.decay_relations();
         }
-        assert_eq!(kg.relation_count(), 0, "weak relation should be decayed away");
+        assert_eq!(
+            kg.relation_count(),
+            0,
+            "weak relation should be decayed away"
+        );
     }
 
     #[test]

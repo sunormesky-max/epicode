@@ -3,57 +3,57 @@ pub mod bus;
 pub mod scheduler;
 
 // Memory lifecycle
-pub mod gateway;
-pub mod intake;
-pub mod storage;
 pub mod dream;
+pub mod gateway;
 pub mod governor;
+pub mod intake;
 pub mod janitor;
+pub mod storage;
 
 // Search & retrieval
-pub mod search_engine;
-pub mod hnsw;
-pub mod library;
-pub mod vector;
 pub mod embedding;
-pub mod retrieval;
+pub mod hnsw;
 pub mod index_manager;
+pub mod library;
+pub mod retrieval;
+pub mod search_engine;
+pub mod vector;
 
 // Cognitive & LLM
-pub mod cognitive;
 pub mod classifier;
+pub mod cognitive;
 pub mod cognitive_hooks;
+pub mod insight;
 pub mod reasoning;
 pub mod tools;
-pub mod insight;
 
 // Protocol & API
-pub mod mcp;
-pub mod smrp;
-pub mod skills;
-pub mod system_skills;
 pub mod assembler;
+pub mod mcp;
+pub mod skills;
+pub mod smrp;
+pub mod system_skills;
 
 // Infrastructure
-pub mod security;
-pub mod energy;
+pub mod consciousness;
 pub mod crypto;
 pub mod e2e;
-pub mod consciousness;
-pub mod user_manager;
+pub mod energy;
 pub mod knowledge;
 pub mod pulse;
+pub mod security;
+pub mod user_manager;
 
 // Auxiliary systems
-pub mod emotion;
-pub mod dynamics;
-pub mod constitution;
 pub mod adaptive;
 pub mod auto_pipeline;
-pub mod drive;
-pub mod outcome;
+pub mod constitution;
 pub mod digestion;
+pub mod drive;
+pub mod dynamics;
+pub mod emotion;
 pub mod layer_pipeline;
+pub mod outcome;
 
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -61,17 +61,17 @@ use tokio::task::JoinHandle;
 use crate::domain::space::Space;
 
 use self::bus::EventBus;
-use self::cognitive::CognitiveEngine;
 use self::classifier::CategoryClassifier;
+use self::cognitive::CognitiveEngine;
 use self::embedding::EmbeddingService;
 use self::energy::EnergyCenter;
 use self::gateway::GatewayCenter;
 use self::knowledge::KnowledgeGraph;
-use self::security::SecurityGuard;
-use self::storage::StorageManager;
 use self::scheduler::SchedulerCenter;
-use self::vector::VectorLayer;
+use self::security::SecurityGuard;
 use self::skills::SkillEngine;
+use self::storage::StorageManager;
+use self::vector::VectorLayer;
 
 pub struct Engine {
     pub space: Arc<Space>,
@@ -106,42 +106,70 @@ impl Engine {
         Self::build(data_path, None, None)
     }
 
-    pub fn with_shared_vector(data_path: std::path::PathBuf, shared_vector: Arc<VectorLayer>, user_id: &str) -> Self {
+    pub fn with_shared_vector(
+        data_path: std::path::PathBuf,
+        shared_vector: Arc<VectorLayer>,
+        user_id: &str,
+    ) -> Self {
         Self::build(data_path, Some(shared_vector), Some(user_id))
     }
 
     pub fn load_shared_vector() -> Option<Arc<VectorLayer>> {
         let model_dir = {
-            let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf()));
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|e| e.parent().map(|p| p.to_path_buf()));
             let candidates: Vec<std::path::PathBuf> = vec![
                 std::path::PathBuf::from("models"),
-                exe_dir.unwrap_or_else(|| std::path::PathBuf::from(".")).join("models"),
+                exe_dir
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join("models"),
             ];
-            candidates.into_iter().find(|d| d.join("model.onnx").exists()).unwrap_or_else(|| std::path::PathBuf::from("models"))
+            candidates
+                .into_iter()
+                .find(|d| d.join("model.onnx").exists())
+                .unwrap_or_else(|| std::path::PathBuf::from("models"))
         };
         match VectorLayer::load(&model_dir) {
             Ok(v) => {
-                tracing::info!("Shared VectorLayer initialized (ONNX, {} dims, 1 copy for all users)", self::vector::EMBEDDING_DIM);
+                tracing::info!(
+                    "Shared VectorLayer initialized (ONNX, {} dims, 1 copy for all users)",
+                    self::vector::EMBEDDING_DIM
+                );
                 Some(Arc::new(v))
             }
             Err(e) => {
-                tracing::warn!("VectorLayer unavailable: {} — falling back to HTTP embedding", e);
+                tracing::warn!(
+                    "VectorLayer unavailable: {} — falling back to HTTP embedding",
+                    e
+                );
                 None
             }
         }
     }
 
-    fn build(data_path: std::path::PathBuf, shared_vector: Option<Arc<VectorLayer>>, user_id: Option<&str>) -> Self {
+    fn build(
+        data_path: std::path::PathBuf,
+        shared_vector: Option<Arc<VectorLayer>>,
+        user_id: Option<&str>,
+    ) -> Self {
         let uid = user_id.unwrap_or("mcp-default");
 
-        let llm_base = std::env::var("LLM_API_BASE").unwrap_or_else(|_| self::cognitive::DEEPSEEK_BASE.to_string());
-        let llm_key = std::env::var("LLM_API_KEY").or_else(|_| std::env::var("DEEPSEEK_API_KEY")).unwrap_or_default();
+        let llm_base = std::env::var("LLM_API_BASE")
+            .unwrap_or_else(|_| self::cognitive::DEEPSEEK_BASE.to_string());
+        let llm_key = std::env::var("LLM_API_KEY")
+            .or_else(|_| std::env::var("DEEPSEEK_API_KEY"))
+            .unwrap_or_default();
         let llm_model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "deepseek-chat".to_string());
 
         if llm_key.is_empty() {
             tracing::warn!("No LLM API key set — cognitive engine disabled.");
         } else if llm_base != self::cognitive::DEEPSEEK_BASE {
-            tracing::info!("Using custom LLM provider: {} model={}", llm_base, llm_model);
+            tracing::info!(
+                "Using custom LLM provider: {} model={}",
+                llm_base,
+                llm_model
+            );
         }
 
         let space = Arc::new(Space::new());
@@ -164,21 +192,34 @@ impl Engine {
             Some(sv)
         } else {
             let model_dir = {
-                let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf()));
+                let exe_dir = std::env::current_exe()
+                    .ok()
+                    .and_then(|e| e.parent().map(|p| p.to_path_buf()));
                 let candidates: Vec<std::path::PathBuf> = vec![
                     std::path::PathBuf::from("models"),
-                    exe_dir.unwrap_or_else(|| std::path::PathBuf::from(".")).join("models"),
+                    exe_dir
+                        .unwrap_or_else(|| std::path::PathBuf::from("."))
+                        .join("models"),
                     data_path.join("models"),
                 ];
-                candidates.into_iter().find(|d| d.join("model.onnx").exists()).unwrap_or_else(|| std::path::PathBuf::from("models"))
+                candidates
+                    .into_iter()
+                    .find(|d| d.join("model.onnx").exists())
+                    .unwrap_or_else(|| std::path::PathBuf::from("models"))
             };
             match VectorLayer::load(&model_dir) {
                 Ok(v) => {
-                    tracing::info!("VectorLayer initialized (in-process ONNX, {} dims)", self::vector::EMBEDDING_DIM);
+                    tracing::info!(
+                        "VectorLayer initialized (in-process ONNX, {} dims)",
+                        self::vector::EMBEDDING_DIM
+                    );
                     Some(Arc::new(v))
                 }
                 Err(e) => {
-                    tracing::warn!("VectorLayer unavailable: {} — falling back to HTTP embedding", e);
+                    tracing::warn!(
+                        "VectorLayer unavailable: {} — falling back to HTTP embedding",
+                        e
+                    );
                     None
                 }
             }
@@ -209,15 +250,24 @@ impl Engine {
         let report = storage.load_all(&space, &knowledge);
         if report.tetras_loaded > 0 {
             // S1破案: 构造调用栈 (临时诊断, 定位幽灵加载触发者)
-            tracing::info!("[{}] loaded {} tetras, {} relations, {} concepts",
-                uid, report.tetras_loaded, report.relations_loaded, report.concepts_loaded);
+            tracing::info!(
+                "[{}] loaded {} tetras, {} relations, {} concepts",
+                uid,
+                report.tetras_loaded,
+                report.relations_loaded,
+                report.concepts_loaded
+            );
         }
 
         // L0: Restore drive queue from SQLite (survives restarts)
         match storage.load_drive_signals() {
             Ok(drive_signals) => {
                 if !drive_signals.is_empty() {
-                    tracing::info!("[{}] restoring {} drive signals from SQLite", uid, drive_signals.len());
+                    tracing::info!(
+                        "[{}] restoring {} drive signals from SQLite",
+                        uid,
+                        drive_signals.len()
+                    );
                 }
                 // Will be passed to scheduler below
                 let _ = drive_signals; // stored for scheduler init
@@ -233,7 +283,8 @@ impl Engine {
                         let name = v["name"].as_str().unwrap_or("").to_string();
                         let mission = v["mission"].as_str().unwrap_or("").to_string();
                         let author = v["author"].as_str().unwrap_or("").to_string();
-                        let extra: std::collections::HashMap<String, String> = v.get("extra")
+                        let extra: std::collections::HashMap<String, String> = v
+                            .get("extra")
                             .and_then(|e| serde_json::from_value(e.clone()).ok())
                             .unwrap_or_default();
                         if !name.is_empty() {
@@ -250,11 +301,27 @@ impl Engine {
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
                             let pending = space.pending_identity();
                             let mut p = pending;
-                            if let Some(n) = v["name"].as_str() { if !n.is_empty() { p.name = Some(n.to_string()); } }
-                            if let Some(m) = v["mission"].as_str() { if !m.is_empty() { p.mission = Some(m.to_string()); } }
-                            if let Some(a) = v["author"].as_str() { if !a.is_empty() { p.author = Some(a.to_string()); } }
-                            if let Some(pe) = v["personality"].as_str() { p.personality = Some(pe.to_string()); }
-                            if let Some(l) = v["language"].as_str() { p.language = Some(l.to_string()); }
+                            if let Some(n) = v["name"].as_str() {
+                                if !n.is_empty() {
+                                    p.name = Some(n.to_string());
+                                }
+                            }
+                            if let Some(m) = v["mission"].as_str() {
+                                if !m.is_empty() {
+                                    p.mission = Some(m.to_string());
+                                }
+                            }
+                            if let Some(a) = v["author"].as_str() {
+                                if !a.is_empty() {
+                                    p.author = Some(a.to_string());
+                                }
+                            }
+                            if let Some(pe) = v["personality"].as_str() {
+                                p.personality = Some(pe.to_string());
+                            }
+                            if let Some(l) = v["language"].as_str() {
+                                p.language = Some(l.to_string());
+                            }
                             for (step, val) in [
                                 (1, &p.name),
                                 (2, &p.mission),
@@ -266,11 +333,18 @@ impl Engine {
                                     space.set_identity_step(step, v.clone());
                                 }
                             }
-                            tracing::info!("[{}] pending identity restored: step {}/5", uid, space.pending_identity().current_step());
+                            tracing::info!(
+                                "[{}] pending identity restored: step {}/5",
+                                uid,
+                                space.pending_identity().current_step()
+                            );
                         }
                     }
                 } else {
-                    tracing::info!("[{}] no identity confirmed yet, awaiting first connection", uid);
+                    tracing::info!(
+                        "[{}] no identity confirmed yet, awaiting first connection",
+                        uid
+                    );
                 }
             }
         }
@@ -310,7 +384,9 @@ impl Engine {
         // 稳态恢复: 演化权重/历史跨重启存活 + ingested去重集
         scheduler.restore_drive_engine();
         scheduler.restore_ingested();
-        let restored_project = storage.load_drive_kv("current_project").filter(|s| !s.is_empty());
+        let restored_project = storage
+            .load_drive_kv("current_project")
+            .filter(|s| !s.is_empty());
 
         let tool_ctx = Arc::new(self::tools::ToolContext::new(
             space.clone(),
@@ -330,8 +406,15 @@ impl Engine {
         }
 
         Self {
-            space, bus, gateway, energy, scheduler, cognitive, guard: security,
-            storage, skills,
+            space,
+            bus,
+            gateway,
+            energy,
+            scheduler,
+            cognitive,
+            guard: security,
+            storage,
+            skills,
             handles: std::sync::Mutex::new(Vec::new()),
             user_id: uid.to_string(),
             data_path: data_path.clone(),
@@ -376,11 +459,18 @@ impl Engine {
         &self.scheduler
     }
 
-    pub fn confirm_identity(&self, name: String, mission: String, author: String, extra: std::collections::HashMap<String, String>) -> Result<(), String> {
+    pub fn confirm_identity(
+        &self,
+        name: String,
+        mission: String,
+        author: String,
+        extra: std::collections::HashMap<String, String>,
+    ) -> Result<(), String> {
         if self.space.identity_info().is_some() {
             return Err("identity already confirmed and cannot be changed".into());
         }
-        self.space.confirm_identity(name.clone(), mission.clone(), author.clone(), extra.clone());
+        self.space
+            .confirm_identity(name.clone(), mission.clone(), author.clone(), extra.clone());
         let identity_path = self.data_path.join("identity.json");
         let data = serde_json::json!({
             "name": name,
@@ -392,15 +482,26 @@ impl Engine {
         });
         let json = serde_json::to_string_pretty(&data).map_err(|e| format!("serialize: {}", e))?;
         std::fs::write(&identity_path, &json).map_err(|e| format!("write: {}", e))?;
-        tracing::info!("[{}] identity confirmed and persisted: {}", self.user_id, name);
+        tracing::info!(
+            "[{}] identity confirmed and persisted: {}",
+            self.user_id,
+            name
+        );
         Ok(())
     }
 
-    pub fn update_identity(&self, name: Option<String>, mission: Option<String>, author: Option<String>, extra: Option<std::collections::HashMap<String, String>>) -> Result<(), String> {
+    pub fn update_identity(
+        &self,
+        name: Option<String>,
+        mission: Option<String>,
+        author: Option<String>,
+        extra: Option<std::collections::HashMap<String, String>>,
+    ) -> Result<(), String> {
         if self.space.identity_info().is_none() {
             return Err("identity not yet confirmed".into());
         }
-        self.space.update_identity(name.clone(), mission.clone(), author.clone(), extra.clone());
+        self.space
+            .update_identity(name.clone(), mission.clone(), author.clone(), extra.clone());
         let info = self.space.identity_info().unwrap();
         let identity_path = self.data_path.join("identity.json");
         let data = serde_json::json!({
@@ -416,7 +517,11 @@ impl Engine {
         Ok(())
     }
 
-    pub fn identity_step(&self, step: usize, value: String) -> Result<super::domain::cylinder::PendingIdentity, String> {
+    pub fn identity_step(
+        &self,
+        step: usize,
+        value: String,
+    ) -> Result<super::domain::cylinder::PendingIdentity, String> {
         if self.space.identity_info().is_some() {
             return Err("identity already confirmed".into());
         }
@@ -443,7 +548,8 @@ impl Engine {
             "author": pending.author,
             "personality": pending.personality,
             "language": pending.language,
-        })).map_err(|e| format!("serialize: {}", e))?;
+        }))
+        .map_err(|e| format!("serialize: {}", e))?;
         std::fs::write(&identity_path, &json).map_err(|e| format!("write: {}", e))?;
         Ok(pending_clone)
     }
@@ -454,12 +560,17 @@ impl Engine {
         }
         let pending = self.space.pending_identity();
         if !pending.is_complete() {
-            return Err(format!("ritual incomplete: step {} not done. Required: name(1), mission(2), author(3)", pending.current_step()));
+            return Err(format!(
+                "ritual incomplete: step {} not done. Required: name(1), mission(2), author(3)",
+                pending.current_step()
+            ));
         }
         if !self.space.confirm_pending_identity() {
             return Err("confirmation failed".into());
         }
-        let info = self.space.identity_info()
+        let info = self
+            .space
+            .identity_info()
             .ok_or("identity not set after confirmation")?;
         let identity_path = self.data_path.join("identity.json");
         let data = serde_json::json!({
@@ -473,7 +584,11 @@ impl Engine {
         let json = serde_json::to_string_pretty(&data).map_err(|e| format!("serialize: {}", e))?;
         std::fs::write(&identity_path, &json).map_err(|e| format!("write: {}", e))?;
         let _ = std::fs::remove_file(self.data_path.join("identity_pending.json"));
-        tracing::info!("[{}] identity ritual complete: {}", self.user_id, info.system_name);
+        tracing::info!(
+            "[{}] identity ritual complete: {}",
+            self.user_id,
+            info.system_name
+        );
         Ok(info)
     }
 
@@ -530,7 +645,10 @@ impl Engine {
             scheduler.run_with_rx(rx_s).await;
         }));
 
-        tracing::info!("Engine ignited: full mode (tick={}ms, cognitive+LLM enabled)", tick_ms);
+        tracing::info!(
+            "Engine ignited: full mode (tick={}ms, cognitive+LLM enabled)",
+            tick_ms
+        );
     }
 
     pub fn start_quiet_with_interval(&mut self, tick_ms: u64) {
@@ -547,7 +665,10 @@ impl Engine {
             scheduler.run_quiet(rx_s).await;
         }));
 
-        tracing::info!("Engine ignited: quiet mode (tick={}ms, auto-save only)", tick_ms);
+        tracing::info!(
+            "Engine ignited: quiet mode (tick={}ms, auto-save only)",
+            tick_ms
+        );
     }
     /// Phase 3 P0-2a: Arc-friendly quiet loop startup (Tester-Q契约 #1658)
     /// 不需要 &mut self — 用 Mutex<Vec> 内部可变性
@@ -566,7 +687,10 @@ impl Engine {
             scheduler.run_quiet(rx_s).await;
         }));
 
-        tracing::info!("Engine ignited via Arc: quiet mode (tick={}ms, auto-save only)", tick_ms);
+        tracing::info!(
+            "Engine ignited via Arc: quiet mode (tick={}ms, auto-save only)",
+            tick_ms
+        );
     }
     /// Phase 3 P0-2b: Arc-friendly full cognitive loop startup
     /// cognitive tick LLM calls are already in spawn_blocking (scheduler.run_unified)
@@ -587,12 +711,11 @@ impl Engine {
             scheduler.run_with_rx(rx_s).await;
         }));
 
-        tracing::info!("Engine ignited via Arc: full mode (tick={}ms, cognitive+LLM)", tick_ms);
+        tracing::info!(
+            "Engine ignited via Arc: full mode (tick={}ms, cognitive+LLM)",
+            tick_ms
+        );
     }
-
-
-
-
 
     pub fn save_all(&self) -> Result<(), String> {
         let kg = self.scheduler.kg_handle();
@@ -604,7 +727,9 @@ impl Engine {
 
         if let Ok(webhook) = std::env::var("TETRAMEM_BACKUP_WEBHOOK") {
             if !webhook.is_empty() {
-                let backup_path = self.storage.data_dir()
+                let backup_path = self
+                    .storage
+                    .data_dir()
                     .join("backups")
                     .join(format!("epicode_{}.db", timestamp));
                 if backup_path.exists() {
@@ -617,7 +742,11 @@ impl Engine {
                         .timeout(std::time::Duration::from_secs(60))
                         .send_bytes(&data)
                     {
-                        Ok(_) => tracing::info!("[Backup] uploaded {} ({}KB) to remote", filename, data.len() / 1024),
+                        Ok(_) => tracing::info!(
+                            "[Backup] uploaded {} ({}KB) to remote",
+                            filename,
+                            data.len() / 1024
+                        ),
                         Err(e) => tracing::warn!("[Backup] remote upload failed: {}", e),
                     }
                 }
@@ -664,7 +793,9 @@ impl Engine {
     }
 
     pub fn reindex_embeddings(&self) -> Result<usize, String> {
-        let vector = self.gateway.vector_clone()
+        let vector = self
+            .gateway
+            .vector_clone()
             .ok_or("VectorLayer not available")?;
         let tetras = self.space.all_tetrahedrons();
         let mut updated = 0usize;
@@ -685,7 +816,11 @@ impl Engine {
         self.gateway.rebuild_hnsw();
         let kg = self.scheduler.kg_handle();
         self.storage.save_all(&self.space, &kg)?;
-        tracing::info!("[Reindex] re-embedded {}/{} memories, HNSW rebuilt, saved", updated, tetras.len());
+        tracing::info!(
+            "[Reindex] re-embedded {}/{} memories, HNSW rebuilt, saved",
+            updated,
+            tetras.len()
+        );
         Ok(updated)
     }
 }

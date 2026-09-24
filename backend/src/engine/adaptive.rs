@@ -136,7 +136,10 @@ impl AdaptiveParams {
     }
 
     pub fn get(&self, param: Param) -> f64 {
-        self.params.get(&param).map(|s| s.value).unwrap_or_else(|| param.default_value())
+        self.params
+            .get(&param)
+            .map(|s| s.value)
+            .unwrap_or_else(|| param.default_value())
     }
 
     pub fn get_u(&self, param: Param) -> usize {
@@ -149,11 +152,7 @@ impl AdaptiveParams {
         }
     }
 
-    pub fn adapt_from_outcome(
-        &mut self,
-        action: super::outcome::ActionType,
-        effectiveness: f64,
-    ) {
+    pub fn adapt_from_outcome(&mut self, action: super::outcome::ActionType, effectiveness: f64) {
         use super::outcome::ActionType;
         match action {
             ActionType::Fission => {

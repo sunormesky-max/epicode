@@ -54,7 +54,11 @@ pub struct Space {
 const GRID_CELL: f64 = 1.0;
 
 fn grid_key(p: &Point3) -> (i64, i64, i64) {
-    ((p.x / GRID_CELL).floor() as i64, (p.y / GRID_CELL).floor() as i64, (p.z / GRID_CELL).floor() as i64)
+    (
+        (p.x / GRID_CELL).floor() as i64,
+        (p.y / GRID_CELL).floor() as i64,
+        (p.z / GRID_CELL).floor() as i64,
+    )
 }
 
 fn nearby_keys(key: (i64, i64, i64)) -> Vec<(i64, i64, i64)> {
@@ -119,7 +123,11 @@ impl Space {
 
     // ── Tetrahedron CRUD ──
 
-    pub fn add_tetrahedron(&self, tetra: &Tetrahedron, positions: &[Point3; 4]) -> Result<TetraId, String> {
+    pub fn add_tetrahedron(
+        &self,
+        tetra: &Tetrahedron,
+        positions: &[Point3; 4],
+    ) -> Result<TetraId, String> {
         if !Tetrahedron::validate_shape(positions) {
             return Err("tetrahedron is not regular".into());
         }
@@ -131,7 +139,11 @@ impl Space {
         Ok(id)
     }
 
-    pub fn add_tetrahedron_with_id(&self, tetra: &Tetrahedron, positions: &[Point3; 4]) -> Result<TetraId, String> {
+    pub fn add_tetrahedron_with_id(
+        &self,
+        tetra: &Tetrahedron,
+        positions: &[Point3; 4],
+    ) -> Result<TetraId, String> {
         if !Tetrahedron::validate_shape(positions) {
             return Err("tetrahedron is not regular".into());
         }
@@ -147,7 +159,12 @@ impl Space {
         Ok(tetra.id)
     }
 
-    fn insert_tetra(inner: &mut SpaceInner, tetra: &Tetrahedron, id: TetraId, positions: &[Point3; 4]) -> Result<(), String> {
+    fn insert_tetra(
+        inner: &mut SpaceInner,
+        tetra: &Tetrahedron,
+        id: TetraId,
+        positions: &[Point3; 4],
+    ) -> Result<(), String> {
         let mut vertex_ids = [0u64; 4];
         for i in 0..4 {
             let pos = &positions[i];
@@ -164,7 +181,9 @@ impl Space {
                         }
                     }
                 }
-                if found.is_some() { break; }
+                if found.is_some() {
+                    break;
+                }
             }
             let vid = match found {
                 Some(vid) => {
@@ -187,7 +206,11 @@ impl Space {
 
         let merged_count = vertex_ids.iter().collect::<HashSet<_>>().len();
         if merged_count < 4 {
-            tracing::info!("[Space] tetra {} shares {} vertices with existing tetrahedra", id, 4 - merged_count);
+            tracing::info!(
+                "[Space] tetra {} shares {} vertices with existing tetrahedra",
+                id,
+                4 - merged_count
+            );
         }
 
         let mut insert_tetra = tetra.clone();
@@ -215,13 +238,19 @@ impl Space {
 
         let core_for_grid = insert_tetra.core;
         inner.tetrahedrons.insert(id, insert_tetra);
-        inner.tetra_grid.entry(grid_key(&core_for_grid)).or_default().push(id);
+        inner
+            .tetra_grid
+            .entry(grid_key(&core_for_grid))
+            .or_default()
+            .push(id);
         Ok(())
     }
 
     pub fn remove_tetrahedron(&self, id: TetraId) -> Result<Tetrahedron, String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.remove(&id)
+        let tetra = inner
+            .tetrahedrons
+            .remove(&id)
             .ok_or_else(|| format!("tetrahedron {} not found", id))?;
 
         let tgk = grid_key(&tetra.core);
@@ -284,7 +313,10 @@ impl Space {
 
     pub fn update_mass(&self, id: TetraId, delta: f64) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.mass = (tetra.mass + delta).clamp(0.1, 100.0);
         // mass 不影响顶点共享拓扑,不递增 structure_version(B3修复)。
         // 之前这里递增导致 pulse 频繁更新 mass 时 find_clusters 反复全量重算 O(N)。
@@ -293,14 +325,24 @@ impl Space {
 
     pub fn update_aliases(&self, id: TetraId, aliases: Vec<String>) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.data.aliases = aliases;
         Ok(())
     }
 
-    pub fn update_payload(&self, id: TetraId, payload: crate::domain::tetra::MemoryPayload) -> Result<(), String> {
+    pub fn update_payload(
+        &self,
+        id: TetraId,
+        payload: crate::domain::tetra::MemoryPayload,
+    ) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.data = payload;
         Ok(())
     }
@@ -312,7 +354,10 @@ impl Space {
         F: FnOnce(&mut crate::domain::tetra::MemoryPayload) -> bool,
     {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         let changed = f(&mut tetra.data);
         if changed {
             inner.structure_version += 1;
@@ -323,7 +368,10 @@ impl Space {
     /// M2修复:单字段更新 access_count,避免 get→clone(8KB embedding)→update_payload 的开销。
     pub fn update_access_count(&self, id: TetraId, count: u32) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.data.access_count = count;
         Ok(())
     }
@@ -331,7 +379,10 @@ impl Space {
     /// M2修复:单字段更新 importance。
     pub fn update_importance(&self, id: TetraId, importance: f64) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.data.importance = importance;
         Ok(())
     }
@@ -339,28 +390,40 @@ impl Space {
     /// 突破3: 更新最后复习时间（遗忘曲线 — 被访问的记忆重置衰减节拍）
     pub fn update_last_reviewed(&self, id: TetraId, ts: i64) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.data.last_reviewed_ts = Some(ts);
         Ok(())
     }
 
     pub fn update_labels(&self, id: TetraId, labels: Vec<String>) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.data.labels = labels;
         Ok(())
     }
 
     pub fn update_enforced(&self, id: TetraId, enforced: bool) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.data.enforced = enforced;
         Ok(())
     }
 
     pub fn update_validity(&self, id: TetraId, valid_to: Option<i64>) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.data.valid_to = valid_to;
         // H1 修复：双时序完整——设 valid_to 时同时记录系统得知失效的时间
         if valid_to.is_some() && tetra.data.invalidated_at.is_none() {
@@ -371,7 +434,10 @@ impl Space {
 
     pub fn update_vertex_ids(&self, id: TetraId, vertex_ids: [VertexId; 4]) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner.tetrahedrons.get_mut(&id).ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
         tetra.vertex_ids = vertex_ids;
         Ok(())
     }
@@ -398,25 +464,32 @@ impl Space {
 
     pub fn cylinder_ports(&self) -> Vec<(VertexId, Point3)> {
         let inner = self.inner.read();
-        inner.cylinder.all_ports()
+        inner
+            .cylinder
+            .all_ports()
             .iter()
             .map(|p| (p.id, p.position))
             .collect()
     }
 
     pub fn all_tetras_meta(&self) -> Vec<super::tetra::TetraMeta> {
-        self.inner.read().tetrahedrons.values().map(|t| super::tetra::TetraMeta {
-            id: t.id,
-            core: t.core,
-            mass: t.mass,
-            content: t.data.content.chars().take(200).collect(),
-            content_hash: t.data.content_hash,
-            labels: t.data.labels.clone(),
-            importance: t.data.importance,
-            enforced: t.data.enforced,
-            access_count: t.data.access_count,
-            timestamp: t.data.timestamp,
-        }).collect()
+        self.inner
+            .read()
+            .tetrahedrons
+            .values()
+            .map(|t| super::tetra::TetraMeta {
+                id: t.id,
+                core: t.core,
+                mass: t.mass,
+                content: t.data.content.chars().take(200).collect(),
+                content_hash: t.data.content_hash,
+                labels: t.data.labels.clone(),
+                importance: t.data.importance,
+                enforced: t.data.enforced,
+                access_count: t.data.access_count,
+                timestamp: t.data.timestamp,
+            })
+            .collect()
     }
 
     pub fn edge_count(&self) -> usize {
@@ -424,11 +497,23 @@ impl Space {
     }
 
     pub fn max_tetra_id(&self) -> u64 {
-        self.inner.read().tetrahedrons.keys().max().copied().unwrap_or(0)
+        self.inner
+            .read()
+            .tetrahedrons
+            .keys()
+            .max()
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn max_vertex_id(&self) -> u64 {
-        self.inner.read().vertices.keys().max().copied().unwrap_or(0)
+        self.inner
+            .read()
+            .vertices
+            .keys()
+            .max()
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn restore_counters(&self) {
@@ -470,14 +555,24 @@ impl Space {
         (total.saturating_sub(free), free)
     }
 
-    pub fn zone_for_layer(&self, layer: super::cylinder::CylinderLayer) -> super::cylinder::LayerZone {
+    pub fn zone_for_layer(
+        &self,
+        layer: super::cylinder::CylinderLayer,
+    ) -> super::cylinder::LayerZone {
         self.inner.read().cylinder.zone_for_layer(layer).clone()
     }
 
-    pub fn assign_cylinder_port(&self, layer: super::cylinder::CylinderLayer, tetra_id: TetraId) -> Option<(VertexId, super::vertex::Point3)> {
+    pub fn assign_cylinder_port(
+        &self,
+        layer: super::cylinder::CylinderLayer,
+        tetra_id: TetraId,
+    ) -> Option<(VertexId, super::vertex::Point3)> {
         let mut inner = self.inner.write();
         let port_vid = inner.cylinder.assign_port(layer, tetra_id)?;
-        let pos = inner.cylinder.port_position(port_vid).unwrap_or(super::vertex::Point3::zero());
+        let pos = inner
+            .cylinder
+            .port_position(port_vid)
+            .unwrap_or(super::vertex::Point3::zero());
         Some((port_vid, pos))
     }
 
@@ -486,12 +581,19 @@ impl Space {
     }
 
     pub fn reassign_cylinder_port(&self, old_tetra_id: TetraId, new_tetra_id: TetraId) -> bool {
-        self.inner.write().cylinder.reassign_port(old_tetra_id, new_tetra_id)
+        self.inner
+            .write()
+            .cylinder
+            .reassign_port(old_tetra_id, new_tetra_id)
     }
 
     /// 按 vid 精确指定 port 连接（kimi2.7 #1：替代 sentinel 匹配，防并发泄漏）
     pub fn assign_specific_port(&self, port_vid: VertexId, tetra_id: TetraId) -> bool {
-        self.inner.write().cylinder.assign_specific_port(port_vid, tetra_id).is_ok()
+        self.inner
+            .write()
+            .cylinder
+            .assign_specific_port(port_vid, tetra_id)
+            .is_ok()
     }
 
     /// 启动恢复：扫描所有 tetra 的 vertex_ids，重建 cylinder Port 占用状态。
@@ -500,7 +602,8 @@ impl Space {
     /// 此方法从持久化的 vertex_ids 反推哪些 Port 被哪个 tetra 占用，恢复一簇一Port 连接。
     pub fn rebuild_port_occupancy(&self) -> usize {
         let mut inner = self.inner.write();
-        let port_vids: HashSet<VertexId> = inner.cylinder.all_ports().iter().map(|p| p.id).collect();
+        let port_vids: HashSet<VertexId> =
+            inner.cylinder.all_ports().iter().map(|p| p.id).collect();
         let mut port_to_tetra: HashMap<VertexId, TetraId> = HashMap::new();
         for (&tid, tetra) in &inner.tetrahedrons {
             for &vid in &tetra.vertex_ids {
@@ -515,7 +618,10 @@ impl Space {
             let _ = inner.cylinder.assign_specific_port(port_vid, tetra_id);
         }
         inner.structure_version += 1;
-        tracing::info!("[Space] rebuilt port occupancy: {} ports re-anchored", restored);
+        tracing::info!(
+            "[Space] rebuilt port occupancy: {} ports re-anchored",
+            restored
+        );
         restored
     }
 
@@ -526,19 +632,27 @@ impl Space {
         let mut inner = self.inner.write();
 
         // 1. 找出已有 Port 连接的 tetra（通过 cylinder 的 connected_tetra）
-        let connected_tetras: HashSet<TetraId> = inner.cylinder.all_ports().iter()
+        let connected_tetras: HashSet<TetraId> = inner
+            .cylinder
+            .all_ports()
+            .iter()
             .filter_map(|p| p.connected_tetra)
             .collect();
 
         // 2. 找出所有簇
-        let tetra_verts: HashMap<TetraId, [VertexId; 4]> = inner.tetrahedrons.iter()
-            .map(|(&id, t)| (id, t.vertex_ids)).collect();
+        let tetra_verts: HashMap<TetraId, [VertexId; 4]> = inner
+            .tetrahedrons
+            .iter()
+            .map(|(&id, t)| (id, t.vertex_ids))
+            .collect();
         let v2t = inner.vertex_to_tetras.clone();
 
         let mut visited: HashSet<TetraId> = HashSet::new();
         let mut clusters: Vec<Vec<TetraId>> = Vec::new();
         for &id in tetra_verts.keys() {
-            if visited.contains(&id) { continue; }
+            if visited.contains(&id) {
+                continue;
+            }
             let mut cluster_ids = Vec::new();
             let mut queue = std::collections::VecDeque::new();
             queue.push_back(id);
@@ -564,7 +678,9 @@ impl Space {
         let mut reseeded = 0usize;
         for cluster in &clusters {
             let has_port = cluster.iter().any(|id| connected_tetras.contains(id));
-            if has_port { continue; }
+            if has_port {
+                continue;
+            }
 
             // 找该簇的语义层
             let first_tetra = match inner.tetrahedrons.get(&cluster[0]) {
@@ -573,8 +689,9 @@ impl Space {
             };
             // 用第一个 tetra 的 core.z 判断层
             let layer = crate::domain::cylinder::CylinderLayer::from_index(
-                (first_tetra.core.z / 2.0).round().max(0.0).min(5.0) as usize
-            ).unwrap_or(crate::domain::cylinder::CylinderLayer::Instinct);
+                (first_tetra.core.z / 2.0).round().max(0.0).min(5.0) as usize,
+            )
+            .unwrap_or(crate::domain::cylinder::CylinderLayer::Instinct);
 
             // 尝试分配 Port
             if let Some(port_vid) = inner.cylinder.assign_port(layer, cluster[0]) {
@@ -605,7 +722,10 @@ impl Space {
         self.inner.read().cylinder.health_check(&[])
     }
 
-    pub fn cylinder_health_with_reports(&self, reports: &[super::cylinder::PulseReport]) -> super::cylinder::HealthReport {
+    pub fn cylinder_health_with_reports(
+        &self,
+        reports: &[super::cylinder::PulseReport],
+    ) -> super::cylinder::HealthReport {
         self.inner.read().cylinder.health_check(reports)
     }
 
@@ -628,16 +748,37 @@ impl Space {
 
     pub fn tetras_connected_to_port(&self, port_vid: VertexId) -> Vec<TetraId> {
         let inner = self.inner.read();
-        inner.vertex_to_tetras.get(&port_vid).cloned()
+        inner
+            .vertex_to_tetras
+            .get(&port_vid)
+            .cloned()
             .unwrap_or_default()
     }
 
-    pub fn confirm_identity(&self, name: String, mission: String, author: String, extra: std::collections::HashMap<String, String>) {
-        self.inner.write().cylinder.confirm_identity(name, mission, author, extra);
+    pub fn confirm_identity(
+        &self,
+        name: String,
+        mission: String,
+        author: String,
+        extra: std::collections::HashMap<String, String>,
+    ) {
+        self.inner
+            .write()
+            .cylinder
+            .confirm_identity(name, mission, author, extra);
     }
 
-    pub fn update_identity(&self, name: Option<String>, mission: Option<String>, author: Option<String>, extra: Option<std::collections::HashMap<String, String>>) {
-        self.inner.write().cylinder.update_identity(name, mission, author, extra);
+    pub fn update_identity(
+        &self,
+        name: Option<String>,
+        mission: Option<String>,
+        author: Option<String>,
+        extra: Option<std::collections::HashMap<String, String>>,
+    ) {
+        self.inner
+            .write()
+            .cylinder
+            .update_identity(name, mission, author, extra);
     }
 
     pub fn pending_identity(&self) -> super::cylinder::PendingIdentity {
@@ -683,7 +824,9 @@ impl Space {
         let mut results = Vec::new();
 
         while let Some((current, dist)) = queue.pop_front() {
-            if dist >= max_hops { continue; }
+            if dist >= max_hops {
+                continue;
+            }
             let tetra = match inner.tetrahedrons.get(&current) {
                 Some(t) => t,
                 None => continue,
@@ -728,7 +871,9 @@ impl Space {
     /// All under one write lock — no TOCTOU window.
     pub fn relocate_tetrahedron(&self, id: TetraId, new_core: Point3) -> Result<TetraId, String> {
         let mut inner = self.inner.write();
-        let removed = inner.tetrahedrons.remove(&id)
+        let removed = inner
+            .tetrahedrons
+            .remove(&id)
             .ok_or_else(|| format!("tetrahedron {} not found", id))?;
 
         for &vid in &removed.vertex_ids {
@@ -791,12 +936,15 @@ impl Space {
     pub fn find_shared_vertices(&self, a: TetraId, b: TetraId) -> Vec<VertexId> {
         let inner = self.inner.read();
         let ta = match inner.tetrahedrons.get(&a) {
-            Some(t) => t, None => return vec![],
+            Some(t) => t,
+            None => return vec![],
         };
         let tb = match inner.tetrahedrons.get(&b) {
-            Some(t) => t, None => return vec![],
+            Some(t) => t,
+            None => return vec![],
         };
-        ta.vertex_ids.iter()
+        ta.vertex_ids
+            .iter()
             .filter(|vid| tb.vertex_ids.contains(vid))
             .copied()
             .collect()
@@ -824,8 +972,11 @@ impl Space {
                 *self.cluster_cache.write() = Some((ver, vec![]));
                 return vec![];
             }
-            let tv: HashMap<TetraId, [VertexId; 4]> = inner.tetrahedrons.iter()
-                .map(|(&id, t)| (id, t.vertex_ids)).collect();
+            let tv: HashMap<TetraId, [VertexId; 4]> = inner
+                .tetrahedrons
+                .iter()
+                .map(|(&id, t)| (id, t.vertex_ids))
+                .collect();
             (tv, inner.vertex_to_tetras.clone())
         };
 
@@ -857,7 +1008,9 @@ impl Space {
                 }
             }
 
-            clusters.push(Cluster { tetra_ids: cluster_ids });
+            clusters.push(Cluster {
+                tetra_ids: cluster_ids,
+            });
         }
 
         for c in &mut clusters {
@@ -873,8 +1026,10 @@ impl Space {
 
     pub fn edge_share_count(&self, v1: VertexId, v2: VertexId) -> usize {
         let key = ordered_pair(v1, v2);
-        self.inner.read()
-            .edge_table.get(&key)
+        self.inner
+            .read()
+            .edge_table
+            .get(&key)
             .map(|e| e.shared_by.len())
             .unwrap_or(0)
     }
@@ -904,7 +1059,9 @@ impl Space {
             return best;
         }
 
-        inner.tetrahedrons.iter()
+        inner
+            .tetrahedrons
+            .iter()
             .map(|(id, t)| (*id, t.core.distance_to(&point)))
             .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
     }
@@ -912,13 +1069,17 @@ impl Space {
 
 /// Return a consistent ordered pair (min, max) for edge keys.
 fn ordered_pair(a: VertexId, b: VertexId) -> (VertexId, VertexId) {
-    if a < b { (a, b) } else { (b, a) }
+    if a < b {
+        (a, b)
+    } else {
+        (b, a)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::tetra::MemoryPayload;
+    use super::*;
 
     fn make_tetra(id: TetraId, center: Point3) -> (Tetrahedron, [Point3; 4]) {
         let positions = Tetrahedron::compute_vertices(center);
@@ -1084,7 +1245,11 @@ mod tests {
         let _a = space.add_tetrahedron(&t1, &p1).unwrap();
         let b = space.add_tetrahedron(&t2, &p2).unwrap();
 
-        assert_eq!(space.find_clusters().len(), 1, "should be 1 cluster before remove+readd");
+        assert_eq!(
+            space.find_clusters().len(),
+            1,
+            "should be 1 cluster before remove+readd"
+        );
 
         let vertices_before = space.vertex_count();
 
@@ -1095,8 +1260,17 @@ mod tests {
         let _new_b = space.add_tetrahedron(&moved, &positions).unwrap();
 
         let clusters_after = space.find_clusters();
-        assert_eq!(clusters_after.len(), 1, "should still be 1 cluster after remove+readd at same position, got {}", clusters_after.len());
-        assert_eq!(space.vertex_count(), vertices_before, "vertex count should be preserved");
+        assert_eq!(
+            clusters_after.len(),
+            1,
+            "should still be 1 cluster after remove+readd at same position, got {}",
+            clusters_after.len()
+        );
+        assert_eq!(
+            space.vertex_count(),
+            vertices_before,
+            "vertex count should be preserved"
+        );
     }
 
     #[test]
@@ -1110,7 +1284,11 @@ mod tests {
             ids.push(id);
         }
 
-        assert_eq!(space.find_clusters().len(), 1, "10 tetras in a chain should be 1 cluster");
+        assert_eq!(
+            space.find_clusters().len(),
+            1,
+            "10 tetras in a chain should be 1 cluster"
+        );
 
         let vertices_before = space.vertex_count();
 
@@ -1127,10 +1305,19 @@ mod tests {
             ids = new_ids;
 
             let clusters = space.find_clusters();
-            assert_eq!(clusters.len(), 1, "should still be 1 cluster after remove+readd round, got {}", clusters.len());
+            assert_eq!(
+                clusters.len(),
+                1,
+                "should still be 1 cluster after remove+readd round, got {}",
+                clusters.len()
+            );
         }
 
-        assert_eq!(space.vertex_count(), vertices_before, "vertex count should be preserved");
+        assert_eq!(
+            space.vertex_count(),
+            vertices_before,
+            "vertex count should be preserved"
+        );
     }
 
     #[test]
@@ -1142,7 +1329,10 @@ mod tests {
     #[test]
     fn port_vertices_registered_in_space() {
         let space = Space::new();
-        assert!(space.vertex_count() > 0, "space should have port vertices at init");
+        assert!(
+            space.vertex_count() > 0,
+            "space should have port vertices at init"
+        );
 
         let ports: Vec<(VertexId, Point3)> = space.cylinder_ports();
 
@@ -1153,7 +1343,10 @@ mod tests {
             let gk = grid_key(pos);
             let inner = space.inner.read();
             assert!(
-                inner.vertex_grid.get(&gk).is_some_and(|vids| vids.contains(vid)),
+                inner
+                    .vertex_grid
+                    .get(&gk)
+                    .is_some_and(|vids| vids.contains(vid)),
                 "port vid {} should be in vertex_grid",
                 vid
             );
@@ -1176,7 +1369,11 @@ mod tests {
 
         let verts = Tetrahedron::compute_vertices(center);
         let merges = space.count_vertex_merges(&verts);
-        assert!(merges >= 1, "at least 1 vertex should merge with port, got {}", merges);
+        assert!(
+            merges >= 1,
+            "at least 1 vertex should merge with port, got {}",
+            merges
+        );
 
         let (tetra, _) = make_tetra(0, center);
         let tid = space.add_tetrahedron(&tetra, &verts).unwrap();
@@ -1185,7 +1382,8 @@ mod tests {
         assert!(
             tet.vertex_ids.contains(&port_vid),
             "tetra vertex_ids {:?} should contain port vid {}",
-            tet.vertex_ids, port_vid
+            tet.vertex_ids,
+            port_vid
         );
     }
 
@@ -1205,7 +1403,11 @@ mod tests {
             let zone = space.zone_for_layer(*layer);
             let layer_height = 12.0 / 6.0;
             let expected_min = i as f64 * layer_height;
-            assert!((zone.z_min - expected_min).abs() < 1e-6, "layer {:?} z_min wrong", layer);
+            assert!(
+                (zone.z_min - expected_min).abs() < 1e-6,
+                "layer {:?} z_min wrong",
+                layer
+            );
         }
     }
 }

@@ -73,7 +73,9 @@ pub fn auto_pulse(
         return 0;
     }
 
-    let budget = cluster_origins.len().min(ctx.adaptive.get_u(super::adaptive::Param::PulseBudget));
+    let budget = cluster_origins
+        .len()
+        .min(ctx.adaptive.get_u(super::adaptive::Param::PulseBudget));
     let mut pulsed = 0u32;
     let tick_usize = ctx.tick as usize;
 
@@ -125,12 +127,20 @@ pub fn auto_fission(
     last_merge_pairs: &HashSet<(usize, usize)>,
 ) -> AutoFissionOutcome {
     if ctx.tick.saturating_sub(last_fission_tick) < 10 {
-        return AutoFissionOutcome { did_fission: false, merge_pairs: None };
+        return AutoFissionOutcome {
+            did_fission: false,
+            merge_pairs: None,
+        };
     }
     let mut sorted_clusters: Vec<(usize, usize)> = clusters
         .iter()
         .enumerate()
-        .filter(|(_, c)| c.tetra_ids.len() >= ctx.adaptive.get_u(super::adaptive::Param::FissionMinClusterSize))
+        .filter(|(_, c)| {
+            c.tetra_ids.len()
+                >= ctx
+                    .adaptive
+                    .get_u(super::adaptive::Param::FissionMinClusterSize)
+        })
         .map(|(i, c)| (i, c.tetra_ids.len()))
         .collect();
     sorted_clusters.sort_by_key(|b| std::cmp::Reverse(b.1));
@@ -140,10 +150,28 @@ pub fn auto_fission(
         if !super::security::SecurityGuard::fission_allowed(entropy, *size) {
             continue;
         }
-        if (*size >= 30 || entropy >= ctx.adaptive.get(super::adaptive::Param::FissionEntropyThreshold))
-            && perform_fission_from_snap(ctx, *ci, 0, 8.0, "AutoFission", clusters, labels_map, core_map).is_some() {
-                return AutoFissionOutcome { did_fission: true, merge_pairs: None };
-            }
+        if (*size >= 30
+            || entropy
+                >= ctx
+                    .adaptive
+                    .get(super::adaptive::Param::FissionEntropyThreshold))
+            && perform_fission_from_snap(
+                ctx,
+                *ci,
+                0,
+                8.0,
+                "AutoFission",
+                clusters,
+                labels_map,
+                core_map,
+            )
+            .is_some()
+        {
+            return AutoFissionOutcome {
+                did_fission: true,
+                merge_pairs: None,
+            };
+        }
     }
 
     if clusters.len() >= 2 {
@@ -152,7 +180,10 @@ pub fn auto_fission(
             merge_pairs: Some(auto_merge(ctx, core_map, clusters, last_merge_pairs)),
         }
     } else {
-        AutoFissionOutcome { did_fission: false, merge_pairs: None }
+        AutoFissionOutcome {
+            did_fission: false,
+            merge_pairs: None,
+        }
     }
 }
 
@@ -175,9 +206,12 @@ pub fn auto_merge(
             if dist >= ctx.adaptive.get(super::adaptive::Param::MergeDistance) {
                 continue;
             }
-            let label_sim =
-                compute_cluster_label_similarity(&clusters[i], &clusters[j], ctx.space);
-            if label_sim < ctx.adaptive.get(super::adaptive::Param::MergeLabelSimilarity) {
+            let label_sim = compute_cluster_label_similarity(&clusters[i], &clusters[j], ctx.space);
+            if label_sim
+                < ctx
+                    .adaptive
+                    .get(super::adaptive::Param::MergeLabelSimilarity)
+            {
                 continue;
             }
             let key = if i < j { (i, j) } else { (j, i) };
@@ -253,7 +287,9 @@ pub fn auto_dream(
     last_dream_tick: u64,
     purge_fn: &dyn Fn(TetraId),
 ) -> Option<DreamOutcome> {
-    if ctx.tick.saturating_sub(last_dream_tick) < ctx.adaptive.get_u(super::adaptive::Param::DreamInterval) as u64 {
+    if ctx.tick.saturating_sub(last_dream_tick)
+        < ctx.adaptive.get_u(super::adaptive::Param::DreamInterval) as u64
+    {
         return None;
     }
     if !ctx.energy.consume(15.0) {
@@ -317,7 +353,10 @@ pub fn evict_low_quality(
         .filter(|t| {
             let is_junk = t.labels.iter().any(|l| l == "junk");
             let is_auto = t.labels.iter().any(|l| l == "auto-extracted");
-            let low_mass = t.mass < ctx.adaptive.get(super::adaptive::Param::EvictionMassThreshold);
+            let low_mass = t.mass
+                < ctx
+                    .adaptive
+                    .get(super::adaptive::Param::EvictionMassThreshold);
             let is_test = t.content.chars().count() < 20  // P1-24修复:字节长度→字符长度(CJK安全)
                 || t.content.starts_with("test ")
                 || t.content.starts_with("persistence-test")
@@ -376,7 +415,10 @@ pub fn perform_fission_from_snap(
     let mut label_counts: HashMap<&str, usize> = HashMap::new();
     for &id in &cluster.tetra_ids {
         if let Some(labels) = labels_map.get(&id) {
-            if labels.iter().any(|l| l.starts_with("meta-") || l.starts_with("bridge")) {
+            if labels
+                .iter()
+                .any(|l| l.starts_with("meta-") || l.starts_with("bridge"))
+            {
                 continue;
             }
             for l in labels {
@@ -386,7 +428,8 @@ pub fn perform_fission_from_snap(
     }
 
     let total: usize = cluster.tetra_ids.len();
-    let best_split = label_counts.iter()
+    let best_split = label_counts
+        .iter()
         .map(|(&label, &count)| {
             let ratio = count as f64 / total.max(1) as f64;
             let score = (ratio - 0.5).abs();
@@ -394,51 +437,69 @@ pub fn perform_fission_from_snap(
         })
         .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
-    let (dominant_label, dominant_ids, minority_ids): (String, HashSet<u64>, Vec<u64>) = match best_split {
-        Some((label, count, _, ratio)) if ratio > 0.0 && ratio < 1.0 && count > 0 => {
-            let dom: HashSet<u64> = cluster.tetra_ids.iter()
-                .filter(|&&id| {
-                    labels_map.get(&id).is_some_and(|ls| {
-                        !ls.iter().any(|l| l.starts_with("meta-") || l.starts_with("bridge"))
-                        && ls.iter().any(|l| l.as_str() == label)
+    let (dominant_label, dominant_ids, minority_ids): (String, HashSet<u64>, Vec<u64>) =
+        match best_split {
+            Some((label, count, _, ratio)) if ratio > 0.0 && ratio < 1.0 && count > 0 => {
+                let dom: HashSet<u64> = cluster
+                    .tetra_ids
+                    .iter()
+                    .filter(|&&id| {
+                        labels_map.get(&id).is_some_and(|ls| {
+                            !ls.iter()
+                                .any(|l| l.starts_with("meta-") || l.starts_with("bridge"))
+                                && ls.iter().any(|l| l.as_str() == label)
+                        })
                     })
-                })
-                .copied()
-                .collect();
-            let min: Vec<u64> = cluster.tetra_ids.iter()
-                .filter(|&&id| {
-                    labels_map.get(&id).is_some_and(|ls| {
-                        !ls.iter().any(|l| l.starts_with("meta-") || l.starts_with("bridge"))
-                        && !ls.iter().any(|l| l.as_str() == label)
+                    .copied()
+                    .collect();
+                let min: Vec<u64> = cluster
+                    .tetra_ids
+                    .iter()
+                    .filter(|&&id| {
+                        labels_map.get(&id).is_some_and(|ls| {
+                            !ls.iter()
+                                .any(|l| l.starts_with("meta-") || l.starts_with("bridge"))
+                                && !ls.iter().any(|l| l.as_str() == label)
+                        })
                     })
-                })
-                .copied()
-                .collect();
-            (label.to_string(), dom, min)
-        }
-        _ => {
-            let mut label_map: HashMap<String, Vec<u64>> = HashMap::new();
-            for &id in &cluster.tetra_ids {
-                if let Some(labels) = labels_map.get(&id) {
-                    if labels.iter().any(|l| l.starts_with("meta-") || l.starts_with("bridge")) {
-                        continue;
+                    .copied()
+                    .collect();
+                (label.to_string(), dom, min)
+            }
+            _ => {
+                let mut label_map: HashMap<String, Vec<u64>> = HashMap::new();
+                for &id in &cluster.tetra_ids {
+                    if let Some(labels) = labels_map.get(&id) {
+                        if labels
+                            .iter()
+                            .any(|l| l.starts_with("meta-") || l.starts_with("bridge"))
+                        {
+                            continue;
+                        }
+                        let key = labels.first().map(|s| s.as_str()).unwrap_or("general");
+                        label_map.entry(key.to_string()).or_default().push(id);
                     }
-                    let key = labels.first().map(|s| s.as_str()).unwrap_or("general");
-                    label_map.entry(key.to_string()).or_default().push(id);
                 }
+                let mut sorted_groups: Vec<(String, Vec<u64>)> = label_map.into_iter().collect();
+                sorted_groups.sort_by_key(|b| std::cmp::Reverse(b.1.len()));
+                if sorted_groups.len() < 2 {
+                    tracing::debug!(
+                        "[AutoFission] cluster {} cannot split: all same labels, entropy={:.3}",
+                        cluster_index,
+                        entropy
+                    );
+                    return None;
+                }
+                let dom_label = sorted_groups[0].0.clone();
+                let dom: HashSet<u64> = sorted_groups[0].1.iter().copied().collect();
+                let min: Vec<u64> = sorted_groups
+                    .iter()
+                    .skip(1)
+                    .flat_map(|(_, ids)| ids.iter().copied())
+                    .collect();
+                (dom_label, dom, min)
             }
-            let mut sorted_groups: Vec<(String, Vec<u64>)> = label_map.into_iter().collect();
-            sorted_groups.sort_by_key(|b| std::cmp::Reverse(b.1.len()));
-            if sorted_groups.len() < 2 {
-                tracing::debug!("[AutoFission] cluster {} cannot split: all same labels, entropy={:.3}", cluster_index, entropy);
-                return None;
-            }
-            let dom_label = sorted_groups[0].0.clone();
-            let dom: HashSet<u64> = sorted_groups[0].1.iter().copied().collect();
-            let min: Vec<u64> = sorted_groups.iter().skip(1).flat_map(|(_, ids)| ids.iter().copied()).collect();
-            (dom_label, dom, min)
-        }
-    };
+        };
 
     if minority_ids.is_empty() || dominant_ids.is_empty() {
         return None;
@@ -449,10 +510,8 @@ pub fn perform_fission_from_snap(
         return None;
     }
 
-    let dominant_centroid = centroid_from_core_map(
-        &dominant_ids.iter().copied().collect::<Vec<_>>(),
-        core_map,
-    );
+    let dominant_centroid =
+        centroid_from_core_map(&dominant_ids.iter().copied().collect::<Vec<_>>(), core_map);
     let minority_centroid = centroid_from_core_map(&minority_ids, core_map);
     let mut moved_count: usize = 0;
     for &id in &minority_ids {
@@ -468,12 +527,7 @@ pub fn perform_fission_from_snap(
                     moved_count += 1;
                     persist_tetra_id(ctx.space, ctx.storage, ctx.gateway, id);
                 }
-                Err(e) => tracing::warn!(
-                    "[{}] fission move tetra {} failed: {}",
-                    tag,
-                    id,
-                    e
-                ),
+                Err(e) => tracing::warn!("[{}] fission move tetra {} failed: {}", tag, id, e),
             }
         }
     }
@@ -504,9 +558,7 @@ pub fn fission_placement(
     let dy = smaller_centroid.y - larger_centroid.y;
     let dz = smaller_centroid.z - larger_centroid.z;
     let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-    let base_dist = EDGE_LENGTH
-        * 10.0
-        * ((tetra_count as f64).sqrt().clamp(3.0, 20.0));
+    let base_dist = EDGE_LENGTH * 10.0 * ((tetra_count as f64).sqrt().clamp(3.0, 20.0));
     let push_dist = base_dist.min(EDGE_LENGTH * 50.0);
     if dist < 1e-10 {
         return Point3::new(original.x + push_dist, original.y, original.z);
@@ -520,12 +572,7 @@ pub fn fission_placement(
     )
 }
 
-fn persist_tetra_id(
-    space: &Space,
-    storage: &StorageManager,
-    gateway: &GatewayCenter,
-    id: TetraId,
-) {
+fn persist_tetra_id(space: &Space, storage: &StorageManager, gateway: &GatewayCenter, id: TetraId) {
     if let Some(tetra) = space.get_tetrahedron(id) {
         if let Err(e) = storage.upsert_tetra(&tetra) {
             tracing::warn!("persist_tetra {} failed: {}", id, e);
@@ -542,11 +589,7 @@ pub fn centroid_from_core_map(ids: &[u64], core_map: &HashMap<u64, Point3>) -> P
     Point3::centroid(&points)
 }
 
-pub fn compute_cluster_label_similarity(
-    ca: &Cluster,
-    cb: &Cluster,
-    space: &Space,
-) -> f64 {
+pub fn compute_cluster_label_similarity(ca: &Cluster, cb: &Cluster, space: &Space) -> f64 {
     let mut set_a: HashSet<String> = HashSet::new();
     for id in &ca.tetra_ids {
         if let Some(t) = space.get_tetrahedron(*id) {

@@ -130,8 +130,7 @@ pub fn reclassify_memories(
                         tracing::error!("[Reclassify] ROLLBACK FAILED for {}: {}", id, re);
                     }
                 } else {
-                    ctx.gateway
-                        .update_label_index(id, &old_labels, &new_labels);
+                    ctx.gateway.update_label_index(id, &old_labels, &new_labels);
                     tracing::info!("[Reclassify] #{}: {:?} -> {:?}", id, old_labels, new_labels);
                 }
             }
@@ -184,11 +183,7 @@ pub fn extract_entities(
                     if let Err(err) = ctx.space.update_labels(id, new_labels.clone()) {
                         tracing::warn!("[Entity] update labels failed for {}: {}", id, err);
                     } else if let Err(err) = ctx.storage.update_labels(id, &new_labels) {
-                        tracing::warn!(
-                            "[Entity] persist failed for {}: {}, rolling back",
-                            id,
-                            err
-                        );
+                        tracing::warn!("[Entity] persist failed for {}: {}, rolling back", id, err);
                         if let Err(re) = ctx.space.update_labels(id, old_labels) {
                             tracing::error!("[Entity] ROLLBACK FAILED for {}: {}", id, re);
                         }

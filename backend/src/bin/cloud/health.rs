@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 
-use epicode::engine::user_manager::{UserPlan, UserInfo};
+use epicode::engine::user_manager::{UserInfo, UserPlan};
 
 use super::helpers::{disk_free_gb, error_response, require_admin, validate_user_id};
 use super::state::CloudState;
@@ -32,7 +32,10 @@ pub async fn health(
     let disk_free_gb = disk_free_gb();
     let disk_ok = disk_free_gb > 2.0;
 
-    let slot = st.user_mgr.list_users().into_iter()
+    let slot = st
+        .user_mgr
+        .list_users()
+        .into_iter()
         .filter(|u| u.parent.is_none())
         .find_map(|u| st.user_mgr.try_get_engine_slot(&u.user_id));
 
@@ -43,17 +46,23 @@ pub async fn health(
         let eff_json: Vec<serde_json::Value> = eff_summary.iter()
             .map(|(at, score)| serde_json::json!({"action": format!("{:?}", at), "effectiveness": (score * 100.0).round() / 100.0}))
             .collect();
-        (serde_json::json!({
-            "memories": stats.tetra_count,
-            "vertices": stats.vertex_count,
-            "clusters": stats.clusters,
-            "energy": stats.energy,
-            "kg_relations": kg.0,
-            "kg_concepts": kg.1,
-            "aggregation_rate": 0.0,
-        }), eff_json)
+        (
+            serde_json::json!({
+                "memories": stats.tetra_count,
+                "vertices": stats.vertex_count,
+                "clusters": stats.clusters,
+                "energy": stats.energy,
+                "kg_relations": kg.0,
+                "kg_concepts": kg.1,
+                "aggregation_rate": 0.0,
+            }),
+            eff_json,
+        )
     } else {
-        (serde_json::json!({"error": "main engine not loaded"}), vec![])
+        (
+            serde_json::json!({"error": "main engine not loaded"}),
+            vec![],
+        )
     };
 
     let model_ok = st.user_mgr.vector_ready();
@@ -100,7 +109,6 @@ pub async fn public_stats(State(st): State<CloudState>) -> Json<serde_json::Valu
     }))
 }
 
-
 /// Phase 3: /ready — readiness probe for load balancer / k8s
 /// Returns 200 when Ready, 503 when WarmingUp.
 pub async fn ready(
@@ -108,13 +116,19 @@ pub async fn ready(
 ) -> (axum::http::StatusCode, Json<serde_json::Value>) {
     use std::sync::atomic::Ordering;
     let is_ready = st.startup_phase.load(Ordering::Relaxed) == 1u8;
-    let status_code = if is_ready { axum::http::StatusCode::OK } else { axum::http::StatusCode::SERVICE_UNAVAILABLE };
-    (status_code, Json(serde_json::json!({
-        "ready": is_ready,
-        "status": if is_ready { "ready" } else { "warming_up" },
-    })))
+    let status_code = if is_ready {
+        axum::http::StatusCode::OK
+    } else {
+        axum::http::StatusCode::SERVICE_UNAVAILABLE
+    };
+    (
+        status_code,
+        Json(serde_json::json!({
+            "ready": is_ready,
+            "status": if is_ready { "ready" } else { "warming_up" },
+        })),
+    )
 }
-
 
 /// Phase 3 P0: GET /v1/persona/ready — 人格 readiness（API key 鉴权）
 /// 返回该 key 对应用户的人格加载状态。
@@ -128,18 +142,22 @@ pub async fn persona_ready(
     let process_ready = st.startup_phase.load(Ordering::Relaxed) == 1u8;
 
     // 从 API key 拿 user_id
-    let api_key = headers.get("X-API-Key")
+    let api_key = headers
+        .get("X-API-Key")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
     let user_id = st.user_mgr.find_user_by_api_key(api_key);
 
     if user_id.is_empty() {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-            "ready": false,
-            "status": "unauthorized",
-            "error": "invalid API key"
-        })));
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "ready": false,
+                "status": "unauthorized",
+                "error": "invalid API key"
+            })),
+        );
     }
 
     // 拿真实的 per-user persona state
@@ -149,12 +167,32 @@ pub async fn persona_ready(
     let (ready, status_code, persona_phase) = match persona_state {
         PersonaState::Ready => {
             let cognitive_enabled = std::env::var("ENABLE_COGNITIVE").as_deref() == Ok("1");
-            let phase = if loop_started { if cognitive_enabled { "live_full" } else { "live_quiet" } } else { "ready" };
+            let phase = if loop_started {
+                if cognitive_enabled {
+                    "live_full"
+                } else {
+                    "live_quiet"
+                }
+            } else {
+                "ready"
+            };
             (true, axum::http::StatusCode::OK, phase)
         }
-        PersonaState::WarmingUp => (false, axum::http::StatusCode::SERVICE_UNAVAILABLE, "warming_up"),
-        PersonaState::Degraded => (false, axum::http::StatusCode::INTERNAL_SERVER_ERROR, "degraded"),
-        PersonaState::Unknown => (false, axum::http::StatusCode::SERVICE_UNAVAILABLE, "unknown"),
+        PersonaState::WarmingUp => (
+            false,
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "warming_up",
+        ),
+        PersonaState::Degraded => (
+            false,
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "degraded",
+        ),
+        PersonaState::Unknown => (
+            false,
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "unknown",
+        ),
     };
 
     // Phase 3 P0-3: 契约 #1658 标准 envelope
@@ -164,9 +202,16 @@ pub async fn persona_ready(
         match st.user_mgr.try_get_engine_slot(&user_id) {
             Some(engine) => {
                 let dq = engine.scheduler.drive_queue();
-                (dq.sweep_applied(), dq.stats().get("total").and_then(|v| v.as_u64()).unwrap_or(0), true)
+                (
+                    dq.sweep_applied(),
+                    dq.stats()
+                        .get("total")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0),
+                    true,
+                )
             }
-            None => (0, 0, false)
+            None => (0, 0, false),
         }
     } else {
         (0, 0, false)
@@ -216,7 +261,11 @@ pub async fn persona_ready(
     (status_code, Json(body))
 }
 
-pub async fn agent_guide() -> (StatusCode, [(axum::http::HeaderName, &'static str); 2], &'static str) {
+pub async fn agent_guide() -> (
+    StatusCode,
+    [(axum::http::HeaderName, &'static str); 2],
+    &'static str,
+) {
     let guide = concat!(
                 "# Epicode Agent Guide\n",
         "\n",
@@ -349,13 +398,19 @@ pub async fn agent_guide() -> (StatusCode, [(axum::http::HeaderName, &'static st
         "- Use memory_recall (not memory_search) when you need connected context.\n",
         "- Run dream_cycle periodically to strengthen KG connections.\n",
         "- Identity is IMMUTABLE after identity_confirm - choose wisely.\n",
-    
+
     );
     (
         StatusCode::OK,
         [
-            (axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8"),
-            (axum::http::HeaderName::from_static("cache-control"), "public, max-age=3600"),
+            (
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; charset=utf-8",
+            ),
+            (
+                axum::http::HeaderName::from_static("cache-control"),
+                "public, max-age=3600",
+            ),
         ],
         guide,
     )
@@ -373,7 +428,8 @@ pub async fn register_user(
     headers: axum::http::HeaderMap,
     Json(req): Json<RegisterRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let invite_code = headers.get("X-Invite-Code")
+    let invite_code = headers
+        .get("X-Invite-Code")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
@@ -382,7 +438,10 @@ pub async fn register_user(
         return error_response(StatusCode::BAD_REQUEST, &e);
     }
     if req.password.len() < 6 {
-        return error_response(StatusCode::BAD_REQUEST, "password must be at least 6 characters");
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "password must be at least 6 characters",
+        );
     }
 
     // 验证通过后检查授权（邀请码/admin）
@@ -400,23 +459,33 @@ pub async fn register_user(
 
     // P17 越权修复: 套餐只能由admin路径授予 — 邀请码注册一律Free
     // (此前任何持码者可自选enterprise, 10万记忆额度自助封顶)
-    let plan = match if via_admin { req.plan.as_deref().unwrap_or("free") } else { "free" } {
+    let plan = match if via_admin {
+        req.plan.as_deref().unwrap_or("free")
+    } else {
+        "free"
+    } {
         "pro" => UserPlan::Pro,
         "enterprise" => UserPlan::Enterprise,
         _ => UserPlan::Free,
     };
     let api_key = format!("tm-{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
 
-    match st.user_mgr.register(&req.user_id, &api_key, plan, &req.password) {
+    match st
+        .user_mgr
+        .register(&req.user_id, &api_key, plan, &req.password)
+    {
         Ok(info) => {
             tracing::info!("user registered: {} plan={:?}", info.user_id, info.plan);
-            (StatusCode::OK, Json(serde_json::json!({
-                "success": true,
-                "user_id": info.user_id,
-                "api_key": api_key,
-                "plan": serde_json::to_value(&info.plan).unwrap_or_default(),
-                "max_memories": info.max_memories,
-            })))
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "success": true,
+                    "user_id": info.user_id,
+                    "api_key": api_key,
+                    "plan": serde_json::to_value(&info.plan).unwrap_or_default(),
+                    "max_memories": info.max_memories,
+                })),
+            )
         }
         Err(e) => error_response(StatusCode::BAD_REQUEST, &e),
     }
@@ -427,7 +496,6 @@ pub struct LoginRequest {
     pub user_id: String,
     pub password: String,
 }
-
 
 /// P27 Pulse: 接收守护进程遥测 — 真实活跃时间回流(带身份验证+归属校验)
 #[derive(serde::Deserialize)]
@@ -443,17 +511,35 @@ pub async fn pulse_heartbeat(
     axum::Json(req): axum::Json<PulseHeartbeat>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if req.real_active_ms < 0 || req.real_active_ms > 86400_000 {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "real_active_ms out of range"})));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "real_active_ms out of range"})),
+        );
     }
     let engine = match st.user_mgr.get_engine(&user.user_id) {
         Ok(e) => e,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": e}))),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": e})),
+            )
+        }
     };
-    match engine.storage.set_real_active(&req.task_id, &user.user_id, req.real_active_ms) {
+    match engine
+        .storage
+        .set_real_active(&req.task_id, &user.user_id, req.real_active_ms)
+    {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({"ok": true}))),
-        Err(e) if e.contains("not found") =>
-            (StatusCode::NOT_FOUND, Json(serde_json::json!({"ok": false, "stop": true, "reason": "task completed or not found — stop pulsing"}))),
-        Err(e) => (StatusCode::FORBIDDEN, Json(serde_json::json!({"ok": false, "stop": true, "error": e}))),
+        Err(e) if e.contains("not found") => (
+            StatusCode::NOT_FOUND,
+            Json(
+                serde_json::json!({"ok": false, "stop": true, "reason": "task completed or not found — stop pulsing"}),
+            ),
+        ),
+        Err(e) => (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"ok": false, "stop": true, "error": e})),
+        ),
     }
 }
 
@@ -584,7 +670,11 @@ pub async fn login_user(
         return error_response(StatusCode::BAD_REQUEST, "password is required").into_response();
     }
     if req.password.len() > 128 {
-        return error_response(StatusCode::BAD_REQUEST, "password too long (max 128 characters)").into_response();
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "password too long (max 128 characters)",
+        )
+        .into_response();
     }
     match st.user_mgr.login(&req.user_id, &req.password) {
         Ok(info) => {
@@ -609,7 +699,11 @@ pub async fn login_user(
 /// B6: 登出 — 清除 HttpOnly session cookie
 pub async fn logout_user() -> impl axum::response::IntoResponse {
     let cookie = "epicode_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0";
-    (StatusCode::OK, [("set-cookie", cookie)], Json(serde_json::json!({"success": true})))
+    (
+        StatusCode::OK,
+        [("set-cookie", cookie)],
+        Json(serde_json::json!({"success": true})),
+    )
 }
 
 pub async fn mint_stream_ticket(
@@ -624,11 +718,14 @@ pub async fn mint_stream_ticket(
         m.retain(|_, (_, e)| *e > now);
         m.insert(ticket.clone(), (user.api_key.clone(), exp));
     }
-    (StatusCode::OK, Json(serde_json::json!({
-        "success": true,
-        "ticket": ticket,
-        "expires_in": 120,
-    })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "success": true,
+            "ticket": ticket,
+            "expires_in": 120,
+        })),
+    )
 }
 
 /// 智能化突破: SSE实时流 — 每3秒推送完整认知状态 + 订阅洞察事件
@@ -670,7 +767,9 @@ pub async fn sse_stream(
                 "cognitive_status": cog_status, "latest_thought": thought,
             });
             let evt = Event::default().data(serde_json::to_string(&data).unwrap_or_default());
-            if tx1.send(Ok(evt)).await.is_err() { break; }
+            if tx1.send(Ok(evt)).await.is_err() {
+                break;
+            }
         }
     });
 
@@ -684,18 +783,31 @@ pub async fn sse_stream(
         let notify = loop {
             let handle = {
                 let slots = st2.user_mgr.slots_read();
-                slots.get(&uid2).map(|slot| slot.engine.scheduler().drive_queue().notify_handle())
+                slots
+                    .get(&uid2)
+                    .map(|slot| slot.engine.scheduler().drive_queue().notify_handle())
             };
-            if let Some(h) = handle { break h; }
+            if let Some(h) = handle {
+                break h;
+            }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            if tx2.is_closed() { return; }
+            if tx2.is_closed() {
+                return;
+            }
         };
         // 基线: 只推送连接后新 enqueue 的 signal (id > 基线 max)
         let mut last_pushed_max_id: u64 = {
             let slots = st2.user_mgr.slots_read();
             match slots.get(&uid2) {
-                Some(slot) => slot.engine.scheduler().drive_queue().peek_unacked(200)
-                    .iter().map(|s| s.id).max().unwrap_or(0),
+                Some(slot) => slot
+                    .engine
+                    .scheduler()
+                    .drive_queue()
+                    .peek_unacked(200)
+                    .iter()
+                    .map(|s| s.id)
+                    .max()
+                    .unwrap_or(0),
                 None => 0,
             }
         };
@@ -711,15 +823,22 @@ pub async fn sse_stream(
                     None => continue,
                 }
             }; // slots dropped here
-            let fresh: Vec<_> = signals.iter().filter(|s| s.id > last_pushed_max_id).collect();
-            if fresh.is_empty() { continue; }
+            let fresh: Vec<_> = signals
+                .iter()
+                .filter(|s| s.id > last_pushed_max_id)
+                .collect();
+            if fresh.is_empty() {
+                continue;
+            }
             if let Some(new_max) = fresh.iter().map(|s| s.id).max() {
                 last_pushed_max_id = new_max;
             }
             // γ2: 传输层 E2E (与 REST inbox 同语义)
             let e2e_pem = {
                 let slots = st2.user_mgr.slots_read();
-                slots.get(&uid2).and_then(|slot| slot.engine.scheduler().e2e_pubkey())
+                slots
+                    .get(&uid2)
+                    .and_then(|slot| slot.engine.scheduler().e2e_pubkey())
             };
             let sig_json: Vec<_> = fresh.iter().map(|s| {
                 let (desc_field, e2e_field) = match &e2e_pem {
@@ -742,9 +861,16 @@ pub async fn sse_stream(
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as i64;
-            let lags: Vec<i64> = fresh.iter().map(|s| {
-                if s.enqueued_at_ms > 0 { pushed_at_ms - s.enqueued_at_ms } else { 0 }
-            }).collect();
+            let lags: Vec<i64> = fresh
+                .iter()
+                .map(|s| {
+                    if s.enqueued_at_ms > 0 {
+                        pushed_at_ms - s.enqueued_at_ms
+                    } else {
+                        0
+                    }
+                })
+                .collect();
             let server_lag_ms = lags.iter().copied().max().unwrap_or(0);
             let data = serde_json::json!({
                 "type": "drive",
@@ -754,7 +880,9 @@ pub async fn sse_stream(
                 "signals": sig_json
             });
             let evt = Event::default().data(serde_json::to_string(&data).unwrap_or_default());
-            if tx2.send(Ok(evt)).await.is_err() { break; }
+            if tx2.send(Ok(evt)).await.is_err() {
+                break;
+            }
         }
     });
 

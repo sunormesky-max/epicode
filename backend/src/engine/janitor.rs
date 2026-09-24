@@ -18,11 +18,15 @@ pub fn auto_save(ctx: &JanitorCtx) {
         let delta_total = ups.len() + dels.len();
         if delta_total > 0 && delta_total <= 50_000 {
             match ctx.storage.save_relations_delta(&ups, &dels) {
-                Ok((u, d)) => { tracing::debug!("[Janitor] kg delta saved: +{} -{}", u, d); ctx.knowledge.clear_dirty(); }
+                Ok((u, d)) => {
+                    tracing::debug!("[Janitor] kg delta saved: +{} -{}", u, d);
+                    ctx.knowledge.clear_dirty();
+                }
                 Err(e) => tracing::warn!("[Janitor] kg delta failed (will full-save): {}", e),
             }
         }
-        if ctx.knowledge.is_dirty() { // 回退/兜底: 无增量信息或超量 → 全量
+        if ctx.knowledge.is_dirty() {
+            // 回退/兜底: 无增量信息或超量 → 全量
             if let Err(e) = ctx.storage.save_kg_only(ctx.knowledge) {
                 tracing::warn!("[Janitor] auto-save kg failed: {}", e);
             } else {

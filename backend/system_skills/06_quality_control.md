@@ -1,5 +1,8 @@
 # 质量自控 (Quality Self-Control)
 
+> **对齐声明**: 本技能为深度伴读。权威流程以《Epicode 系统操作手册》(epicode-system, 经握手或 skill_get 获取) 为准——当前系统包含相位机、双钟模型(预算按活跃时间燃烧, 停放不烧)、时间树(parent_task_id)、检查点微沉淀、崩溃恢复(无参 task_status)、停放仪式、阻塞告警(task_alert)、LLM 评审与交付凭证(task_id)。
+
+
 ## 概述
 系统会自动进行记忆质量控制，但你也可以主动参与。本技能教你如何帮助维护记忆库的健康。
 

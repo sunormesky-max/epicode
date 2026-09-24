@@ -25,14 +25,19 @@ pub async fn admin_list_users(
         "active_engines": st.user_mgr.active_users(),
     });
     match engine {
-        Some(e) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&e, "admin_list_users", body))),
+        Some(e) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &e,
+                "admin_list_users",
+                body,
+            )),
+        ),
         None => (StatusCode::OK, Json(body)),
     }
 }
 
-pub async fn admin_stats(
-    State(st): State<CloudState>,
-) -> (StatusCode, Json<serde_json::Value>) {
+pub async fn admin_stats(State(st): State<CloudState>) -> (StatusCode, Json<serde_json::Value>) {
     let engine = first_engine(&st);
     let body = serde_json::json!({
         "total_users": st.user_mgr.total_users(),
@@ -40,7 +45,10 @@ pub async fn admin_stats(
         "max_users": 1000,
     });
     match engine {
-        Some(e) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&e, "admin_stats", body))),
+        Some(e) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(&e, "admin_stats", body)),
+        ),
         None => (StatusCode::OK, Json(body)),
     }
 }
@@ -49,27 +57,37 @@ pub async fn admin_users_list(
     State(st): State<CloudState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let users = st.user_mgr.list_users();
-    let items: Vec<serde_json::Value> = users.into_iter().map(|u| {
-        let identity = st.user_mgr.get_engine(&u.user_id).ok().and_then(|e| {
-            e.space.identity_info().map(|info| serde_json::json!({
+    let items: Vec<serde_json::Value> = users
+        .into_iter()
+        .map(|u| {
+            let identity = st.user_mgr.get_engine(&u.user_id).ok().and_then(|e| {
+                e.space.identity_info().map(|info| serde_json::json!({
                 "name": info.system_name, "mission": info.mission, "confirmed": info.confirmed,
             }))
-        });
-        serde_json::json!({
-            "user_id": u.user_id,
-            "plan": serde_json::to_value(&u.plan).unwrap_or_default(),
-            "max_memories": u.max_memories,
-            "memories_used": u.memories_used,
-            "created_at": u.created_at,
-            "identity": identity,
+            });
+            serde_json::json!({
+                "user_id": u.user_id,
+                "plan": serde_json::to_value(&u.plan).unwrap_or_default(),
+                "max_memories": u.max_memories,
+                "memories_used": u.memories_used,
+                "created_at": u.created_at,
+                "identity": identity,
+            })
         })
-    }).collect();
+        .collect();
     let engine = first_engine(&st);
     let body = serde_json::json!({
         "users": items,
     });
     match engine {
-        Some(e) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&e, "admin_users_list", body))),
+        Some(e) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &e,
+                "admin_users_list",
+                body,
+            )),
+        ),
         None => (StatusCode::OK, Json(body)),
     }
 }
@@ -86,18 +104,28 @@ pub async fn admin_user_detail(
         None => {
             let engine = first_engine(&st);
             return match engine {
-                Some(e) => (StatusCode::NOT_FOUND, Json(epicode::engine::smrp::envelope_err(&e, "admin_user_detail", 404, "user not found"))),
+                Some(e) => (
+                    StatusCode::NOT_FOUND,
+                    Json(epicode::engine::smrp::envelope_err(
+                        &e,
+                        "admin_user_detail",
+                        404,
+                        "user not found",
+                    )),
+                ),
                 None => error_response(StatusCode::NOT_FOUND, "user not found"),
             };
         }
     };
     let identity = st.user_mgr.get_engine(&user_id).ok().and_then(|e| {
-        e.space.identity_info().map(|info| serde_json::json!({
-            "name": info.system_name, "mission": info.mission, "author": info.author,
-            "confirmed": info.confirmed,
-            "personality": info.extra.get("personality").unwrap_or(&String::new()),
-            "language": info.extra.get("language").unwrap_or(&String::new()),
-        }))
+        e.space.identity_info().map(|info| {
+            serde_json::json!({
+                "name": info.system_name, "mission": info.mission, "author": info.author,
+                "confirmed": info.confirmed,
+                "personality": info.extra.get("personality").unwrap_or(&String::new()),
+                "language": info.extra.get("language").unwrap_or(&String::new()),
+            })
+        })
     });
     let stats = st.user_mgr.get_engine(&user_id).ok().map(|e| {
         let s = e.scheduler.api_stats();
@@ -114,7 +142,14 @@ pub async fn admin_user_detail(
         "stats": stats,
     });
     match engine {
-        Some(e) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&e, "admin_user_detail", body))),
+        Some(e) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &e,
+                "admin_user_detail",
+                body,
+            )),
+        ),
         None => (StatusCode::OK, Json(body)),
     }
 }
@@ -131,12 +166,27 @@ pub async fn admin_reset_key(
         Ok(new_key) => {
             let body = serde_json::json!({ "new_api_key": new_key });
             match engine {
-                Some(e) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&e, "admin_reset_key", body))),
+                Some(e) => (
+                    StatusCode::OK,
+                    Json(epicode::engine::smrp::envelope_ok(
+                        &e,
+                        "admin_reset_key",
+                        body,
+                    )),
+                ),
                 None => (StatusCode::OK, Json(body)),
             }
         }
         Err(e) => match engine {
-            Some(eng) => (StatusCode::NOT_FOUND, Json(epicode::engine::smrp::envelope_err(&eng, "admin_reset_key", 404, &e))),
+            Some(eng) => (
+                StatusCode::NOT_FOUND,
+                Json(epicode::engine::smrp::envelope_err(
+                    &eng,
+                    "admin_reset_key",
+                    404,
+                    &e,
+                )),
+            ),
             None => error_response(StatusCode::NOT_FOUND, &e),
         },
     }
@@ -158,14 +208,30 @@ pub async fn admin_set_password(
     let engine = first_engine(&st);
     match st.user_mgr.set_password(&user_id, &req.password) {
         Ok(()) => {
-            let body = serde_json::json!({ "message": format!("password set for user {}", user_id) });
+            let body =
+                serde_json::json!({ "message": format!("password set for user {}", user_id) });
             match &engine {
-                Some(e) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(e, "admin_set_password", body))),
+                Some(e) => (
+                    StatusCode::OK,
+                    Json(epicode::engine::smrp::envelope_ok(
+                        e,
+                        "admin_set_password",
+                        body,
+                    )),
+                ),
                 None => (StatusCode::OK, Json(body)),
             }
         }
         Err(e) => match &engine {
-            Some(eng) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(eng, "admin_set_password", 400, &e))),
+            Some(eng) => (
+                StatusCode::BAD_REQUEST,
+                Json(epicode::engine::smrp::envelope_err(
+                    eng,
+                    "admin_set_password",
+                    400,
+                    &e,
+                )),
+            ),
             None => error_response(StatusCode::BAD_REQUEST, &e),
         },
     }
@@ -189,21 +255,49 @@ pub async fn admin_set_plan(
         "free" => UserPlan::Free,
         "pro" => UserPlan::Pro,
         "enterprise" => UserPlan::Enterprise,
-        _ => return match &engine {
-            Some(e) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(e, "admin_set_plan", 400, "plan must be free, pro, or enterprise"))),
-            None => error_response(StatusCode::BAD_REQUEST, "plan must be free, pro, or enterprise"),
-        },
+        _ => {
+            return match &engine {
+                Some(e) => (
+                    StatusCode::BAD_REQUEST,
+                    Json(epicode::engine::smrp::envelope_err(
+                        e,
+                        "admin_set_plan",
+                        400,
+                        "plan must be free, pro, or enterprise",
+                    )),
+                ),
+                None => error_response(
+                    StatusCode::BAD_REQUEST,
+                    "plan must be free, pro, or enterprise",
+                ),
+            }
+        }
     };
     match st.user_mgr.set_plan(&user_id, plan) {
         Ok(()) => {
             let body = serde_json::json!({ "user_id": user_id, "plan": req.plan });
             match &engine {
-                Some(e) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(e, "admin_set_plan", body))),
+                Some(e) => (
+                    StatusCode::OK,
+                    Json(epicode::engine::smrp::envelope_ok(
+                        e,
+                        "admin_set_plan",
+                        body,
+                    )),
+                ),
                 None => (StatusCode::OK, Json(body)),
             }
         }
         Err(e) => match &engine {
-            Some(eng) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(eng, "admin_set_plan", 400, &e))),
+            Some(eng) => (
+                StatusCode::BAD_REQUEST,
+                Json(epicode::engine::smrp::envelope_err(
+                    eng,
+                    "admin_set_plan",
+                    400,
+                    &e,
+                )),
+            ),
             None => error_response(StatusCode::BAD_REQUEST, &e),
         },
     }
@@ -221,12 +315,27 @@ pub async fn admin_delete_user(
         Ok(()) => {
             let body = serde_json::json!({ "deleted": user_id });
             match &engine {
-                Some(e) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(e, "admin_delete_user", body))),
+                Some(e) => (
+                    StatusCode::OK,
+                    Json(epicode::engine::smrp::envelope_ok(
+                        e,
+                        "admin_delete_user",
+                        body,
+                    )),
+                ),
                 None => (StatusCode::OK, Json(body)),
             }
         }
         Err(e) => match &engine {
-            Some(eng) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(eng, "admin_delete_user", 400, &e))),
+            Some(eng) => (
+                StatusCode::BAD_REQUEST,
+                Json(epicode::engine::smrp::envelope_err(
+                    eng,
+                    "admin_delete_user",
+                    400,
+                    &e,
+                )),
+            ),
             None => error_response(StatusCode::BAD_REQUEST, &e),
         },
     }
@@ -249,7 +358,14 @@ pub async fn admin_generate_invites(
         "codes": codes,
     });
     match engine {
-        Some(e) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&e, "admin_generate_invites", body))),
+        Some(e) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &e,
+                "admin_generate_invites",
+                body,
+            )),
+        ),
         None => (StatusCode::OK, Json(body)),
     }
 }
@@ -264,7 +380,14 @@ pub async fn admin_list_invites(
         "codes": codes,
     });
     match engine {
-        Some(e) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&e, "admin_list_invites", body))),
+        Some(e) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &e,
+                "admin_list_invites",
+                body,
+            )),
+        ),
         None => (StatusCode::OK, Json(body)),
     }
 }
@@ -276,12 +399,13 @@ pub async fn admin_backup_all(
     let mut results = Vec::new();
     for u in &users {
         match st.user_mgr.get_engine(&u.user_id) {
-            Ok(engine) => {
-                match engine.backup() {
-                    Ok(ts) => results.push(serde_json::json!({"user_id": u.user_id, "timestamp": ts, "ok": true})),
-                    Err(e) => results.push(serde_json::json!({"user_id": u.user_id, "error": e, "ok": false})),
+            Ok(engine) => match engine.backup() {
+                Ok(ts) => results
+                    .push(serde_json::json!({"user_id": u.user_id, "timestamp": ts, "ok": true})),
+                Err(e) => {
+                    results.push(serde_json::json!({"user_id": u.user_id, "error": e, "ok": false}))
                 }
-            }
+            },
             Err(_) => {}
         }
     }
@@ -291,7 +415,14 @@ pub async fn admin_backup_all(
         "results": results,
     });
     match engine {
-        Some(e) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&e, "admin_backup_all", body))),
+        Some(e) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &e,
+                "admin_backup_all",
+                body,
+            )),
+        ),
         None => (StatusCode::OK, Json(body)),
     }
 }
@@ -305,13 +436,39 @@ pub async fn admin_backup_user(
     }
     match st.user_mgr.get_engine(&user_id) {
         Ok(engine) => match engine.backup() {
-            Ok(ts) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "admin_backup_user", serde_json::json!({
-                "user_id": user_id, "timestamp": ts,
-            })))),
-            Err(e) => { tracing::error!("admin_backup_user error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "admin_backup_user", 500, "internal error"))) },
+            Ok(ts) => (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "admin_backup_user",
+                    serde_json::json!({
+                        "user_id": user_id, "timestamp": ts,
+                    }),
+                )),
+            ),
+            Err(e) => {
+                tracing::error!("admin_backup_user error: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(epicode::engine::smrp::envelope_err(
+                        &engine,
+                        "admin_backup_user",
+                        500,
+                        "internal error",
+                    )),
+                )
+            }
         },
         Err(e) => match first_engine(&st) {
-            Some(fe) => (StatusCode::NOT_FOUND, Json(epicode::engine::smrp::envelope_err(&fe, "admin_backup_user", 404, &e))),
+            Some(fe) => (
+                StatusCode::NOT_FOUND,
+                Json(epicode::engine::smrp::envelope_err(
+                    &fe,
+                    "admin_backup_user",
+                    404,
+                    &e,
+                )),
+            ),
             None => error_response(StatusCode::NOT_FOUND, &e),
         },
     }
@@ -327,12 +484,27 @@ pub async fn admin_list_user_backups(
     match st.user_mgr.get_engine(&user_id) {
         Ok(engine) => {
             let backups = engine.list_backups();
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "admin_list_user_backups", serde_json::json!({
-                "user_id": user_id, "backups": backups,
-            }))))
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "admin_list_user_backups",
+                    serde_json::json!({
+                        "user_id": user_id, "backups": backups,
+                    }),
+                )),
+            )
         }
         Err(e) => match first_engine(&st) {
-            Some(fe) => (StatusCode::NOT_FOUND, Json(epicode::engine::smrp::envelope_err(&fe, "admin_list_user_backups", 404, &e))),
+            Some(fe) => (
+                StatusCode::NOT_FOUND,
+                Json(epicode::engine::smrp::envelope_err(
+                    &fe,
+                    "admin_list_user_backups",
+                    404,
+                    &e,
+                )),
+            ),
             None => error_response(StatusCode::NOT_FOUND, &e),
         },
     }
@@ -343,20 +515,38 @@ pub async fn admin_purge_pub_skills(
     headers: axum::http::HeaderMap,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let admin_key = st.admin_key.clone();
-    let key = headers.get("X-Admin-Key").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let key = headers
+        .get("X-Admin-Key")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
     if !epicode::engine::crypto::constant_time_eq(key, &admin_key) {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "forbidden"})));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "forbidden"})),
+        );
     }
     let before = st.pub_skills.list_public().len();
     let removed = st.pub_skills.purge_non_system();
     let after = st.pub_skills.list_public().len();
-    tracing::info!("[Admin] purged {} non-system pub skills (before={}, after={})", removed, before, after);
+    tracing::info!(
+        "[Admin] purged {} non-system pub skills (before={}, after={})",
+        removed,
+        before,
+        after
+    );
     let engine = first_engine(&st);
     let body = serde_json::json!({
         "removed": removed, "before": before, "after": after
     });
     match engine {
-        Some(e) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&e, "admin_purge_pub_skills", body))),
+        Some(e) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &e,
+                "admin_purge_pub_skills",
+                body,
+            )),
+        ),
         None => (StatusCode::OK, Json(body)),
     }
 }
@@ -366,23 +556,57 @@ pub async fn admin_reindex(
     headers: axum::http::HeaderMap,
     Query(params): Query<HashMap<String, String>>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Err(resp) = require_admin(&st.admin_key, &headers) { return resp; }
+    if let Err(resp) = require_admin(&st.admin_key, &headers) {
+        return resp;
+    }
     let user_id = params.get("user_id").cloned().unwrap_or_default();
     if user_id.is_empty() {
         let engine = first_engine(&st);
         return match engine {
-            Some(e) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&e, "admin_reindex", 400, "user_id required"))),
-            None => (StatusCode::BAD_REQUEST, Json(serde_json::json!({"success": false, "error": "user_id required"}))),
+            Some(e) => (
+                StatusCode::BAD_REQUEST,
+                Json(epicode::engine::smrp::envelope_err(
+                    &e,
+                    "admin_reindex",
+                    400,
+                    "user_id required",
+                )),
+            ),
+            None => (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"success": false, "error": "user_id required"})),
+            ),
         };
     }
     match st.user_mgr.get_engine(&user_id) {
         Ok(engine) => match engine.reindex_embeddings() {
-            Ok(count) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "admin_reindex", serde_json::json!({
-                "user_id": user_id, "reindexed": count
-            })))),
-            Err(e) => { tracing::error!("admin_reindex error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "admin_reindex", 500, "internal error"))) },
+            Ok(count) => (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "admin_reindex",
+                    serde_json::json!({
+                        "user_id": user_id, "reindexed": count
+                    }),
+                )),
+            ),
+            Err(e) => {
+                tracing::error!("admin_reindex error: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(epicode::engine::smrp::envelope_err(
+                        &engine,
+                        "admin_reindex",
+                        500,
+                        "internal error",
+                    )),
+                )
+            }
         },
-        Err(e) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"success": false, "error": e}))),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"success": false, "error": e})),
+        ),
     }
 }
 
@@ -392,14 +616,29 @@ pub async fn admin_scavenge(
     headers: axum::http::HeaderMap,
     Query(params): Query<HashMap<String, String>>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Err(resp) = require_admin(&st.admin_key, &headers) { return resp; }
-    let user_id = params.get("user_id").cloned().unwrap_or_else(|| "sunorme".to_string());
+    if let Err(resp) = require_admin(&st.admin_key, &headers) {
+        return resp;
+    }
+    let user_id = params
+        .get("user_id")
+        .cloned()
+        .unwrap_or_else(|| "sunorme".to_string());
     match st.user_mgr.get_engine(&user_id) {
         Ok(engine) => {
             let result = engine.scavenge();
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "admin_scavenge", result)))
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "admin_scavenge",
+                    result,
+                )),
+            )
         }
-        Err(e) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"success": false, "error": e}))),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"success": false, "error": e})),
+        ),
     }
 }
 
@@ -411,17 +650,27 @@ pub async fn admin_pending_skills(
     State(st): State<CloudState>,
     headers: axum::http::HeaderMap,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Err(resp) = require_admin(&st.admin_key, &headers) { return resp; }
+    if let Err(resp) = require_admin(&st.admin_key, &headers) {
+        return resp;
+    }
     let pending = st.pub_skills.review_pending();
     let count = pending.len();
-    let data: Vec<serde_json::Value> = pending.iter().map(|s| serde_json::json!({
-        "id": s.id, "name": s.name, "owner": s.owner,
-        "created_at": s.created_at, "category": s.category,
-        "preview": s.skill_md.chars().take(200).collect::<String>(),
-    })).collect();
-    (StatusCode::OK, Json(serde_json::json!({
-        "success": true, "pending_count": count, "skills": data,
-    })))
+    let data: Vec<serde_json::Value> = pending
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "id": s.id, "name": s.name, "owner": s.owner,
+                "created_at": s.created_at, "category": s.category,
+                "preview": s.skill_md.chars().take(200).collect::<String>(),
+            })
+        })
+        .collect();
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "success": true, "pending_count": count, "skills": data,
+        })),
+    )
 }
 
 pub async fn admin_approve_skill(
@@ -429,14 +678,22 @@ pub async fn admin_approve_skill(
     headers: axum::http::HeaderMap,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Err(resp) = require_admin(&st.admin_key, &headers) { return resp; }
+    if let Err(resp) = require_admin(&st.admin_key, &headers) {
+        return resp;
+    }
     match st.pub_skills.approve_skill(id) {
-        Ok(skill) => (StatusCode::OK, Json(serde_json::json!({
-            "success": true, "action": "approved", "skill_id": id, "name": skill.name,
-        }))),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "success": false, "error": e,
-        }))),
+        Ok(skill) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true, "action": "approved", "skill_id": id, "name": skill.name,
+            })),
+        ),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "success": false, "error": e,
+            })),
+        ),
     }
 }
 
@@ -445,14 +702,22 @@ pub async fn admin_reject_skill(
     headers: axum::http::HeaderMap,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Err(resp) = require_admin(&st.admin_key, &headers) { return resp; }
+    if let Err(resp) = require_admin(&st.admin_key, &headers) {
+        return resp;
+    }
     match st.pub_skills.reject_skill(id, "rejected by admin") {
-        Ok(skill) => (StatusCode::OK, Json(serde_json::json!({
-            "success": true, "action": "rejected", "skill_id": id, "name": skill.name,
-        }))),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "success": false, "error": e,
-        }))),
+        Ok(skill) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true, "action": "rejected", "skill_id": id, "name": skill.name,
+            })),
+        ),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "success": false, "error": e,
+            })),
+        ),
     }
 }
 
@@ -476,14 +741,22 @@ pub async fn swagger_ui() -> axum::response::Html<String> {
 pub async fn openapi_spec() -> (axum::http::StatusCode, axum::http::HeaderMap, &'static str) {
     let mut headers = axum::http::HeaderMap::new();
     headers.insert("content-type", "text/yaml; charset=utf-8".parse().unwrap());
-    (axum::http::StatusCode::OK, headers, include_str!("../../../docs/openapi.yaml"))
+    (
+        axum::http::StatusCode::OK,
+        headers,
+        include_str!("../../../docs/openapi.yaml"),
+    )
 }
 
 /// SMRP 协议规范（公开，无需认证）—— 官网发布入口，返回 RFC/W3C 风格的 HTML 规范。
 pub async fn smrp_spec() -> (axum::http::StatusCode, axum::http::HeaderMap, &'static str) {
     let mut headers = axum::http::HeaderMap::new();
     headers.insert("content-type", "text/html; charset=utf-8".parse().unwrap());
-    (axum::http::StatusCode::OK, headers, include_str!("../../../docs/smrp-spec.html"))
+    (
+        axum::http::StatusCode::OK,
+        headers,
+        include_str!("../../../docs/smrp-spec.html"),
+    )
 }
 
 /// POST /admin/skills/optimize-descriptions — S2描述医生: 数据驱动LLM改写触发描述。
@@ -501,7 +774,9 @@ pub async fn admin_optimize_descriptions(
     headers: axum::http::HeaderMap,
     Json(req): Json<OptimizeDescriptionsRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Err(resp) = require_admin(&st.admin_key, &headers) { return resp; }
+    if let Err(resp) = require_admin(&st.admin_key, &headers) {
+        return resp;
+    }
     if let Err(e) = validate_user_id(&req.user_id) {
         return error_response(StatusCode::BAD_REQUEST, &e);
     }
@@ -510,33 +785,56 @@ pub async fn admin_optimize_descriptions(
         Err(e) => return error_response(StatusCode::NOT_FOUND, &e),
     };
     let limit = req.limit.unwrap_or(8).clamp(1, 16);
-    let result = tokio::task::spawn_blocking(move || {
-        optimize_descriptions_impl(&engine, limit)
-    }).await;
+    let result =
+        tokio::task::spawn_blocking(move || optimize_descriptions_impl(&engine, limit)).await;
     match result {
-        Ok(Ok(report)) => (StatusCode::OK, Json(serde_json::json!({"success": true, "report": report}))),
-        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": e}))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": format!("{}", e)}))),
+        Ok(Ok(report)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"success": true, "report": report})),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"success": false, "error": e})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"success": false, "error": format!("{}", e)})),
+        ),
     }
 }
 
-fn optimize_descriptions_impl(engine: &epicode::engine::Engine, limit: usize) -> Result<serde_json::Value, String> {
+fn optimize_descriptions_impl(
+    engine: &epicode::engine::Engine,
+    limit: usize,
+) -> Result<serde_json::Value, String> {
     // 候选: 非系统, 按(曝光>0且取用==0, 曝光降序)>(缺描述)>(其余) 排序
-    let mut cands: Vec<epicode::engine::skills::Skill> = engine.skills.list(None).into_iter()
+    let mut cands: Vec<epicode::engine::skills::Skill> = engine
+        .skills
+        .list(None)
+        .into_iter()
         .filter(|s| !s.is_system)
         .collect();
     tracing::info!("[SkillDoctor] candidates: {}", cands.len());
     cands.sort_by(|a, b| {
-        let sa = (a.surface_impressions > 0 && a.usage_count == 0, a.surface_impressions);
-        let sb = (b.surface_impressions > 0 && b.usage_count == 0, b.surface_impressions);
+        let sa = (
+            a.surface_impressions > 0 && a.usage_count == 0,
+            a.surface_impressions,
+        );
+        let sb = (
+            b.surface_impressions > 0 && b.usage_count == 0,
+            b.surface_impressions,
+        );
         sb.cmp(&sa)
     });
     cands.truncate(limit);
 
     let api_key = std::env::var("LLM_API_KEY").unwrap_or_default();
-    if api_key.is_empty() { return Err("LLM_API_KEY not set".into()); }
+    if api_key.is_empty() {
+        return Err("LLM_API_KEY not set".into());
+    }
     let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "MiniMax-M3".to_string());
-    let base = std::env::var("LLM_API_BASE").unwrap_or_else(|_| "https://api.minimaxi.com".to_string());
+    let base =
+        std::env::var("LLM_API_BASE").unwrap_or_else(|_| "https://api.minimaxi.com".to_string());
     let agent = ureq::AgentBuilder::new()
         .timeout_read(std::time::Duration::from_secs(30))
         .timeout_write(std::time::Duration::from_secs(5))
@@ -564,23 +862,43 @@ fn optimize_descriptions_impl(engine: &epicode::engine::Engine, limit: usize) ->
         let new_desc = match resp {
             Ok(r) => {
                 let body: serde_json::Value = r.into_json().map_err(|e| e.to_string())?;
-                let content = body["choices"][0]["message"]["content"].as_str().unwrap_or("");
-                let cleaned = match content.find("</think>") { Some(p) => &content[p+8..], None => content };
-                let cleaned = cleaned.trim().trim_start_matches("```json").trim_end_matches("```").trim();
+                let content = body["choices"][0]["message"]["content"]
+                    .as_str()
+                    .unwrap_or("");
+                let cleaned = match content.find("</think>") {
+                    Some(p) => &content[p + 8..],
+                    None => content,
+                };
+                let cleaned = cleaned
+                    .trim()
+                    .trim_start_matches("```json")
+                    .trim_end_matches("```")
+                    .trim();
                 let extracted = match (cleaned.find('{'), cleaned.rfind('}')) {
                     (Some(a), Some(b)) if b > a => {
                         serde_json::from_str::<serde_json::Value>(&cleaned[a..=b])
                             .ok()
-                            .and_then(|v| v.get("description").and_then(|d| d.as_str()).map(|s| s.to_string()))
+                            .and_then(|v| {
+                                v.get("description")
+                                    .and_then(|d| d.as_str())
+                                    .map(|s| s.to_string())
+                            })
                             .unwrap_or_else(|| cleaned.to_string())
                     }
                     _ => cleaned.to_string(),
                 };
                 let mut d = extracted.trim().trim_matches('"').to_string();
-                if d.chars().count() > 140 { d = d.chars().take(140).collect(); }
+                if d.chars().count() > 140 {
+                    d = d.chars().take(140).collect();
+                }
                 d
             }
-            Err(e) => { report.push(serde_json::json!({"id": s.id, "name": s.name, "error": format!("{}", e)})); continue; }
+            Err(e) => {
+                report.push(
+                    serde_json::json!({"id": s.id, "name": s.name, "error": format!("{}", e)}),
+                );
+                continue;
+            }
         };
         if new_desc.chars().count() < 10 {
             report.push(serde_json::json!({"id": s.id, "name": s.name, "skipped": "llm_output_too_short", "raw_len": new_desc.chars().count()}));
@@ -602,13 +920,22 @@ pub async fn admin_resync_system_skills(
     State(st): State<CloudState>,
     headers: axum::http::HeaderMap,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Err(resp) = require_admin(&st.admin_key, &headers) { return resp; }
+    if let Err(resp) = require_admin(&st.admin_key, &headers) {
+        return resp;
+    }
     let result = tokio::task::spawn_blocking(move || {
         epicode::engine::system_skills::force_sync_system_skills(&st.pub_skills);
-    }).await;
+    })
+    .await;
     match result {
-        Ok(_) => (StatusCode::OK, Json(serde_json::json!({"success": true, "message": "system skills force-synced"}))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": format!("{}", e)}))),
+        Ok(_) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"success": true, "message": "system skills force-synced"})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"success": false, "error": format!("{}", e)})),
+        ),
     }
 }
 
@@ -617,9 +944,14 @@ pub async fn admin_purge_memory(
     headers: axum::http::HeaderMap,
     Path((user_id, id)): Path<(String, u64)>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Err(resp) = require_admin(&st.admin_key, &headers) { return resp; }
+    if let Err(resp) = require_admin(&st.admin_key, &headers) {
+        return resp;
+    }
     if let Err(e) = validate_user_id(&user_id) {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"success": false, "error": e})));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"success": false, "error": e})),
+        );
     }
     match st.user_mgr.get_engine(&user_id) {
         Ok(engine) => {
@@ -628,14 +960,40 @@ pub async fn admin_purge_memory(
             match result {
                 Ok(Ok(_)) => {
                     st.user_mgr.decrement_memory_count(&user_id, 1);
-                    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "admin_purge_memory", serde_json::json!({
-                        "purged": id, "user_id": user_id
-                    }))))
+                    (
+                        StatusCode::OK,
+                        Json(epicode::engine::smrp::envelope_ok(
+                            &engine,
+                            "admin_purge_memory",
+                            serde_json::json!({
+                                "purged": id, "user_id": user_id
+                            }),
+                        )),
+                    )
                 }
-                Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "admin_purge_memory", 400, &e))),
-                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "admin_purge_memory", 500, &format!("{}", e)))),
+                Ok(Err(e)) => (
+                    StatusCode::BAD_REQUEST,
+                    Json(epicode::engine::smrp::envelope_err(
+                        &engine,
+                        "admin_purge_memory",
+                        400,
+                        &e,
+                    )),
+                ),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(epicode::engine::smrp::envelope_err(
+                        &engine,
+                        "admin_purge_memory",
+                        500,
+                        &format!("{}", e),
+                    )),
+                ),
             }
         }
-        Err(e) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"success": false, "error": e}))),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"success": false, "error": e})),
+        ),
     }
 }

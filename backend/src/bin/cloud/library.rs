@@ -34,21 +34,54 @@ pub async fn create_collection(
     Json(req): Json<CreateCollectionRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if req.name.trim().is_empty() || req.name.len() > 128 {
-        return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err_plain("library_create_collection", 400, "name must be 1-128 chars")));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_create_collection",
+                400,
+                "name must be 1-128 chars",
+            )),
+        );
     }
     let visibility = req.visibility.unwrap_or_else(|| "private".to_string());
     let visibility_out = visibility.clone();
     let lib = st.library.clone();
     let owner = user.user_id.clone();
     let res = tokio::task::spawn_blocking(move || {
-        lib.create_collection(&owner, req.name.trim(), &visibility, req.plan_gate.as_deref())
-    }).await;
+        lib.create_collection(
+            &owner,
+            req.name.trim(),
+            &visibility,
+            req.plan_gate.as_deref(),
+        )
+    })
+    .await;
     match res {
-        Ok(Ok(id)) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok_plain("library_create_collection", serde_json::json!({
-            "collection_id": id, "visibility": visibility_out, "note": "写权=owner; 读权=owner/ACL/public(entitled按套餐)",
-        })))),
-        Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err_plain("library_create_collection", 400, &e))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err_plain("library_create_collection", 500, &format!("{}", e)))),
+        Ok(Ok(id)) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok_plain(
+                "library_create_collection",
+                serde_json::json!({
+                    "collection_id": id, "visibility": visibility_out, "note": "写权=owner; 读权=owner/ACL/public(entitled按套餐)",
+                }),
+            )),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_create_collection",
+                400,
+                &e,
+            )),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_create_collection",
+                500,
+                &format!("{}", e),
+            )),
+        ),
     }
 }
 
@@ -66,14 +99,48 @@ pub async fn set_acl(
 ) -> (StatusCode, Json<serde_json::Value>) {
     match st.library.collection_owner(req.collection_id) {
         Some(owner) if owner == user.user_id => {}
-        Some(_) => return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err_plain("library_set_acl", 403, "only collection owner can manage ACL"))),
-        None => return (StatusCode::NOT_FOUND, Json(epicode::engine::smrp::envelope_err_plain("library_set_acl", 404, "collection not found"))),
+        Some(_) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(epicode::engine::smrp::envelope_err_plain(
+                    "library_set_acl",
+                    403,
+                    "only collection owner can manage ACL",
+                )),
+            )
+        }
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(epicode::engine::smrp::envelope_err_plain(
+                    "library_set_acl",
+                    404,
+                    "collection not found",
+                )),
+            )
+        }
     }
-    match st.library.set_acl(req.collection_id, &req.principal, &req.level) {
-        Ok(()) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok_plain("library_set_acl", serde_json::json!({
-            "collection_id": req.collection_id, "principal": req.principal, "level": req.level,
-        })))),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err_plain("library_set_acl", 400, &e))),
+    match st
+        .library
+        .set_acl(req.collection_id, &req.principal, &req.level)
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok_plain(
+                "library_set_acl",
+                serde_json::json!({
+                    "collection_id": req.collection_id, "principal": req.principal, "level": req.level,
+                }),
+            )),
+        ),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_set_acl",
+                400,
+                &e,
+            )),
+        ),
     }
 }
 
@@ -89,24 +156,60 @@ pub async fn ingest(
     Json(req): Json<LibraryIngestRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if req.items.is_empty() || req.items.len() > 8 {
-        return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err_plain("library_ingest", 400, "items must be 1-8 per batch")));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_ingest",
+                400,
+                "items must be 1-8 per batch",
+            )),
+        );
     }
     let total_chunks: usize = req.items.iter().map(|i| i.chunks.len()).sum();
     if total_chunks == 0 || total_chunks > 64 {
-        return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err_plain("library_ingest", 400, "chunks must be 1-64 per batch")));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_ingest",
+                400,
+                "chunks must be 1-64 per batch",
+            )),
+        );
     }
     let lib = st.library.clone();
     let caller = user.user_id.clone();
     let t0 = std::time::Instant::now();
-    let res = tokio::task::spawn_blocking(move || lib.ingest(&caller, req.collection_id, &req.items)).await;
+    let res =
+        tokio::task::spawn_blocking(move || lib.ingest(&caller, req.collection_id, &req.items))
+            .await;
     match res {
-        Ok(Ok((items_new, inserted, deduped))) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok_plain("library_ingest", serde_json::json!({
-            "items_new": items_new, "chunks_inserted": inserted, "chunks_deduped": deduped,
-            "elapsed_ms": t0.elapsed().as_millis() as u64,
-            "library_total_chunks": st.library.chunk_count(),
-        })))),
-        Ok(Err(e)) => (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err_plain("library_ingest", 403, &e))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err_plain("library_ingest", 500, &format!("{}", e)))),
+        Ok(Ok((items_new, inserted, deduped))) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok_plain(
+                "library_ingest",
+                serde_json::json!({
+                    "items_new": items_new, "chunks_inserted": inserted, "chunks_deduped": deduped,
+                    "elapsed_ms": t0.elapsed().as_millis() as u64,
+                    "library_total_chunks": st.library.chunk_count(),
+                }),
+            )),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::FORBIDDEN,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_ingest",
+                403,
+                &e,
+            )),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_ingest",
+                500,
+                &format!("{}", e),
+            )),
+        ),
     }
 }
 
@@ -127,20 +230,53 @@ pub async fn submit_request(
     Json(req): Json<LibraryRequestIn>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if req.title.trim().is_empty() || req.title.len() > 300 {
-        return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err_plain("library_submit_request", 400, "title must be 1-300 chars")));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_submit_request",
+                400,
+                "title must be 1-300 chars",
+            )),
+        );
     }
     let lib = st.library.clone();
     let uid = user.user_id.clone();
     let res = tokio::task::spawn_blocking(move || {
-        lib.create_request(&uid, req.title.trim(), req.url.as_deref(), req.note.as_deref())
-    }).await;
+        lib.create_request(
+            &uid,
+            req.title.trim(),
+            req.url.as_deref(),
+            req.note.as_deref(),
+        )
+    })
+    .await;
     match res {
-        Ok(Ok(id)) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok_plain("library_submit_request", serde_json::json!({
-            "request_id": id, "status": "pending",
-            "note": "收集请求已入队 — 库管理员(owner)处理后生效; 你可继续阅读全库公开内容",
-        })))),
-        Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err_plain("library_submit_request", 400, &e))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err_plain("library_submit_request", 500, &format!("{}", e)))),
+        Ok(Ok(id)) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok_plain(
+                "library_submit_request",
+                serde_json::json!({
+                    "request_id": id, "status": "pending",
+                    "note": "收集请求已入队 — 库管理员(owner)处理后生效; 你可继续阅读全库公开内容",
+                }),
+            )),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_submit_request",
+                400,
+                &e,
+            )),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_submit_request",
+                500,
+                &format!("{}", e),
+            )),
+        ),
     }
 }
 
@@ -160,19 +296,37 @@ pub async fn list_requests(
     let uid_for_task = uid.clone();
     let res = tokio::task::spawn_blocking(move || {
         let all = lib.list_requests(None);
-        let mine: Vec<_> = all.iter().filter(|r| r.get("user_id").and_then(|v| v.as_str()) == Some(uid_for_task.as_str())).cloned().collect();
+        let mine: Vec<_> = all
+            .iter()
+            .filter(|r| r.get("user_id").and_then(|v| v.as_str()) == Some(uid_for_task.as_str()))
+            .cloned()
+            .collect();
         (all, mine, lib.pending_request_count())
-    }).await;
+    })
+    .await;
     match res {
         Ok((all, mine, pending)) => {
             let is_owner = uid == "sunorme";
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok_plain("library_list_requests", serde_json::json!({
-                "requests": if is_owner { all } else { mine },
-                "pending_total": pending,
-                "role": if is_owner { "owner" } else { "user" },
-            }))))
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok_plain(
+                    "library_list_requests",
+                    serde_json::json!({
+                        "requests": if is_owner { all } else { mine },
+                        "pending_total": pending,
+                        "role": if is_owner { "owner" } else { "user" },
+                    }),
+                )),
+            )
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err_plain("library_list_requests", 500, &format!("{}", e)))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_list_requests",
+                500,
+                &format!("{}", e),
+            )),
+        ),
     }
 }
 
@@ -190,19 +344,47 @@ pub async fn handle_request(
     Json(req): Json<HandleRequestIn>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if user.user_id != "sunorme" {
-        return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err_plain("library_handle_request", 403, "only the library owner can handle requests")));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_handle_request",
+                403,
+                "only the library owner can handle requests",
+            )),
+        );
     }
     let lib = st.library.clone();
     let action_out = req.action.clone();
     let res = tokio::task::spawn_blocking(move || {
         lib.handle_request(req.request_id, &req.action, req.note.as_deref())
-    }).await;
+    })
+    .await;
     match res {
-        Ok(Ok(())) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok_plain("library_handle_request", serde_json::json!({
-            "request_id": req.request_id, "action": action_out,
-        })))),
-        Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err_plain("library_handle_request", 400, &e))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err_plain("library_handle_request", 500, &format!("{}", e)))),
+        Ok(Ok(())) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok_plain(
+                "library_handle_request",
+                serde_json::json!({
+                    "request_id": req.request_id, "action": action_out,
+                }),
+            )),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_handle_request",
+                400,
+                &e,
+            )),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_handle_request",
+                500,
+                &format!("{}", e),
+            )),
+        ),
     }
 }
 
@@ -219,14 +401,48 @@ pub async fn set_visibility(
 ) -> (StatusCode, Json<serde_json::Value>) {
     match st.library.collection_owner(req.collection_id) {
         Some(owner) if owner == user.user_id => {}
-        Some(_) => return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err_plain("library_set_visibility", 403, "only collection owner"))),
-        None => return (StatusCode::NOT_FOUND, Json(epicode::engine::smrp::envelope_err_plain("library_set_visibility", 404, "collection not found"))),
+        Some(_) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(epicode::engine::smrp::envelope_err_plain(
+                    "library_set_visibility",
+                    403,
+                    "only collection owner",
+                )),
+            )
+        }
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(epicode::engine::smrp::envelope_err_plain(
+                    "library_set_visibility",
+                    404,
+                    "collection not found",
+                )),
+            )
+        }
     }
-    match st.library.set_collection_visibility(req.collection_id, &req.visibility) {
-        Ok(()) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok_plain("library_set_visibility", serde_json::json!({
-            "collection_id": req.collection_id, "visibility": req.visibility,
-        })))),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err_plain("library_set_visibility", 400, &e))),
+    match st
+        .library
+        .set_collection_visibility(req.collection_id, &req.visibility)
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok_plain(
+                "library_set_visibility",
+                serde_json::json!({
+                    "collection_id": req.collection_id, "visibility": req.visibility,
+                }),
+            )),
+        ),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_set_visibility",
+                400,
+                &e,
+            )),
+        ),
     }
 }
 
@@ -243,7 +459,14 @@ pub async fn search(
     Json(req): Json<LibrarySearchRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if req.query.trim().is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err_plain("library_search", 400, "query is required")));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_search",
+                400,
+                "query is required",
+            )),
+        );
     }
     let k = req.limit.unwrap_or(10).clamp(1, 50);
     let lib = st.library.clone();
@@ -251,11 +474,31 @@ pub async fn search(
     let pl = plan_str(&user.plan).to_string();
     let res = tokio::task::spawn_blocking(move || lib.search(&uid, &pl, &req.query, k)).await;
     match res {
-        Ok(Ok(hits)) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok_plain("library_search", serde_json::json!({
-            "results": hits, "count": hits.len(),
-            "note": "图书馆结果带provenance(title/source_meta/chunk_no); 权限=owner/ACL/public/entitled",
-        })))),
-        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err_plain("library_search", 500, &e))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err_plain("library_search", 500, &format!("{}", e)))),
+        Ok(Ok(hits)) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok_plain(
+                "library_search",
+                serde_json::json!({
+                    "results": hits, "count": hits.len(),
+                    "note": "图书馆结果带provenance(title/source_meta/chunk_no); 权限=owner/ACL/public/entitled",
+                }),
+            )),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_search",
+                500,
+                &e,
+            )),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "library_search",
+                500,
+                &format!("{}", e),
+            )),
+        ),
     }
 }

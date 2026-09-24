@@ -2,13 +2,12 @@ use crate::domain::tetra::TetraId;
 use crate::engine::hnsw::HnswIndex;
 use crate::engine::storage::StorageManager;
 use crate::engine::vector::{VectorLayer, EMBEDDING_DIM};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use parking_lot::Mutex;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum ReviewStatus {
     #[default]
     Draft,
@@ -16,7 +15,6 @@ pub enum ReviewStatus {
     Approved,
     Rejected,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {
@@ -101,10 +99,15 @@ impl SkillEngine {
                     }
                     // S2迁移: 旧技能补触发描述(系统技能的精写值由ensure_system_skills覆盖)
                     if s.description.is_none() {
-                        let first_para: String = s.skill_md.lines()
+                        let first_para: String = s
+                            .skill_md
+                            .lines()
                             .map(|l| l.trim())
                             .find(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("---"))
-                            .unwrap_or("").chars().take(100).collect();
+                            .unwrap_or("")
+                            .chars()
+                            .take(100)
+                            .collect();
                         s.description = Some(if first_para.is_empty() {
                             s.name.clone()
                         } else {
@@ -114,7 +117,11 @@ impl SkillEngine {
                     }
                     skills.insert(s.id, s);
                 }
-                tracing::info!("[SkillEngine] loaded {} skills from storage (S2 migrated {} descriptions)", skills.len(), migrated);
+                tracing::info!(
+                    "[SkillEngine] loaded {} skills from storage (S2 migrated {} descriptions)",
+                    skills.len(),
+                    migrated
+                );
             }
         }
     }
@@ -205,7 +212,9 @@ impl SkillEngine {
 
     /// S2: 曝光计数(注入面批量计数; task_start低频调用, persist开销可接受)
     pub fn increment_impressions(&self, ids: &[u64]) {
-        if ids.is_empty() { return; }
+        if ids.is_empty() {
+            return;
+        }
         {
             let mut skills = self.skills.lock();
             for &id in ids {
@@ -220,7 +229,10 @@ impl SkillEngine {
     /// S2: 系统技能描述批量对齐 — 单次persist+只reindex变化项(引擎加载时vector未注入, reindex为no-op,
     /// 全量索引由set_vector→rebuild_index用新嵌入文本重建; 不受SKIP_SKILL_SYNC门控, 描述是短文本无风暴风险)
     pub fn backfill_descriptions(&self, pairs: &[(u64, String)]) -> usize {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
         let mut changed: Vec<u64> = Vec::new();
         {
             let mut skills = self.skills.lock();
@@ -234,9 +246,13 @@ impl SkillEngine {
                 }
             }
         }
-        if changed.is_empty() { return 0; }
+        if changed.is_empty() {
+            return 0;
+        }
         self.persist();
-        for id in &changed { self.reindex_skill(*id); }
+        for id in &changed {
+            self.reindex_skill(*id);
+        }
         changed.len()
     }
 
@@ -277,7 +293,10 @@ impl SkillEngine {
             match skills.get_mut(&id) {
                 Some(s) => {
                     s.description = Some(description);
-                    s.updated_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+                    s.updated_at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64;
                 }
                 None => return Err("skill not found".into()),
             }
@@ -289,7 +308,10 @@ impl SkillEngine {
 
     /// S2: 带分数的语义匹配(自动触发注入面: 分数=阈值过滤与曝光排序依据)
     pub fn match_skills_scored(&self, query: &str, owner: &str, limit: usize) -> Vec<(Skill, f64)> {
-        let vector = match self.vector.lock().clone() { Some(v) => v, None => return Vec::new() };
+        let vector = match self.vector.lock().clone() {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
         let q_emb = match vector.embed(query) {
             Ok(e) if e.len() == super::vector::EMBEDDING_DIM => e,
             _ => return Vec::new(),
@@ -300,7 +322,13 @@ impl SkillEngine {
         for (id, cosine) in candidates {
             if let Some(skill) = skills.get(&id) {
                 // R2a: 废止技能不进自动触发面(仍可skill_get显式取)
-                if skill.description.as_deref().map_or(false, |d| d.starts_with("已废止")) { continue; }
+                if skill
+                    .description
+                    .as_deref()
+                    .map_or(false, |d| d.starts_with("已废止"))
+                {
+                    continue;
+                }
                 if skill.owner == owner || skill.owner == "__system__" || skill.is_public {
                     let usage_bonus = (skill.usage_count as f64).ln_1p() * 0.1;
                     let final_score = cosine * 0.85 + usage_bonus * 0.15;
@@ -309,7 +337,9 @@ impl SkillEngine {
             }
         }
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        scored.into_iter().take(limit)
+        scored
+            .into_iter()
+            .take(limit)
             .map(|(s, sk)| (sk.clone(), (s * 1000.0).round() / 1000.0))
             .collect()
     }
@@ -415,7 +445,12 @@ impl SkillEngine {
             .collect()
     }
 
-    pub fn update(&self, id: u64, skill_md: Option<String>, version: Option<String>) -> Result<Skill, String> {
+    pub fn update(
+        &self,
+        id: u64,
+        skill_md: Option<String>,
+        version: Option<String>,
+    ) -> Result<Skill, String> {
         let mut skills = self.skills.lock();
         let skill = skills.get_mut(&id).ok_or("skill not found")?;
         if let Some(md) = skill_md {
@@ -458,10 +493,17 @@ impl SkillEngine {
     pub fn fork(&self, source: &Skill, new_owner: String) -> Skill {
         {
             let skills = self.skills.lock();
-            if let Some(existing) = skills.values().find(|s| s.evolved_from == Some(source.id) && s.owner == new_owner) {
+            if let Some(existing) = skills
+                .values()
+                .find(|s| s.evolved_from == Some(source.id) && s.owner == new_owner)
+            {
                 let dup = existing.clone();
                 drop(skills);
-                tracing::info!("[SkillEngine] fork dedup: '{}' already forked as id={}", dup.name, dup.id);
+                tracing::info!(
+                    "[SkillEngine] fork dedup: '{}' already forked as id={}",
+                    dup.name,
+                    dup.id
+                );
                 return dup;
             }
         }
@@ -499,7 +541,12 @@ impl SkillEngine {
         drop(skills);
         self.persist();
         self.reindex_skill(id);
-        tracing::info!("[SkillEngine] forked skill '{}' (id={}) from id={}", forked.name, id, source.id);
+        tracing::info!(
+            "[SkillEngine] forked skill '{}' (id={}) from id={}",
+            forked.name,
+            id,
+            source.id
+        );
         forked
     }
 
@@ -563,7 +610,11 @@ impl SkillEngine {
         let submitted = skill.clone();
         drop(skills);
         self.persist();
-        tracing::info!("[SkillEngine] skill '{}' (id={}) submitted for review", submitted.name, id);
+        tracing::info!(
+            "[SkillEngine] skill '{}' (id={}) submitted for review",
+            submitted.name,
+            id
+        );
         Ok(submitted)
     }
 
@@ -583,7 +634,11 @@ impl SkillEngine {
         let approved = skill.clone();
         drop(skills);
         self.persist();
-        tracing::info!("[SkillEngine] skill '{}' (id={}) approved and published", approved.name, id);
+        tracing::info!(
+            "[SkillEngine] skill '{}' (id={}) approved and published",
+            approved.name,
+            id
+        );
         Ok(approved)
     }
 
@@ -602,7 +657,12 @@ impl SkillEngine {
         let rejected = skill.clone();
         drop(skills);
         self.persist();
-        tracing::info!("[SkillEngine] skill '{}' (id={}) rejected: {}", rejected.name, id, reason);
+        tracing::info!(
+            "[SkillEngine] skill '{}' (id={}) rejected: {}",
+            rejected.name,
+            id,
+            reason
+        );
         Ok(rejected)
     }
 
@@ -638,7 +698,8 @@ impl SkillEngine {
 
     pub fn review_pending(&self) -> Vec<Skill> {
         let skills = self.skills.lock();
-        skills.values()
+        skills
+            .values()
             .filter(|s| s.review_status == ReviewStatus::PendingReview)
             .cloned()
             .collect()
@@ -658,7 +719,8 @@ impl SkillEngine {
 
     pub fn purge_non_system(&self) -> usize {
         let mut skills = self.skills.lock();
-        let to_remove: Vec<u64> = skills.iter()
+        let to_remove: Vec<u64> = skills
+            .iter()
             .filter(|(_, s)| !s.is_system)
             .map(|(id, _)| *id)
             .collect();
@@ -674,7 +736,10 @@ impl SkillEngine {
                 embeddings.remove(id);
             }
             self.persist();
-            tracing::info!("[SkillEngine] purged {} non-system skills (index cleaned)", to_remove.len());
+            tracing::info!(
+                "[SkillEngine] purged {} non-system skills (index cleaned)",
+                to_remove.len()
+            );
         }
         to_remove.len()
     }
@@ -695,7 +760,13 @@ impl SkillEngine {
         for (id, cosine) in candidates {
             if let Some(skill) = skills.get(&id) {
                 // R2a: 废止技能不进语义匹配面(REST search/模拟器/技能发现共用此路)
-                if skill.description.as_deref().map_or(false, |d| d.starts_with("已废止")) { continue; }
+                if skill
+                    .description
+                    .as_deref()
+                    .map_or(false, |d| d.starts_with("已废止"))
+                {
+                    continue;
+                }
                 if skill.owner == owner || skill.is_public {
                     let usage_bonus = (skill.usage_count as f64).ln_1p() * 0.1;
                     let feedback_score = skill.success_rate * 0.5 + usage_bonus;
@@ -705,7 +776,13 @@ impl SkillEngine {
             }
         }
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        Some(scored.into_iter().take(limit).map(|(_, s)| s.clone()).collect())
+        Some(
+            scored
+                .into_iter()
+                .take(limit)
+                .map(|(_, s)| s.clone())
+                .collect(),
+        )
     }
 
     fn match_skills_keyword(&self, query: &str, owner: &str, limit: usize) -> Vec<Skill> {
@@ -724,10 +801,7 @@ impl SkillEngine {
                     .iter()
                     .filter(|w| name_lower.contains(*w))
                     .count() as f64;
-                let md_match = query_words
-                    .iter()
-                    .filter(|w| md_lower.contains(*w))
-                    .count() as f64;
+                let md_match = query_words.iter().filter(|w| md_lower.contains(*w)).count() as f64;
                 let usage_bonus = (s.usage_count as f64).ln_1p() * 0.1;
                 let success_bonus = s.success_rate * 0.2;
                 let score = name_match * 2.0 + md_match * 1.0 + usage_bonus + success_bonus;
@@ -737,9 +811,12 @@ impl SkillEngine {
             .collect();
 
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        scored.into_iter().take(limit).map(|(_, s)| s.clone()).collect()
+        scored
+            .into_iter()
+            .take(limit)
+            .map(|(_, s)| s.clone())
+            .collect()
     }
-
 }
 
 fn skill_text_for_embed(skill: &Skill) -> String {
@@ -760,7 +837,9 @@ fn skill_text_for_embed(skill: &Skill) -> String {
     text
 }
 
-fn parse_frontmatter_fields(skill_md: &str) -> (Option<String>, Vec<String>, Vec<String>, Vec<String>) {
+fn parse_frontmatter_fields(
+    skill_md: &str,
+) -> (Option<String>, Vec<String>, Vec<String>, Vec<String>) {
     let content = skill_md.trim();
     if !content.starts_with("---") {
         return (None, Vec::new(), Vec::new(), Vec::new());
@@ -806,7 +885,12 @@ fn parse_frontmatter_fields(skill_md: &str) -> (Option<String>, Vec<String>, Vec
                 current_list_target = 3;
             }
         } else if line.starts_with("- ") {
-            let val = line.trim_start_matches("- ").trim().trim_matches('"').trim_matches('\'').to_string();
+            let val = line
+                .trim_start_matches("- ")
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string();
             if !val.is_empty() {
                 match current_list_target {
                     1 => requires.push(val),
@@ -825,7 +909,7 @@ fn parse_frontmatter_fields(skill_md: &str) -> (Option<String>, Vec<String>, Vec
 fn parse_yaml_list(val: &str) -> Vec<String> {
     let val = val.trim();
     if val.starts_with('[') && val.ends_with(']') {
-        val[1..val.len()-1]
+        val[1..val.len() - 1]
             .split(',')
             .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
             .filter(|s| !s.is_empty())

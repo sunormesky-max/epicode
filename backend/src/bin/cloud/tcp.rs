@@ -7,7 +7,11 @@ use std::sync::Arc;
 use epicode::engine::mcp::McpHandler;
 use epicode::engine::user_manager::UserManager;
 
-pub fn run_tcp_server(addr: &str, user_mgr: &Arc<UserManager>, shutdown: &Arc<std::sync::atomic::AtomicBool>) {
+pub fn run_tcp_server(
+    addr: &str,
+    user_mgr: &Arc<UserManager>,
+    shutdown: &Arc<std::sync::atomic::AtomicBool>,
+) {
     let listener = match std::net::TcpListener::bind(addr) {
         Ok(l) => l,
         Err(e) => {
@@ -25,11 +29,18 @@ pub fn run_tcp_server(addr: &str, user_mgr: &Arc<UserManager>, shutdown: &Arc<st
     while !shutdown.load(std::sync::atomic::Ordering::Relaxed) {
         match listener.accept() {
             Ok((stream, _addr)) => {
-                let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_else(|_| "unknown".into());
+                let peer = stream
+                    .peer_addr()
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|_| "unknown".into());
                 // 连接数限制
                 let cur = active_connections.load(std::sync::atomic::Ordering::Relaxed);
                 if cur >= MAX_TCP_CONNECTIONS {
-                    tracing::warn!("[TCP] rejecting connection from {}: max {} reached", peer, MAX_TCP_CONNECTIONS);
+                    tracing::warn!(
+                        "[TCP] rejecting connection from {}: max {} reached",
+                        peer,
+                        MAX_TCP_CONNECTIONS
+                    );
                     drop(stream);
                     continue;
                 }
@@ -81,11 +92,17 @@ fn handle_tcp_connection(stream: std::net::TcpStream, user_mgr: &Arc<UserManager
             Ok(l) => {
                 // 防止超大行导致内存耗尽
                 if l.len() > MAX_LINE_LEN {
-                    tracing::warn!("[TCP] {} sent oversized line ({} bytes), dropping", peer, l.len());
+                    tracing::warn!(
+                        "[TCP] {} sent oversized line ({} bytes), dropping",
+                        peer,
+                        l.len()
+                    );
                     break;
                 }
                 let trimmed = l.trim();
-                if trimmed.is_empty() { continue; }
+                if trimmed.is_empty() {
+                    continue;
+                }
 
                 if handler.is_none() {
                     match tcp_try_authenticate(trimmed, user_mgr) {
@@ -96,13 +113,21 @@ fn handle_tcp_connection(stream: std::net::TcpStream, user_mgr: &Arc<UserManager
                                 "jsonrpc": "2.0", "id": tcp_extract_id(trimmed),
                                 "result": {"status": "authenticated", "user_id": user_id}
                             });
-                            if writeln!(writer, "{}", resp).is_err() { break; }
-                            if writer.flush().is_err() { break; }
+                            if writeln!(writer, "{}", resp).is_err() {
+                                break;
+                            }
+                            if writer.flush().is_err() {
+                                break;
+                            }
                             continue;
                         }
                         Err(resp_str) => {
-                            if writeln!(writer, "{}", resp_str).is_err() { break; }
-                            if writer.flush().is_err() { break; }
+                            if writeln!(writer, "{}", resp_str).is_err() {
+                                break;
+                            }
+                            if writer.flush().is_err() {
+                                break;
+                            }
                             continue;
                         }
                     }
@@ -115,10 +140,19 @@ fn handle_tcp_connection(stream: std::net::TcpStream, user_mgr: &Arc<UserManager
                     let t = std::time::Instant::now();
                     let response = h.process_json(trimmed);
                     if t.elapsed().as_millis() > 100 {
-                        tracing::warn!("slow TCP request from {} ({}): {}ms", peer, authenticated_user.as_deref().unwrap_or("?"), t.elapsed().as_millis());
+                        tracing::warn!(
+                            "slow TCP request from {} ({}): {}ms",
+                            peer,
+                            authenticated_user.as_deref().unwrap_or("?"),
+                            t.elapsed().as_millis()
+                        );
                     }
-                    if writeln!(writer, "{}", response).is_err() { break; }
-                    if writer.flush().is_err() { break; }
+                    if writeln!(writer, "{}", response).is_err() {
+                        break;
+                    }
+                    if writer.flush().is_err() {
+                        break;
+                    }
                 }
             }
             Err(e) => {
@@ -134,35 +168,51 @@ fn handle_tcp_connection(stream: std::net::TcpStream, user_mgr: &Arc<UserManager
     }
 }
 
-pub fn tcp_try_authenticate(msg: &str, user_mgr: &Arc<UserManager>) -> Result<(String, Arc<McpHandler>), String> {
+pub fn tcp_try_authenticate(
+    msg: &str,
+    user_mgr: &Arc<UserManager>,
+) -> Result<(String, Arc<McpHandler>), String> {
     let parsed: serde_json::Value = serde_json::from_str(msg)
         .map_err(|_| tcp_auth_error(tcp_extract_id(msg), "invalid JSON"))?;
 
     let method = parsed.get("method").and_then(|v| v.as_str()).unwrap_or("");
-    let params = parsed.get("params").cloned().unwrap_or(serde_json::Value::Null);
+    let params = parsed
+        .get("params")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
 
     if method == "initialize" {
         let api_key = params.get("api_key").and_then(|v| v.as_str()).unwrap_or("");
         if api_key.is_empty() {
-            return Err(tcp_auth_error(tcp_extract_id(msg), "api_key required in initialize params"));
+            return Err(tcp_auth_error(
+                tcp_extract_id(msg),
+                "api_key required in initialize params",
+            ));
         }
-        let user_info = user_mgr.authenticate(api_key)
+        let user_info = user_mgr
+            .authenticate(api_key)
             .ok_or_else(|| tcp_auth_error(tcp_extract_id(msg), "authentication failed"))?;
 
-        let engine = user_mgr.get_engine(&user_info.user_id)
+        let engine = user_mgr
+            .get_engine(&user_info.user_id)
             .map_err(|e| tcp_auth_error(tcp_extract_id(msg), &e))?;
 
-        let handler = Arc::new(
-            McpHandler::new(engine)
-                .with_quota(epicode::engine::mcp::QuotaContext {
-                    user_mgr: Arc::clone(user_mgr),
-                    user_id: user_info.user_id.clone(),
-                })
+        let handler = Arc::new(McpHandler::new(engine).with_quota(
+            epicode::engine::mcp::QuotaContext {
+                user_mgr: Arc::clone(user_mgr),
+                user_id: user_info.user_id.clone(),
+            },
+        ));
+        tracing::info!(
+            "TCP user '{}' authenticated (pub_skills not available via TCP)",
+            user_info.user_id
         );
-        tracing::info!("TCP user '{}' authenticated (pub_skills not available via TCP)", user_info.user_id);
         Ok((user_info.user_id, handler))
     } else {
-        Err(tcp_auth_error(tcp_extract_id(msg), "first message must be initialize with api_key"))
+        Err(tcp_auth_error(
+            tcp_extract_id(msg),
+            "first message must be initialize with api_key",
+        ))
     }
 }
 
@@ -170,7 +220,8 @@ fn tcp_auth_error(id: Option<u64>, msg: &str) -> String {
     serde_json::json!({
         "jsonrpc": "2.0", "id": id,
         "error": {"code": -32001, "message": msg}
-    }).to_string()
+    })
+    .to_string()
 }
 
 fn tcp_extract_id(msg: &str) -> Option<u64> {

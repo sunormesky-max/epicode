@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use axum::extract::{Path, Query, State, Extension};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
@@ -13,7 +13,8 @@ use epicode::engine::search_engine::SearchFilters;
 use epicode::engine::user_manager::UserInfo;
 
 use super::helpers::{
-    AuthedEngine, error_response, get_engine, strip_html, validate_content, validate_query, check_primary_executor,
+    check_primary_executor, error_response, get_engine, strip_html, validate_content,
+    validate_query, AuthedEngine,
 };
 use super::state::CloudState;
 
@@ -28,8 +29,12 @@ pub struct DigestRequest {
     pub chunk_size: usize,
 }
 
-fn default_source() -> String { String::new() }
-fn default_chunk_size() -> usize { 500 }
+fn default_source() -> String {
+    String::new()
+}
+fn default_chunk_size() -> usize {
+    500
+}
 
 pub async fn digest_content(
     State(st): State<CloudState>,
@@ -39,37 +44,63 @@ pub async fn digest_content(
     if req.content.trim().is_empty() {
         return error_response(StatusCode::BAD_REQUEST, "content must not be empty");
     }
-     if req.content.len() > 30_000_000 {
-         return error_response(StatusCode::BAD_REQUEST, "content exceeds 30MB limit");
-     }
+    if req.content.len() > 30_000_000 {
+        return error_response(StatusCode::BAD_REQUEST, "content exceeds 30MB limit");
+    }
     let chunk_size = req.chunk_size.clamp(50, 2000);
 
     let needed = req.content.len() / chunk_size + 1;
     if needed > 100 {
-        return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "digest", 400, &format!(
-            "too many chunks ({}). Max 100 per request. Use larger chunk_size.", needed
-        ))));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "digest",
+                400,
+                &format!(
+                    "too many chunks ({}). Max 100 per request. Use larger chunk_size.",
+                    needed
+                ),
+            )),
+        );
     }
     if let Err(e) = st.user_mgr.check_memory_limit(&engine.user_id) {
-        let available = st.user_mgr.user_stats(&engine.user_id)
+        let available = st
+            .user_mgr
+            .user_stats(&engine.user_id)
             .map(|i| i.max_memories - i.memories_used)
             .unwrap_or(0);
-        return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err(&engine, "digest", 403, &format!(
-            "not enough memory quota (need ~{}, have {}): {}", needed, available, e
-        ))));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "digest",
+                403,
+                &format!(
+                    "not enough memory quota (need ~{}, have {}): {}",
+                    needed, available, e
+                ),
+            )),
+        );
     }
 
     let digester = DigestionEngine::new(engine.scheduler.clone(), engine.cognitive.clone());
-    let source = if req.source.is_empty() { "paste".to_string() } else { req.source.clone() };
+    let source = if req.source.is_empty() {
+        "paste".to_string()
+    } else {
+        req.source.clone()
+    };
     let content = req.content.clone();
 
-    st.active_tasks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    st.active_tasks
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let at = st.active_tasks.clone();
     let result = tokio::task::spawn_blocking(move || {
         let r = digester.digest(&content, &source, chunk_size);
         at.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         r
-    }).await;
+    })
+    .await;
 
     match result {
         Ok(Ok(digest)) => {
@@ -77,20 +108,40 @@ pub async fn digest_content(
             for _ in 0..created {
                 st.user_mgr.increment_memory_count(&engine.user_id);
             }
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "digest", serde_json::json!({
-                "total_chunks": digest.total_chunks,
-                "memories_created": created,
-                "ids": digest.ids,
-                "labels": digest.labels_map.into_iter().map(|(id, labels)| {
-                    serde_json::json!({"id": id, "labels": labels})
-                }).collect::<Vec<_>>(),
-                "skipped": digest.skipped,
-            }))))
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "digest",
+                    serde_json::json!({
+                        "total_chunks": digest.total_chunks,
+                        "memories_created": created,
+                        "ids": digest.ids,
+                        "labels": digest.labels_map.into_iter().map(|(id, labels)| {
+                            serde_json::json!({"id": id, "labels": labels})
+                        }).collect::<Vec<_>>(),
+                        "skipped": digest.skipped,
+                    }),
+                )),
+            )
         }
-        Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "digest", 400, &e))),
+        Ok(Err(e)) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine, "digest", 400, &e,
+            )),
+        ),
         Err(e) => {
             tracing::error!("digest task error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "digest", 500, "digestion failed")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "digest",
+                    500,
+                    "digestion failed",
+                )),
+            )
         }
     }
 }
@@ -132,21 +183,28 @@ pub async fn ingest_batch(
     let mut reserved = 0usize;
     for _ in 0..n {
         if let Err(e) = st.user_mgr.check_and_increment_memory(&engine.user_id) {
-            for _ in 0..reserved { let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1); }
+            for _ in 0..reserved {
+                let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+            }
             return error_response(StatusCode::FORBIDDEN, &e);
         }
         reserved += 1;
     }
     for it in &req.items {
         if let Err(e) = validate_content(&it.content) {
-            for _ in 0..reserved { let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1); }
+            for _ in 0..reserved {
+                let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+            }
             return error_response(StatusCode::BAD_REQUEST, &e);
         }
     }
     let scheduler = engine.scheduler.clone();
     let user_id = engine.user_id.clone();
-    let items: Vec<(String, Vec<String>)> = req.items.into_iter()
-        .map(|it| (strip_html(&it.content), it.labels.unwrap_or_default())).collect();
+    let items: Vec<(String, Vec<String>)> = req
+        .items
+        .into_iter()
+        .map(|it| (strip_html(&it.content), it.labels.unwrap_or_default()))
+        .collect();
     let t0 = std::time::Instant::now();
     let result = tokio::task::spawn_blocking(move || {
         // L1相2d: 先批量预热嵌入缓存 — N次串行真实推理 → 1次批量推理+N次缓存命中
@@ -162,24 +220,44 @@ pub async fn ingest_batch(
             }
         }
         out
-    }).await;
+    })
+    .await;
     let elapsed_ms = t0.elapsed().as_millis() as u64;
     let engine_for_cb = engine.clone();
     match result {
         Ok(items_out) => {
             let mut refund = 0usize;
             for it in &items_out {
-                if it.get("error").is_some() || it.get("is_new") == Some(&serde_json::Value::Bool(false)) { refund += 1; }
+                if it.get("error").is_some()
+                    || it.get("is_new") == Some(&serde_json::Value::Bool(false))
+                {
+                    refund += 1;
+                }
             }
-            for _ in 0..refund { let _ = st.user_mgr.decrement_memory_count(&user_id, 1); }
-            let created = items_out.iter().filter(|i| i.get("is_new") == Some(&serde_json::Value::Bool(true))).count();
-            let failed = items_out.iter().filter(|i| i.get("error").is_some()).count();
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine_for_cb, "ingest_batch", serde_json::json!({
-                "total": n, "created": created, "exists": n - created - failed, "failed": failed,
-                "elapsed_ms": elapsed_ms,
-                "per_item_ms": elapsed_ms / n as u64,
-                "items": items_out,
-            }))))
+            for _ in 0..refund {
+                let _ = st.user_mgr.decrement_memory_count(&user_id, 1);
+            }
+            let created = items_out
+                .iter()
+                .filter(|i| i.get("is_new") == Some(&serde_json::Value::Bool(true)))
+                .count();
+            let failed = items_out
+                .iter()
+                .filter(|i| i.get("error").is_some())
+                .count();
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine_for_cb,
+                    "ingest_batch",
+                    serde_json::json!({
+                        "total": n, "created": created, "exists": n - created - failed, "failed": failed,
+                        "elapsed_ms": elapsed_ms,
+                        "per_item_ms": elapsed_ms / n as u64,
+                        "items": items_out,
+                    }),
+                )),
+            )
         }
         Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &format!("{}", e)),
     }
@@ -205,40 +283,82 @@ pub async fn remember(
     if let Some(ts) = req.timestamp.filter(|t| *t > 0) {
         let result = tokio::task::spawn_blocking(move || {
             scheduler.api_create_memory_at(&content_for_task, labels, ts)
-        }).await;
+        })
+        .await;
         return match result {
             Ok(Ok((id, is_new))) => {
-                if !is_new { let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1); }
+                if !is_new {
+                    let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+                }
                 let preview: String = clean_content.chars().take(200).collect();
                 let data = serde_json::json!({
                     "id": id, "status": if is_new { "created" } else { "exists" },
                     "content_preview": preview, "timestamped": true,
                 });
-                (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine_for_cb, "memory_create", data)))
+                (
+                    StatusCode::OK,
+                    Json(epicode::engine::smrp::envelope_ok(
+                        &engine_for_cb,
+                        "memory_create",
+                        data,
+                    )),
+                )
             }
-            Ok(Err(e)) => { tracing::error!("remember(ts) error: {}", e); error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error") }
-            Err(e) => { tracing::error!("remember(ts) task error: {}", e); error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error") }
+            Ok(Err(e)) => {
+                tracing::error!("remember(ts) error: {}", e);
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            }
+            Err(e) => {
+                tracing::error!("remember(ts) task error: {}", e);
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            }
         };
     }
     let result = tokio::task::spawn_blocking(move || {
         scheduler.api_create_memory_full(&content_for_task, labels)
-    }).await;
+    })
+    .await;
     match result {
         Ok(Ok(r)) => {
-            if !r.is_new { let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1); }  // dedup 回滚配额（kimi #3）
+            if !r.is_new {
+                let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+            } // dedup 回滚配额（kimi #3）
             let preview: String = clean_content.chars().take(200).collect();
             let data = epicode::engine::smrp::create_data(&engine_for_cb, &r, &preview);
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine_for_cb, "memory_create", data)))
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine_for_cb,
+                    "memory_create",
+                    data,
+                )),
+            )
         }
-        Ok(Err(e)) => { tracing::error!("remember error: {}", e); error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error") },
-        Err(e) => { tracing::error!("remember task error: {}", e); error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error") },
+        Ok(Err(e)) => {
+            tracing::error!("remember error: {}", e);
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
+        Err(e) => {
+            tracing::error!("remember task error: {}", e);
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
     }
 }
 
 // ---------- search ----------
 
 #[derive(Deserialize)]
-pub struct SearchRequest { pub query: String, pub limit: Option<usize>, pub labels: Option<Vec<String>>, pub min_importance: Option<f64>, pub project: Option<String>, pub since_days: Option<u64>, pub mode: Option<String>, pub strict_filter: Option<bool>, pub as_of: Option<i64> }
+pub struct SearchRequest {
+    pub query: String,
+    pub limit: Option<usize>,
+    pub labels: Option<Vec<String>>,
+    pub min_importance: Option<f64>,
+    pub project: Option<String>,
+    pub since_days: Option<u64>,
+    pub mode: Option<String>,
+    pub strict_filter: Option<bool>,
+    pub as_of: Option<i64>,
+}
 
 pub async fn search(
     State(st): State<CloudState>,
@@ -251,16 +371,21 @@ pub async fn search(
     let limit = req.limit.unwrap_or(20).min(200);
     let query = req.query.clone();
     let filters = build_rest_search_filters(&req);
-    let is_exact_mode = filters.as_ref().map(|f| f.mode == epicode::engine::search_engine::SearchMode::Exact).unwrap_or(false);
+    let is_exact_mode = filters
+        .as_ref()
+        .map(|f| f.mode == epicode::engine::search_engine::SearchMode::Exact)
+        .unwrap_or(false);
     let scheduler = engine.scheduler.clone();
     let engine_for_cb = engine.clone();
-    st.active_tasks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    st.active_tasks
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let at = st.active_tasks.clone();
     let result = tokio::task::spawn_blocking(move || {
         let r = scheduler.api_search_scored(&query, limit, filters.as_ref());
         at.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         r
-    }).await;
+    })
+    .await;
     match result {
         Ok(Ok((results, notes))) => {
             // SMRP 信封 + tier 分桶 + score_notes（与 MCP 端一致，兑现传输正交承诺 §1.3）
@@ -268,15 +393,28 @@ pub async fn search(
             let mut contextual: Vec<serde_json::Value> = Vec::new();
             let mut experiential: Vec<serde_json::Value> = Vec::new();
             let mut flat: Vec<serde_json::Value> = Vec::with_capacity(results.len());
-            let picked_ids: std::collections::HashSet<u64> = results.iter().map(|(id, _, _, _)| *id).collect();
+            let picked_ids: std::collections::HashSet<u64> =
+                results.iter().map(|(id, _, _, _)| *id).collect();
             // 审计P1-9收口: 响应级标签只看请求模式 — hybrid碰巧有exact命中不得谎称整包bm25_exact
             // (per-item matched_by 已诚实附加在每条结果上)
             let is_exact = is_exact_mode;
-            let source_tag: Vec<&str> = if is_exact { vec!["bm25"] } else { vec!["vector"] };
+            let source_tag: Vec<&str> = if is_exact {
+                vec!["bm25"]
+            } else {
+                vec!["vector"]
+            };
             for (id, sim, _mass, p) in &results {
                 let tier = epicode::engine::smrp::tier_search(*sim, &p.labels);
                 let mut item = epicode::engine::smrp::memory_item(
-                    &engine_for_cb, *id, &p.content, &p.labels, p.timestamp, tier, source_tag.clone(), *sim, None,
+                    &engine_for_cb,
+                    *id,
+                    &p.content,
+                    &p.labels,
+                    p.timestamp,
+                    tier,
+                    source_tag.clone(),
+                    *sim,
+                    None,
                 );
                 // Phase 1 收口: REST 端附加 matched_by(与 MCP 端一致, 传输正交承诺)
                 if let Some(matched) = notes.matched_by_map.get(id) {
@@ -289,7 +427,12 @@ pub async fn search(
                 }
                 flat.push(item);
             }
-            let filter_ids = |v: &[u64]| v.iter().filter(|i| picked_ids.contains(i)).copied().collect::<Vec<_>>();
+            let filter_ids = |v: &[u64]| {
+                v.iter()
+                    .filter(|i| picked_ids.contains(i))
+                    .copied()
+                    .collect::<Vec<_>>()
+            };
             let data = serde_json::json!({
                 "query": req.query,
                 "tiers": {"primary": primary, "contextual": contextual, "experiential": experiential, "hub": []},
@@ -305,10 +448,23 @@ pub async fn search(
                     ],
                 },
             });
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine_for_cb, "memory_search", data)))
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine_for_cb,
+                    "memory_search",
+                    data,
+                )),
+            )
         }
-        Ok(Err(e)) => { tracing::error!("search error: {}", e); error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error") },
-        Err(e) => { tracing::error!("search task error: {}", e); error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error") },
+        Ok(Err(e)) => {
+            tracing::error!("search error: {}", e);
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
+        Err(e) => {
+            tracing::error!("search task error: {}", e);
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
     }
 }
 
@@ -321,7 +477,14 @@ fn build_rest_search_filters(req: &SearchRequest) -> Option<SearchFilters> {
     let has_strict = req.strict_filter.is_some();
     let has_as_of = req.as_of.is_some();
     // Phase 1: mode/strict_filter 也触发 Some, 否则单独传 mode 时会被丢掉
-    if !has_labels && !has_min_imp && !has_project && !has_since && !has_mode && !has_strict && !has_as_of {
+    if !has_labels
+        && !has_min_imp
+        && !has_project
+        && !has_since
+        && !has_mode
+        && !has_strict
+        && !has_as_of
+    {
         return None;
     }
     let mut f = SearchFilters::default();
@@ -349,7 +512,10 @@ fn build_rest_search_filters(req: &SearchRequest) -> Option<SearchFilters> {
 // ---------- recall / ask ----------
 
 #[derive(Deserialize)]
-pub struct RecallRequest { pub query: String, pub depth: Option<usize> }
+pub struct RecallRequest {
+    pub query: String,
+    pub depth: Option<usize>,
+}
 
 pub async fn recall(
     AuthedEngine(engine): AuthedEngine,
@@ -362,22 +528,36 @@ pub async fn recall(
     let query = req.query.clone();
     let scheduler = engine.scheduler.clone();
     let engine_for_cb = engine.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        scheduler.api_recall(&query, depth)
-    }).await;
+    let result = tokio::task::spawn_blocking(move || scheduler.api_recall(&query, depth)).await;
     match result {
         Ok(Ok(r)) => {
             // SMRP 信封 + relevance 分桶（与 MCP 端一致，传输正交 §1.3）
             let data = epicode::engine::smrp::recall_data(&engine_for_cb, &r, &req.query, depth);
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine_for_cb, "memory_recall", data)))
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine_for_cb,
+                    "memory_recall",
+                    data,
+                )),
+            )
         }
-        Ok(Err(e)) => { tracing::error!("recall error: {}", e); error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error") },
-        Err(e) => { tracing::error!("recall task error: {}", e); error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error") },
+        Ok(Err(e)) => {
+            tracing::error!("recall error: {}", e);
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
+        Err(e) => {
+            tracing::error!("recall task error: {}", e);
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
     }
 }
 
 #[derive(Deserialize)]
-pub struct AskRequest { pub question: String, pub depth: Option<usize> }
+pub struct AskRequest {
+    pub question: String,
+    pub depth: Option<usize>,
+}
 
 pub async fn ask(
     AuthedEngine(engine): AuthedEngine,
@@ -390,18 +570,49 @@ pub async fn ask(
     let question = req.question;
     let engine_for_cb = engine.clone();
     match tokio::task::spawn_blocking(move || engine.scheduler.api_ask(&question, depth)).await {
-        Ok(Ok(result)) => {
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine_for_cb, "ask", result)))
+        Ok(Ok(result)) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine_for_cb,
+                "ask",
+                result,
+            )),
+        ),
+        Ok(Err(e)) => {
+            tracing::error!("internal error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine_for_cb,
+                    "ask",
+                    500,
+                    "internal error",
+                )),
+            )
         }
-        Ok(Err(e)) => { tracing::error!("internal error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine_for_cb, "ask", 500, "internal error"))) },
-        Err(e) => { tracing::error!("spawn_blocking panicked: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine_for_cb, "ask", 500, "internal error"))) },
+        Err(e) => {
+            tracing::error!("spawn_blocking panicked: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine_for_cb,
+                    "ask",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
 // ---------- nodes ----------
 
 #[derive(Deserialize)]
-pub struct CreateNodeRequest { pub content: String, pub labels: Option<Vec<String>>, pub timestamp: Option<i64> }
+pub struct CreateNodeRequest {
+    pub content: String,
+    pub labels: Option<Vec<String>>,
+    pub timestamp: Option<i64>,
+}
 
 pub async fn create_node(
     State(st): State<CloudState>,
@@ -417,26 +628,76 @@ pub async fn create_node(
     let labels = req.labels.unwrap_or_default();
     for label in &labels {
         if label.len() > 64 || label.trim().is_empty() {
-            return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "node_create", 400, "invalid label")));
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "node_create",
+                    400,
+                    "invalid label",
+                )),
+            );
         }
     }
-    let ts = req.timestamp.unwrap_or_else(|| chrono::Utc::now().timestamp());
+    let ts = req
+        .timestamp
+        .unwrap_or_else(|| chrono::Utc::now().timestamp());
     let now = chrono::Utc::now().timestamp();
     if ts > 1700000000 && (ts < now - 31536000 || ts > now + 31536000) {
-        return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "node_create", 400, "timestamp out of range")));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "node_create",
+                400,
+                "timestamp out of range",
+            )),
+        );
     }
-    let clean_content = strip_html(&req.content);  // 去 HTML 标签（非 XSS 转义，React 前端默认转义文本）
+    let clean_content = strip_html(&req.content); // 去 HTML 标签（非 XSS 转义，React 前端默认转义文本）
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || {
         scheduler.api_create_memory_with_time(&clean_content, labels, ts)
-    }).await;
+    })
+    .await;
     match result {
         Ok(Ok((id, is_new))) => {
-            if !is_new { let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1); }  // dedup 回滚配额（kimi #3）
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "node_create", serde_json::json!({"id": id}))))
+            if !is_new {
+                let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+            } // dedup 回滚配额（kimi #3）
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "node_create",
+                    serde_json::json!({"id": id}),
+                )),
+            )
         }
-        Ok(Err(e)) => { tracing::error!("internal error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "node_create", 500, "internal error"))) },
-        Err(e) => { tracing::error!("node_create spawn_blocking error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "node_create", 500, "internal error"))) },
+        Ok(Err(e)) => {
+            tracing::error!("internal error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "node_create",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
+        Err(e) => {
+            tracing::error!("node_create spawn_blocking error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "node_create",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -460,16 +721,33 @@ pub async fn get_node(
                     "valid_from": p.valid_from, "valid_to": p.valid_to,
                 },
             });
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "memory_get", data)))
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "memory_get",
+                    data,
+                )),
+            )
         }
-        None => (StatusCode::NOT_FOUND, Json(epicode::engine::smrp::envelope_err(&engine, "memory_get", 404, "not found"))),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "memory_get",
+                404,
+                "not found",
+            )),
+        ),
     }
 }
 
 // ---------- knowledge graph ----------
 
 #[derive(Deserialize)]
-pub struct KGRequest { pub id: u64 }
+pub struct KGRequest {
+    pub id: u64,
+}
 
 pub async fn knowledge(
     State(st): State<CloudState>,
@@ -481,11 +759,23 @@ pub async fn knowledge(
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
     };
     let rels = engine.scheduler.api_get_relations(req.id);
-    let items: Vec<serde_json::Value> = rels.iter().map(|(t, rt, s)| serde_json::json!({
-        "target": t, "type": rt, "strength": (*s * 100.0).round() / 100.0
-    })).collect();
+    let items: Vec<serde_json::Value> = rels
+        .iter()
+        .map(|(t, rt, s)| {
+            serde_json::json!({
+                "target": t, "type": rt, "strength": (*s * 100.0).round() / 100.0
+            })
+        })
+        .collect();
     let data = serde_json::json!({"id": req.id, "relations": items, "count": items.len()});
-    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "knowledge_relations", data)))
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "knowledge_relations",
+            data,
+        )),
+    )
 }
 
 pub async fn graph_analysis(
@@ -578,9 +868,38 @@ pub async fn graph_analysis(
     }))
     }).await;
     match result {
-        Ok(Ok(data)) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine_for_cb, "graph_analysis", data))),
-        Ok(Err(e)) => { tracing::error!("graph_analysis error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine_for_cb, "graph_analysis", 500, "internal error"))) },
-        Err(e) => { tracing::error!("graph_analysis task error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine_for_cb, "graph_analysis", 500, "internal error"))) },
+        Ok(Ok(data)) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine_for_cb,
+                "graph_analysis",
+                data,
+            )),
+        ),
+        Ok(Err(e)) => {
+            tracing::error!("graph_analysis error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine_for_cb,
+                    "graph_analysis",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
+        Err(e) => {
+            tracing::error!("graph_analysis task error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine_for_cb,
+                    "graph_analysis",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -593,19 +912,56 @@ pub async fn import_personality(
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => {
-            let warming = json.0.get("error").and_then(|v| v.as_str()).map(|e| e.contains("WARMING")).unwrap_or(false)
+            let warming = json
+                .0
+                .get("error")
+                .and_then(|v| v.as_str())
+                .map(|e| e.contains("WARMING"))
+                .unwrap_or(false)
                 || st.user_mgr.is_loading(&user.user_id);
-            let code = if warming { StatusCode::SERVICE_UNAVAILABLE } else { StatusCode::INTERNAL_SERVER_ERROR };
+            let code = if warming {
+                StatusCode::SERVICE_UNAVAILABLE
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
             return (code, json);
         }
     };
     // 安全校验: 只接受epicode-personality格式
-    if pkg.get("format").and_then(|f| f.as_str()).map(|s| !s.starts_with("epicode-personality")).unwrap_or(true) {
-        return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "personality_import", 400, "invalid format: expected epicode-personality/1.0")));
+    if pkg
+        .get("format")
+        .and_then(|f| f.as_str())
+        .map(|s| !s.starts_with("epicode-personality"))
+        .unwrap_or(true)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "personality_import",
+                400,
+                "invalid format: expected epicode-personality/1.0",
+            )),
+        );
     }
     match engine.scheduler.api_import_personality(&pkg) {
-        Ok(result) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "personality_import", result))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "personality_import", 500, &e))),
+        Ok(result) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "personality_import",
+                result,
+            )),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "personality_import",
+                500,
+                &e,
+            )),
+        ),
     }
 }
 
@@ -617,14 +973,30 @@ pub async fn knowledge_cards(
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => {
-            let warming = json.0.get("error").and_then(|v| v.as_str()).map(|e| e.contains("WARMING")).unwrap_or(false)
+            let warming = json
+                .0
+                .get("error")
+                .and_then(|v| v.as_str())
+                .map(|e| e.contains("WARMING"))
+                .unwrap_or(false)
                 || st.user_mgr.is_loading(&user.user_id);
-            let code = if warming { StatusCode::SERVICE_UNAVAILABLE } else { StatusCode::INTERNAL_SERVER_ERROR };
+            let code = if warming {
+                StatusCode::SERVICE_UNAVAILABLE
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
             return (code, json);
         }
     };
     let cards = engine.scheduler.list_knowledge_cards();
-    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "knowledge_cards", cards)))
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "knowledge_cards",
+            cards,
+        )),
+    )
 }
 
 /// D9: 人格导出 — 身份+权重+知识卡片+核心记忆的可移植包
@@ -635,15 +1007,39 @@ pub async fn export_personality(
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => {
-            let warming = json.0.get("error").and_then(|v| v.as_str()).map(|e| e.contains("WARMING")).unwrap_or(false)
+            let warming = json
+                .0
+                .get("error")
+                .and_then(|v| v.as_str())
+                .map(|e| e.contains("WARMING"))
+                .unwrap_or(false)
                 || st.user_mgr.is_loading(&user.user_id);
-            let code = if warming { StatusCode::SERVICE_UNAVAILABLE } else { StatusCode::INTERNAL_SERVER_ERROR };
+            let code = if warming {
+                StatusCode::SERVICE_UNAVAILABLE
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
             return (code, json);
         }
     };
     match engine.scheduler.api_export_personality() {
-        Ok(pkg) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "personality_export", pkg))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "personality_export", 500, &e))),
+        Ok(pkg) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "personality_export",
+                pkg,
+            )),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "personality_export",
+                500,
+                &e,
+            )),
+        ),
     }
 }
 
@@ -653,7 +1049,8 @@ pub async fn graph_export(
     axum::extract::RawQuery(q): axum::extract::RawQuery,
 ) -> (StatusCode, Json<serde_json::Value>) {
     // 图谱裁剪: ?limit=N(默认800, 0=全量) — 曾5499节点13万边12MB/74s致客户端499
-    let node_limit: usize = q.as_deref()
+    let node_limit: usize = q
+        .as_deref()
         .and_then(|qs| qs.split('&').find(|p| p.starts_with("limit=")))
         .and_then(|p| p.strip_prefix("limit="))
         .and_then(|v| v.parse().ok())
@@ -661,16 +1058,43 @@ pub async fn graph_export(
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => {
-            let warming = json.0.get("error").and_then(|v| v.as_str()).map(|e| e.contains("WARMING")).unwrap_or(false)
+            let warming = json
+                .0
+                .get("error")
+                .and_then(|v| v.as_str())
+                .map(|e| e.contains("WARMING"))
+                .unwrap_or(false)
                 || st.user_mgr.is_loading(&user.user_id);
-            let code = if warming { StatusCode::SERVICE_UNAVAILABLE } else { StatusCode::INTERNAL_SERVER_ERROR };
+            let code = if warming {
+                StatusCode::SERVICE_UNAVAILABLE
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
             return (code, json);
         }
     };
     let export = engine.scheduler.api_export_graph(node_limit);
     match serde_json::to_value(&export) {
-        Ok(val) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "graph_export", val))),
-        Err(e) => { tracing::error!("[graph_export] task error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "graph_export", 500, "internal error"))) },
+        Ok(val) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "graph_export",
+                val,
+            )),
+        ),
+        Err(e) => {
+            tracing::error!("[graph_export] task error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "graph_export",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -683,25 +1107,52 @@ pub async fn user_stats(
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => {
-            let warming = json.0.get("error").and_then(|v| v.as_str()).map(|e| e.contains("WARMING")).unwrap_or(false)
+            let warming = json
+                .0
+                .get("error")
+                .and_then(|v| v.as_str())
+                .map(|e| e.contains("WARMING"))
+                .unwrap_or(false)
                 || st.user_mgr.is_loading(&user.user_id);
-            let code = if warming { StatusCode::SERVICE_UNAVAILABLE } else { StatusCode::INTERNAL_SERVER_ERROR };
+            let code = if warming {
+                StatusCode::SERVICE_UNAVAILABLE
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
             return (code, json);
         }
     };
     let s = engine.scheduler.api_stats();
     let info = st.user_mgr.user_stats(&user.user_id);
     let is_main = info.as_ref().map(|i| i.parent.is_none()).unwrap_or(false);
-    let has_subs = info.as_ref().map(|i| !i.sub_accounts.is_empty()).unwrap_or(false);
+    let has_subs = info
+        .as_ref()
+        .map(|i| !i.sub_accounts.is_empty())
+        .unwrap_or(false);
     let max_mem = if is_main {
         info.as_ref().map(|i| i.max_memories).unwrap_or(0)
     } else {
-        let parent_id = info.as_ref().and_then(|i| i.parent.clone()).unwrap_or_default();
-        st.user_mgr.user_stats(&parent_id).map(|p| p.max_memories).unwrap_or(0)
+        let parent_id = info
+            .as_ref()
+            .and_then(|i| i.parent.clone())
+            .unwrap_or_default();
+        st.user_mgr
+            .user_stats(&parent_id)
+            .map(|p| p.max_memories)
+            .unwrap_or(0)
     };
     let own_tetra_count = s.tetra_count;
-    let owner_id = if is_main { user.user_id.clone() } else { info.as_ref().and_then(|i| i.parent.clone()).unwrap_or_else(|| user.user_id.clone()) };
-    let mem_count = st.user_mgr.list_users().iter()
+    let owner_id = if is_main {
+        user.user_id.clone()
+    } else {
+        info.as_ref()
+            .and_then(|i| i.parent.clone())
+            .unwrap_or_else(|| user.user_id.clone())
+    };
+    let mem_count = st
+        .user_mgr
+        .list_users()
+        .iter()
         .filter(|u| u.user_id == owner_id || u.parent.as_deref() == Some(owner_id.as_str()))
         .map(|u| u.memories_used)
         .sum::<usize>();
@@ -728,7 +1179,11 @@ pub async fn user_stats(
         for i in (0..30).rev() {
             let d = chrono::Utc::now() - chrono::Duration::days(i);
             let key = d.format("%Y-%m-%d").to_string();
-            let label = format!("{}/{}", d.format("%m").to_string().parse::<u32>().unwrap_or(0), d.format("%d").to_string().parse::<u32>().unwrap_or(0));
+            let label = format!(
+                "{}/{}",
+                d.format("%m").to_string().parse::<u32>().unwrap_or(0),
+                d.format("%d").to_string().parse::<u32>().unwrap_or(0)
+            );
             let count = db_map.get(&key).copied().unwrap_or(0);
             result.push(serde_json::json!({"date": label, "count": count}));
         }
@@ -759,7 +1214,14 @@ pub async fn user_stats(
         "api_calls_daily": api_calls_daily,
         "time_context": time_ctx,
     });
-    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "user_stats", data)))
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "user_stats",
+            data,
+        )),
+    )
 }
 
 // ---------- timeline ----------
@@ -774,8 +1236,15 @@ pub async fn timeline(
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
     };
     let engine_for_cb = engine.clone();
-    let limit: usize = params.get("limit").and_then(|v| v.parse().ok()).unwrap_or(20).min(100);
-    let offset: usize = params.get("offset").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let limit: usize = params
+        .get("limit")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20)
+        .min(100);
+    let offset: usize = params
+        .get("offset")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let result: Result<Result<(usize, Vec<serde_json::Value>), String>, tokio::task::JoinError> = tokio::task::spawn_blocking(move || {
         let total_count = engine.scheduler.api_stats().tetra_count;
         let all = engine.scheduler.api_list_nodes_limit(offset + limit);
@@ -787,9 +1256,38 @@ pub async fn timeline(
         Ok((total_count, nodes))
     }).await;
     match result {
-        Ok(Ok((total, nodes))) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine_for_cb, "timeline", serde_json::json!({"events": nodes, "total": total})))),
-        Ok(Err(e)) => { tracing::error!("timeline error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine_for_cb, "timeline", 500, "internal error"))) },
-        Err(e) => { tracing::error!("timeline task error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine_for_cb, "timeline", 500, "internal error"))) },
+        Ok(Ok((total, nodes))) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine_for_cb,
+                "timeline",
+                serde_json::json!({"events": nodes, "total": total}),
+            )),
+        ),
+        Ok(Err(e)) => {
+            tracing::error!("timeline error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine_for_cb,
+                    "timeline",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
+        Err(e) => {
+            tracing::error!("timeline task error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine_for_cb,
+                    "timeline",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -801,18 +1299,51 @@ pub async fn delete_memory(
 ) -> (StatusCode, Json<serde_json::Value>) {
     let exists = engine.space().get_tetrahedron(id).is_some();
     if !exists {
-        return (StatusCode::NOT_FOUND, Json(epicode::engine::smrp::envelope_err(&engine, "memory_delete", 404, &format!("tetrahedron {} not found", id))));
+        return (
+            StatusCode::NOT_FOUND,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "memory_delete",
+                404,
+                &format!("tetrahedron {} not found", id),
+            )),
+        );
     }
     let scheduler = engine.scheduler.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        scheduler.api_forget_memory(id)
-    }).await;
+    let result = tokio::task::spawn_blocking(move || scheduler.api_forget_memory(id)).await;
     match result {
-        Ok(Ok(d)) => {
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "memory_delete", serde_json::json!({"forgotten": id, "mode": "forget", "valid_to": d.get("valid_to")}))))
+        Ok(Ok(d)) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "memory_delete",
+                serde_json::json!({"forgotten": id, "mode": "forget", "valid_to": d.get("valid_to")}),
+            )),
+        ),
+        Ok(Err(e)) => {
+            tracing::error!("memory_delete error: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "memory_delete",
+                    400,
+                    &e,
+                )),
+            )
         }
-        Ok(Err(e)) => { tracing::error!("memory_delete error: {}", e); (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "memory_delete", 400, &e))) },
-        Err(e) => { tracing::error!("memory_delete spawn_blocking error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "memory_delete", 500, "internal error"))) },
+        Err(e) => {
+            tracing::error!("memory_delete spawn_blocking error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "memory_delete",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -827,17 +1358,53 @@ pub async fn update_memory_content(
     Json(body): Json<UpdateContentRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if let Err(e) = validate_content(&body.content) {
-        return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "memory_update", 400, &e)));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "memory_update",
+                400,
+                &e,
+            )),
+        );
     }
-    let clean_content = strip_html(&body.content);  // 去 HTML 标签（非 XSS 转义，React 前端默认转义文本）
+    let clean_content = strip_html(&body.content); // 去 HTML 标签（非 XSS 转义，React 前端默认转义文本）
     let scheduler = engine.scheduler.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        scheduler.api_update_content(id, &clean_content)
-    }).await;
+    let result =
+        tokio::task::spawn_blocking(move || scheduler.api_update_content(id, &clean_content)).await;
     match result {
-        Ok(Ok(())) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "memory_update", serde_json::json!({"updated": id})))),
-        Ok(Err(e)) => { tracing::error!("memory_update error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "memory_update", 500, "internal error"))) },
-        Err(e) => { tracing::error!("memory_update spawn_blocking error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "memory_update", 500, "internal error"))) },
+        Ok(Ok(())) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "memory_update",
+                serde_json::json!({"updated": id}),
+            )),
+        ),
+        Ok(Err(e)) => {
+            tracing::error!("memory_update error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "memory_update",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
+        Err(e) => {
+            tracing::error!("memory_update spawn_blocking error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "memory_update",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -867,18 +1434,35 @@ pub async fn batch_delete_memories(
             }
         }
         (forgotten, failed)
-    }).await;
+    })
+    .await;
     match result {
-        Ok((forgotten, failed)) => {
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "memory_batch_delete", serde_json::json!({
-                "forgotten": forgotten,
-                "forgotten_count": forgotten.len(),
-                "mode": "forget",
-                "failed": failed,
-                "failed_count": failed.len(),
-            }))))
+        Ok((forgotten, failed)) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "memory_batch_delete",
+                serde_json::json!({
+                    "forgotten": forgotten,
+                    "forgotten_count": forgotten.len(),
+                    "mode": "forget",
+                    "failed": failed,
+                    "failed_count": failed.len(),
+                }),
+            )),
+        ),
+        Err(e) => {
+            tracing::error!("memory_batch_delete spawn_blocking error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "memory_batch_delete",
+                    500,
+                    "internal error",
+                )),
+            )
         }
-        Err(e) => { tracing::error!("memory_batch_delete spawn_blocking error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "memory_batch_delete", 500, "internal error"))) },
     }
 }
 
@@ -896,36 +1480,87 @@ pub async fn import_doc(
     Json(body): Json<ImportDocRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if body.name.trim().is_empty() || body.content.trim().is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "doc_import", 400, "name and content required")));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "doc_import",
+                400,
+                "name and content required",
+            )),
+        );
     }
-    if let Err(e) = st.user_mgr.check_and_increment_memory(&engine.user_id) {  // 配额（kimi #5）
-        return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err(&engine, "doc_import", 403, &e)));
+    if let Err(e) = st.user_mgr.check_and_increment_memory(&engine.user_id) {
+        // 配额（kimi #5）
+        return (
+            StatusCode::FORBIDDEN,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "doc_import",
+                403,
+                &e,
+            )),
+        );
     }
 
-    let clean_content = strip_html(&body.content);  // 去 HTML 标签（非 XSS 转义，React 前端默认转义文本）
+    let clean_content = strip_html(&body.content); // 去 HTML 标签（非 XSS 转义，React 前端默认转义文本）
     let doc_label = format!("doc.{}", body.name);
     let labels = vec!["documentation".to_string(), doc_label];
     let chars = clean_content.len();
     let scheduler = engine.scheduler.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        scheduler.api_create_memory(&clean_content, labels)
-    }).await;
+    let result =
+        tokio::task::spawn_blocking(move || scheduler.api_create_memory(&clean_content, labels))
+            .await;
     match result {
         Ok(Ok((id, is_new))) => {
-            if !is_new { let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1); }  // dedup 回滚配额（kimi #3）
-            tracing::info!("[DocImport] '{}' — {} chars, id={}, new={}", body.name, chars, id, is_new);
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "doc_import", serde_json::json!({
-                "document": body.name,
-                "id": id,
-                "chars": chars,
-                "new": is_new,
-            }))))
+            if !is_new {
+                let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+            } // dedup 回滚配额（kimi #3）
+            tracing::info!(
+                "[DocImport] '{}' — {} chars, id={}, new={}",
+                body.name,
+                chars,
+                id,
+                is_new
+            );
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "doc_import",
+                    serde_json::json!({
+                        "document": body.name,
+                        "id": id,
+                        "chars": chars,
+                        "new": is_new,
+                    }),
+                )),
+            )
         }
         Ok(Err(e)) => {
             tracing::error!("doc_import error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "doc_import", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "doc_import",
+                    500,
+                    "internal error",
+                )),
+            )
         }
-        Err(e) => { tracing::error!("doc_import spawn_blocking error: {}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "doc_import", 500, "internal error"))) },
+        Err(e) => {
+            tracing::error!("doc_import spawn_blocking error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "doc_import",
+                    500,
+                    "internal error",
+                )),
+            )
+        }
     }
 }
 
@@ -937,11 +1572,14 @@ pub async fn list_docs(
         Ok(e) => e,
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
     };
-    let docs_mem = engine.scheduler.gateway_handle().list_by_labels(&["documentation"], 500);
-    let docs: Vec<serde_json::Value> = docs_mem.iter()
+    let docs_mem = engine
+        .scheduler
+        .gateway_handle()
+        .list_by_labels(&["documentation"], 500);
+    let docs: Vec<serde_json::Value> = docs_mem
+        .iter()
         .filter_map(|(id, payload)| {
-            let doc_name = payload.labels.iter()
-                .find_map(|l| l.strip_prefix("doc."))?;
+            let doc_name = payload.labels.iter().find_map(|l| l.strip_prefix("doc."))?;
             Some(serde_json::json!({
                 "id": id,
                 "name": doc_name,
@@ -951,10 +1589,17 @@ pub async fn list_docs(
         })
         .collect();
 
-    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "doc_list", serde_json::json!({
-        "documents": docs.len(),
-        "docs": docs,
-    }))))
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "doc_list",
+            serde_json::json!({
+                "documents": docs.len(),
+                "docs": docs,
+            }),
+        )),
+    )
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -975,34 +1620,39 @@ pub async fn drive_inbox(
     // retryable = true  -> status is Pending or Delivered (non-terminal, agent may act)
     // retryable = false -> status is terminal (Executed/Rejected/Expired)
     use epicode::engine::drive::DriveStatus;
-    let signals: Vec<serde_json::Value> = polled.iter().map(|s| {
-        let retryable = matches!(s.status, DriveStatus::Pending | DriveStatus::Delivered);
-        let mut v = serde_json::to_value(s).unwrap_or_else(|_| serde_json::json!({"id": s.id}));
-        if let Some(obj) = v.as_object_mut() {
-            obj.insert("retryable".to_string(), serde_json::json!(retryable));
-            // γ2: 传输层 E2E — 有端侧公钥则 description 加密, 私钥只在端侧
-            if let Some(pem) = engine.scheduler().e2e_pubkey() {
-                match epicode::engine::e2e::encrypt_for(s.description.as_bytes(), &pem) {
-                    Ok(ct) => {
-                        obj.insert("description_e2e".to_string(), serde_json::json!(ct));
-                        obj.insert("description".to_string(), serde_json::Value::Null);
+    let signals: Vec<serde_json::Value> = polled
+        .iter()
+        .map(|s| {
+            let retryable = matches!(s.status, DriveStatus::Pending | DriveStatus::Delivered);
+            let mut v = serde_json::to_value(s).unwrap_or_else(|_| serde_json::json!({"id": s.id}));
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("retryable".to_string(), serde_json::json!(retryable));
+                // γ2: 传输层 E2E — 有端侧公钥则 description 加密, 私钥只在端侧
+                if let Some(pem) = engine.scheduler().e2e_pubkey() {
+                    match epicode::engine::e2e::encrypt_for(s.description.as_bytes(), &pem) {
+                        Ok(ct) => {
+                            obj.insert("description_e2e".to_string(), serde_json::json!(ct));
+                            obj.insert("description".to_string(), serde_json::Value::Null);
+                        }
+                        Err(e) => {
+                            tracing::warn!("[γ2] encrypt failed, fallback plaintext: {}", e);
+                        }
                     }
-                    Err(e) => { tracing::warn!("[γ2] encrypt failed, fallback plaintext: {}", e); }
                 }
             }
-        }
-        v
-    }).collect();
+            v
+        })
+        .collect();
     // Phase 3 收尾: empty_reason 区分自消费 vs 真无信号
     let empty_reason = if signals.is_empty() {
         let executed = stats.get("executed").and_then(|v| v.as_u64()).unwrap_or(0);
         let total = stats.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
         if executed > 0 && total > executed {
-            "self_consumed"  // 认知引擎已自消费了 pending 信号
+            "self_consumed" // 认知引擎已自消费了 pending 信号
         } else if total == 0 {
-            "no_signals"  // 从未产生过信号
+            "no_signals" // 从未产生过信号
         } else {
-            "no_pending"  // 有历史信号但当前无 pending
+            "no_pending" // 有历史信号但当前无 pending
         }
     } else {
         "has_signals"
@@ -1012,7 +1662,14 @@ pub async fn drive_inbox(
         "stats": stats,
         "empty_reason": empty_reason,
     });
-    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "drive_inbox", result)))
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "drive_inbox",
+            result,
+        )),
+    )
 }
 
 #[derive(Deserialize)]
@@ -1027,10 +1684,17 @@ pub async fn drive_ingested(
     engine.scheduler.drive_queue().record_ingested(&body.ids);
     engine.scheduler.save_drive_queue();
     let stored = engine.scheduler.drive_queue().ingested_ids();
-    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "drive_ingested", serde_json::json!({
-        "recorded": body.ids.len(),
-        "ingested_count": stored.len(),
-    }))))
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "drive_ingested",
+            serde_json::json!({
+                "recorded": body.ids.len(),
+                "ingested_count": stored.len(),
+            }),
+        )),
+    )
 }
 
 pub async fn drive_policy(
@@ -1039,15 +1703,20 @@ pub async fn drive_policy(
     let q = engine.scheduler.drive_queue();
     let stats = q.stats();
     let (bins, suppressed) = q.policy_stats();
-    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "drive_policy", serde_json::json!({
-        "policy_version": q.policy_version(),
-        "bins": bins,
-        "suppressed": suppressed,
-        "stats": stats,
-    }))))
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "drive_policy",
+            serde_json::json!({
+                "policy_version": q.policy_version(),
+                "bins": bins,
+                "suppressed": suppressed,
+                "stats": stats,
+            }),
+        )),
+    )
 }
-
-
 
 // ═══ Phase 4-1: 噪声批量管理 (Tester-Q Phase 4 治理层) ═══
 
@@ -1072,11 +1741,17 @@ pub async fn bulk_quarantine(
     // P0 门禁 (Tester-Q验收): bulk 写路径必须带 confirm_token
     let token = match &body.confirm_token {
         Some(t) => t.clone(),
-        None => return (
-            StatusCode::FORBIDDEN,
-            Json(epicode::engine::smrp::envelope_err(&engine, "bulk_quarantine", 403,
-                "confirm_token required. Call POST /v1/operations/dry-run first."))
-        ),
+        None => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "bulk_quarantine",
+                    403,
+                    "confirm_token required. Call POST /v1/operations/dry-run first.",
+                )),
+            )
+        }
     };
 
     // 验证 token 有效且未过期
@@ -1085,18 +1760,41 @@ pub async fn bulk_quarantine(
         Some(p) => {
             let now = chrono::Utc::now().timestamp();
             if now - p.created_at > 300 {
-                return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err(&engine, "bulk_quarantine", 403, "token expired")));
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(epicode::engine::smrp::envelope_err(
+                        &engine,
+                        "bulk_quarantine",
+                        403,
+                        "token expired",
+                    )),
+                );
             }
             // 检查 risk_level
             if p.risk_level == "critical" {
-                return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err(&engine, "bulk_quarantine", 403, "operation on protected memories forbidden")));
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(epicode::engine::smrp::envelope_err(
+                        &engine,
+                        "bulk_quarantine",
+                        403,
+                        "operation on protected memories forbidden",
+                    )),
+                );
             }
             p
         }
-        None => return (
-            StatusCode::FORBIDDEN,
-            Json(epicode::engine::smrp::envelope_err(&engine, "bulk_quarantine", 403, "invalid token"))
-        ),
+        None => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "bulk_quarantine",
+                    403,
+                    "invalid token",
+                )),
+            )
+        }
     };
 
     let engine_inner = engine.clone();
@@ -1121,7 +1819,11 @@ pub async fn bulk_quarantine(
                         Ok(_) => {
                             if let Some(t) = engine_inner.space().get_tetrahedron(id) {
                                 if let Err(e) = engine_inner.storage.upsert_tetra(&t) {
-                                    tracing::warn!("[P0-1] quarantine persist failed {}: {}", id, e);
+                                    tracing::warn!(
+                                        "[P0-1] quarantine persist failed {}: {}",
+                                        id,
+                                        e
+                                    );
                                 }
                             }
                             quarantined.push(id);
@@ -1133,29 +1835,55 @@ pub async fn bulk_quarantine(
             }
         }
         (quarantined, already, failed)
-    }).await;
+    })
+    .await;
 
     match result {
         Ok((quarantined, already, failed)) => {
             // P0 门禁: 每次写操作强制 op_audit
-            let audit_content = format!("bulk_quarantine: {} ids (token={}, risk={})", quarantined.len() + already.len(), token, pending.risk_level);
-            let _ = engine.scheduler.api_remember_with_labels(&audit_content, vec!["op_audit".to_string(), "l0-exempt".to_string()]);
+            let audit_content = format!(
+                "bulk_quarantine: {} ids (token={}, risk={})",
+                quarantined.len() + already.len(),
+                token,
+                pending.risk_level
+            );
+            let _ = engine.scheduler.api_remember_with_labels(
+                &audit_content,
+                vec!["op_audit".to_string(), "l0-exempt".to_string()],
+            );
 
             tracing::info!(
                 "[P4-1] bulk_quarantine: {} quarantined, {} already, {} failed (token verified)",
-                quarantined.len(), already.len(), failed.len()
+                quarantined.len(),
+                already.len(),
+                failed.len()
             );
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "bulk_quarantine", serde_json::json!({
-                "quarantined": quarantined,
-                "quarantined_count": quarantined.len(),
-                "already_quarantined": already,
-                "failed": failed,
-                "failed_count": failed.len(),
-            }))))
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "bulk_quarantine",
+                    serde_json::json!({
+                        "quarantined": quarantined,
+                        "quarantined_count": quarantined.len(),
+                        "already_quarantined": already,
+                        "failed": failed,
+                        "failed_count": failed.len(),
+                    }),
+                )),
+            )
         }
         Err(e) => {
             tracing::error!("[P4-1] bulk_quarantine error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "bulk_quarantine", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "bulk_quarantine",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }
@@ -1170,25 +1898,57 @@ pub async fn bulk_restore(
     // P0 门禁: bulk_restore 也需要 token（恢复是写操作）
     let token = match &body.confirm_token {
         Some(t) => t.clone(),
-        None => return (
-            StatusCode::FORBIDDEN,
-            Json(epicode::engine::smrp::envelope_err(&engine, "bulk_restore", 403,
-                "confirm_token required. Call POST /v1/operations/dry-run first."))
-        ),
+        None => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "bulk_restore",
+                    403,
+                    "confirm_token required. Call POST /v1/operations/dry-run first.",
+                )),
+            )
+        }
     };
     let pending_r = pending_ops().lock().remove(&token);
     let pending_r = match pending_r {
         Some(p) => {
             let now = chrono::Utc::now().timestamp();
             if now - p.created_at > 300 {
-                return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err(&engine, "bulk_restore", 403, "token expired")));
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(epicode::engine::smrp::envelope_err(
+                        &engine,
+                        "bulk_restore",
+                        403,
+                        "token expired",
+                    )),
+                );
             }
             if p.risk_level == "critical" {
-                return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err(&engine, "bulk_restore", 403, "operation on protected memories forbidden")));
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(epicode::engine::smrp::envelope_err(
+                        &engine,
+                        "bulk_restore",
+                        403,
+                        "operation on protected memories forbidden",
+                    )),
+                );
             }
             p
         }
-        None => return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err(&engine, "bulk_restore", 403, "invalid token"))),
+        None => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "bulk_restore",
+                    403,
+                    "invalid token",
+                )),
+            )
+        }
     };
 
     let engine_inner = engine.clone();
@@ -1229,29 +1989,54 @@ pub async fn bulk_restore(
             }
         }
         (restored, not_quarantined, failed)
-    }).await;
+    })
+    .await;
 
     match result {
         Ok((restored, not_quarantined, failed)) => {
             // P0 门禁: audit
-            let audit_content = format!("bulk_restore: {} ids (risk={})", restored.len() + not_quarantined.len(), pending_r.risk_level);
-            let _ = engine.scheduler.api_remember_with_labels(&audit_content, vec!["op_audit".to_string(), "l0-exempt".to_string()]);
+            let audit_content = format!(
+                "bulk_restore: {} ids (risk={})",
+                restored.len() + not_quarantined.len(),
+                pending_r.risk_level
+            );
+            let _ = engine.scheduler.api_remember_with_labels(
+                &audit_content,
+                vec!["op_audit".to_string(), "l0-exempt".to_string()],
+            );
 
             tracing::info!(
                 "[P4-1] bulk_restore: {} restored, {} not_quarantined, {} failed (token verified)",
-                restored.len(), not_quarantined.len(), failed.len()
+                restored.len(),
+                not_quarantined.len(),
+                failed.len()
             );
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "bulk_restore", serde_json::json!({
-                "restored": restored,
-                "restored_count": restored.len(),
-                "not_quarantined": not_quarantined,
-                "failed": failed,
-                "failed_count": failed.len(),
-            }))))
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "bulk_restore",
+                    serde_json::json!({
+                        "restored": restored,
+                        "restored_count": restored.len(),
+                        "not_quarantined": not_quarantined,
+                        "failed": failed,
+                        "failed_count": failed.len(),
+                    }),
+                )),
+            )
         }
         Err(e) => {
             tracing::error!("[P4-1] bulk_restore error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "bulk_restore", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "bulk_restore",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }
@@ -1268,10 +2053,15 @@ pub async fn drive_evolution(
     let queue = engine.scheduler().drive_queue().stats();
     let executed = queue.get("executed").and_then(|v| v.as_u64()).unwrap_or(0);
     let rejected = queue.get("rejected").and_then(|v| v.as_u64()).unwrap_or(0);
-    let dead = queue.get("dead_letter_count").and_then(|v| v.as_u64()).unwrap_or(0);
+    let dead = queue
+        .get("dead_letter_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     let ring_rate = if executed + rejected + dead > 0 {
         ((rejected + dead) as f64 / (executed + rejected + dead) as f64 * 1000.0).round() / 1000.0
-    } else { 0.0 };
+    } else {
+        0.0
+    };
     let result = serde_json::json!({
         "drive_engine": weights,
         "queue": queue,
@@ -1282,7 +2072,14 @@ pub async fn drive_evolution(
             "note": "delta验收: N次ack后 weights/evolution_history 可见变化; 7日 ring_rate 应下降",
         },
     });
-    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "drive_evolution", result)))
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "drive_evolution",
+            result,
+        )),
+    )
 }
 
 /// GET /v1/memories/:id — D5/D7 REST get single memory
@@ -1298,9 +2095,28 @@ pub async fn get_memory(
         }))
     }).await;
     match result {
-        Ok(Some(d)) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "get_memory", d))),
-        Ok(None) => (StatusCode::NOT_FOUND, Json(epicode::engine::smrp::envelope_err(&engine, "get_memory", 404, "not found"))),
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "get_memory", 500, "error"))),
+        Ok(Some(d)) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(&engine, "get_memory", d)),
+        ),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "get_memory",
+                404,
+                "not found",
+            )),
+        ),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "get_memory",
+                500,
+                "error",
+            )),
+        ),
     }
 }
 
@@ -1313,12 +2129,30 @@ pub async fn forget_memory(
     let eng = engine.clone();
     let result = tokio::task::spawn_blocking(move || sched.api_forget_memory(id)).await;
     match result {
-        Ok(Ok(d)) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&eng, "forget_memory", d))),
-        Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&eng, "forget_memory", 400, &e))),
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&eng, "forget_memory", 500, "error"))),
+        Ok(Ok(d)) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(&eng, "forget_memory", d)),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &eng,
+                "forget_memory",
+                400,
+                &e,
+            )),
+        ),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(epicode::engine::smrp::envelope_err(
+                &eng,
+                "forget_memory",
+                500,
+                "error",
+            )),
+        ),
     }
 }
-
 
 /// GET /v1/memories/noise-stats
 /// 统计噪声记忆数量：quarantined / junk / superseded / low_importance
@@ -1367,13 +2201,29 @@ pub async fn noise_stats(
                 0.0
             },
         })
-    }).await;
+    })
+    .await;
 
     match result {
-        Ok(stats) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "noise_stats", stats))),
+        Ok(stats) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "noise_stats",
+                stats,
+            )),
+        ),
         Err(e) => {
             tracing::error!("[P4-1] noise_stats error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "noise_stats", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "noise_stats",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }
@@ -1393,9 +2243,15 @@ pub struct NoiseCandidatesRequest {
     #[serde(default = "default_exclude_protected")]
     pub exclude_protected: bool,
 }
-fn default_candidates_limit() -> usize { 50 }
-fn default_candidates_filter() -> String { "superseded".to_string() }
-fn default_exclude_protected() -> bool { true }
+fn default_candidates_limit() -> usize {
+    50
+}
+fn default_candidates_filter() -> String {
+    "superseded".to_string()
+}
+fn default_exclude_protected() -> bool {
+    true
+}
 
 /// GET /v1/memories/noise-candidates
 ///
@@ -1430,7 +2286,9 @@ pub async fn noise_candidates(
             let labels = &p.labels;
 
             // Skip protected if requested
-            if exclude_protected && p.enforced { continue; }
+            if exclude_protected && p.enforced {
+                continue;
+            }
 
             let is_quarantined = labels.iter().any(|l| l == "quarantine");
             let is_superseded = p.valid_to.is_some();
@@ -1443,11 +2301,17 @@ pub async fn noise_candidates(
                 "all" => is_quarantined || is_superseded || is_low_imp,
                 _ => is_superseded && !is_quarantined,
             };
-            if !matches { continue; }
+            if !matches {
+                continue;
+            }
 
             total_matching += 1;
-            if total_matching <= offset as u64 { continue; }
-            if candidates.len() >= limit { continue; }
+            if total_matching <= offset as u64 {
+                continue;
+            }
+            if candidates.len() >= limit {
+                continue;
+            }
 
             candidates.push(serde_json::json!({
                 "id": tetra.id,
@@ -1470,13 +2334,29 @@ pub async fn noise_candidates(
             "filter": filter,
             "exclude_protected": exclude_protected,
         })
-    }).await;
+    })
+    .await;
 
     match result {
-        Ok(data) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "noise_candidates", data))),
+        Ok(data) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "noise_candidates",
+                data,
+            )),
+        ),
         Err(e) => {
             tracing::error!("[P1-5] noise_candidates error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "noise_candidates", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "noise_candidates",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }
@@ -1501,7 +2381,9 @@ pub struct ContradictionListRequest {
     #[serde(default)]
     pub min_strength: f64,
 }
-fn default_contradiction_limit() -> usize { 100 }
+fn default_contradiction_limit() -> usize {
+    100
+}
 
 /// POST /v1/memories/contradictions
 /// 列出所有 "contradicts" 关系。每条关系返回 source/target 记忆元信息。
@@ -1519,9 +2401,13 @@ pub async fn list_contradictions(
         let kg = engine_inner.gateway().knowledge.clone();
         let all_rels = kg.all_relations();
         let mut pairs: Vec<serde_json::Value> = Vec::new();
-        let mut seen_pairs: std::collections::HashSet<(u64, u64)> = std::collections::HashSet::new();
+        let mut seen_pairs: std::collections::HashSet<(u64, u64)> =
+            std::collections::HashSet::new();
         for rel in all_rels.iter() {
-            if !matches!(rel.relation_type, epicode::engine::knowledge::RelationType::Contradicts) {
+            if !matches!(
+                rel.relation_type,
+                epicode::engine::knowledge::RelationType::Contradicts
+            ) {
                 continue;
             }
             let (a, b) = (rel.source.min(rel.target), rel.source.max(rel.target));
@@ -1537,12 +2423,20 @@ pub async fn list_contradictions(
             };
             let la = &ta.data.labels;
             let lb = &tb.data.labels;
-            let is_resolved = la.iter().any(|l| l == "resolved") || lb.iter().any(|l| l == "resolved");
-            let is_archived = la.iter().any(|l| l == "archived") || lb.iter().any(|l| l == "archived");
-            if is_resolved && !include_resolved { continue; }
-            if is_archived && !include_archived { continue; }
+            let is_resolved =
+                la.iter().any(|l| l == "resolved") || lb.iter().any(|l| l == "resolved");
+            let is_archived =
+                la.iter().any(|l| l == "archived") || lb.iter().any(|l| l == "archived");
+            if is_resolved && !include_resolved {
+                continue;
+            }
+            if is_archived && !include_archived {
+                continue;
+            }
             // B4: filter weak contradictions below min_strength threshold
-            if rel.strength < min_strength { continue; }
+            if rel.strength < min_strength {
+                continue;
+            }
             pairs.push(serde_json::json!({
                 "source": {
                     "id": ta.id,
@@ -1570,12 +2464,28 @@ pub async fn list_contradictions(
             "contradictions": pairs,
             "count": pairs.len(),
         })
-    }).await;
+    })
+    .await;
     match result {
-        Ok(data) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "contradiction_list", data))),
+        Ok(data) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "contradiction_list",
+                data,
+            )),
+        ),
         Err(e) => {
             tracing::error!("[P4-2] list_contradictions error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "contradiction_list", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "contradiction_list",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }
@@ -1598,7 +2508,8 @@ pub async fn resolve_contradiction(
         let r1 = engine_inner.scheduler.api_add_labels(sid, &["resolved"]);
         let r2 = engine_inner.scheduler.api_add_labels(tid, &["resolved"]);
         (r1, r2)
-    }).await;
+    })
+    .await;
     match result {
         Ok((r1, r2)) => {
             let (applied1, err1) = match r1 {
@@ -1609,23 +2520,52 @@ pub async fn resolve_contradiction(
                 Ok((changed, _, _)) => (changed, None),
                 Err(e) => (false, Some(e)),
             };
-            tracing::info!("[P4-2] resolve_contradiction #{}+#{}: applied1={} applied2={}", sid, tid, applied1, applied2);
+            tracing::info!(
+                "[P4-2] resolve_contradiction #{}+#{}: applied1={} applied2={}",
+                sid,
+                tid,
+                applied1,
+                applied2
+            );
             if err1.is_some() && err2.is_some() {
                 let msg = format!("both failed: {} | {}", err1.unwrap(), err2.unwrap());
-                return (StatusCode::NOT_FOUND, Json(epicode::engine::smrp::envelope_err(&engine, "contradiction_resolve", 404, &msg)));
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(epicode::engine::smrp::envelope_err(
+                        &engine,
+                        "contradiction_resolve",
+                        404,
+                        &msg,
+                    )),
+                );
             }
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "contradiction_resolve", serde_json::json!({
-                "source_id": sid, "target_id": tid,
-                "labels_applied": ["resolved"],
-                "source_changed": applied1,
-                "target_changed": applied2,
-                "source_error": err1,
-                "target_error": err2,
-            }))))
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "contradiction_resolve",
+                    serde_json::json!({
+                        "source_id": sid, "target_id": tid,
+                        "labels_applied": ["resolved"],
+                        "source_changed": applied1,
+                        "target_changed": applied2,
+                        "source_error": err1,
+                        "target_error": err2,
+                    }),
+                )),
+            )
         }
         Err(e) => {
             tracing::error!("[P4-2] resolve_contradiction spawn error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "contradiction_resolve", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "contradiction_resolve",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }
@@ -1642,7 +2582,8 @@ pub async fn archive_contradiction(
         let r1 = engine_inner.scheduler.api_add_labels(sid, &["archived"]);
         let r2 = engine_inner.scheduler.api_add_labels(tid, &["archived"]);
         (r1, r2)
-    }).await;
+    })
+    .await;
     match result {
         Ok((r1, r2)) => {
             let (applied1, err1) = match r1 {
@@ -1653,23 +2594,52 @@ pub async fn archive_contradiction(
                 Ok((changed, _, _)) => (changed, None),
                 Err(e) => (false, Some(e)),
             };
-            tracing::info!("[P4-2] archive_contradiction #{}+#{}: applied1={} applied2={}", sid, tid, applied1, applied2);
+            tracing::info!(
+                "[P4-2] archive_contradiction #{}+#{}: applied1={} applied2={}",
+                sid,
+                tid,
+                applied1,
+                applied2
+            );
             if err1.is_some() && err2.is_some() {
                 let msg = format!("both failed: {} | {}", err1.unwrap(), err2.unwrap());
-                return (StatusCode::NOT_FOUND, Json(epicode::engine::smrp::envelope_err(&engine, "contradiction_archive", 404, &msg)));
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(epicode::engine::smrp::envelope_err(
+                        &engine,
+                        "contradiction_archive",
+                        404,
+                        &msg,
+                    )),
+                );
             }
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "contradiction_archive", serde_json::json!({
-                "source_id": sid, "target_id": tid,
-                "labels_applied": ["archived"],
-                "source_changed": applied1,
-                "target_changed": applied2,
-                "source_error": err1,
-                "target_error": err2,
-            }))))
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "contradiction_archive",
+                    serde_json::json!({
+                        "source_id": sid, "target_id": tid,
+                        "labels_applied": ["archived"],
+                        "source_changed": applied1,
+                        "target_changed": applied2,
+                        "source_error": err1,
+                        "target_error": err2,
+                    }),
+                )),
+            )
         }
         Err(e) => {
             tracing::error!("[P4-2] archive_contradiction spawn error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "contradiction_archive", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "contradiction_archive",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }
@@ -1690,36 +2660,62 @@ pub async fn list_projects(
     let result = tokio::task::spawn_blocking(move || {
         let space = engine_inner.space();
         let all = space.all_tetrahedrons();
-        let mut project_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        let mut memory_counts: std::collections::HashMap<String, Vec<u64>> = std::collections::HashMap::new();
+        let mut project_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        let mut memory_counts: std::collections::HashMap<String, Vec<u64>> =
+            std::collections::HashMap::new();
         for tetra in all.iter() {
             for label in tetra.data.labels.iter() {
                 if let Some(proj) = label.strip_prefix("project:") {
-                    if proj.is_empty() { continue; }
+                    if proj.is_empty() {
+                        continue;
+                    }
                     *project_counts.entry(proj.to_string()).or_insert(0) += 1;
-                    memory_counts.entry(proj.to_string()).or_insert_with(Vec::new).push(tetra.id);
+                    memory_counts
+                        .entry(proj.to_string())
+                        .or_insert_with(Vec::new)
+                        .push(tetra.id);
                 }
             }
         }
         let mut projects: Vec<(String, usize)> = project_counts.into_iter().collect();
         projects.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-        let projects_json: Vec<serde_json::Value> = projects.iter().map(|(name, count)| {
-            serde_json::json!({
-                "name": name,
-                "label": format!("project:{}", name),
-                "memory_count": count,
+        let projects_json: Vec<serde_json::Value> = projects
+            .iter()
+            .map(|(name, count)| {
+                serde_json::json!({
+                    "name": name,
+                    "label": format!("project:{}", name),
+                    "memory_count": count,
+                })
             })
-        }).collect();
+            .collect();
         serde_json::json!({
             "projects": projects_json,
             "count": projects_json.len(),
         })
-    }).await;
+    })
+    .await;
     match result {
-        Ok(data) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "project_list", data))),
+        Ok(data) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "project_list",
+                data,
+            )),
+        ),
         Err(e) => {
             tracing::error!("[P4-3] list_projects error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "project_list", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "project_list",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }
@@ -1740,7 +2736,11 @@ pub async fn switch_project(
     let normalized: Option<String> = match req.project {
         Some(p) => {
             let trimmed = p.trim().to_string();
-            if trimmed.is_empty() { None } else { Some(trimmed) }
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
         }
         None => None,
     };
@@ -1749,15 +2749,25 @@ pub async fn switch_project(
         *guard = normalized.clone();
     }
     let persist_val = normalized.clone().unwrap_or_default();
-    if let Err(e) = engine.storage.save_drive_kv("current_project", &persist_val) {
+    if let Err(e) = engine
+        .storage
+        .save_drive_kv("current_project", &persist_val)
+    {
         tracing::warn!("[P4-3] persist current_project failed: {}", e);
     }
     tracing::info!("[P4-3] switch_project → {:?}", normalized);
-    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "project_switch", serde_json::json!({
-        "current_project": normalized,
-        "filter_label": normalized.as_ref().map(|p| format!("project:{}", p)),
-        "filtering_active": normalized.is_some(),
-    }))))
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "project_switch",
+            serde_json::json!({
+                "current_project": normalized,
+                "filter_label": normalized.as_ref().map(|p| format!("project:{}", p)),
+                "filtering_active": normalized.is_some(),
+            }),
+        )),
+    )
 }
 
 /// GET /v1/projects/current
@@ -1766,11 +2776,18 @@ pub async fn current_project(
     AuthedEngine(engine): AuthedEngine,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let cur = engine.current_project.read().clone();
-    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "project_current", serde_json::json!({
-        "current_project": cur,
-        "filter_label": cur.as_ref().map(|p| format!("project:{}", p)),
-        "filtering_active": cur.is_some(),
-    }))))
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "project_current",
+            serde_json::json!({
+                "current_project": cur,
+                "filter_label": cur.as_ref().map(|p| format!("project:{}", p)),
+                "filtering_active": cur.is_some(),
+            }),
+        )),
+    )
 }
 
 // ============================================================
@@ -1791,7 +2808,9 @@ pub struct RuleLearnRequest {
     #[serde(default = "default_rule_strength")]
     pub strength: f64,
 }
-fn default_rule_strength() -> f64 { 0.8 }
+fn default_rule_strength() -> f64 {
+    0.8
+}
 
 /// POST /v1/rules/learn
 /// 创建一条 enforced rule。
@@ -1805,11 +2824,27 @@ pub async fn learn_rule(
     Json(req): Json<RuleLearnRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if let Err(e) = validate_content(&req.content) {
-        return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "rule_learn", 400, &e)));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "rule_learn",
+                400,
+                &e,
+            )),
+        );
     }
     let clean_content = strip_html(&req.content);
     if let Err(e) = st.user_mgr.check_and_increment_memory(&engine.user_id) {
-        return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err(&engine, "rule_learn", 403, &e)));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "rule_learn",
+                403,
+                &e,
+            )),
+        );
     }
     // 组装标签：enforced_rule + 用户标签 + project:<name>
     let mut labels: Vec<String> = vec!["enforced_rule".to_string()];
@@ -1836,7 +2871,8 @@ pub async fn learn_rule(
     let content_for_task = clean_content.clone();
     let result = tokio::task::spawn_blocking(move || {
         scheduler.api_create_memory_full(&content_for_task, labels_for_task)
-    }).await;
+    })
+    .await;
     match result {
         Ok(Ok(report)) => {
             if !report.is_new {
@@ -1848,7 +2884,10 @@ pub async fn learn_rule(
             // 写一条审计记忆（异步、失败不影响主流程）
             let audit_content = format!(
                 "[rule_learn] created rule #{} ({} chars) labels={:?} strength={}",
-                rule_id, clean_content.len(), labels, req.strength
+                rule_id,
+                clean_content.len(),
+                labels,
+                req.strength
             );
             let audit_engine = engine.clone();
             tokio::task::spawn_blocking(move || {
@@ -1857,7 +2896,11 @@ pub async fn learn_rule(
                     vec!["rule_audit".to_string(), "enforced_rule_audit".to_string()],
                 );
             });
-            tracing::info!("[P4-4] learn_rule: created #{} ({})", rule_id, clean_content.chars().take(60).collect::<String>());
+            tracing::info!(
+                "[P4-4] learn_rule: created #{} ({})",
+                rule_id,
+                clean_content.chars().take(60).collect::<String>()
+            );
             let data = serde_json::json!({
                 "id": rule_id,
                 "content": clean_content.chars().take(300).collect::<String>(),
@@ -1866,17 +2909,40 @@ pub async fn learn_rule(
                 "strength": req.strength,
                 "is_new": report.is_new,
             });
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine_for_cb, "rule_learn", data)))
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine_for_cb,
+                    "rule_learn",
+                    data,
+                )),
+            )
         }
         Ok(Err(e)) => {
             tracing::error!("[P4-4] learn_rule error: {}", e);
             let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine_for_cb, "rule_learn", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine_for_cb,
+                    "rule_learn",
+                    500,
+                    "internal error",
+                )),
+            )
         }
         Err(e) => {
             tracing::error!("[P4-4] learn_rule spawn error: {}", e);
             let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine_for_cb, "rule_learn", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine_for_cb,
+                    "rule_learn",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }
@@ -1888,7 +2954,9 @@ pub async fn list_rules(
 ) -> (StatusCode, Json<serde_json::Value>) {
     let engine_inner = engine.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let all = engine_inner.scheduler.api_list_by_labels(&["enforced_rule"], 1000);
+        let all = engine_inner
+            .scheduler
+            .api_list_by_labels(&["enforced_rule"], 1000);
         let mut rules: Vec<serde_json::Value> = Vec::new();
         for (id, payload) in all {
             let revoked = payload.labels.iter().any(|l| l == "revoked");
@@ -1907,12 +2975,28 @@ pub async fn list_rules(
             "rules": rules,
             "count": rules.len(),
         })
-    }).await;
+    })
+    .await;
     match result {
-        Ok(data) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "rule_list", data))),
+        Ok(data) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "rule_list",
+                data,
+            )),
+        ),
         Err(e) => {
             tracing::error!("[P4-4] list_rules error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "rule_list", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "rule_list",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }
@@ -1937,26 +3021,54 @@ pub async fn revoke_rule(
             vec!["rule_audit".to_string(), "enforced_rule_audit".to_string()],
         );
         Ok::<_, String>(relabel)
-    }).await;
+    })
+    .await;
     match result {
         Ok(Ok((changed, old_labels, new_labels))) => {
-            tracing::info!("[P4-4] revoke_rule #{}: changed={} enforced=false", id, changed);
-            (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "rule_revoke", serde_json::json!({
-                "id": id,
-                "revoked": true,
-                "labels_changed": changed,
-                "old_labels": old_labels,
-                "new_labels": new_labels,
-                "enforced": false,
-            }))))
+            tracing::info!(
+                "[P4-4] revoke_rule #{}: changed={} enforced=false",
+                id,
+                changed
+            );
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "rule_revoke",
+                    serde_json::json!({
+                        "id": id,
+                        "revoked": true,
+                        "labels_changed": changed,
+                        "old_labels": old_labels,
+                        "new_labels": new_labels,
+                        "enforced": false,
+                    }),
+                )),
+            )
         }
         Ok(Err(e)) => {
             tracing::error!("[P4-4] revoke_rule #{} error: {}", id, e);
-            (StatusCode::NOT_FOUND, Json(epicode::engine::smrp::envelope_err(&engine, "rule_revoke", 404, &e)))
+            (
+                StatusCode::NOT_FOUND,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "rule_revoke",
+                    404,
+                    &e,
+                )),
+            )
         }
         Err(e) => {
             tracing::error!("[P4-4] revoke_rule #{} spawn error: {}", id, e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "rule_revoke", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "rule_revoke",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }
@@ -1968,30 +3080,50 @@ pub async fn audit_rules(
 ) -> (StatusCode, Json<serde_json::Value>) {
     let engine_inner = engine.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let mut entries = engine_inner.scheduler.api_list_by_labels(&["rule_audit"], 500);
+        let mut entries = engine_inner
+            .scheduler
+            .api_list_by_labels(&["rule_audit"], 500);
         entries.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
-        let log: Vec<serde_json::Value> = entries.iter().map(|(id, p)| {
-            serde_json::json!({
-                "id": id,
-                "content": p.content.chars().take(500).collect::<String>(),
-                "labels": p.labels,
-                "timestamp": p.timestamp,
+        let log: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|(id, p)| {
+                serde_json::json!({
+                    "id": id,
+                    "content": p.content.chars().take(500).collect::<String>(),
+                    "labels": p.labels,
+                    "timestamp": p.timestamp,
+                })
             })
-        }).collect();
+            .collect();
         serde_json::json!({
             "audit_log": log,
             "count": log.len(),
         })
-    }).await;
+    })
+    .await;
     match result {
-        Ok(data) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "rule_audit", data))),
+        Ok(data) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "rule_audit",
+                data,
+            )),
+        ),
         Err(e) => {
             tracing::error!("[P4-4] audit_rules error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "rule_audit", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "rule_audit",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }
-
 
 /// POST /v1/drive/ack — Acknowledge a drive signal with feedback.
 ///
@@ -2021,28 +3153,42 @@ pub async fn drive_ack(
     if binding.is_none() {
         // 区分: 绑定存在但心跳过期 → heartbeat 即复活 (无需重新 register)
         let has_expired = st.primary_executors.read().get(&user.user_id).is_some();
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({
-            "success": false,
-            "error": if has_expired {
-                "primary_executor expired (heartbeat >120s): run POST /v1/runtime/heartbeat to revive, no re-register needed"
-            } else {
-                "not primary_executor: register first via POST /v1/runtime/register"
-            },
-            "revive_hint": has_expired,
-        })));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "success": false,
+                "error": if has_expired {
+                    "primary_executor expired (heartbeat >120s): run POST /v1/runtime/heartbeat to revive, no re-register needed"
+                } else {
+                    "not primary_executor: register first via POST /v1/runtime/register"
+                },
+                "revive_hint": has_expired,
+            })),
+        );
     }
     // D §14.5: e2e=false blocks high/critical urgency auto-execute
-    let signal_info = engine.scheduler().drive_queue().peek_unacked(100)
-        .into_iter().find(|s| s.id == req.drive_id);
+    let signal_info = engine
+        .scheduler()
+        .drive_queue()
+        .peek_unacked(100)
+        .into_iter()
+        .find(|s| s.id == req.drive_id);
     if let Some(ref sig) = signal_info {
-        let is_high = matches!(sig.urgency, epicode::engine::drive::DriveUrgency::High | epicode::engine::drive::DriveUrgency::Critical);
+        let is_high = matches!(
+            sig.urgency,
+            epicode::engine::drive::DriveUrgency::High
+                | epicode::engine::drive::DriveUrgency::Critical
+        );
         let e2e = binding.as_ref().map(|b| b.e2e_enabled).unwrap_or(false);
         if is_high && !e2e {
-            return (StatusCode::FORBIDDEN, Json(serde_json::json!({
-                "success": false,
-                "error": "e2e=false: high/critical signal requires e2e registration",
-                "urgency": format!("{:?}", sig.urgency),
-            })));
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": "e2e=false: high/critical signal requires e2e registration",
+                    "urgency": format!("{:?}", sig.urgency),
+                })),
+            );
         }
     }
     let feedback = epicode::engine::drive::DriveFeedback {
@@ -2052,16 +3198,25 @@ pub async fn drive_ack(
         reflection: req.reflection.clone(),
     };
     // δ2: 预读 signal (retry_count + evidence), 用于空铃降权判断
-    let pre_signal = engine.scheduler().drive_queue().peek_unacked(200)
-        .into_iter().find(|s| s.id == req.drive_id);
-    let (success, first_ack) = engine.scheduler().drive_queue().acknowledge(req.drive_id, feedback);
+    let pre_signal = engine
+        .scheduler()
+        .drive_queue()
+        .peek_unacked(200)
+        .into_iter()
+        .find(|s| s.id == req.drive_id);
+    let (success, first_ack) = engine
+        .scheduler()
+        .drive_queue()
+        .acknowledge(req.drive_id, feedback);
     // 持久化修复: ack 成功立即落盘, 不等周期 auto_save(重启会回滚未保存的 ack)
     if success {
         engine.scheduler().save_drive_queue();
     }
     // δ2: 执行失败且将 dead-letter (retry 耗尽) → evidence 降权, 打断空铃循环
     if let Some(ref sig) = pre_signal {
-        if success && first_ack && !req.executed
+        if success
+            && first_ack
+            && !req.executed
             && sig.retry_count + 1 > epicode::engine::drive::DriveQueue::max_retries()
             && !sig.evidence.is_empty()
         {
@@ -2071,23 +3226,73 @@ pub async fn drive_ack(
 
     // Record in decision_history so the personality learns from this outcome
     let outcome_str = if req.executed {
-        format!("drive #{} executed: {}", req.drive_id, req.outcome.chars().take(80).collect::<String>())
+        format!(
+            "drive #{} executed: {}",
+            req.drive_id,
+            req.outcome.chars().take(80).collect::<String>()
+        )
     } else {
-        format!("drive #{} rejected: {}", req.drive_id, req.outcome.chars().take(80).collect::<String>())
+        format!(
+            "drive #{} rejected: {}",
+            req.drive_id,
+            req.outcome.chars().take(80).collect::<String>()
+        )
     };
     // The feedback becomes part of learn_history — personality evolves from outcomes
-    tracing::info!("[L0] Drive feedback: drive #{} executed={} outcome={}", req.drive_id, req.executed, req.outcome.chars().take(60).collect::<String>());
+    tracing::info!(
+        "[L0] Drive feedback: drive #{} executed={} outcome={}",
+        req.drive_id,
+        req.executed,
+        req.outcome.chars().take(60).collect::<String>()
+    );
 
     // B3: ack audit log — record drive acknowledgments for governance traceability
-    let audit_content = format!("drive_ack: #{} executed={} outcome={}", req.drive_id, req.executed, req.outcome.chars().take(100).collect::<String>());
-    let _ = engine.scheduler.api_remember_with_labels(&audit_content, vec!["op_audit".to_string(), "drive".to_string(), "l0-exempt".to_string()]);
+    let audit_content = format!(
+        "drive_ack: #{} executed={} outcome={}",
+        req.drive_id,
+        req.executed,
+        req.outcome.chars().take(100).collect::<String>()
+    );
+    let _ = engine.scheduler.api_remember_with_labels(
+        &audit_content,
+        vec![
+            "op_audit".to_string(),
+            "drive".to_string(),
+            "l0-exempt".to_string(),
+        ],
+    );
 
     // δ1: REST ack 也走 DriveEngine reward (与 MCP 对齐, 环4数据面)
     if success && first_ack {
         let o = req.outcome.to_lowercase();
-        let positive = ["success","done","completed","effective","helpful","good","actioned","resolved","处理","完成","有效","采纳"].iter().any(|k| o.contains(k));
-        let negative = ["ignored","rejected","failed","error","useless","拒绝","忽略","无效"].iter().any(|k| o.contains(k));
-        let reward = if positive { 5.0 } else if negative { -3.0 } else { 1.0 }; // δ1fix: 幅度x100 让 weights/history 可见变化
+        let positive = [
+            "success",
+            "done",
+            "completed",
+            "effective",
+            "helpful",
+            "good",
+            "actioned",
+            "resolved",
+            "处理",
+            "完成",
+            "有效",
+            "采纳",
+        ]
+        .iter()
+        .any(|k| o.contains(k));
+        let negative = [
+            "ignored", "rejected", "failed", "error", "useless", "拒绝", "忽略", "无效",
+        ]
+        .iter()
+        .any(|k| o.contains(k));
+        let reward = if positive {
+            5.0
+        } else if negative {
+            -3.0
+        } else {
+            1.0
+        }; // δ1fix: 幅度x100 让 weights/history 可见变化
         let mut de = engine.scheduler.drive_engine_lock();
         de.reward(epicode::engine::drive::Drive::Vitality, reward);
         de.reward(epicode::engine::drive::Drive::Coherence, reward * 0.7);
@@ -2101,10 +3306,15 @@ pub async fn drive_ack(
         "first_ack": first_ack,
         "learned": outcome_str,
     });
-    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "drive_ack", result)))
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "drive_ack",
+            result,
+        )),
+    )
 }
-
-
 
 // ═══ Phase 4-5: Drive Status Semantics (drive_inbox retryable) ═══
 //
@@ -2137,7 +3347,8 @@ pub async fn kg_quality(
         let total_edges = all_relations.len() as u64;
 
         // Nodes that participate in at least one relation.
-        let connected_ids: std::collections::HashSet<u64> = all_relations.iter()
+        let connected_ids: std::collections::HashSet<u64> = all_relations
+            .iter()
             .flat_map(|r| [r.source, r.target].into_iter())
             .collect();
         let orphan_count = total_nodes.saturating_sub(connected_ids.len() as u64);
@@ -2147,23 +3358,48 @@ pub async fn kg_quality(
 
         // Duplicate / degenerate edges: self-loops (source==target) plus any
         // extra occurrences of an unordered pair beyond the first.
-        let mut edge_pairs: std::collections::HashMap<(u64, u64), u64> = std::collections::HashMap::new();
+        let mut edge_pairs: std::collections::HashMap<(u64, u64), u64> =
+            std::collections::HashMap::new();
         let mut self_loops = 0u64;
         for r in &all_relations {
             if r.source == r.target {
                 self_loops += 1;
                 continue;
             }
-            let key = if r.source < r.target { (r.source, r.target) } else { (r.target, r.source) };
+            let key = if r.source < r.target {
+                (r.source, r.target)
+            } else {
+                (r.target, r.source)
+            };
             *edge_pairs.entry(key).or_insert(0) += 1;
         }
-        let dup_extra: u64 = edge_pairs.values().filter(|&&c| c > 1).map(|&c| c - 1).sum();
+        let dup_extra: u64 = edge_pairs
+            .values()
+            .filter(|&&c| c > 1)
+            .map(|&c| c - 1)
+            .sum();
         let duplicate_edge_count = self_loops + dup_extra;
 
-        let avg_degree = if total_nodes > 0 { total_edges as f64 / total_nodes as f64 } else { 0.0 };
-        let max_possible = if total_nodes > 1 { total_nodes * (total_nodes - 1) / 2 } else { 0 };
-        let density = if max_possible > 0 { total_edges as f64 / max_possible as f64 } else { 0.0 };
-        let orphan_rate = if total_nodes > 0 { orphan_count as f64 / total_nodes as f64 } else { 0.0 };
+        let avg_degree = if total_nodes > 0 {
+            total_edges as f64 / total_nodes as f64
+        } else {
+            0.0
+        };
+        let max_possible = if total_nodes > 1 {
+            total_nodes * (total_nodes - 1) / 2
+        } else {
+            0
+        };
+        let density = if max_possible > 0 {
+            total_edges as f64 / max_possible as f64
+        } else {
+            0.0
+        };
+        let orphan_rate = if total_nodes > 0 {
+            orphan_count as f64 / total_nodes as f64
+        } else {
+            0.0
+        };
 
         serde_json::json!({
             "total_nodes": total_nodes,
@@ -2175,13 +3411,29 @@ pub async fn kg_quality(
             "duplicate_edge_count": duplicate_edge_count,
             "density": (density * 10000.0).round() / 10000.0,
         })
-    }).await;
+    })
+    .await;
 
     match result {
-        Ok(metrics) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "kg_quality", metrics))),
+        Ok(metrics) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "kg_quality",
+                metrics,
+            )),
+        ),
         Err(e) => {
             tracing::error!("[P4-6] kg_quality error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "kg_quality", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "kg_quality",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }
@@ -2192,9 +3444,9 @@ pub async fn kg_quality(
 // confirm consumes the token and executes. Every executed op is recorded as
 // a memory labelled "op_audit" so GET /v1/operations/audit-log can list it.
 
-use std::sync::OnceLock;
 use parking_lot::Mutex;
 use serde::Serialize;
+use std::sync::OnceLock;
 
 /// TTL for a pending operation token, in seconds.
 const OP_TOKEN_TTL_SECS: i64 = 300;
@@ -2241,10 +3493,15 @@ pub async fn operations_dry_run(
     // Validate operation name up-front.
     let op = req.operation.trim().to_lowercase();
     if !matches!(op.as_str(), "delete" | "quarantine" | "merge" | "restore") {
-        return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(
-            &engine, "dry_run", 400,
-            "operation must be one of: delete | quarantine | merge | restore",
-        )));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "dry_run",
+                400,
+                "operation must be one of: delete | quarantine | merge | restore",
+            )),
+        );
     }
 
     let engine_inner = engine.clone();
@@ -2254,76 +3511,112 @@ pub async fn operations_dry_run(
     let ids_for_store = req.target_ids.clone();
     let ids_for_resp = req.target_ids.clone();
 
-    let result = tokio::task::spawn_blocking(move || -> Result<(u64, Vec<String>, u64, u64, &'static str), String> {
-        let space = engine_inner.space();
-        let mut titles: Vec<String> = Vec::new();
-        let mut found = 0u64;
-        let mut high_risk = 0u64;
-        let mut protected = 0u64;
+    let result = tokio::task::spawn_blocking(
+        move || -> Result<(u64, Vec<String>, u64, u64, &'static str), String> {
+            let space = engine_inner.space();
+            let mut titles: Vec<String> = Vec::new();
+            let mut found = 0u64;
+            let mut high_risk = 0u64;
+            let mut protected = 0u64;
 
-        for &id in &ids_for_task {
-            if let Some(tetra) = space.get_tetrahedron(id) {
-                found += 1;
-                titles.push(tetra.data.content.chars().take(80).collect());
-                if tetra.data.importance > 0.7 {
-                    high_risk += 1;
-                }
-                if tetra.data.labels.iter().any(|l| l == "enforced" || l == "identity") {
-                    protected += 1;
+            for &id in &ids_for_task {
+                if let Some(tetra) = space.get_tetrahedron(id) {
+                    found += 1;
+                    titles.push(tetra.data.content.chars().take(80).collect());
+                    if tetra.data.importance > 0.7 {
+                        high_risk += 1;
+                    }
+                    if tetra
+                        .data
+                        .labels
+                        .iter()
+                        .any(|l| l == "enforced" || l == "identity")
+                    {
+                        protected += 1;
+                    }
                 }
             }
-        }
 
-        let risk = if protected > 0 { "critical" }
-            else if high_risk > 0 { "high" }
-            else if requested_count > 10 { "medium" }
-            else { "low" };
-        Ok((found, titles, high_risk, protected, risk))
-    }).await;
+            let risk = if protected > 0 {
+                "critical"
+            } else if high_risk > 0 {
+                "high"
+            } else if requested_count > 10 {
+                "medium"
+            } else {
+                "low"
+            };
+            Ok((found, titles, high_risk, protected, risk))
+        },
+    )
+    .await;
 
     let (found, titles, high_risk, protected, risk) = match result {
         Ok(Ok(tup)) => tup,
         Ok(Err(e)) => {
             tracing::error!("[P4-7] dry_run inner error: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "dry_run", 500, "internal error")));
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "dry_run",
+                    500,
+                    "internal error",
+                )),
+            );
         }
         Err(e) => {
             tracing::error!("[P4-7] dry_run task error: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "dry_run", 500, "internal error")));
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "dry_run",
+                    500,
+                    "internal error",
+                )),
+            );
         }
     };
 
     // Generate confirmation token.
     let now = chrono::Utc::now().timestamp();
     gc_pending_ops(now);
-    let token = format!("tok_{}_{}_{}",
-        now,
-        &op,
-        requested_count);
+    let token = format!("tok_{}_{}_{}", now, &op, requested_count);
 
-    pending_ops().lock().insert(token.clone(), PendingOp {
-        operation: op.clone(),
-        target_ids: ids_for_store,
-        target_titles: titles.clone(),
-        risk_level: risk.to_string(),
-        created_at: now,
-    });
+    pending_ops().lock().insert(
+        token.clone(),
+        PendingOp {
+            operation: op.clone(),
+            target_ids: ids_for_store,
+            target_titles: titles.clone(),
+            risk_level: risk.to_string(),
+            created_at: now,
+        },
+    );
 
     let not_found = (requested_count as u64).saturating_sub(found);
 
-    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "dry_run", serde_json::json!({
-        "token": token,
-        "operation": op,
-        "target_count": requested_count,
-        "found_count": found,
-        "not_found_count": not_found,
-        "risk_level": risk,
-        "high_importance_count": high_risk,
-        "protected_count": protected,
-        "preview_titles": titles.iter().take(5).collect::<Vec<_>>(),
-        "target_ids": ids_for_resp,
-        "expires_in_sec": OP_TOKEN_TTL_SECS,
-    }))))
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "dry_run",
+            serde_json::json!({
+                "token": token,
+                "operation": op,
+                "target_count": requested_count,
+                "found_count": found,
+                "not_found_count": not_found,
+                "risk_level": risk,
+                "high_importance_count": high_risk,
+                "protected_count": protected,
+                "preview_titles": titles.iter().take(5).collect::<Vec<_>>(),
+                "target_ids": ids_for_resp,
+                "expires_in_sec": OP_TOKEN_TTL_SECS,
+            }),
+        )),
+    )
 }
 
 #[derive(Deserialize)]
@@ -2350,22 +3643,41 @@ pub async fn operations_confirm(
 
     let pending = match pending {
         Some(p) => p,
-        None => return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(
-            &engine, "confirm", 400, "invalid or unknown token",
-        ))),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "confirm",
+                    400,
+                    "invalid or unknown token",
+                )),
+            )
+        }
     };
 
     if now - pending.created_at > OP_TOKEN_TTL_SECS {
-        return (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(
-            &engine, "confirm", 400, "token expired; please re-run dry-run",
-        )));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "confirm",
+                400,
+                "token expired; please re-run dry-run",
+            )),
+        );
     }
 
     if pending.risk_level == "critical" {
-        return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err(
-            &engine, "confirm", 403,
-            "operation on protected (enforced/identity) memories is forbidden",
-        )));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "confirm",
+                403,
+                "operation on protected (enforced/identity) memories is forbidden",
+            )),
+        );
     }
 
     // Clone what we need for the response / audit before moving into the task.
@@ -2436,38 +3748,64 @@ pub async fn operations_confirm(
         Ok(v) => v,
         Err(e) => {
             tracing::error!("[P4-7] confirm task error: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "confirm", 500, "internal error")));
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "confirm",
+                    500,
+                    "internal error",
+                )),
+            );
         }
     };
 
     // Decrement user memory quota when memories were actually deleted.
     if op_name == "delete" {
         if let Some(deleted) = exec_result.get("affected_count").and_then(|v| v.as_u64()) {
-            st.user_mgr.decrement_memory_count(&engine.user_id, deleted as usize);
+            st.user_mgr
+                .decrement_memory_count(&engine.user_id, deleted as usize);
         }
     }
 
     // Write an audit-log entry as a memory labelled "op_audit".
     let audit_content = format!(
         "[op_audit] {} on {} target(s) (risk={}): {} affected",
-        op_name, target_count, risk_for_audit,
-        exec_result.get("affected_count").and_then(|v| v.as_u64()).unwrap_or(0),
+        op_name,
+        target_count,
+        risk_for_audit,
+        exec_result
+            .get("affected_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
     );
     let audit_engine = engine.clone();
     let _ = tokio::task::spawn_blocking(move || {
-        audit_engine.scheduler.api_create_memory_full(
-            &audit_content,
-            vec!["op_audit".to_string()],
-        )
-    }).await;
+        audit_engine
+            .scheduler
+            .api_create_memory_full(&audit_content, vec!["op_audit".to_string()])
+    })
+    .await;
 
     tracing::info!(
         "[P4-7] operation confirmed: {} targets={} risk={} affected={}",
-        op_name, target_count, risk_for_audit,
-        exec_result.get("affected_count").and_then(|v| v.as_u64()).unwrap_or(0)
+        op_name,
+        target_count,
+        risk_for_audit,
+        exec_result
+            .get("affected_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
     );
 
-    (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "confirm", exec_result)))
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "confirm",
+            exec_result,
+        )),
+    )
 }
 
 /// GET /v1/operations/audit-log
@@ -2478,27 +3816,48 @@ pub async fn operations_audit_log(
 ) -> (StatusCode, Json<serde_json::Value>) {
     let engine_inner = engine.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let mut entries = engine_inner.scheduler.api_list_by_labels(&["op_audit"], 500);
+        let mut entries = engine_inner
+            .scheduler
+            .api_list_by_labels(&["op_audit"], 500);
         entries.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
-        let log: Vec<serde_json::Value> = entries.iter().map(|(id, p)| {
-            serde_json::json!({
-                "id": id,
-                "content": p.content.chars().take(500).collect::<String>(),
-                "labels": p.labels,
-                "timestamp": p.timestamp,
+        let log: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|(id, p)| {
+                serde_json::json!({
+                    "id": id,
+                    "content": p.content.chars().take(500).collect::<String>(),
+                    "labels": p.labels,
+                    "timestamp": p.timestamp,
+                })
             })
-        }).collect();
+            .collect();
         serde_json::json!({
             "entries": log,
             "count": log.len(),
         })
-    }).await;
+    })
+    .await;
 
     match result {
-        Ok(data) => (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "audit_log", data))),
+        Ok(data) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "audit_log",
+                data,
+            )),
+        ),
         Err(e) => {
             tracing::error!("[P4-7] audit_log error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "audit_log", 500, "internal error")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "audit_log",
+                    500,
+                    "internal error",
+                )),
+            )
         }
     }
 }

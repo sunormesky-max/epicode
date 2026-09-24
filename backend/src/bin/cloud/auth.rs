@@ -32,7 +32,8 @@ pub async fn auth_middleware(
     let client_id = if path == "/v1/login" || path == "/register" {
         format!("ip:{}", addr.ip())
     } else {
-        headers.get("X-API-Key")
+        headers
+            .get("X-API-Key")
             .or_else(|| headers.get("X-Admin-Key"))
             .and_then(|v| v.to_str().ok())
             .unwrap_or("anonymous")
@@ -43,14 +44,21 @@ pub async fn auth_middleware(
     {
         let mut limits = st.rate_limits.lock();
         let now = Instant::now();
-        let bucket = limits.entry(client_id.clone()).or_insert_with(|| RateBucket { count: 0, window_start: now });
+        let bucket = limits
+            .entry(client_id.clone())
+            .or_insert_with(|| RateBucket {
+                count: 0,
+                window_start: now,
+            });
         if now.duration_since(bucket.window_start).as_secs() > RATE_LIMIT_WINDOW_SECS {
             bucket.count = 0;
             bucket.window_start = now;
         }
         bucket.count += 1;
         // 从 user_mgr 获取用户套餐决定限流上限
-        let plan_limit = st.user_mgr.authenticate(&client_id)
+        let plan_limit = st
+            .user_mgr
+            .authenticate(&client_id)
             .map(|info| match info.plan {
                 UserPlan::Free => 60,
                 UserPlan::Pro => 300,
@@ -66,7 +74,16 @@ pub async fn auth_middleware(
     }
 
     // 累计 API 调用次数（非公开端点才计）+ 按日按用户统计
-    let is_public = path.starts_with("/health") || path == "/ready" || path == "/" || path == "/docs" || path == "/openapi.yaml" || path == "/v1/login" || path == "/v1/skills/explore" || path == "/stats/public" || path == "/v1/agent-guide" || path == "/v1/smrp";
+    let is_public = path.starts_with("/health")
+        || path == "/ready"
+        || path == "/"
+        || path == "/docs"
+        || path == "/openapi.yaml"
+        || path == "/v1/login"
+        || path == "/v1/skills/explore"
+        || path == "/stats/public"
+        || path == "/v1/agent-guide"
+        || path == "/v1/smrp";
     if !is_public {
         let mut counts = st.api_call_counts.lock();
         *counts.entry(client_id.clone()).or_insert(0) += 1;
@@ -79,7 +96,18 @@ pub async fn auth_middleware(
     }
 
     // Public/static endpoints + auth endpoints (already rate-limited above) bypass API-key auth.
-    if path.starts_with("/health") || path == "/v1/health" || path == "/ready" || path == "/" || path == "/docs" || path == "/openapi.yaml" || path == "/v1/login" || path == "/v1/skills/explore" || path == "/stats/public" || path == "/v1/agent-guide" || path == "/v1/smrp" {
+    if path.starts_with("/health")
+        || path == "/v1/health"
+        || path == "/ready"
+        || path == "/"
+        || path == "/docs"
+        || path == "/openapi.yaml"
+        || path == "/v1/login"
+        || path == "/v1/skills/explore"
+        || path == "/stats/public"
+        || path == "/v1/agent-guide"
+        || path == "/v1/smrp"
+    {
         return next.run(request).await;
     }
 
@@ -103,24 +131,31 @@ pub async fn auth_middleware(
         .and_then(|v| v.to_str().ok())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
-    let cookie_key = headers.get_all("cookie").iter()
+    let cookie_key = headers
+        .get_all("cookie")
+        .iter()
         .filter_map(|v| v.to_str().ok())
         .flat_map(|s| s.split(';'))
         .map(|s| s.trim())
         .find_map(|s| s.strip_prefix("epicode_session="))
         .map(|s| s.to_string());
-        // SSE旧路径退役: ?key=裸密钥出URL(审计安全债) — 现支持header→cookie→ticket(短票)三级
+    // SSE旧路径退役: ?key=裸密钥出URL(审计安全债) — 现支持header→cookie→ticket(短票)三级
     // 半截工程收口(2026-08-30 租户断连根因): 签发端已有, 消费端缺失 — EventSource无法带header,
     // 无cookie租户(无密码账号)此前只能回退已退役的?key= → 401死循环
     let ticket_key: Option<String> = request.uri().query().and_then(|q| {
-        q.split('&').find_map(|kv| kv.strip_prefix("ticket=")).and_then(|t| {
-            let mut m = st.stream_tickets.lock();
-            match m.get(t).cloned() {
-                Some((api_key, exp)) if exp > chrono::Utc::now().timestamp() => Some(api_key),
-                Some(_) => { m.remove(t); None }
-                None => None,
-            }
-        })
+        q.split('&')
+            .find_map(|kv| kv.strip_prefix("ticket="))
+            .and_then(|t| {
+                let mut m = st.stream_tickets.lock();
+                match m.get(t).cloned() {
+                    Some((api_key, exp)) if exp > chrono::Utc::now().timestamp() => Some(api_key),
+                    Some(_) => {
+                        m.remove(t);
+                        None
+                    }
+                    None => None,
+                }
+            })
     });
     let api_key_owned = header_key.or(cookie_key).or(ticket_key).unwrap_or_default();
     let api_key = api_key_owned.as_str();
@@ -128,10 +163,14 @@ pub async fn auth_middleware(
     let user_info = match st.user_mgr.authenticate(api_key) {
         Some(u) => u,
         None => {
-            tracing::warn!("auth failed: path={} key_len={}", path, api_key.len());  // 不打印 key 前缀（kimi2.7 #20）
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-                "success": false, "error": "invalid API key"
-            }))).into_response();
+            tracing::warn!("auth failed: path={} key_len={}", path, api_key.len()); // 不打印 key 前缀（kimi2.7 #20）
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "success": false, "error": "invalid API key"
+                })),
+            )
+                .into_response();
         }
     };
 

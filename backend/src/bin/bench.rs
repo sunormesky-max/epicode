@@ -2,9 +2,8 @@ use std::time::Instant;
 
 #[tokio::main]
 async fn main() {
-    let mut engine = epicode::engine::Engine::with_data_dir(
-        std::path::PathBuf::from("data/bench_tmp")
-    );
+    let mut engine =
+        epicode::engine::Engine::with_data_dir(std::path::PathBuf::from("data/bench_tmp"));
     engine.start();
 
     println!("=== Epicode v1.0.0 Performance Benchmark ===\n");
@@ -151,6 +150,8 @@ fn print_stats(name: &str, times: &[f64], count: usize) {
     let p99 = sorted[(sorted.len() as f64 * 0.99) as usize];
     let min = sorted[0];
     let max = sorted[sorted.len() - 1];
-    println!("{} (n={}) avg={:.1}ms p50={:.1}ms p95={:.1}ms p99={:.1}ms min={:.1}ms max={:.1}ms",
-        name, count, avg, p50, p95, p99, min, max);
+    println!(
+        "{} (n={}) avg={:.1}ms p50={:.1}ms p95={:.1}ms p99={:.1}ms min={:.1}ms max={:.1}ms",
+        name, count, avg, p50, p95, p99, min, max
+    );
 }

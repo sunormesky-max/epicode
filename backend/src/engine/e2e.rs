@@ -12,8 +12,8 @@ const RSA_OAEP_OVERHEAD: usize = 256; // 2048-bit modulus
 
 /// 用端侧公钥(PEM SPKI)加密 payload, 返回 base64 密文; 失败返回 None(调用方降级明文+警告)
 pub fn encrypt_for(payload: &[u8], pem_public: &str) -> Result<String, String> {
-    use rsa::{Oaep, RsaPublicKey, pkcs8::DecodePublicKey};
     use rsa::sha2::Sha256;
+    use rsa::{pkcs8::DecodePublicKey, Oaep, RsaPublicKey};
 
     let pub_key = RsaPublicKey::from_public_key_pem(pem_public)
         .map_err(|e| format!("bad e2e pubkey pem: {}", e))?;
@@ -26,13 +26,15 @@ pub fn encrypt_for(payload: &[u8], pem_public: &str) -> Result<String, String> {
     rand::thread_rng().fill_bytes(&mut nonce);
 
     // 2. AES-256-GCM 加密 payload (输出 ct||tag, 与 Node authTag 拼接语义一致)
-    use aes_gcm::{Aes256Gcm, KeyInit, aead::Aead};
+    use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
     let cipher = Aes256Gcm::new_from_slice(&aes_key).map_err(|e| format!("{}", e))?;
-    let ct = cipher.encrypt(&nonce.into(), payload)
+    let ct = cipher
+        .encrypt(&nonce.into(), payload)
         .map_err(|e| format!("aes encrypt: {}", e))?;
 
     // 3. RSA-OAEP-SHA256 包 AES key
-    let wrapped = pub_key.encrypt(&mut rand::thread_rng(), Oaep::new::<Sha256>(), &aes_key)
+    let wrapped = pub_key
+        .encrypt(&mut rand::thread_rng(), Oaep::new::<Sha256>(), &aes_key)
         .map_err(|e| format!("rsa wrap: {}", e))?;
 
     // 4. 拼装: wrapped || nonce || ct
@@ -45,8 +47,8 @@ pub fn encrypt_for(payload: &[u8], pem_public: &str) -> Result<String, String> {
 
 /// 端侧解密 (SDK/adapter 对称实现; 服务端提供此函数供测试自证)
 pub fn decrypt_with(payload_b64: &str, pem_private: &str) -> Result<Vec<u8>, String> {
-    use rsa::{Oaep, RsaPrivateKey, pkcs8::DecodePrivateKey};
     use rsa::sha2::Sha256;
+    use rsa::{pkcs8::DecodePrivateKey, Oaep, RsaPrivateKey};
 
     let raw = B64.decode(payload_b64).map_err(|e| format!("b64: {}", e))?;
     if raw.len() < RSA_OAEP_OVERHEAD + 12 + 16 {
@@ -57,24 +59,33 @@ pub fn decrypt_with(payload_b64: &str, pem_private: &str) -> Result<Vec<u8>, Str
 
     let priv_key = RsaPrivateKey::from_pkcs8_pem(pem_private)
         .map_err(|e| format!("bad e2e privkey: {}", e))?;
-    let aes_key = priv_key.decrypt(Oaep::new::<Sha256>(), wrapped)
+    let aes_key = priv_key
+        .decrypt(Oaep::new::<Sha256>(), wrapped)
         .map_err(|e| format!("rsa unwrap: {}", e))?;
 
-    use aes_gcm::{Aes256Gcm, KeyInit, aead::Aead};
+    use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
     let cipher = Aes256Gcm::new_from_slice(&aes_key).map_err(|e| format!("{}", e))?;
-    cipher.decrypt(nonce.into(), ct).map_err(|e| format!("aes decrypt: {}", e))
+    cipher
+        .decrypt(nonce.into(), ct)
+        .map_err(|e| format!("aes decrypt: {}", e))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rsa::{RsaPrivateKey, pkcs8::EncodePrivateKey, pkcs8::EncodePublicKey};
+    use rsa::{pkcs8::EncodePrivateKey, pkcs8::EncodePublicKey, RsaPrivateKey};
 
     #[test]
     fn roundtrip() {
         let priv_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
-        let priv_pem = priv_key.to_pkcs8_pem(rsa::pkcs8::LineEnding::LF).unwrap().to_string();
-        let pub_pem = priv_key.to_public_key().to_public_key_pem(rsa::pkcs8::LineEnding::LF).unwrap();
+        let priv_pem = priv_key
+            .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+            .unwrap()
+            .to_string();
+        let pub_pem = priv_key
+            .to_public_key()
+            .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+            .unwrap();
         let msg = "意志通道加密测试: identity 不可触碰";
         let ct = encrypt_for(msg.as_bytes(), &pub_pem).unwrap();
         let pt = decrypt_with(&ct, &priv_pem).unwrap();

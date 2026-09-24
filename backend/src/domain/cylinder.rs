@@ -29,25 +29,54 @@ impl CylinderLayer {
         let lower: Vec<String> = labels.iter().map(|l| l.to_lowercase()).collect();
         let lower_joined = lower.join(" ");
 
-        if lower.iter().any(|l| l == "identity" || l == "system") || lower_joined.contains("identity") {
+        if lower.iter().any(|l| l == "identity" || l == "system")
+            || lower_joined.contains("identity")
+        {
             return CylinderLayer::Identity;
         }
-        if lower.iter().any(|l| l == "cycle" || l == "loop" || l == "proactive" || l == "initiative")
-            || lower_joined.contains("主动") || lower_joined.contains("循环") {
+        if lower
+            .iter()
+            .any(|l| l == "cycle" || l == "loop" || l == "proactive" || l == "initiative")
+            || lower_joined.contains("主动")
+            || lower_joined.contains("循环")
+        {
             return CylinderLayer::Cycle;
         }
-        if lower.iter().any(|l| l == "engineering" || l == "optimization" || l == "programming"
-            || l == "database" || l == "storage" || l == "security" || l == "architecture")
-            || lower_joined.contains("tool") || lower_joined.contains("service") {
+        if lower.iter().any(|l| {
+            l == "engineering"
+                || l == "optimization"
+                || l == "programming"
+                || l == "database"
+                || l == "storage"
+                || l == "security"
+                || l == "architecture"
+        }) || lower_joined.contains("tool")
+            || lower_joined.contains("service")
+        {
             return CylinderLayer::Service;
         }
-        if lower.iter().any(|l| l == "ai" || l == "ml" || l == "science" || l == "biology"
-            || l == "physics" || l == "mathematics" || l == "concept" || l == "reasoning") {
+        if lower.iter().any(|l| {
+            l == "ai"
+                || l == "ml"
+                || l == "science"
+                || l == "biology"
+                || l == "physics"
+                || l == "mathematics"
+                || l == "concept"
+                || l == "reasoning"
+        }) {
             return CylinderLayer::Cognitive;
         }
-        if lower.iter().any(|l| l == "relation" || l == "knowledge-graph" || l == "kg"
-            || l == "concept" || l == "entity")
-            || lower_joined.contains("关系") || lower_joined.contains("图谱") || lower_joined.contains("知识") {
+        if lower.iter().any(|l| {
+            l == "relation"
+                || l == "knowledge-graph"
+                || l == "kg"
+                || l == "concept"
+                || l == "entity"
+        }) || lower_joined.contains("关系")
+            || lower_joined.contains("图谱")
+            || lower_joined.contains("知识")
+        {
             return CylinderLayer::Relation;
         }
         CylinderLayer::Instinct
@@ -176,20 +205,40 @@ pub struct PendingIdentity {
 impl PendingIdentity {
     pub fn completed_steps(&self) -> usize {
         let mut n = 0;
-        if self.name.is_some() { n += 1; }
-        if self.mission.is_some() { n += 1; }
-        if self.author.is_some() { n += 1; }
-        if self.personality.is_some() { n += 1; }
-        if self.language.is_some() { n += 1; }
+        if self.name.is_some() {
+            n += 1;
+        }
+        if self.mission.is_some() {
+            n += 1;
+        }
+        if self.author.is_some() {
+            n += 1;
+        }
+        if self.personality.is_some() {
+            n += 1;
+        }
+        if self.language.is_some() {
+            n += 1;
+        }
         n
     }
 
     pub fn current_step(&self) -> usize {
-        if self.name.is_none() { return 1; }
-        if self.mission.is_none() { return 2; }
-        if self.author.is_none() { return 3; }
-        if self.personality.is_none() { return 4; }
-        if self.language.is_none() { return 5; }
+        if self.name.is_none() {
+            return 1;
+        }
+        if self.mission.is_none() {
+            return 2;
+        }
+        if self.author.is_none() {
+            return 3;
+        }
+        if self.personality.is_none() {
+            return 4;
+        }
+        if self.language.is_none() {
+            return 5;
+        }
         6
     }
 
@@ -291,12 +340,36 @@ impl Cylinder {
         let layer_height = INITIAL_HEIGHT / 6.0;
 
         let zones = [
-            LayerZone { layer: CylinderLayer::Instinct, z_min: 0.0, z_max: layer_height },
-            LayerZone { layer: CylinderLayer::Relation, z_min: layer_height, z_max: layer_height * 2.0 },
-            LayerZone { layer: CylinderLayer::Cognitive, z_min: layer_height * 2.0, z_max: layer_height * 3.0 },
-            LayerZone { layer: CylinderLayer::Service, z_min: layer_height * 3.0, z_max: layer_height * 4.0 },
-            LayerZone { layer: CylinderLayer::Cycle, z_min: layer_height * 4.0, z_max: layer_height * 5.0 },
-            LayerZone { layer: CylinderLayer::Identity, z_min: layer_height * 5.0, z_max: INITIAL_HEIGHT },
+            LayerZone {
+                layer: CylinderLayer::Instinct,
+                z_min: 0.0,
+                z_max: layer_height,
+            },
+            LayerZone {
+                layer: CylinderLayer::Relation,
+                z_min: layer_height,
+                z_max: layer_height * 2.0,
+            },
+            LayerZone {
+                layer: CylinderLayer::Cognitive,
+                z_min: layer_height * 2.0,
+                z_max: layer_height * 3.0,
+            },
+            LayerZone {
+                layer: CylinderLayer::Service,
+                z_min: layer_height * 3.0,
+                z_max: layer_height * 4.0,
+            },
+            LayerZone {
+                layer: CylinderLayer::Cycle,
+                z_min: layer_height * 4.0,
+                z_max: layer_height * 5.0,
+            },
+            LayerZone {
+                layer: CylinderLayer::Identity,
+                z_min: layer_height * 5.0,
+                z_max: INITIAL_HEIGHT,
+            },
         ];
 
         let mut cyl = Self {
@@ -315,14 +388,20 @@ impl Cylinder {
     }
 
     fn generate_initial_ports(&mut self) {
-        let ring_specs: Vec<(usize, f64)> = self.zones.iter().enumerate()
+        let ring_specs: Vec<(usize, f64)> = self
+            .zones
+            .iter()
+            .enumerate()
             .filter(|(_, zone)| zone.layer.has_ports())
             .flat_map(|(zone_idx, zone)| {
                 let num_rings = ((zone.height() / RING_SPACING).floor() as usize).max(1);
-                (0..num_rings).map(move |ring| {
-                    let z = zone.z_min + (ring as f64 + 0.5) * (zone.height() / num_rings as f64);
-                    (zone_idx, z)
-                }).collect::<Vec<_>>()
+                (0..num_rings)
+                    .map(move |ring| {
+                        let z =
+                            zone.z_min + (ring as f64 + 0.5) * (zone.height() / num_rings as f64);
+                        (zone_idx, z)
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect();
 
@@ -353,11 +432,15 @@ impl Cylinder {
     }
 
     pub fn find_free_port_mut(&mut self, layer: CylinderLayer) -> Option<&mut Port> {
-        self.ports.iter_mut().find(|p| p.layer == layer && p.is_free())
+        self.ports
+            .iter_mut()
+            .find(|p| p.layer == layer && p.is_free())
     }
 
     pub fn find_port_for_tetra(&self, tetra_id: TetraId) -> Option<&Port> {
-        self.ports.iter().find(|p| p.connected_tetra == Some(tetra_id))
+        self.ports
+            .iter()
+            .find(|p| p.connected_tetra == Some(tetra_id))
     }
 
     pub fn assign_port(&mut self, layer: CylinderLayer, tetra_id: TetraId) -> Option<VertexId> {
@@ -371,21 +454,35 @@ impl Cylinder {
     }
 
     pub fn release_port(&mut self, tetra_id: TetraId) {
-        if let Some(port) = self.ports.iter_mut().find(|p| p.connected_tetra == Some(tetra_id)) {
+        if let Some(port) = self
+            .ports
+            .iter_mut()
+            .find(|p| p.connected_tetra == Some(tetra_id))
+        {
             port.release();
         }
     }
 
     pub fn reassign_port(&mut self, old_tetra_id: TetraId, new_tetra_id: TetraId) -> bool {
-        if let Some(port) = self.ports.iter_mut().find(|p| p.connected_tetra == Some(old_tetra_id)) {
+        if let Some(port) = self
+            .ports
+            .iter_mut()
+            .find(|p| p.connected_tetra == Some(old_tetra_id))
+        {
             port.connected_tetra = Some(new_tetra_id);
             return true;
         }
         false
     }
 
-    pub fn assign_specific_port(&mut self, port_id: VertexId, tetra_id: TetraId) -> Result<(), String> {
-        let port = self.ports.iter_mut()
+    pub fn assign_specific_port(
+        &mut self,
+        port_id: VertexId,
+        tetra_id: TetraId,
+    ) -> Result<(), String> {
+        let port = self
+            .ports
+            .iter_mut()
             .find(|p| p.id == port_id)
             .ok_or_else(|| format!("port {} not found", port_id))?;
         if !port.is_free() {
@@ -418,10 +515,15 @@ impl Cylinder {
             port.position.z = new_base + t * new_layer_height;
         }
 
-        let layers_to_expand: Vec<(usize, f64)> = self.zones.iter().enumerate()
+        let layers_to_expand: Vec<(usize, f64)> = self
+            .zones
+            .iter()
+            .enumerate()
             .filter(|(_, zone)| zone.layer.has_ports())
             .filter_map(|(zone_idx, zone)| {
-                let top_ring_z = self.ports.iter()
+                let top_ring_z = self
+                    .ports
+                    .iter()
                     .filter(|p| p.layer == zone.layer)
                     .map(|p| p.position.z)
                     .fold(0.0f64, f64::max);
@@ -442,13 +544,17 @@ impl Cylinder {
 
     pub fn ensure_free_port(&mut self, layer: CylinderLayer) -> Option<VertexId> {
         if self.find_free_port(layer).is_some() {
-            return self.ports.iter()
+            return self
+                .ports
+                .iter()
                 .find(|p| p.layer == layer && p.is_free())
                 .map(|p| p.id);
         }
 
         let zone = &self.zones[layer.index()];
-        let top_ring_z = self.ports.iter()
+        let top_ring_z = self
+            .ports
+            .iter()
             .filter(|p| p.layer == layer)
             .map(|p| p.position.z)
             .fold(0.0f64, f64::max);
@@ -470,7 +576,10 @@ impl Cylinder {
     }
 
     pub fn port_position(&self, port_id: VertexId) -> Option<Point3> {
-        self.ports.iter().find(|p| p.id == port_id).map(|p| p.position)
+        self.ports
+            .iter()
+            .find(|p| p.id == port_id)
+            .map(|p| p.position)
     }
 
     pub fn all_ports(&self) -> &[Port] {
@@ -510,7 +619,11 @@ impl Cylinder {
         let total_ports: usize = layer_reports.iter().map(|l| l.total_ports).sum();
         let pulses_sent: usize = layer_reports.iter().map(|l| l.pulses_sent).sum();
         let pulses_returned: usize = layer_reports.iter().map(|l| l.pulses_returned).sum();
-        let broken: usize = self.ports.iter().filter(|p| p.status == PortStatus::Broken).count();
+        let broken: usize = self
+            .ports
+            .iter()
+            .filter(|p| p.status == PortStatus::Broken)
+            .count();
 
         HealthReport {
             total_ports,
@@ -529,7 +642,13 @@ impl Cylinder {
         self.identity.as_ref().map(|i| i.confirmed).unwrap_or(false)
     }
 
-    pub fn confirm_identity(&mut self, name: String, mission: String, author: String, extra: HashMap<String, String>) {
+    pub fn confirm_identity(
+        &mut self,
+        name: String,
+        mission: String,
+        author: String,
+        extra: HashMap<String, String>,
+    ) {
         if self.identity.is_some() {
             return;
         }
@@ -546,30 +665,64 @@ impl Cylinder {
         self.identity = None;
     }
 
-    pub fn update_identity(&mut self, name: Option<String>, mission: Option<String>, author: Option<String>, extra: Option<HashMap<String, String>>) {
+    pub fn update_identity(
+        &mut self,
+        name: Option<String>,
+        mission: Option<String>,
+        author: Option<String>,
+        extra: Option<HashMap<String, String>>,
+    ) {
         if let Some(ref mut info) = self.identity {
-            if let Some(n) = name { info.system_name = n; }
-            if let Some(m) = mission { info.mission = m; }
-            if let Some(a) = author { info.author = a; }
-            if let Some(e) = extra { info.extra = e; }
+            if let Some(n) = name {
+                info.system_name = n;
+            }
+            if let Some(m) = mission {
+                info.mission = m;
+            }
+            if let Some(a) = author {
+                info.author = a;
+            }
+            if let Some(e) = extra {
+                info.extra = e;
+            }
         }
     }
 
     pub fn set_identity_step(&mut self, step: usize, value: String) {
-        if self.identity.is_some() { return; }
+        if self.identity.is_some() {
+            return;
+        }
         match step {
-            1 => { if !value.trim().is_empty() { self.pending_identity.name = Some(value); } }
-            2 => { if !value.trim().is_empty() { self.pending_identity.mission = Some(value); } }
-            3 => { if !value.trim().is_empty() { self.pending_identity.author = Some(value); } }
-            4 => { self.pending_identity.personality = Some(value); }
-            5 => { self.pending_identity.language = Some(value); }
+            1 => {
+                if !value.trim().is_empty() {
+                    self.pending_identity.name = Some(value);
+                }
+            }
+            2 => {
+                if !value.trim().is_empty() {
+                    self.pending_identity.mission = Some(value);
+                }
+            }
+            3 => {
+                if !value.trim().is_empty() {
+                    self.pending_identity.author = Some(value);
+                }
+            }
+            4 => {
+                self.pending_identity.personality = Some(value);
+            }
+            5 => {
+                self.pending_identity.language = Some(value);
+            }
             _ => {}
         }
     }
 
     pub fn confirm_pending(&mut self) -> bool {
         let p = &self.pending_identity;
-        if self.identity.is_some() { return false; }
+        if self.identity.is_some() {
+            return false;
+        }
         let name = match &p.name {
             Some(n) if !n.trim().is_empty() => n.clone(),
             _ => return false,
@@ -583,8 +736,12 @@ impl Cylinder {
             _ => return false,
         };
         let mut extra = HashMap::new();
-        if let Some(ref pers) = p.personality { extra.insert("personality".into(), pers.clone()); }
-        if let Some(ref lang) = p.language { extra.insert("language".into(), lang.clone()); }
+        if let Some(ref pers) = p.personality {
+            extra.insert("personality".into(), pers.clone());
+        }
+        if let Some(ref lang) = p.language {
+            extra.insert("language".into(), lang.clone());
+        }
         self.identity = Some(IdentityInfo {
             system_name: name,
             mission,
@@ -612,7 +769,10 @@ impl Cylinder {
     }
 
     pub fn free_port_count(&self, layer: CylinderLayer) -> usize {
-        self.ports.iter().filter(|p| p.layer == layer && p.is_free()).count()
+        self.ports
+            .iter()
+            .filter(|p| p.layer == layer && p.is_free())
+            .count()
     }
 }
 
@@ -626,7 +786,11 @@ mod tests {
         assert!(c.port_count() > 0, "cylinder should have initial ports");
         for layer in CylinderLayer::all() {
             if layer.has_ports() {
-                assert!(c.free_port_count(*layer) > 0, "{:?} should have free ports", layer);
+                assert!(
+                    c.free_port_count(*layer) > 0,
+                    "{:?} should have free ports",
+                    layer
+                );
             }
         }
     }
@@ -635,7 +799,12 @@ mod tests {
     fn identity_lock() {
         let mut c = Cylinder::new();
         assert!(!c.is_identity_confirmed());
-        c.confirm_identity("大卫".into(), "AI记忆".into(), "刘启航".into(), HashMap::new());
+        c.confirm_identity(
+            "大卫".into(),
+            "AI记忆".into(),
+            "刘启航".into(),
+            HashMap::new(),
+        );
         assert!(c.is_identity_confirmed());
         c.confirm_identity("冒充".into(), "".into(), "".into(), HashMap::new());
         let id = c.identity().unwrap();
@@ -709,15 +878,26 @@ mod tests {
         for (i, zone) in c.zones.iter().enumerate() {
             let expected_min = i as f64 * layer_height;
             let expected_max = (i as f64 + 1.0) * layer_height;
-            assert!((zone.z_min - expected_min).abs() < 1e-6, "zone {} z_min mismatch", i);
-            assert!((zone.z_max - expected_max).abs() < 1e-6, "zone {} z_max mismatch", i);
+            assert!(
+                (zone.z_min - expected_min).abs() < 1e-6,
+                "zone {} z_min mismatch",
+                i
+            );
+            assert!(
+                (zone.z_max - expected_max).abs() < 1e-6,
+                "zone {} z_max mismatch",
+                i
+            );
         }
     }
 
     #[test]
     fn identity_layer_has_no_ports() {
         let c = Cylinder::new();
-        assert!(!CylinderLayer::Identity.has_ports(), "Identity layer must not have ports");
+        assert!(
+            !CylinderLayer::Identity.has_ports(),
+            "Identity layer must not have ports"
+        );
         for layer in CylinderLayer::all() {
             if *layer != CylinderLayer::Identity {
                 assert!(layer.has_ports(), "{:?} should have ports", layer);
@@ -729,17 +909,39 @@ mod tests {
     fn port_vertex_ids_start_at_one_million() {
         let c = Cylinder::new();
         for port in c.all_ports() {
-            assert!(port.id >= 1_000_000, "port vid {} must be >= 1_000_000", port.id);
+            assert!(
+                port.id >= 1_000_000,
+                "port vid {} must be >= 1_000_000",
+                port.id
+            );
         }
     }
 
     #[test]
     fn from_labels_six_way() {
-        assert_eq!(CylinderLayer::from_labels(&["identity".into()]), CylinderLayer::Identity);
-        assert_eq!(CylinderLayer::from_labels(&["cycle".into()]), CylinderLayer::Cycle);
-        assert_eq!(CylinderLayer::from_labels(&["engineering".into()]), CylinderLayer::Service);
-        assert_eq!(CylinderLayer::from_labels(&["ai".into()]), CylinderLayer::Cognitive);
-        assert_eq!(CylinderLayer::from_labels(&["knowledge-graph".into()]), CylinderLayer::Relation);
-        assert_eq!(CylinderLayer::from_labels(&["random".into()]), CylinderLayer::Instinct);
+        assert_eq!(
+            CylinderLayer::from_labels(&["identity".into()]),
+            CylinderLayer::Identity
+        );
+        assert_eq!(
+            CylinderLayer::from_labels(&["cycle".into()]),
+            CylinderLayer::Cycle
+        );
+        assert_eq!(
+            CylinderLayer::from_labels(&["engineering".into()]),
+            CylinderLayer::Service
+        );
+        assert_eq!(
+            CylinderLayer::from_labels(&["ai".into()]),
+            CylinderLayer::Cognitive
+        );
+        assert_eq!(
+            CylinderLayer::from_labels(&["knowledge-graph".into()]),
+            CylinderLayer::Relation
+        );
+        assert_eq!(
+            CylinderLayer::from_labels(&["random".into()]),
+            CylinderLayer::Instinct
+        );
     }
 }

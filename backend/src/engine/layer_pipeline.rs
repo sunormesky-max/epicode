@@ -130,8 +130,16 @@ impl LayerPipeline {
         if ctx.content.trim().is_empty() {
             return LayerDecision::deny("empty query");
         }
-        ctx.stamp(CylinderLayer::Relation, "expand", "KG synonym expansion queued");
-        ctx.stamp(CylinderLayer::Cognitive, "intent", "intent parsing + embedding");
+        ctx.stamp(
+            CylinderLayer::Relation,
+            "expand",
+            "KG synonym expansion queued",
+        );
+        ctx.stamp(
+            CylinderLayer::Cognitive,
+            "intent",
+            "intent parsing + embedding",
+        );
         ctx.stamp(CylinderLayer::Service, "execute", "search execution");
         ctx.stamp(CylinderLayer::Cycle, "boost", "recency boost applied");
         self.identity_layer(ctx);
@@ -148,21 +156,36 @@ impl LayerPipeline {
             ctx.stamp(CylinderLayer::Instinct, "reject", "content too short");
             return Err("content too short (min 3 chars)".into());
         }
-        ctx.stamp(CylinderLayer::Instinct, "receive", &format!("content_len={}", ctx.content.len()));
+        ctx.stamp(
+            CylinderLayer::Instinct,
+            "receive",
+            &format!("content_len={}", ctx.content.len()),
+        );
         Ok(())
     }
 
     fn relation_layer(&self, ctx: &mut RequestContext) -> Result<(), String> {
-        ctx.stamp(CylinderLayer::Relation, "kg-prep", "concept extraction queued");
+        ctx.stamp(
+            CylinderLayer::Relation,
+            "kg-prep",
+            "concept extraction queued",
+        );
         Ok(())
     }
 
     fn cognitive_layer(&self, ctx: &mut RequestContext) -> Result<(), String> {
         let lower = ctx.content.to_lowercase();
-        let is_noise = lower.chars().filter(|c| !c.is_alphanumeric() && !c.is_whitespace()).count() as f64
+        let is_noise = lower
+            .chars()
+            .filter(|c| !c.is_alphanumeric() && !c.is_whitespace())
+            .count() as f64
             / lower.len().max(1) as f64;
         if is_noise > 0.7 {
-            ctx.stamp(CylinderLayer::Cognitive, "reject", &format!("noise_ratio={:.2}", is_noise));
+            ctx.stamp(
+                CylinderLayer::Cognitive,
+                "reject",
+                &format!("noise_ratio={:.2}", is_noise),
+            );
             return Err("content appears to be noise (high special-char ratio)".into());
         }
         ctx.stamp(CylinderLayer::Cognitive, "assess", "quality check passed");
@@ -175,7 +198,11 @@ impl LayerPipeline {
     }
 
     fn cycle_layer(&self, ctx: &mut RequestContext) {
-        ctx.stamp(CylinderLayer::Cycle, "recall", "active recall trigger checked");
+        ctx.stamp(
+            CylinderLayer::Cycle,
+            "recall",
+            "active recall trigger checked",
+        );
     }
 
     fn identity_layer(&self, ctx: &mut RequestContext) {
@@ -189,7 +216,11 @@ impl LayerPipeline {
                 &format!("identity={} hash={}chars", info.system_name, hash.len()),
             );
         } else {
-            ctx.stamp(CylinderLayer::Identity, "no-stamp", "identity not confirmed");
+            ctx.stamp(
+                CylinderLayer::Identity,
+                "no-stamp",
+                "identity not confirmed",
+            );
         }
     }
 
@@ -219,12 +250,7 @@ pub fn audit_to_string(ctx: &RequestContext) -> String {
         .join(" → ")
 }
 
-pub fn memorialize_security_event(
-    space: &Space,
-    operation: &str,
-    reason: &str,
-    audit_trail: &str,
-) {
+pub fn memorialize_security_event(space: &Space, operation: &str, reason: &str, audit_trail: &str) {
     let ts = chrono::Utc::now().timestamp();
     let content = format!(
         "[SECURITY] operation={} reason=\"{}\" trail=\"{}\" ts={}",
@@ -285,13 +311,19 @@ pub fn memorialize_security_event(
             if port_opt.is_some() {
                 space.reassign_cylinder_port(u64::MAX, id);
             }
-            tracing::info!("[LayerPipeline] security event memorialized as tetra {}", id);
+            tracing::info!(
+                "[LayerPipeline] security event memorialized as tetra {}",
+                id
+            );
         }
         Err(e) => {
             if port_opt.is_some() {
                 space.release_cylinder_port(u64::MAX);
             }
-            tracing::error!("[LayerPipeline] failed to memorialize security event: {}", e);
+            tracing::error!(
+                "[LayerPipeline] failed to memorialize security event: {}",
+                e
+            );
         }
     }
 }

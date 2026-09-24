@@ -1,17 +1,17 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::Router;
-use axum::routing::{get, post};
 use axum::middleware;
 use axum::response::IntoResponse;
+use axum::routing::{get, post};
+use axum::Router;
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use epicode::api::routes;
-use epicode::engine::Engine;
 use epicode::engine::security::SecurityResult;
+use epicode::engine::Engine;
 
 #[tokio::main]
 async fn main() {
@@ -39,7 +39,8 @@ async fn main() {
         "DISABLED"
     };
 
-    tracing::info!("Engine fired. Energy: {:.1}, Brain: {}, Security: {}",
+    tracing::info!(
+        "Engine fired. Energy: {:.1}, Brain: {}, Security: {}",
         engine.energy.available(),
         cognitive_status,
         security_status,
@@ -48,9 +49,9 @@ async fn main() {
     let state = Arc::new(engine);
 
     let security_fn = |axum::extract::State(engine): axum::extract::State<Arc<Engine>>,
-                        headers: axum::http::HeaderMap,
-                        request: axum::extract::Request,
-                        next: axum::middleware::Next| async move {
+                       headers: axum::http::HeaderMap,
+                       request: axum::extract::Request,
+                       next: axum::middleware::Next| async move {
         let guard = engine.guard.clone();
         let path = request.uri().path().to_string();
         let method = request.method().clone().to_string();
@@ -76,11 +77,15 @@ async fn main() {
                     SecurityResult::DeniedEnergy => axum::http::StatusCode::SERVICE_UNAVAILABLE,
                     SecurityResult::Allowed => axum::http::StatusCode::OK,
                 };
-                (status, axum::Json(serde_json::json!({
-                    "success": false,
-                    "error": format!("{:?}", result),
-                    "action": action,
-                }))).into_response()
+                (
+                    status,
+                    axum::Json(serde_json::json!({
+                        "success": false,
+                        "error": format!("{:?}", result),
+                        "action": action,
+                    })),
+                )
+                    .into_response()
             }
         }
     };
@@ -91,7 +96,10 @@ async fn main() {
         .route("/health", get(routes::health))
         .route("/constitution", get(routes::constitution))
         .route("/sse", get(routes::sse_stream))
-        .route("/config", get(routes::get_config).post(routes::update_config))
+        .route(
+            "/config",
+            get(routes::get_config).post(routes::update_config),
+        )
         .route("/security/stats", get(routes::security_stats))
         .route("/security/audit", get(routes::security_audit))
         .route("/remember", post(routes::remember))
@@ -103,7 +111,10 @@ async fn main() {
         .route("/recall", post(routes::recall))
         .route("/pulse", post(routes::send_pulse))
         .route("/stats", get(routes::stats))
-        .route("/identity", get(routes::get_identity).post(routes::confirm_identity))
+        .route(
+            "/identity",
+            get(routes::get_identity).post(routes::confirm_identity),
+        )
         .route("/knowledge", post(routes::knowledge_relations))
         .route("/concepts", get(routes::concepts))
         .route("/dream", post(routes::dream_cycle))
@@ -113,10 +124,16 @@ async fn main() {
         .route("/timeline", get(routes::timeline))
         .route("/backups", get(routes::list_backups))
         .layer(middleware::from_fn_with_state(state.clone(), security_fn))
-        .layer(CorsLayer::new()
-            .allow_origin("http://127.0.0.1:9110".parse::<axum::http::HeaderValue>().unwrap())
-            .allow_methods(Any)
-            .allow_headers(Any))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(
+                    "http://127.0.0.1:9110"
+                        .parse::<axum::http::HeaderValue>()
+                        .unwrap(),
+                )
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
 

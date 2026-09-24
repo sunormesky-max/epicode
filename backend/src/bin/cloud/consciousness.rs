@@ -8,14 +8,14 @@
 //! 安全: run 只读白名单 / read 路径白名单 / apply 限 src+自动备份
 //!       部署(编译+systemctl)不在任何白名单 — 大卫的手。
 
-use axum::extract::{State, Extension};
+use axum::extract::{Extension, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 
-use epicode::engine::user_manager::UserInfo;
 use super::helpers::AuthedEngine;
 use super::state::CloudState;
+use epicode::engine::user_manager::UserInfo;
 
 #[derive(Deserialize)]
 pub struct ThinkRequest {
@@ -181,8 +181,40 @@ pub async fn think(
     }).await;
 
     match result {
-        Ok(Ok(body)) => { let b: serde_json::Value = body; (StatusCode::OK, Json(epicode::engine::smrp::envelope_ok(&engine, "consciousness_think", b))) }
-        Ok(Err(e)) => { let m: String = e; (StatusCode::BAD_REQUEST, Json(epicode::engine::smrp::envelope_err(&engine, "consciousness_think", 400, &m))) }
-        Err(e) => { let m: String = format!("{}", e); (StatusCode::INTERNAL_SERVER_ERROR, Json(epicode::engine::smrp::envelope_err(&engine, "consciousness_think", 500, &m))) }
+        Ok(Ok(body)) => {
+            let b: serde_json::Value = body;
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "consciousness_think",
+                    b,
+                )),
+            )
+        }
+        Ok(Err(e)) => {
+            let m: String = e;
+            (
+                StatusCode::BAD_REQUEST,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "consciousness_think",
+                    400,
+                    &m,
+                )),
+            )
+        }
+        Err(e) => {
+            let m: String = format!("{}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(epicode::engine::smrp::envelope_err(
+                    &engine,
+                    "consciousness_think",
+                    500,
+                    &m,
+                )),
+            )
+        }
     }
 }

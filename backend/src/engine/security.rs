@@ -148,7 +148,10 @@ impl SecurityGuard {
 
         if buckets.len() > 1000 {
             buckets.retain(|_, b| {
-                b.timestamps.last().map(|t| now.duration_since(*t).as_secs() < RATE_LIMIT_WINDOW_SECS).unwrap_or(false)
+                b.timestamps
+                    .last()
+                    .map(|t| now.duration_since(*t).as_secs() < RATE_LIMIT_WINDOW_SECS)
+                    .unwrap_or(false)
             });
         }
 
@@ -195,7 +198,15 @@ impl SecurityGuard {
             if label.len() > MAX_LABEL_LENGTH || label.trim().is_empty() {
                 return Err(SecurityResult::DeniedValidation);
             }
-            if !label.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ':' || c == '/' || c.is_whitespace()) {
+            if !label.chars().all(|c| {
+                c.is_alphanumeric()
+                    || c == '-'
+                    || c == '_'
+                    || c == '.'
+                    || c == ':'
+                    || c == '/'
+                    || c.is_whitespace()
+            }) {
                 return Err(SecurityResult::DeniedValidation);
             }
         }
@@ -217,7 +228,11 @@ impl SecurityGuard {
         cluster_size >= 30 || (entropy >= 0.4 && cluster_size >= 6)
     }
 
-    pub fn check_constitution_fission(&self, entropy: f64, cluster_size: usize) -> Result<(), SecurityResult> {
+    pub fn check_constitution_fission(
+        &self,
+        entropy: f64,
+        cluster_size: usize,
+    ) -> Result<(), SecurityResult> {
         if Self::fission_allowed(entropy, cluster_size) {
             Ok(())
         } else {
@@ -250,11 +265,22 @@ impl SecurityGuard {
         if result != SecurityResult::Allowed {
             self.total_denied.fetch_add(1, Ordering::Relaxed);
             match result {
-                SecurityResult::DeniedAuth => { self.denied_auth_count.fetch_add(1, Ordering::Relaxed); }
-                SecurityResult::DeniedRateLimit => { self.denied_rate_count.fetch_add(1, Ordering::Relaxed); }
-                SecurityResult::DeniedValidation => { self.denied_validation_count.fetch_add(1, Ordering::Relaxed); }
-                SecurityResult::DeniedConstitution => { self.denied_constitution_count.fetch_add(1, Ordering::Relaxed); }
-                SecurityResult::DeniedEnergy => { self.denied_energy_count.fetch_add(1, Ordering::Relaxed); }
+                SecurityResult::DeniedAuth => {
+                    self.denied_auth_count.fetch_add(1, Ordering::Relaxed);
+                }
+                SecurityResult::DeniedRateLimit => {
+                    self.denied_rate_count.fetch_add(1, Ordering::Relaxed);
+                }
+                SecurityResult::DeniedValidation => {
+                    self.denied_validation_count.fetch_add(1, Ordering::Relaxed);
+                }
+                SecurityResult::DeniedConstitution => {
+                    self.denied_constitution_count
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+                SecurityResult::DeniedEnergy => {
+                    self.denied_energy_count.fetch_add(1, Ordering::Relaxed);
+                }
                 SecurityResult::Allowed => {}
             }
         }
@@ -270,8 +296,8 @@ impl SecurityGuard {
         // 持久化审计日志到文件 — 同步写入（单次 append syscall，比每次 spawn 线程开销小得多）
         // 之前每条审计日志 std::thread::spawn 导致高 QPS 下线程爆炸
         if let Some(ref path) = self.config.audit_log_file {
-            use std::io::Write;
             use std::fs::OpenOptions;
+            use std::io::Write;
             let entry_json = serde_json::to_string(&entry).unwrap_or_default();
             if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
                 let _ = writeln!(f, "{}", entry_json);
@@ -281,12 +307,19 @@ impl SecurityGuard {
         if result != SecurityResult::Allowed {
             tracing::warn!(
                 "[Security] {} by {} — {:?}: {}",
-                action, client, result, detail
+                action,
+                client,
+                result,
+                detail
             );
         }
     }
 
-    pub fn full_check(&self, api_key: &str, action: &str) -> Result<String, (SecurityResult, String)> {
+    pub fn full_check(
+        &self,
+        api_key: &str,
+        action: &str,
+    ) -> Result<String, (SecurityResult, String)> {
         let client = match self.authenticate(api_key) {
             Ok(c) => c,
             Err(r) => {
@@ -329,7 +362,7 @@ impl SecurityGuard {
         if key.len() <= 8 {
             return "*".repeat(key.len());
         }
-        format!("{}****{}", &key[..3], &key[key.len()-2..])
+        format!("{}****{}", &key[..3], &key[key.len() - 2..])
     }
 
     fn hash_key(key: &str) -> String {
@@ -424,40 +457,58 @@ mod tests {
     #[test]
     fn validate_content_empty() {
         let guard = test_guard();
-        assert_eq!(guard.validate_content("").unwrap_err(), SecurityResult::DeniedValidation);
+        assert_eq!(
+            guard.validate_content("").unwrap_err(),
+            SecurityResult::DeniedValidation
+        );
     }
 
     #[test]
     fn validate_content_too_long() {
         let guard = test_guard();
         let long = "x".repeat(101);
-        assert_eq!(guard.validate_content(&long).unwrap_err(), SecurityResult::DeniedValidation);
+        assert_eq!(
+            guard.validate_content(&long).unwrap_err(),
+            SecurityResult::DeniedValidation
+        );
     }
 
     #[test]
     fn validate_query_too_long() {
         let guard = test_guard();
         let long = "q".repeat(51);
-        assert_eq!(guard.validate_query(&long).unwrap_err(), SecurityResult::DeniedValidation);
+        assert_eq!(
+            guard.validate_query(&long).unwrap_err(),
+            SecurityResult::DeniedValidation
+        );
     }
 
     #[test]
     fn validate_labels_too_many() {
         let guard = test_guard();
         let labels: Vec<String> = (0..6).map(|i| format!("label{}", i)).collect();
-        assert_eq!(guard.validate_labels(&labels).unwrap_err(), SecurityResult::DeniedValidation);
+        assert_eq!(
+            guard.validate_labels(&labels).unwrap_err(),
+            SecurityResult::DeniedValidation
+        );
     }
 
     #[test]
     fn constitution_blocks_delete() {
         let guard = test_guard();
-        assert_eq!(guard.check_constitution_delete().unwrap_err(), SecurityResult::DeniedConstitution);
+        assert_eq!(
+            guard.check_constitution_delete().unwrap_err(),
+            SecurityResult::DeniedConstitution
+        );
     }
 
     #[test]
     fn constitution_blocks_fission() {
         let guard = test_guard();
-        assert_eq!(guard.check_constitution_fission(0.1, 3).unwrap_err(), SecurityResult::DeniedConstitution);
+        assert_eq!(
+            guard.check_constitution_fission(0.1, 3).unwrap_err(),
+            SecurityResult::DeniedConstitution
+        );
     }
 
     #[test]
@@ -469,7 +520,10 @@ mod tests {
     #[test]
     fn constitution_blocks_fission_small_cluster() {
         let guard = test_guard();
-        assert_eq!(guard.check_constitution_fission(0.8, 3).unwrap_err(), SecurityResult::DeniedConstitution);
+        assert_eq!(
+            guard.check_constitution_fission(0.8, 3).unwrap_err(),
+            SecurityResult::DeniedConstitution
+        );
     }
 
     #[test]
@@ -481,13 +535,19 @@ mod tests {
     #[test]
     fn constitution_blocks_blend() {
         let guard = test_guard();
-        assert_eq!(guard.check_constitution_blend().unwrap_err(), SecurityResult::DeniedConstitution);
+        assert_eq!(
+            guard.check_constitution_blend().unwrap_err(),
+            SecurityResult::DeniedConstitution
+        );
     }
 
     #[test]
     fn energy_check_insufficient() {
         let guard = test_guard();
-        assert_eq!(guard.check_energy(5.0, 10.0).unwrap_err(), SecurityResult::DeniedEnergy);
+        assert_eq!(
+            guard.check_energy(5.0, 10.0).unwrap_err(),
+            SecurityResult::DeniedEnergy
+        );
     }
 
     #[test]
@@ -514,7 +574,12 @@ mod tests {
     fn audit_log_entries() {
         let guard = test_guard();
         guard.audit("create", "client1", SecurityResult::Allowed, "ok");
-        guard.audit("delete", "client1", SecurityResult::DeniedConstitution, "forbidden");
+        guard.audit(
+            "delete",
+            "client1",
+            SecurityResult::DeniedConstitution,
+            "forbidden",
+        );
         let log = guard.audit_log(10);
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].action, "delete");

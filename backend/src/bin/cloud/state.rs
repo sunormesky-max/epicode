@@ -23,7 +23,6 @@ pub enum StartupPhase {
     Ready,
 }
 
-
 /// D2: Primary Executor binding (C Spec §14.1: 多端只读, 执行写单主)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExecutorBinding {

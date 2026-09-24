@@ -2,18 +2,36 @@
 //! MCP 与 REST 入口共用，兑现协议"与传输正交"的承诺（SMRP §1.3）。
 //! 所有函数接受 `&Engine`，不持有状态，纯构造。
 use crate::domain::tetra::TetraId;
-use crate::engine::Engine;
 use crate::engine::scheduler::CreateReport;
+use crate::engine::Engine;
 
 /// 经历性质标签：调用方历史交互产生的痕迹（运维/安全/反馈/事件）。
 const EXP_LABELS: &[&str] = &[
     // 原有
-    "ops", "deployment", "security", "feedback", "session-summary",
-    "bug", "fix", "observation", "system-observation", "ctx-finding",
+    "ops",
+    "deployment",
+    "security",
+    "feedback",
+    "session-summary",
+    "bug",
+    "fix",
+    "observation",
+    "system-observation",
+    "ctx-finding",
     // P0-3 扩充: 治理/驱动/决策/学习类经历
-    "op_audit", "drive", "decision", "pattern", "bug_memory",
-    "session_summary", "task", "incident", "postmortem",
-    "learning", "experiment", "test-result", "review",
+    "op_audit",
+    "drive",
+    "decision",
+    "pattern",
+    "bug_memory",
+    "session_summary",
+    "task",
+    "incident",
+    "postmortem",
+    "learning",
+    "experiment",
+    "test-result",
+    "review",
 ];
 
 /// SMRP §5.1 experiential 判定：纯按"经历性质"标签，不依赖分数。
@@ -23,17 +41,26 @@ pub fn is_experiential(labels: &[String]) -> bool {
 
 /// search 路径 tier：experiential(经历标签) > primary(sim≥0.3) > contextual。
 pub fn tier_search(sim: f64, labels: &[String]) -> &'static str {
-    if is_experiential(labels) { "experiential" }
-    else if sim >= 0.3 { "primary" }
-    else { "contextual" }
+    if is_experiential(labels) {
+        "experiential"
+    } else if sim >= 0.3 {
+        "primary"
+    } else {
+        "contextual"
+    }
 }
 
 /// recall 路径 tier：experiential > hub(双命中) > primary(direct) > contextual(assoc)。
 pub fn tier_recall(direct: f64, assoc: f64, labels: &[String]) -> &'static str {
-    if is_experiential(labels) { "experiential" }
-    else if direct > 0.0 && assoc > 0.0 { "hub" }
-    else if direct > 0.0 { "primary" }
-    else { "contextual" }
+    if is_experiential(labels) {
+        "experiential"
+    } else if direct > 0.0 && assoc > 0.0 {
+        "hub"
+    } else if direct > 0.0 {
+        "primary"
+    } else {
+        "contextual"
+    }
 }
 
 /// 一次性 cluster 索引（id → (cluster_id, size)），避免每条记忆 find_clusters O(N)。
@@ -67,7 +94,11 @@ pub fn memory_item(
         Some(p) => (p.importance, p.memory_type.clone(), p.valid_to.is_none()),
         None => (0.0, None, true),
     };
-    let mass = engine.space().get_tetrahedron(id).map(|t| t.mass).unwrap_or(1.0);
+    let mass = engine
+        .space()
+        .get_tetrahedron(id)
+        .map(|t| t.mass)
+        .unwrap_or(1.0);
     let mut item = serde_json::json!({
         "id": id, "content": content, "labels": labels, "timestamp": ts,
         "tier": tier, "source": source,
@@ -148,9 +179,9 @@ pub fn create_data(engine: &Engine, r: &CreateReport, content_preview: &str) -> 
     };
     let placement = match &r.placement {
         Some(p) => {
-            let joined = cluster_index(engine).get(&r.id).map(|(cid, sz)| {
-                serde_json::json!({"id": cid, "size": sz})
-            });
+            let joined = cluster_index(engine)
+                .get(&r.id)
+                .map(|(cid, sz)| serde_json::json!({"id": cid, "size": sz}));
             serde_json::json!({
                 "layer": p.layer,
                 "core": p.core,
@@ -188,9 +219,17 @@ pub fn create_data(engine: &Engine, r: &CreateReport, content_preview: &str) -> 
 
 /// SMRP §7.1 recall 的 data 段：由 api_recall 结果 + relevance 二元组分桶。
 /// MCP 与 REST 共用（传输正交）。删除了 api_recall 重复的 memory_file 字段。
-pub fn recall_data(engine: &Engine, result: &serde_json::Value, query: &str, depth: usize) -> serde_json::Value {
+pub fn recall_data(
+    engine: &Engine,
+    result: &serde_json::Value,
+    query: &str,
+    depth: usize,
+) -> serde_json::Value {
     let sections = result["results"].as_object().cloned().unwrap_or_default();
-    let emotion = result.get("emotion").cloned().unwrap_or(serde_json::Value::Null);
+    let emotion = result
+        .get("emotion")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     let seed_count = result["seed_count"].as_u64().unwrap_or(0);
     let associated_count = result["associated_count"].as_u64().unwrap_or(0);
     let total_fragments = result["total_fragments"].as_u64().unwrap_or(0);
@@ -207,12 +246,19 @@ pub fn recall_data(engine: &Engine, result: &serde_json::Value, query: &str, dep
             for frag in fragments {
                 let id = frag["id"].as_u64().unwrap_or(0);
                 let (ds, asim) = match frag["relevance"].as_array() {
-                    Some(r) if r.len() >= 2 => (r[0].as_f64().unwrap_or(0.0), r[1].as_f64().unwrap_or(0.0)),
+                    Some(r) if r.len() >= 2 => {
+                        (r[0].as_f64().unwrap_or(0.0), r[1].as_f64().unwrap_or(0.0))
+                    }
                     _ => (0.0, 0.0),
                 };
                 let content = frag["content"].as_str().unwrap_or("");
-                let labels: Vec<String> = frag["labels"].as_array()
-                    .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                let labels: Vec<String> = frag["labels"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 let ts = frag["timestamp"].as_i64().unwrap_or(0);
                 let sim = ds.max(asim);

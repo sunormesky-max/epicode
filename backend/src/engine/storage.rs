@@ -2,12 +2,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use parking_lot::Mutex;
-use rusqlite::{Connection, params, OpenFlags};
+use rusqlite::{params, Connection, OpenFlags};
 
 use crate::domain::space::Space;
-use crate::domain::tetra::{MemoryPayload, Tetrahedron, TetraId};
+use crate::domain::tetra::{MemoryPayload, TetraId, Tetrahedron};
 use crate::domain::vertex::Point3;
-use crate::engine::knowledge::{KnowledgeGraph, RelationType, ConceptPrototype};
+use crate::engine::knowledge::{ConceptPrototype, KnowledgeGraph, RelationType};
 use crate::engine::vector::VectorLayer;
 
 const SCHEMA: &str = "
@@ -94,19 +94,32 @@ CREATE TABLE IF NOT EXISTS drive_signals (
 ";
 
 const MIGRATION_ADD_EMBEDDING: &str = "ALTER TABLE tetrahedrons ADD COLUMN embedding BLOB";
-const MIGRATION_ADD_IMPORTANCE: &str = "ALTER TABLE tetrahedrons ADD COLUMN importance REAL NOT NULL DEFAULT 1.0";
-const MIGRATION_ADD_ENFORCED: &str = "ALTER TABLE tetrahedrons ADD COLUMN enforced INTEGER NOT NULL DEFAULT 0";
-const MIGRATION_ADD_RATIONALE: &str = "ALTER TABLE tetrahedrons ADD COLUMN rationale TEXT DEFAULT NULL";
-const MIGRATION_ADD_ACCESS_COUNT: &str = "ALTER TABLE tetrahedrons ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0";
-const MIGRATION_ADD_MEMORY_TYPE: &str = "ALTER TABLE tetrahedrons ADD COLUMN memory_type TEXT DEFAULT NULL";
-const MIGRATION_ADD_VALID_FROM: &str = "ALTER TABLE tetrahedrons ADD COLUMN valid_from INTEGER NOT NULL DEFAULT 0";
-const MIGRATION_ADD_VALID_TO: &str = "ALTER TABLE tetrahedrons ADD COLUMN valid_to INTEGER DEFAULT NULL";
-const MIGRATION_ADD_IDENTITY_STAMP: &str = "ALTER TABLE tetrahedrons ADD COLUMN identity_stamp TEXT DEFAULT NULL";
-const MIGRATION_ADD_SOURCE_AGENT: &str = "ALTER TABLE tetrahedrons ADD COLUMN source_agent TEXT DEFAULT NULL";
-const MIGRATION_ADD_LAST_REVIEWED: &str = "ALTER TABLE tetrahedrons ADD COLUMN last_reviewed_ts INTEGER DEFAULT NULL";
-const MIGRATION_ADD_EXPIRED_AT: &str = "ALTER TABLE tetrahedrons ADD COLUMN expired_at INTEGER DEFAULT NULL";
-const MIGRATION_ADD_INVALIDATED_AT: &str = "ALTER TABLE tetrahedrons ADD COLUMN invalidated_at INTEGER DEFAULT NULL";
-const MIGRATION_ADD_MEMORY_CLASS: &str = "ALTER TABLE tetrahedrons ADD COLUMN memory_class TEXT DEFAULT NULL";
+const MIGRATION_ADD_IMPORTANCE: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN importance REAL NOT NULL DEFAULT 1.0";
+const MIGRATION_ADD_ENFORCED: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN enforced INTEGER NOT NULL DEFAULT 0";
+const MIGRATION_ADD_RATIONALE: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN rationale TEXT DEFAULT NULL";
+const MIGRATION_ADD_ACCESS_COUNT: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0";
+const MIGRATION_ADD_MEMORY_TYPE: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN memory_type TEXT DEFAULT NULL";
+const MIGRATION_ADD_VALID_FROM: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN valid_from INTEGER NOT NULL DEFAULT 0";
+const MIGRATION_ADD_VALID_TO: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN valid_to INTEGER DEFAULT NULL";
+const MIGRATION_ADD_IDENTITY_STAMP: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN identity_stamp TEXT DEFAULT NULL";
+const MIGRATION_ADD_SOURCE_AGENT: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN source_agent TEXT DEFAULT NULL";
+const MIGRATION_ADD_LAST_REVIEWED: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN last_reviewed_ts INTEGER DEFAULT NULL";
+const MIGRATION_ADD_EXPIRED_AT: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN expired_at INTEGER DEFAULT NULL";
+const MIGRATION_ADD_INVALIDATED_AT: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN invalidated_at INTEGER DEFAULT NULL";
+const MIGRATION_ADD_MEMORY_CLASS: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN memory_class TEXT DEFAULT NULL";
 const MIGRATION_ADD_HEALTH_SNAPSHOTS: &str = "CREATE TABLE IF NOT EXISTS health_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp INTEGER NOT NULL,
@@ -162,7 +175,10 @@ pub struct StorageManager {
 /// 默认300s; 环境变量 EPICODE_HEARTBEAT_GAP_SECS 可覆盖(慢推理智能体应调大)。
 /// 自适应路线: 按各agent自身调用间隙分布P90自动定标(未实施)。
 pub fn heartbeat_gap_secs() -> i64 {
-    std::env::var("EPICODE_HEARTBEAT_GAP_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(300)
+    std::env::var("EPICODE_HEARTBEAT_GAP_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(300)
 }
 
 impl StorageManager {
@@ -180,18 +196,34 @@ impl StorageManager {
         let conn = Connection::open_with_flags(
             &db_path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
-        ).map_err(|e| format!("failed to open SQLite database at {}: {}", db_path.display(), e))?;
+        )
+        .map_err(|e| {
+            format!(
+                "failed to open SQLite database at {}: {}",
+                db_path.display(),
+                e
+            )
+        })?;
 
         conn.execute_batch(SCHEMA)
             .map_err(|e| format!("failed to initialize schema: {}", e))?;
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_EMBEDDING) {
-            tracing::debug!("[Storage] embedding migration skipped (likely already applied): {}", e);
+            tracing::debug!(
+                "[Storage] embedding migration skipped (likely already applied): {}",
+                e
+            );
         }
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_IMPORTANCE) {
-            tracing::debug!("[Storage] importance migration skipped (likely already applied): {}", e);
+            tracing::debug!(
+                "[Storage] importance migration skipped (likely already applied): {}",
+                e
+            );
         }
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_ENFORCED) {
-            tracing::debug!("[Storage] enforced migration skipped (likely already applied): {}", e);
+            tracing::debug!(
+                "[Storage] enforced migration skipped (likely already applied): {}",
+                e
+            );
         }
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_RATIONALE) {
             tracing::debug!("[Storage] rationale migration skipped: {}", e);
@@ -200,13 +232,22 @@ impl StorageManager {
             tracing::debug!("[Storage] access_count migration skipped: {}", e);
         }
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_MEMORY_TYPE) {
-            tracing::debug!("[Storage] memory_type migration skipped (likely already applied): {}", e);
+            tracing::debug!(
+                "[Storage] memory_type migration skipped (likely already applied): {}",
+                e
+            );
         }
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_VALID_FROM) {
-            tracing::debug!("[Storage] valid_from migration skipped (likely already applied): {}", e);
+            tracing::debug!(
+                "[Storage] valid_from migration skipped (likely already applied): {}",
+                e
+            );
         }
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_VALID_TO) {
-            tracing::debug!("[Storage] valid_to migration skipped (likely already applied): {}", e);
+            tracing::debug!(
+                "[Storage] valid_to migration skipped (likely already applied): {}",
+                e
+            );
         }
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_IDENTITY_STAMP) {
             tracing::info!("[Storage] identity_stamp migration: {}", e);
@@ -258,9 +299,14 @@ impl StorageManager {
 
     fn encrypt_field(&self, content: &str) -> Result<String, String> {
         if let Some(ref crypto) = self.crypto {
-            crypto.encrypt_content(content, &self.crypto_user)
+            crypto
+                .encrypt_content(content, &self.crypto_user)
                 .map_err(|e| {
-                    tracing::error!("[Storage] FATAL: encrypt failed for user {}: {}. Data NOT stored.", self.crypto_user, e);
+                    tracing::error!(
+                        "[Storage] FATAL: encrypt failed for user {}: {}. Data NOT stored.",
+                        self.crypto_user,
+                        e
+                    );
                     format!("encrypt failed: {}", e)
                 })
         } else {
@@ -274,7 +320,7 @@ impl StorageManager {
                 Ok(dec) => dec,
                 Err(e) => {
                     tracing::error!("[Storage] decrypt failed for user {}: {}. Content marked as corrupted (id may be affected). raw_len={}", self.crypto_user, e, content.len());
-                    "[corrupted:decryption-failed]".to_string()  // 占位而非空串（kimi #7），避免静默清空
+                    "[corrupted:decryption-failed]".to_string() // 占位而非空串（kimi #7），避免静默清空
                 }
             }
         } else {
@@ -358,14 +404,21 @@ impl StorageManager {
                  ON CONFLICT(source, target, rel_type) DO UPDATE SET strength = excluded.strength"
             ).map_err(|e| e.to_string())?;
             for r in upserts {
-                stmt.execute(params![r.source as i64, r.target as i64, Self::rel_type_str(&r.relation_type), r.strength])
-                    .map_err(|e| e.to_string())?;
+                stmt.execute(params![
+                    r.source as i64,
+                    r.target as i64,
+                    Self::rel_type_str(&r.relation_type),
+                    r.strength
+                ])
+                .map_err(|e| e.to_string())?;
             }
         }
         {
-            let mut stmt = tx.prepare(
-                "DELETE FROM relations WHERE source = ?1 AND target = ?2 AND rel_type = ?3"
-            ).map_err(|e| e.to_string())?;
+            let mut stmt = tx
+                .prepare(
+                    "DELETE FROM relations WHERE source = ?1 AND target = ?2 AND rel_type = ?3",
+                )
+                .map_err(|e| e.to_string())?;
             for (s, t, rt) in deletes {
                 stmt.execute(params![*s as i64, *t as i64, Self::rel_type_str(rt)])
                     .map_err(|e| e.to_string())?;
@@ -384,13 +437,13 @@ impl StorageManager {
         Ok(())
     }
 
-
     /// L0: Save drive signals to SQLite for persistence across restarts.
     pub fn save_drive_signals(&self, signals: &[super::drive::DriveSignal]) -> Result<(), String> {
         let conn = self.conn.lock();
         // Phase 3 收尾: 事务化保存，防崩溃丢队列（Tester-Q P1 要求）
-        conn.execute("BEGIN IMMEDIATE TRANSACTION", []).map_err(|e| e.to_string())?;
-        
+        conn.execute("BEGIN IMMEDIATE TRANSACTION", [])
+            .map_err(|e| e.to_string())?;
+
         conn.execute("DELETE FROM drive_signals", []).map_err(|e| {
             let _ = conn.execute("ROLLBACK", []);
             e.to_string()
@@ -404,7 +457,8 @@ impl StorageManager {
             conn.execute(
                 "INSERT OR REPLACE INTO drive_signals (id, data, updated_at) VALUES (?, ?, ?)",
                 params![signal.id as i64, data, now],
-            ).map_err(|e| {
+            )
+            .map_err(|e| {
                 let _ = conn.execute("ROLLBACK", []);
                 e.to_string()
             })?;
@@ -416,25 +470,53 @@ impl StorageManager {
     /// 稳态持久化: 驱力引擎状态 (weights/history) kv 存取
     pub fn save_drive_engine_state(&self, data: &str) -> Result<(), String> {
         let conn = self.conn.lock();
-        conn.execute("CREATE TABLE IF NOT EXISTS drive_kv (k TEXT PRIMARY KEY, v TEXT)", []).map_err(|e| e.to_string())?;
-        conn.execute("INSERT OR REPLACE INTO drive_kv (k, v) VALUES ('engine_state', ?)", params![data]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS drive_kv (k TEXT PRIMARY KEY, v TEXT)",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO drive_kv (k, v) VALUES ('engine_state', ?)",
+            params![data],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
     pub fn load_drive_engine_state(&self) -> Option<String> {
         let conn = self.conn.lock();
-        if conn.execute("CREATE TABLE IF NOT EXISTS drive_kv (k TEXT PRIMARY KEY, v TEXT)", []).is_err() { return None; }
-        conn.query_row("SELECT v FROM drive_kv WHERE k='engine_state'", [], |r| r.get(0)).ok()
+        if conn
+            .execute(
+                "CREATE TABLE IF NOT EXISTS drive_kv (k TEXT PRIMARY KEY, v TEXT)",
+                [],
+            )
+            .is_err()
+        {
+            return None;
+        }
+        conn.query_row("SELECT v FROM drive_kv WHERE k='engine_state'", [], |r| {
+            r.get(0)
+        })
+        .ok()
     }
 
     /// D7.2 参数记忆: 知识卡片 — 域级压缩知识(潜意识从簇中蒸馏的"内化知识")
-    pub fn save_knowledge_card(&self, domain: &str, summary: &str, cluster_ids: &[u64]) -> Result<(), String> {
+    pub fn save_knowledge_card(
+        &self,
+        domain: &str,
+        summary: &str,
+        cluster_ids: &[u64],
+    ) -> Result<(), String> {
         let conn = self.conn.lock();
-        conn.execute("CREATE TABLE IF NOT EXISTS knowledge_cards (
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS knowledge_cards (
             domain TEXT PRIMARY KEY,
             summary TEXT NOT NULL,
             cluster_ids TEXT NOT NULL,
             updated_at INTEGER NOT NULL
-        )", []).map_err(|e| e.to_string())?;
+        )",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
         conn.execute("INSERT OR REPLACE INTO knowledge_cards (domain, summary, cluster_ids, updated_at) VALUES (?1, ?2, ?3, ?4)",
             params![domain, summary, serde_json::to_string(cluster_ids).unwrap_or_default(),
                     chrono::Utc::now().timestamp()]).map_err(|e| e.to_string())?;
@@ -443,8 +525,11 @@ impl StorageManager {
     pub fn load_knowledge_cards(&self) -> Vec<(String, String, Vec<u64>)> {
         let conn = self.conn.lock();
         let _ = conn.execute("CREATE TABLE IF NOT EXISTS knowledge_cards (domain TEXT PRIMARY KEY, summary TEXT NOT NULL, cluster_ids TEXT NOT NULL, updated_at INTEGER NOT NULL)", []);
-        let mut stmt = match conn.prepare("SELECT domain, summary, cluster_ids FROM knowledge_cards ORDER BY updated_at DESC") {
-            Ok(s) => s, Err(_) => return vec![],
+        let mut stmt = match conn.prepare(
+            "SELECT domain, summary, cluster_ids FROM knowledge_cards ORDER BY updated_at DESC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
         };
         stmt.query_map([], |row| {
             let d: String = row.get(0)?;
@@ -456,24 +541,45 @@ impl StorageManager {
             let ids: String = row.get(2).unwrap_or_default();
             let cluster_ids: Vec<u64> = serde_json::from_str(&ids).unwrap_or_default();
             Ok((d, s, cluster_ids))
-        }).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
     }
 
     /// 时间效性: 任务会话CRUD
-    pub fn create_task_session(&self, task_id: &str, agent_id: &str, user_id: &str, description: &str, budget_ms: i64) -> Result<(), String> {
+    pub fn create_task_session(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+        user_id: &str,
+        description: &str,
+        budget_ms: i64,
+    ) -> Result<(), String> {
         let conn = self.conn.lock();
-        conn.execute("CREATE TABLE IF NOT EXISTS task_sessions (
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS task_sessions (
             task_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, user_id TEXT NOT NULL,
             description TEXT NOT NULL, start_ts INTEGER NOT NULL, budget_ms INTEGER NOT NULL,
             actual_ms INTEGER, deviation REAL, on_time BOOLEAN, quality_score REAL,
             outcome_summary TEXT, created_at INTEGER DEFAULT (strftime('%s','now'))
-        )", []).map_err(|e| e.to_string())?;
+        )",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
         conn.execute("INSERT OR REPLACE INTO task_sessions (task_id, agent_id, user_id, description, start_ts, budget_ms) VALUES (?1,?2,?3,?4,?5,?6)",
             params![task_id, agent_id, user_id, description, chrono::Utc::now().timestamp(), budget_ms]).map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    pub fn update_task_session_complete(&self, task_id: &str, actual_ms: i64, deviation: f64, on_time: bool, quality: f64, summary: &str) -> Result<(), String> {
+    pub fn update_task_session_complete(
+        &self,
+        task_id: &str,
+        actual_ms: i64,
+        deviation: f64,
+        on_time: bool,
+        quality: f64,
+        summary: &str,
+    ) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute("UPDATE task_sessions SET actual_ms=?1, deviation=?2, on_time=?3, quality_score=?4, outcome_summary=?5 WHERE task_id=?6",
             params![actual_ms, deviation, on_time, quality, summary, task_id]).map_err(|e| e.to_string())?;
@@ -501,37 +607,67 @@ impl StorageManager {
         let mut stmt = match conn.prepare("SELECT task_id, description, budget_ms, actual_ms, on_time, quality_score FROM task_sessions WHERE actual_ms IS NOT NULL AND description LIKE ?1 ORDER BY start_ts DESC LIMIT ?2") {
             Ok(s) => s, Err(_) => return vec![],
         };
-        stmt.query_map(params![format!("%{}%", description_kw), limit as i64], |row| {
-            Ok(serde_json::json!({
-                "task_id": row.get::<_, String>(0)?, "description": row.get::<_, String>(1)?,
-                "budget_ms": row.get::<_, i64>(2)?, "actual_ms": row.get::<_, i64>(3)?,
-                "on_time": row.get::<_, bool>(4)?, "quality": row.get::<_, Option<f64>>(5)?,
-            }))
-        }).map(|r| r.filter_map(|x| x.ok()).collect()).unwrap_or_default()
+        stmt.query_map(
+            params![format!("%{}%", description_kw), limit as i64],
+            |row| {
+                Ok(serde_json::json!({
+                    "task_id": row.get::<_, String>(0)?, "description": row.get::<_, String>(1)?,
+                    "budget_ms": row.get::<_, i64>(2)?, "actual_ms": row.get::<_, i64>(3)?,
+                    "on_time": row.get::<_, bool>(4)?, "quality": row.get::<_, Option<f64>>(5)?,
+                }))
+            },
+        )
+        .map(|r| r.filter_map(|x| x.ok()).collect())
+        .unwrap_or_default()
     }
-
 
     // ═══ P0 时间效性: 相位机证据计数器 ═══
 
     fn ensure_task_cols(conn: &rusqlite::Connection) {
         let _ = conn.execute("CREATE TABLE IF NOT EXISTS task_sessions (task_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, user_id TEXT NOT NULL, description TEXT NOT NULL, start_ts INTEGER NOT NULL, budget_ms INTEGER NOT NULL, actual_ms INTEGER, deviation REAL, on_time BOOLEAN, quality_score REAL, outcome_summary TEXT, created_at INTEGER DEFAULT (strftime('%s','now')))", []);
-        for col in ["memory_ops INTEGER DEFAULT 0", "alternatives INTEGER DEFAULT 0",
-                    "revisions INTEGER DEFAULT 0", "checks INTEGER DEFAULT 0",
-                    "utilization_pct REAL", "low_utilization BOOLEAN DEFAULT 0", "saturation_note TEXT",
-                    "parent_task_id TEXT", "checkpoints TEXT",
-                    "alerts TEXT", "judge_score REAL", "judge_note TEXT",
-                    "first_memory_op_ts INTEGER", "active_ms INTEGER", "last_activity_ts INTEGER",
-                    "open_questions TEXT", "iteration_log TEXT", "reflection_pushed INTEGER",
-                    "clock_offset_ms INTEGER",
-                    "flow_last_active_ms INTEGER", "flow_last_ts INTEGER",
-                    "est_ms INTEGER", "task_class TEXT", "real_active_ms INTEGER",
-                    "over_budget_pct REAL", "wait_attempts INTEGER DEFAULT 0", "wait_evidence_sig TEXT", "first_wait_ts INTEGER", "stop_reason TEXT", "goal_json TEXT"] {
+        for col in [
+            "memory_ops INTEGER DEFAULT 0",
+            "alternatives INTEGER DEFAULT 0",
+            "revisions INTEGER DEFAULT 0",
+            "checks INTEGER DEFAULT 0",
+            "utilization_pct REAL",
+            "low_utilization BOOLEAN DEFAULT 0",
+            "saturation_note TEXT",
+            "parent_task_id TEXT",
+            "checkpoints TEXT",
+            "alerts TEXT",
+            "judge_score REAL",
+            "judge_note TEXT",
+            "first_memory_op_ts INTEGER",
+            "active_ms INTEGER",
+            "last_activity_ts INTEGER",
+            "open_questions TEXT",
+            "iteration_log TEXT",
+            "reflection_pushed INTEGER",
+            "clock_offset_ms INTEGER",
+            "flow_last_active_ms INTEGER",
+            "flow_last_ts INTEGER",
+            "est_ms INTEGER",
+            "task_class TEXT",
+            "real_active_ms INTEGER",
+            "over_budget_pct REAL",
+            "wait_attempts INTEGER DEFAULT 0",
+            "wait_evidence_sig TEXT",
+            "first_wait_ts INTEGER",
+            "stop_reason TEXT",
+            "goal_json TEXT",
+        ] {
             let _ = conn.execute(&format!("ALTER TABLE task_sessions ADD COLUMN {}", col), []);
         }
     }
 
     pub fn bump_task_counter(&self, task_id: &str, field: &str) {
-        if !matches!(field, "memory_ops" | "alternatives" | "revisions" | "checks") { return; }
+        if !matches!(
+            field,
+            "memory_ops" | "alternatives" | "revisions" | "checks"
+        ) {
+            return;
+        }
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
         if field == "memory_ops" {
@@ -553,8 +689,12 @@ impl StorageManager {
     pub fn get_task_active_ms(&self, task_id: &str) -> i64 {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        conn.query_row("SELECT COALESCE(active_ms,0) FROM task_sessions WHERE task_id=?1",
-            params![task_id], |r| r.get::<_, i64>(0)).unwrap_or(0)
+        conn.query_row(
+            "SELECT COALESCE(active_ms,0) FROM task_sessions WHERE task_id=?1",
+            params![task_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
     }
 
     pub fn get_task_history_stats(&self, user_id: &str) -> (i64, i64, f64) {
@@ -564,12 +704,16 @@ impl StorageManager {
             params![user_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap_or((0, 0, 0.0))
     }
 
-
     pub fn get_first_memory_op_ts(&self, task_id: &str) -> Option<i64> {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        conn.query_row("SELECT first_memory_op_ts FROM task_sessions WHERE task_id=?1",
-            params![task_id], |r| r.get::<_, Option<i64>>(0)).ok().flatten()
+        conn.query_row(
+            "SELECT first_memory_op_ts FROM task_sessions WHERE task_id=?1",
+            params![task_id],
+            |r| r.get::<_, Option<i64>>(0),
+        )
+        .ok()
+        .flatten()
     }
 
     pub fn set_task_alternatives(&self, task_id: &str, n: i64) {
@@ -592,7 +736,18 @@ impl StorageManager {
             params![user_id], |r| r.get::<_, String>(0)).ok()
     }
 
-    pub fn complete_task_v2(&self, task_id: &str, actual_ms: i64, deviation: f64, on_time: bool, quality: f64, summary: &str, utilization_pct: f64, low_utilization: bool, saturation_note: &str) -> Result<(), String> {
+    pub fn complete_task_v2(
+        &self,
+        task_id: &str,
+        actual_ms: i64,
+        deviation: f64,
+        on_time: bool,
+        quality: f64,
+        summary: &str,
+        utilization_pct: f64,
+        low_utilization: bool,
+        saturation_note: &str,
+    ) -> Result<(), String> {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
         conn.execute("UPDATE task_sessions SET actual_ms=?1, deviation=?2, on_time=?3, quality_score=?4, outcome_summary=?5, utilization_pct=?6, low_utilization=?7, saturation_note=?8 WHERE task_id=?9",
@@ -602,29 +757,46 @@ impl StorageManager {
     // ═══ P1 时间效性: 时间树 + 检查点 ═══
 
     pub fn attach_task_parent(&self, task_id: &str, parent_task_id: &str) {
-        if task_id == parent_task_id { return; }
+        if task_id == parent_task_id {
+            return;
+        }
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        let _ = conn.execute("UPDATE task_sessions SET parent_task_id=?1 WHERE task_id=?2 AND actual_ms IS NULL", params![parent_task_id, task_id]);
+        let _ = conn.execute(
+            "UPDATE task_sessions SET parent_task_id=?1 WHERE task_id=?2 AND actual_ms IS NULL",
+            params![parent_task_id, task_id],
+        );
     }
 
     pub fn append_checkpoint(&self, task_id: &str, note: &str) {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        let existing: String = conn.query_row("SELECT COALESCE(checkpoints,'[]') FROM task_sessions WHERE task_id=?1",
-            params![task_id], |r| r.get(0)).unwrap_or_else(|_| "[]".to_string());
+        let existing: String = conn
+            .query_row(
+                "SELECT COALESCE(checkpoints,'[]') FROM task_sessions WHERE task_id=?1",
+                params![task_id],
+                |r| r.get(0),
+            )
+            .unwrap_or_else(|_| "[]".to_string());
         let mut arr: Vec<serde_json::Value> = serde_json::from_str(&existing).unwrap_or_default();
         arr.push(serde_json::json!({"ts": chrono::Utc::now().timestamp(), "note": note}));
-        let _ = conn.execute("UPDATE task_sessions SET checkpoints=?1 WHERE task_id=?2",
-            params![serde_json::to_string(&arr).unwrap_or_default(), task_id]);
+        let _ = conn.execute(
+            "UPDATE task_sessions SET checkpoints=?1 WHERE task_id=?2",
+            params![serde_json::to_string(&arr).unwrap_or_default(), task_id],
+        );
     }
 
     pub fn get_task_checkpoints(&self, task_id: &str) -> serde_json::Value {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        conn.query_row("SELECT COALESCE(checkpoints,'[]') FROM task_sessions WHERE task_id=?1",
-            params![task_id], |r| r.get::<_, String>(0))
-            .ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(serde_json::json!([]))
+        conn.query_row(
+            "SELECT COALESCE(checkpoints,'[]') FROM task_sessions WHERE task_id=?1",
+            params![task_id],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(serde_json::json!([]))
     }
 
     pub fn list_child_tasks(&self, parent_task_id: &str) -> Vec<serde_json::Value> {
@@ -633,58 +805,85 @@ impl StorageManager {
         let mut stmt = match conn.prepare("SELECT task_id, description, budget_ms, actual_ms FROM task_sessions WHERE parent_task_id=?1 ORDER BY start_ts ASC") {
             Ok(s) => s, Err(_) => return vec![],
         };
-        stmt.query_map(params![parent_task_id], |row| Ok(serde_json::json!({
-            "task_id": row.get::<_, String>(0)?, "description": row.get::<_, String>(1)?,
-            "budget_ms": row.get::<_, i64>(2)?, "actual_ms": row.get::<_, Option<i64>>(3)?,
-        }))).map(|r| r.filter_map(|x| x.ok()).collect()).unwrap_or_default()
+        stmt.query_map(params![parent_task_id], |row| {
+            Ok(serde_json::json!({
+                "task_id": row.get::<_, String>(0)?, "description": row.get::<_, String>(1)?,
+                "budget_ms": row.get::<_, i64>(2)?, "actual_ms": row.get::<_, Option<i64>>(3)?,
+            }))
+        })
+        .map(|r| r.filter_map(|x| x.ok()).collect())
+        .unwrap_or_default()
     }
 
     pub fn append_task_alert(&self, task_id: &str, urgency: &str, message: &str, blocking: bool) {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        let existing: String = conn.query_row("SELECT COALESCE(alerts,'[]') FROM task_sessions WHERE task_id=?1",
-            params![task_id], |r| r.get(0)).unwrap_or_else(|_| "[]".to_string());
+        let existing: String = conn
+            .query_row(
+                "SELECT COALESCE(alerts,'[]') FROM task_sessions WHERE task_id=?1",
+                params![task_id],
+                |r| r.get(0),
+            )
+            .unwrap_or_else(|_| "[]".to_string());
         let mut arr: Vec<serde_json::Value> = serde_json::from_str(&existing).unwrap_or_default();
         arr.push(serde_json::json!({"ts": chrono::Utc::now().timestamp(), "urgency": urgency, "message": message, "blocking": blocking}));
-        let _ = conn.execute("UPDATE task_sessions SET alerts=?1 WHERE task_id=?2",
-            params![serde_json::to_string(&arr).unwrap_or_default(), task_id]);
+        let _ = conn.execute(
+            "UPDATE task_sessions SET alerts=?1 WHERE task_id=?2",
+            params![serde_json::to_string(&arr).unwrap_or_default(), task_id],
+        );
     }
 
     pub fn get_task_alerts(&self, task_id: &str) -> serde_json::Value {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        conn.query_row("SELECT COALESCE(alerts,'[]') FROM task_sessions WHERE task_id=?1",
-            params![task_id], |r| r.get::<_, String>(0))
-            .ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(serde_json::json!([]))
+        conn.query_row(
+            "SELECT COALESCE(alerts,'[]') FROM task_sessions WHERE task_id=?1",
+            params![task_id],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(serde_json::json!([]))
     }
 
     pub fn set_task_judge(&self, task_id: &str, score: f64, note: &str) {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        let _ = conn.execute("UPDATE task_sessions SET judge_score=?1, judge_note=?2 WHERE task_id=?3",
-            params![score, note, task_id]);
+        let _ = conn.execute(
+            "UPDATE task_sessions SET judge_score=?1, judge_note=?2 WHERE task_id=?3",
+            params![score, note, task_id],
+        );
     }
 
     pub fn set_task_open_questions(&self, task_id: &str, qs: &[String]) {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        let _ = conn.execute("UPDATE task_sessions SET open_questions=?1 WHERE task_id=?2",
-            params![serde_json::to_string(qs).unwrap_or_default(), task_id]);
+        let _ = conn.execute(
+            "UPDATE task_sessions SET open_questions=?1 WHERE task_id=?2",
+            params![serde_json::to_string(qs).unwrap_or_default(), task_id],
+        );
     }
 
     pub fn get_task_open_questions(&self, task_id: &str) -> serde_json::Value {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        conn.query_row("SELECT COALESCE(open_questions,'[]') FROM task_sessions WHERE task_id=?1",
-            params![task_id], |r| r.get::<_, String>(0))
-            .ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(serde_json::json!([]))
+        conn.query_row(
+            "SELECT COALESCE(open_questions,'[]') FROM task_sessions WHERE task_id=?1",
+            params![task_id],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(serde_json::json!([]))
     }
 
     pub fn set_task_iteration_log(&self, task_id: &str, iters: &[serde_json::Value]) {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        let _ = conn.execute("UPDATE task_sessions SET iteration_log=?1 WHERE task_id=?2",
-            params![serde_json::to_string(iters).unwrap_or_default(), task_id]);
+        let _ = conn.execute(
+            "UPDATE task_sessions SET iteration_log=?1 WHERE task_id=?2",
+            params![serde_json::to_string(iters).unwrap_or_default(), task_id],
+        );
     }
 
     pub fn get_last_judgment(&self, user_id: &str) -> Option<(f64, String)> {
@@ -699,15 +898,24 @@ impl StorageManager {
     pub fn get_task_class(&self, task_id: &str) -> String {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        conn.query_row("SELECT COALESCE(task_class,'') FROM task_sessions WHERE task_id=?1",
-            params![task_id], |r| r.get::<_, String>(0)).unwrap_or_default()
+        conn.query_row(
+            "SELECT COALESCE(task_class,'') FROM task_sessions WHERE task_id=?1",
+            params![task_id],
+            |r| r.get::<_, String>(0),
+        )
+        .unwrap_or_default()
     }
 
     pub fn get_task_est(&self, task_id: &str) -> Option<i64> {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        conn.query_row("SELECT est_ms FROM task_sessions WHERE task_id=?1", params![task_id],
-            |r| r.get::<_, Option<i64>>(0)).ok().flatten()
+        conn.query_row(
+            "SELECT est_ms FROM task_sessions WHERE task_id=?1",
+            params![task_id],
+            |r| r.get::<_, Option<i64>>(0),
+        )
+        .ok()
+        .flatten()
     }
 
     // P34 停止谈判: WAIT计数与证据签名(识别零新证据的重复停止尝试)
@@ -727,8 +935,13 @@ impl StorageManager {
     pub fn get_first_wait_ts(&self, task_id: &str) -> Option<i64> {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        conn.query_row("SELECT first_wait_ts FROM task_sessions WHERE task_id=?1",
-            params![task_id], |r| r.get::<_, Option<i64>>(0)).ok().flatten()
+        conn.query_row(
+            "SELECT first_wait_ts FROM task_sessions WHERE task_id=?1",
+            params![task_id],
+            |r| r.get::<_, Option<i64>>(0),
+        )
+        .ok()
+        .flatten()
     }
 
     /// P34d 停留画像: 同类任务几轮改进才饱和(PonderNet式自校准停止)
@@ -742,15 +955,27 @@ impl StorageManager {
             .unwrap_or_default();
         drop(conn);
         let n = rows.len();
-        if n == 0 { return serde_json::json!({"samples": 0}); }
+        if n == 0 {
+            return serde_json::json!({"samples": 0});
+        }
         let mut wa: Vec<i64> = rows.iter().map(|(w, _, _)| *w).collect();
         wa.sort();
         let med_iter = wa[n / 2];
-        let earned = rows.iter().filter(|(_, _, s)| s.as_deref() == Some("earned_saturation")).count();
-        let mut earned_rows: Vec<f64> = rows.iter().filter(|(_, _, s)| s.as_deref() == Some("earned_saturation")).map(|(_, u, _)| *u).collect();
+        let earned = rows
+            .iter()
+            .filter(|(_, _, s)| s.as_deref() == Some("earned_saturation"))
+            .count();
+        let mut earned_rows: Vec<f64> = rows
+            .iter()
+            .filter(|(_, _, s)| s.as_deref() == Some("earned_saturation"))
+            .map(|(_, u, _)| *u)
+            .collect();
         earned_rows.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let med_earned: serde_json::Value = if earned_rows.is_empty() { serde_json::Value::Null }
-            else { serde_json::json!(earned_rows[earned_rows.len() / 2]) };
+        let med_earned: serde_json::Value = if earned_rows.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::json!(earned_rows[earned_rows.len() / 2])
+        };
         serde_json::json!({
             "samples": n,
             "median_wait_iterations": med_iter,
@@ -764,42 +989,71 @@ impl StorageManager {
     pub fn count_pulse_tasks(&self, user_id: &str) -> i64 {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        conn.query_row("SELECT count(*) FROM task_sessions WHERE user_id=?1 AND real_active_ms IS NOT NULL",
-            params![user_id], |r| r.get::<_, i64>(0)).unwrap_or(0)
+        conn.query_row(
+            "SELECT count(*) FROM task_sessions WHERE user_id=?1 AND real_active_ms IS NOT NULL",
+            params![user_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
     }
 
     pub fn set_task_stop_reason(&self, task_id: &str, reason: &str) {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        let _ = conn.execute("UPDATE task_sessions SET stop_reason=?1 WHERE task_id=?2", params![reason, task_id]);
+        let _ = conn.execute(
+            "UPDATE task_sessions SET stop_reason=?1 WHERE task_id=?2",
+            params![reason, task_id],
+        );
     }
 
     /// P35 目标契约: 结构化goal(objective/scope/constraints/done_when/stop_if)持久化
     pub fn set_task_goal_json(&self, task_id: &str, goal_json: &str) {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        let _ = conn.execute("UPDATE task_sessions SET goal_json=?1 WHERE task_id=?2", params![goal_json, task_id]);
+        let _ = conn.execute(
+            "UPDATE task_sessions SET goal_json=?1 WHERE task_id=?2",
+            params![goal_json, task_id],
+        );
     }
 
     /// P35: 独立访问器(get_task_session按位置索引, 新列必须独立读取 — P34d同款陷阱)
     pub fn get_task_goal_json(&self, task_id: &str) -> Option<String> {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        conn.query_row("SELECT goal_json FROM task_sessions WHERE task_id=?1",
-            params![task_id], |r| r.get::<_, Option<String>>(0)).ok().flatten()
+        conn.query_row(
+            "SELECT goal_json FROM task_sessions WHERE task_id=?1",
+            params![task_id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
     }
 
     /// P27 Pulse: 写入插件上报的真实活跃时间(带归属校验的调用方负责)
-    pub fn set_real_active(&self, task_id: &str, user_id: &str, real_ms: i64) -> Result<(), String> {
+    pub fn set_real_active(
+        &self,
+        task_id: &str,
+        user_id: &str,
+        real_ms: i64,
+    ) -> Result<(), String> {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        let owner: String = conn.query_row("SELECT user_id FROM task_sessions WHERE task_id=?1",
-            params![task_id], |r| r.get(0)).map_err(|_| "task not found".to_string())?;
+        let owner: String = conn
+            .query_row(
+                "SELECT user_id FROM task_sessions WHERE task_id=?1",
+                params![task_id],
+                |r| r.get(0),
+            )
+            .map_err(|_| "task not found".to_string())?;
         if owner != user_id {
             return Err("task does not belong to this user".into());
         }
-        let updated = conn.execute("UPDATE task_sessions SET real_active_ms=?1 WHERE task_id=?2 AND actual_ms IS NULL",
-            params![real_ms, task_id]).map_err(|e| e.to_string())?;
+        let updated = conn
+            .execute(
+                "UPDATE task_sessions SET real_active_ms=?1 WHERE task_id=?2 AND actual_ms IS NULL",
+                params![real_ms, task_id],
+            )
+            .map_err(|e| e.to_string())?;
         if updated == 0 {
             return Err("task not found or already completed".into());
         }
@@ -818,8 +1072,18 @@ impl StorageManager {
     pub fn set_task_est_class(&self, task_id: &str, est_ms: i64, task_class: &str) {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        let _ = conn.execute("UPDATE task_sessions SET est_ms=?1, task_class=?2 WHERE task_id=?3",
-            params![if est_ms > 0 { Some(est_ms) } else { None }, if task_class.is_empty() { None } else { Some(task_class) }, task_id]);
+        let _ = conn.execute(
+            "UPDATE task_sessions SET est_ms=?1, task_class=?2 WHERE task_id=?3",
+            params![
+                if est_ms > 0 { Some(est_ms) } else { None },
+                if task_class.is_empty() {
+                    None
+                } else {
+                    Some(task_class)
+                },
+                task_id
+            ],
+        );
     }
 
     pub fn get_self_calibration(&self, task_class: &str) -> serde_json::Value {
@@ -837,19 +1101,23 @@ impl StorageManager {
             out0["dwell"] = self.get_dwell_profile(task_class);
             return out0;
         }
-        let errs: Vec<f64> = rows.iter()
+        let errs: Vec<f64> = rows
+            .iter()
             .map(|(e, a)| (*e as f64 - *a as f64) / (*e as f64).max(1.0))
             .collect();
-        let mut sorted = errs.clone(); sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mut sorted = errs.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let med = sorted[sorted.len() / 2];
         let ratio = (1.0 - med).max(0.1); // act≈est×ratio: 高估(正偏差)→系数<1压小
-        // P31: 方差(熟练度判定) + 人类典型值 + 你的中位(时间双语三量)
+                                          // P31: 方差(熟练度判定) + 人类典型值 + 你的中位(时间双语三量)
         let actuals: Vec<f64> = rows.iter().map(|(_, a)| *a as f64 / 60000.0).collect();
         let ests: Vec<f64> = rows.iter().map(|(e, _)| *e as f64 / 60000.0).collect();
         let mean_err: f64 = errs.iter().sum::<f64>() / errs.len() as f64;
-        let variance: f64 = errs.iter().map(|e| (e - mean_err).powi(2)).sum::<f64>() / errs.len() as f64;
+        let variance: f64 =
+            errs.iter().map(|e| (e - mean_err).powi(2)).sum::<f64>() / errs.len() as f64;
         let cv = variance.sqrt() / mean_err.abs().max(0.01); // 变异系数
-        let mut sorted_actuals = actuals.clone(); sorted_actuals.sort_by(|a,b| a.partial_cmp(b).unwrap());
+        let mut sorted_actuals = actuals.clone();
+        sorted_actuals.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let your_median = sorted_actuals[sorted_actuals.len() / 2];
         let human_typical: f64 = ests.iter().sum::<f64>() / ests.len() as f64;
         let proficient = rows.len() >= 3 && cv < 0.15;
@@ -884,16 +1152,20 @@ impl StorageManager {
             "SELECT COALESCE(flow_last_active_ms,0), COALESCE(flow_last_ts,0) FROM task_sessions WHERE task_id=?1",
             params![task_id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
         let now = chrono::Utc::now().timestamp_millis();
-        let _ = conn.execute("UPDATE task_sessions SET flow_last_active_ms=?1, flow_last_ts=?2 WHERE task_id=?3",
-            params![active_now, now, task_id]);
+        let _ = conn.execute(
+            "UPDATE task_sessions SET flow_last_active_ms=?1, flow_last_ts=?2 WHERE task_id=?3",
+            params![active_now, now, task_id],
+        );
         prev.filter(|(_, ts)| *ts > 0)
     }
 
     pub fn set_clock_offset(&self, task_id: &str, offset_ms: i64) {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
-        let _ = conn.execute("UPDATE task_sessions SET clock_offset_ms=?1 WHERE task_id=?2 AND actual_ms IS NULL",
-            params![offset_ms, task_id]);
+        let _ = conn.execute(
+            "UPDATE task_sessions SET clock_offset_ms=?1 WHERE task_id=?2 AND actual_ms IS NULL",
+            params![offset_ms, task_id],
+        );
     }
 
     /// 一次性标记: 返回true=本次新标记(此前未推送过反思信号)
@@ -904,7 +1176,15 @@ impl StorageManager {
             params![task_id]).map(|n| n == 1).unwrap_or(false)
     }
     /// Skills强制介入: agent授权管理
-    pub fn upsert_agent_grant(&self, agent_id: &str, user_id: &str, skill_name: &str, version: &str, auto_install: bool, auto_update: bool) -> Result<(), String> {
+    pub fn upsert_agent_grant(
+        &self,
+        agent_id: &str,
+        user_id: &str,
+        skill_name: &str,
+        version: &str,
+        auto_install: bool,
+        auto_update: bool,
+    ) -> Result<(), String> {
         let conn = self.conn.lock();
         conn.execute("CREATE TABLE IF NOT EXISTS agent_skills_grants (agent_id TEXT NOT NULL, user_id TEXT NOT NULL, skill_name TEXT NOT NULL, version TEXT, auto_install BOOLEAN DEFAULT FALSE, auto_update BOOLEAN DEFAULT FALSE, installed_at INTEGER, last_sync_at INTEGER, PRIMARY KEY (agent_id, user_id, skill_name))", []).map_err(|e| e.to_string())?;
         conn.execute("INSERT OR REPLACE INTO agent_skills_grants (agent_id, user_id, skill_name, version, auto_install, auto_update, installed_at, last_sync_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
@@ -926,15 +1206,34 @@ impl StorageManager {
 
     pub fn save_drive_kv(&self, k: &str, v: &str) -> Result<(), String> {
         let conn = self.conn.lock();
-        conn.execute("CREATE TABLE IF NOT EXISTS drive_kv (k TEXT PRIMARY KEY, v TEXT)", []).map_err(|e| e.to_string())?;
-        conn.execute("INSERT OR REPLACE INTO drive_kv (k, v) VALUES (?1, ?2)", params![k, v]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS drive_kv (k TEXT PRIMARY KEY, v TEXT)",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO drive_kv (k, v) VALUES (?1, ?2)",
+            params![k, v],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
     pub fn load_drive_kv(&self, k: &str) -> Option<String> {
         let conn = self.conn.lock();
-        if conn.execute("CREATE TABLE IF NOT EXISTS drive_kv (k TEXT PRIMARY KEY, v TEXT)", []).is_err() { return None; }
-        conn.query_row("SELECT v FROM drive_kv WHERE k=?1", params![k], |r| r.get(0)).ok()
+        if conn
+            .execute(
+                "CREATE TABLE IF NOT EXISTS drive_kv (k TEXT PRIMARY KEY, v TEXT)",
+                [],
+            )
+            .is_err()
+        {
+            return None;
+        }
+        conn.query_row("SELECT v FROM drive_kv WHERE k=?1", params![k], |r| {
+            r.get(0)
+        })
+        .ok()
     }
 
     /// L0: Load drive signals from SQLite on startup.
@@ -945,24 +1244,39 @@ impl StorageManager {
         conn.execute("CREATE TABLE IF NOT EXISTS drive_signals_archive AS SELECT * FROM drive_signals WHERE 1=0", []).map_err(|e| e.to_string())?;
         // 找executed/rejected/expired且超过7天的
         let old_ids: Vec<i64> = {
-            let mut stmt = conn.prepare("SELECT id, updated_at, data FROM drive_signals").map_err(|e| e.to_string())?;
-            let rows = stmt.query_map([], |row| {
-                let id: i64 = row.get(0)?;
-                let updated: i64 = row.get(1).unwrap_or(0);
-                let data: String = row.get(2).unwrap_or_default();
-                Ok((id, updated, data))
-            }).map_err(|e| e.to_string())?;
+            let mut stmt = conn
+                .prepare("SELECT id, updated_at, data FROM drive_signals")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| {
+                    let id: i64 = row.get(0)?;
+                    let updated: i64 = row.get(1).unwrap_or(0);
+                    let data: String = row.get(2).unwrap_or_default();
+                    Ok((id, updated, data))
+                })
+                .map_err(|e| e.to_string())?;
             rows.filter_map(|r| r.ok())
                 .filter(|(_, updated, data)| {
-                    *updated < cutoff && (data.contains("Executed") || data.contains("Rejected") || data.contains("Expired"))
+                    *updated < cutoff
+                        && (data.contains("Executed")
+                            || data.contains("Rejected")
+                            || data.contains("Expired"))
                 })
                 .map(|(id, _, _)| id)
                 .collect()
         };
-        if old_ids.is_empty() { return Ok(0); }
+        if old_ids.is_empty() {
+            return Ok(0);
+        }
         let mut moved = 0;
         for id in &old_ids {
-            if conn.execute("INSERT INTO drive_signals_archive SELECT * FROM drive_signals WHERE id=?1", params![id]).is_ok() {
+            if conn
+                .execute(
+                    "INSERT INTO drive_signals_archive SELECT * FROM drive_signals WHERE id=?1",
+                    params![id],
+                )
+                .is_ok()
+            {
                 let _ = conn.execute("DELETE FROM drive_signals WHERE id=?1", params![id]);
                 moved += 1;
             }
@@ -984,19 +1298,31 @@ impl StorageManager {
             params![cutoff]
         ).map_err(|e| e.to_string())?;
         if moved > 0 {
-            conn.execute("DELETE FROM tetrahedrons WHERE id IN (SELECT id FROM tetrahedrons_archive)", []).map_err(|e| e.to_string())?;
-            tracing::info!("[P1] archived {} stale superseded memories (>{})", moved, cutoff);
+            conn.execute(
+                "DELETE FROM tetrahedrons WHERE id IN (SELECT id FROM tetrahedrons_archive)",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+            tracing::info!(
+                "[P1] archived {} stale superseded memories (>{})",
+                moved,
+                cutoff
+            );
         }
         Ok(moved)
     }
 
     pub fn load_drive_signals(&self) -> Result<Vec<super::drive::DriveSignal>, String> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare("SELECT data FROM drive_signals ORDER BY id").map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            let data: String = row.get(0)?;
-            Ok(data)
-        }).map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT data FROM drive_signals ORDER BY id")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                let data: String = row.get(0)?;
+                Ok(data)
+            })
+            .map_err(|e| e.to_string())?;
 
         let mut signals = Vec::new();
         for row in rows {
@@ -1010,9 +1336,14 @@ impl StorageManager {
     }
     pub fn upsert_tetra(&self, tetra: &Tetrahedron) -> Result<(), String> {
         let conn = self.conn.lock();
-        let labels_json = self.encrypt_field(&serde_json::to_string(&tetra.data.labels).unwrap_or_else(|_| "[]".into()))?;
-        let aliases_json = self.encrypt_field(&serde_json::to_string(&tetra.data.aliases).unwrap_or_else(|_| "[]".into()))?;
-        let vertex_json = serde_json::to_string(&tetra.vertex_ids).unwrap_or_else(|_| "[0,0,0,0]".into());
+        let labels_json = self.encrypt_field(
+            &serde_json::to_string(&tetra.data.labels).unwrap_or_else(|_| "[]".into()),
+        )?;
+        let aliases_json = self.encrypt_field(
+            &serde_json::to_string(&tetra.data.aliases).unwrap_or_else(|_| "[]".into()),
+        )?;
+        let vertex_json =
+            serde_json::to_string(&tetra.vertex_ids).unwrap_or_else(|_| "[0,0,0,0]".into());
         let emb_blob = if tetra.data.embedding.is_empty() {
             None
         } else {
@@ -1025,7 +1356,9 @@ impl StorageManager {
             UPSERT_TETRA_SQL,
             params![
                 tetra.id,
-                tetra.core.x, tetra.core.y, tetra.core.z,
+                tetra.core.x,
+                tetra.core.y,
+                tetra.core.z,
                 encrypted_content,
                 content_hash,
                 labels_json,
@@ -1040,12 +1373,16 @@ impl StorageManager {
                 tetra.data.access_count as i32,
                 tetra.data.memory_type,
                 tetra.data.valid_from,
-                tetra.data.valid_to, tetra.data.identity_stamp, tetra.data.source_agent,
+                tetra.data.valid_to,
+                tetra.data.identity_stamp,
+                tetra.data.source_agent,
                 tetra.data.last_reviewed_ts,
-                tetra.data.expired_at, tetra.data.invalidated_at,
+                tetra.data.expired_at,
+                tetra.data.invalidated_at,
                 tetra.data.memory_class.clone(),
             ],
-        ).map_err(|e| format!("upsert tetra {}: {}", tetra.id, e))?;
+        )
+        .map_err(|e| format!("upsert tetra {}: {}", tetra.id, e))?;
         Ok(())
     }
 
@@ -1058,31 +1395,45 @@ impl StorageManager {
 
     pub fn update_mass(&self, id: TetraId, mass: f64) -> Result<(), String> {
         let conn = self.conn.lock();
-        conn.execute("UPDATE tetrahedrons SET mass = ?1 WHERE id = ?2", params![mass, id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE tetrahedrons SET mass = ?1 WHERE id = ?2",
+            params![mass, id],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
     pub fn update_aliases(&self, id: TetraId, aliases: &[String]) -> Result<(), String> {
         let conn = self.conn.lock();
-        let aliases_json = self.encrypt_field(&serde_json::to_string(aliases).unwrap_or_else(|_| "[]".into()))?;
-        conn.execute("UPDATE tetrahedrons SET aliases = ?1 WHERE id = ?2", params![aliases_json, id])
-            .map_err(|e| e.to_string())?;
+        let aliases_json =
+            self.encrypt_field(&serde_json::to_string(aliases).unwrap_or_else(|_| "[]".into()))?;
+        conn.execute(
+            "UPDATE tetrahedrons SET aliases = ?1 WHERE id = ?2",
+            params![aliases_json, id],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
     pub fn update_labels(&self, id: TetraId, labels: &[String]) -> Result<(), String> {
         let conn = self.conn.lock();
-        let labels_json = self.encrypt_field(&serde_json::to_string(labels).unwrap_or_else(|_| "[]".into()))?;
-        conn.execute("UPDATE tetrahedrons SET labels = ?1 WHERE id = ?2", params![labels_json, id])
-            .map_err(|e| e.to_string())?;
+        let labels_json =
+            self.encrypt_field(&serde_json::to_string(labels).unwrap_or_else(|_| "[]".into()))?;
+        conn.execute(
+            "UPDATE tetrahedrons SET labels = ?1 WHERE id = ?2",
+            params![labels_json, id],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
     pub fn update_enforced(&self, id: TetraId, enforced: bool) -> Result<(), String> {
         let conn = self.conn.lock();
-        conn.execute("UPDATE tetrahedrons SET enforced = ?1 WHERE id = ?2", params![enforced, id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE tetrahedrons SET enforced = ?1 WHERE id = ?2",
+            params![enforced, id],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -1093,7 +1444,14 @@ impl StorageManager {
         Ok(())
     }
 
-    pub fn save_health_snapshot(&self, total: i64, clusters: i64, feedback: i64, avg_imp: f64, enforced: i64) -> Result<(), String> {
+    pub fn save_health_snapshot(
+        &self,
+        total: i64,
+        clusters: i64,
+        feedback: i64,
+        avg_imp: f64,
+        enforced: i64,
+    ) -> Result<(), String> {
         let conn = self.conn.lock();
         let ts = chrono::Utc::now().timestamp();
         conn.execute(
@@ -1118,7 +1476,14 @@ impl StorageManager {
             }
         };
         let rows = match stmt.query_map(params![cutoff], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+            ))
         }) {
             Ok(r) => r,
             Err(e) => {
@@ -1131,8 +1496,11 @@ impl StorageManager {
 
     pub fn update_access_count(&self, id: TetraId, count: u32) -> Result<(), String> {
         let conn = self.conn.lock();
-        conn.execute("UPDATE tetrahedrons SET access_count = ?1 WHERE id = ?2", params![count, id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE tetrahedrons SET access_count = ?1 WHERE id = ?2",
+            params![count, id],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -1160,13 +1528,22 @@ impl StorageManager {
             })
         }) {
             Ok(r) => r,
-            Err(e) => { tracing::warn!("[Storage] archive_list_nodes query failed: {}", e); return vec![]; }
+            Err(e) => {
+                tracing::warn!("[Storage] archive_list_nodes query failed: {}", e);
+                return vec![];
+            }
         };
         rows.filter_map(|r| r.ok()).collect()
     }
 
     /// 插入或忽略档案节点（幂等，用于数据迁移和创建）
-    pub fn archive_upsert_node(&self, node_id: i64, parent_id: Option<i64>, node_type: &str, category: &str) -> Result<(), String> {
+    pub fn archive_upsert_node(
+        &self,
+        node_id: i64,
+        parent_id: Option<i64>,
+        node_type: &str,
+        category: &str,
+    ) -> Result<(), String> {
         let conn = self.conn.lock();
         let now = chrono::Utc::now().timestamp();
         conn.execute(
@@ -1177,7 +1554,12 @@ impl StorageManager {
     }
 
     /// 更新节点（移动父节点 / 改 category）
-    pub fn archive_update_node(&self, node_id: i64, parent_id: Option<i64>, category: Option<&str>) -> Result<(), String> {
+    pub fn archive_update_node(
+        &self,
+        node_id: i64,
+        parent_id: Option<i64>,
+        category: Option<&str>,
+    ) -> Result<(), String> {
         let conn = self.conn.lock();
         let now = chrono::Utc::now().timestamp();
         if let Some(cat) = category {
@@ -1198,8 +1580,11 @@ impl StorageManager {
     pub fn archive_soft_delete(&self, node_id: i64) -> Result<(), String> {
         let conn = self.conn.lock();
         let now = chrono::Utc::now().timestamp();
-        conn.execute("UPDATE archive_nodes SET archived = 1, updated_ts = ?1 WHERE node_id = ?2", params![now, node_id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE archive_nodes SET archived = 1, updated_ts = ?1 WHERE node_id = ?2",
+            params![now, node_id],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -1209,8 +1594,9 @@ impl StorageManager {
         conn.query_row(
             "SELECT 1 FROM archive_nodes WHERE node_id = ?1 AND archived = 0",
             params![node_id],
-            |_| Ok(())
-        ).is_ok()
+            |_| Ok(()),
+        )
+        .is_ok()
     }
 
     // ========================================================================
@@ -1230,32 +1616,43 @@ impl StorageManager {
     /// 查询最近 N 天的调用统计，返回 (date, count) 按日期升序
     pub fn api_stats_recent(&self, days: i64) -> Vec<(String, i64)> {
         let conn = self.conn.lock();
-        let cutoff = (chrono::Utc::now() - chrono::Duration::days(days)).format("%Y-%m-%d").to_string();
-        let mut stmt = match conn.prepare(
-            "SELECT date, count FROM api_call_stats WHERE date >= ?1 ORDER BY date ASC"
-        ) {
+        let cutoff = (chrono::Utc::now() - chrono::Duration::days(days))
+            .format("%Y-%m-%d")
+            .to_string();
+        let mut stmt = match conn
+            .prepare("SELECT date, count FROM api_call_stats WHERE date >= ?1 ORDER BY date ASC")
+        {
             Ok(s) => s,
-            Err(e) => { tracing::warn!("[Storage] api_stats_recent prepare failed: {}", e); return vec![]; }
+            Err(e) => {
+                tracing::warn!("[Storage] api_stats_recent prepare failed: {}", e);
+                return vec![];
+            }
         };
         let rows = match stmt.query_map(params![cutoff], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         }) {
             Ok(r) => r,
-            Err(e) => { tracing::warn!("[Storage] api_stats_recent query failed: {}", e); return vec![]; }
+            Err(e) => {
+                tracing::warn!("[Storage] api_stats_recent query failed: {}", e);
+                return vec![];
+            }
         };
         rows.filter_map(|r| r.ok()).collect()
     }
 
-
     /// 批量更新 access_count — 单事务一次锁，避免 N 次 update_access_count 的 N 次锁竞争
     pub fn batch_update_access_counts(&self, updates: &[(TetraId, u32)]) -> Result<(), String> {
-        if updates.is_empty() { return Ok(()); }
+        if updates.is_empty() {
+            return Ok(());
+        }
         let conn = self.conn.lock();
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-        let mut stmt = tx.prepare("UPDATE tetrahedrons SET access_count = ?1 WHERE id = ?2")
+        let mut stmt = tx
+            .prepare("UPDATE tetrahedrons SET access_count = ?1 WHERE id = ?2")
             .map_err(|e| e.to_string())?;
         for (id, count) in updates {
-            stmt.execute(params![count, id]).map_err(|e| e.to_string())?;
+            stmt.execute(params![count, id])
+                .map_err(|e| e.to_string())?;
         }
         drop(stmt);
         tx.commit().map_err(|e| e.to_string())?;
@@ -1271,9 +1668,14 @@ impl StorageManager {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         for &id in ids {
             if let Some(tetra) = space.get_tetrahedron(id) {
-                let labels_json = self.encrypt_field(&serde_json::to_string(&tetra.data.labels).unwrap_or_else(|_| "[]".into()))?;
-                let aliases_json = self.encrypt_field(&serde_json::to_string(&tetra.data.aliases).unwrap_or_else(|_| "[]".into()))?;
-                let vertex_json = serde_json::to_string(&tetra.vertex_ids).unwrap_or_else(|_| "[0,0,0,0]".into());
+                let labels_json = self.encrypt_field(
+                    &serde_json::to_string(&tetra.data.labels).unwrap_or_else(|_| "[]".into()),
+                )?;
+                let aliases_json = self.encrypt_field(
+                    &serde_json::to_string(&tetra.data.aliases).unwrap_or_else(|_| "[]".into()),
+                )?;
+                let vertex_json =
+                    serde_json::to_string(&tetra.vertex_ids).unwrap_or_else(|_| "[0,0,0,0]".into());
                 let emb_blob = if tetra.data.embedding.is_empty() {
                     None
                 } else {
@@ -1285,7 +1687,9 @@ impl StorageManager {
                     UPSERT_TETRA_SQL,
                     params![
                         tetra.id,
-                        tetra.core.x, tetra.core.y, tetra.core.z,
+                        tetra.core.x,
+                        tetra.core.y,
+                        tetra.core.z,
                         encrypted_content,
                         content_hash,
                         labels_json,
@@ -1300,12 +1704,16 @@ impl StorageManager {
                         tetra.data.access_count as i32,
                         tetra.data.memory_type,
                         tetra.data.valid_from,
-                        tetra.data.valid_to, tetra.data.identity_stamp, tetra.data.source_agent,
+                        tetra.data.valid_to,
+                        tetra.data.identity_stamp,
+                        tetra.data.source_agent,
                         tetra.data.last_reviewed_ts,
-                        tetra.data.expired_at, tetra.data.invalidated_at,
+                        tetra.data.expired_at,
+                        tetra.data.invalidated_at,
                         tetra.data.memory_class.clone(),
                     ],
-                ).map_err(|e| format!("batch upsert {}: {}", id, e))?;
+                )
+                .map_err(|e| format!("batch upsert {}: {}", id, e))?;
                 count += 1;
             }
         }
@@ -1325,7 +1733,8 @@ impl StorageManager {
         conn.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
             params![key, value],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -1339,7 +1748,8 @@ impl StorageManager {
             tx.execute(
                 "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
                 params![key, value],
-            ).map_err(|e| format!("set_meta_batch({}): {}", key, e))?;
+            )
+            .map_err(|e| format!("set_meta_batch({}): {}", key, e))?;
         }
         tx.commit().map_err(|e| e.to_string())?;
         Ok(())
@@ -1354,20 +1764,25 @@ impl StorageManager {
 
     pub fn tetra_count(&self) -> usize {
         let conn = self.conn.lock();
-        conn.query_row("SELECT COUNT(*) FROM tetrahedrons", [], |row| row.get::<_, i64>(0))
-            .unwrap_or(0) as usize
+        conn.query_row("SELECT COUNT(*) FROM tetrahedrons", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap_or(0) as usize
     }
 
     pub fn relation_count(&self) -> usize {
         let conn = self.conn.lock();
-        conn.query_row("SELECT COUNT(*) FROM relations", [], |row| row.get::<_, i64>(0))
-            .unwrap_or(0) as usize
+        conn.query_row("SELECT COUNT(*) FROM relations", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap_or(0) as usize
     }
 
     pub fn backup(&self) -> Result<String, String> {
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
         let backup_path = self.backup_dir.join(format!("epicode_{}.db", timestamp));
-        let backup_str = backup_path.to_str()
+        let backup_str = backup_path
+            .to_str()
             .ok_or_else(|| "backup path is not valid UTF-8".to_string())?;
 
         let conn = self.conn.lock();
@@ -1390,7 +1805,11 @@ impl StorageManager {
                         .and_then(|s| s.strip_suffix(".db"))
                         .unwrap_or("unknown")
                         .to_string();
-                    backups.push(BackupInfo { timestamp: ts, size_bytes: size, filename: name });
+                    backups.push(BackupInfo {
+                        timestamp: ts,
+                        size_bytes: size,
+                        filename: name,
+                    });
                 }
             }
         }
@@ -1412,53 +1831,118 @@ impl StorageManager {
             "SELECT id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, memory_type, valid_from, valid_to, identity_stamp, source_agent, last_reviewed_ts, expired_at, invalidated_at, memory_class FROM tetrahedrons ORDER BY id"
         ).map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map([], |row| {
-            let id: u64 = row.get(0)?;
-            let core_x: f64 = row.get(1)?;
-            let core_y: f64 = row.get(2)?;
-            let core_z: f64 = row.get(3)?;
-            let content: String = row.get(4)?;
-            let decrypted_content = self.decrypt_field(&content);
-            let content_hash: u64 = {
-                let h: i64 = row.get(5)?;
-                h as u64
-            };
-            let labels_json = self.decrypt_field(&row.get::<_, String>(6)?);
-            let mass: f64 = row.get(7)?;
-            let timestamp: i64 = row.get(8)?;
-            let aliases_json = self.decrypt_field(&row.get::<_, String>(9)?);
-            let vertex_json: String = row.get::<_, String>(10).unwrap_or_else(|_| "[0,0,0,0]".into());
-            let emb_blob: Option<Vec<u8>> = row.get(11).unwrap_or(None);
-            let importance: f64 = row.get::<_, f64>(12).unwrap_or(1.0);
-            let enforced: bool = row.get::<_, i32>(13).unwrap_or(0) != 0;
-            let rationale: Option<String> = row.get(14).unwrap_or(None);
-            let access_count: u32 = row.get::<_, i32>(15).unwrap_or(0) as u32;
-            let memory_type: Option<String> = row.get(16).unwrap_or(None);
-            let valid_from: i64 = row.get::<_, i64>(17).unwrap_or(0);
-            let valid_to: Option<i64> = row.get(18).unwrap_or(None);
-            let identity_stamp: Option<String> = row.get(19).unwrap_or(None);
-            let source_agent: Option<String> = row.get(20).unwrap_or(None);
-            let last_reviewed_ts: Option<i64> = row.get(21).unwrap_or(None);
-            let expired_at: Option<i64> = row.get(22).unwrap_or(None);
-            let invalidated_at: Option<i64> = row.get(23).unwrap_or(None);
-            let memory_class: Option<String> = row.get(24).unwrap_or(None);
+        let rows = stmt
+            .query_map([], |row| {
+                let id: u64 = row.get(0)?;
+                let core_x: f64 = row.get(1)?;
+                let core_y: f64 = row.get(2)?;
+                let core_z: f64 = row.get(3)?;
+                let content: String = row.get(4)?;
+                let decrypted_content = self.decrypt_field(&content);
+                let content_hash: u64 = {
+                    let h: i64 = row.get(5)?;
+                    h as u64
+                };
+                let labels_json = self.decrypt_field(&row.get::<_, String>(6)?);
+                let mass: f64 = row.get(7)?;
+                let timestamp: i64 = row.get(8)?;
+                let aliases_json = self.decrypt_field(&row.get::<_, String>(9)?);
+                let vertex_json: String = row
+                    .get::<_, String>(10)
+                    .unwrap_or_else(|_| "[0,0,0,0]".into());
+                let emb_blob: Option<Vec<u8>> = row.get(11).unwrap_or(None);
+                let importance: f64 = row.get::<_, f64>(12).unwrap_or(1.0);
+                let enforced: bool = row.get::<_, i32>(13).unwrap_or(0) != 0;
+                let rationale: Option<String> = row.get(14).unwrap_or(None);
+                let access_count: u32 = row.get::<_, i32>(15).unwrap_or(0) as u32;
+                let memory_type: Option<String> = row.get(16).unwrap_or(None);
+                let valid_from: i64 = row.get::<_, i64>(17).unwrap_or(0);
+                let valid_to: Option<i64> = row.get(18).unwrap_or(None);
+                let identity_stamp: Option<String> = row.get(19).unwrap_or(None);
+                let source_agent: Option<String> = row.get(20).unwrap_or(None);
+                let last_reviewed_ts: Option<i64> = row.get(21).unwrap_or(None);
+                let expired_at: Option<i64> = row.get(22).unwrap_or(None);
+                let invalidated_at: Option<i64> = row.get(23).unwrap_or(None);
+                let memory_class: Option<String> = row.get(24).unwrap_or(None);
 
-            let labels: Vec<String> = serde_json::from_str(&labels_json).unwrap_or_else(|e| {
-                tracing::warn!("[Storage] labels parse error (may be plaintext migration): {}", e);
-                vec![]
-            });
-            let aliases: Vec<String> = serde_json::from_str(&aliases_json).unwrap_or_else(|e| {
-                tracing::warn!("[Storage] aliases parse error (may be plaintext migration): {}", e);
-                vec![]
-            });
-            let embedding = emb_blob.as_deref().map_or(vec![], VectorLayer::blob_to_embedding);
+                let labels: Vec<String> = serde_json::from_str(&labels_json).unwrap_or_else(|e| {
+                    tracing::warn!(
+                        "[Storage] labels parse error (may be plaintext migration): {}",
+                        e
+                    );
+                    vec![]
+                });
+                let aliases: Vec<String> =
+                    serde_json::from_str(&aliases_json).unwrap_or_else(|e| {
+                        tracing::warn!(
+                            "[Storage] aliases parse error (may be plaintext migration): {}",
+                            e
+                        );
+                        vec![]
+                    });
+                let embedding = emb_blob
+                    .as_deref()
+                    .map_or(vec![], VectorLayer::blob_to_embedding);
 
-            Ok((id, core_x, core_y, core_z, decrypted_content, content_hash, labels, mass, timestamp, aliases, vertex_json, embedding, importance, enforced, rationale, access_count, memory_type, valid_from, valid_to, identity_stamp, source_agent, last_reviewed_ts, expired_at, invalidated_at, memory_class))
-        }).map_err(|e| e.to_string())?;
+                Ok((
+                    id,
+                    core_x,
+                    core_y,
+                    core_z,
+                    decrypted_content,
+                    content_hash,
+                    labels,
+                    mass,
+                    timestamp,
+                    aliases,
+                    vertex_json,
+                    embedding,
+                    importance,
+                    enforced,
+                    rationale,
+                    access_count,
+                    memory_type,
+                    valid_from,
+                    valid_to,
+                    identity_stamp,
+                    source_agent,
+                    last_reviewed_ts,
+                    expired_at,
+                    invalidated_at,
+                    memory_class,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
 
         let mut count = 0;
         for row in rows {
-            let (id, cx, cy, cz, content, hash, labels, mass, ts, aliases, vertex_json, embedding, importance, enforced, rationale, access_count, memory_type, valid_from, valid_to, identity_stamp, source_agent, last_reviewed_ts, expired_at, invalidated_at, memory_class) = row.map_err(|e: rusqlite::Error| e.to_string())?;
+            let (
+                id,
+                cx,
+                cy,
+                cz,
+                content,
+                hash,
+                labels,
+                mass,
+                ts,
+                aliases,
+                vertex_json,
+                embedding,
+                importance,
+                enforced,
+                rationale,
+                access_count,
+                memory_type,
+                valid_from,
+                valid_to,
+                identity_stamp,
+                source_agent,
+                last_reviewed_ts,
+                expired_at,
+                invalidated_at,
+                memory_class,
+            ) = row.map_err(|e: rusqlite::Error| e.to_string())?;
             let positions = Tetrahedron::compute_vertices(Point3::new(cx, cy, cz));
             let saved_vertex_ids: Vec<u64> = serde_json::from_str(&vertex_json).unwrap_or_default();
             let tetra = Tetrahedron {
@@ -1498,10 +1982,15 @@ impl StorageManager {
                 let loaded = space.get_tetrahedron(tetra_id);
                 if let Some(t) = &loaded {
                     let current_ids = t.vertex_ids;
-                    if current_ids == [0u64; 4] || current_ids.iter().all(|&v| v == current_ids[0]) {
+                    if current_ids == [0u64; 4] || current_ids.iter().all(|&v| v == current_ids[0])
+                    {
                         if let Ok(loaded_verts) = serde_json::from_str::<[u64; 4]>(&vertex_json) {
                             if let Err(e) = space.update_vertex_ids(tetra_id, loaded_verts) {
-                                tracing::debug!("[Storage] vertex id restore failed for {}: {}", tetra_id, e);
+                                tracing::debug!(
+                                    "[Storage] vertex id restore failed for {}: {}",
+                                    tetra_id,
+                                    e
+                                );
                             }
                         }
                     }
@@ -1513,30 +2002,38 @@ impl StorageManager {
 
     fn load_relations(&self, kg: &KnowledgeGraph) -> Result<usize, String> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare("SELECT source, target, rel_type, strength FROM relations")
+        let mut stmt = conn
+            .prepare("SELECT source, target, rel_type, strength FROM relations")
             .map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map([], |row| {
-            let source: u64 = row.get(0)?;
-            let target: u64 = row.get(1)?;
-            let rel_type_str: String = row.get(2)?;
-            let strength: f64 = row.get(3)?;
-            let rel_type = Self::parse_rel_type(&rel_type_str);
-            Ok((source, target, rel_type, strength))
-        }).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                let source: u64 = row.get(0)?;
+                let target: u64 = row.get(1)?;
+                let rel_type_str: String = row.get(2)?;
+                let strength: f64 = row.get(3)?;
+                let rel_type = Self::parse_rel_type(&rel_type_str);
+                Ok((source, target, rel_type, strength))
+            })
+            .map_err(|e| e.to_string())?;
 
         // L3审计修复: 跳过孤儿关系(端点tetra已不存在) — 曾3656条远古遗留每次全量重播
         let valid_ids: std::collections::HashSet<u64> = {
-            let mut stmt_ids = conn.prepare("SELECT id FROM tetrahedrons").map_err(|e| e.to_string())?;
-            let collected: std::collections::HashSet<u64> = stmt_ids.query_map([], |row| row.get::<_, u64>(0))
+            let mut stmt_ids = conn
+                .prepare("SELECT id FROM tetrahedrons")
+                .map_err(|e| e.to_string())?;
+            let collected: std::collections::HashSet<u64> = stmt_ids
+                .query_map([], |row| row.get::<_, u64>(0))
                 .map_err(|e| e.to_string())?
-                .filter_map(|r| r.ok()).collect();
+                .filter_map(|r| r.ok())
+                .collect();
             collected
         };
         let mut count = 0;
         let mut skipped_orphans = 0usize;
         for row in rows {
-            let (source, target, rel_type, strength) = row.map_err(|e: rusqlite::Error| e.to_string())?;
+            let (source, target, rel_type, strength) =
+                row.map_err(|e: rusqlite::Error| e.to_string())?;
             if !valid_ids.contains(&source) || !valid_ids.contains(&target) {
                 skipped_orphans += 1;
                 continue;
@@ -1545,24 +2042,38 @@ impl StorageManager {
             count += 1;
         }
         if skipped_orphans > 0 {
-            tracing::info!("[Storage] load_relations: 跳过 {} 条孤儿关系(下次save自动清除)", skipped_orphans);
+            tracing::info!(
+                "[Storage] load_relations: 跳过 {} 条孤儿关系(下次save自动清除)",
+                skipped_orphans
+            );
         }
         Ok(count)
     }
 
     fn load_concepts(&self, kg: &KnowledgeGraph) -> Result<usize, String> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare("SELECT id, label, member_count, centroid FROM concepts")
+        let mut stmt = conn
+            .prepare("SELECT id, label, member_count, centroid FROM concepts")
             .map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map([], |row| {
-            let id: u64 = row.get(0)?;
-            let label: String = row.get(1)?;
-            let member_count: u64 = row.get(2)?;
-            let centroid_blob: Option<Vec<u8>> = row.get(3).unwrap_or(None);
-            let centroid = centroid_blob.as_deref().map_or(vec![], VectorLayer::blob_to_embedding);
-            Ok(ConceptPrototype { id, centroid, member_count, label, member_ids: vec![] })
-        }).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                let id: u64 = row.get(0)?;
+                let label: String = row.get(1)?;
+                let member_count: u64 = row.get(2)?;
+                let centroid_blob: Option<Vec<u8>> = row.get(3).unwrap_or(None);
+                let centroid = centroid_blob
+                    .as_deref()
+                    .map_or(vec![], VectorLayer::blob_to_embedding);
+                Ok(ConceptPrototype {
+                    id,
+                    centroid,
+                    member_count,
+                    label,
+                    member_ids: vec![],
+                })
+            })
+            .map_err(|e| e.to_string())?;
 
         let concepts: Vec<ConceptPrototype> = rows.filter_map(|r| r.ok()).collect();
         let count = concepts.len();
@@ -1570,15 +2081,23 @@ impl StorageManager {
         Ok(count)
     }
 
-    fn save_tetrahedrons_tx(&self, tx: &rusqlite::Transaction, space: &Space) -> Result<(), String> {
+    fn save_tetrahedrons_tx(
+        &self,
+        tx: &rusqlite::Transaction,
+        space: &Space,
+    ) -> Result<(), String> {
         let tetras = space.all_tetrahedrons();
         let space_ids: std::collections::HashSet<u64> = tetras.iter().map(|t| t.id).collect();
 
         let stale_ids: Vec<u64> = {
-            let mut stmt = tx.prepare("SELECT id FROM tetrahedrons").map_err(|e| e.to_string())?;
-            let db_ids: std::collections::HashSet<u64> = stmt.query_map([], |row| row.get::<_, u64>(0))
+            let mut stmt = tx
+                .prepare("SELECT id FROM tetrahedrons")
+                .map_err(|e| e.to_string())?;
+            let db_ids: std::collections::HashSet<u64> = stmt
+                .query_map([], |row| row.get::<_, u64>(0))
                 .map_err(|e| e.to_string())?
-                .filter_map(|r| r.ok()).collect();
+                .filter_map(|r| r.ok())
+                .collect();
             db_ids.difference(&space_ids).copied().collect()
         };
 
@@ -1588,9 +2107,14 @@ impl StorageManager {
         }
 
         for t in &tetras {
-            let labels_json = self.encrypt_field(&serde_json::to_string(&t.data.labels).unwrap_or_else(|_| "[]".into()))?;
-            let aliases_json = self.encrypt_field(&serde_json::to_string(&t.data.aliases).unwrap_or_else(|_| "[]".into()))?;
-            let vertex_json = serde_json::to_string(&t.vertex_ids).unwrap_or_else(|_| "[0,0,0,0]".into());
+            let labels_json = self.encrypt_field(
+                &serde_json::to_string(&t.data.labels).unwrap_or_else(|_| "[]".into()),
+            )?;
+            let aliases_json = self.encrypt_field(
+                &serde_json::to_string(&t.data.aliases).unwrap_or_else(|_| "[]".into()),
+            )?;
+            let vertex_json =
+                serde_json::to_string(&t.vertex_ids).unwrap_or_else(|_| "[0,0,0,0]".into());
             let emb_blob = if t.data.embedding.is_empty() {
                 None
             } else {
@@ -1602,26 +2126,49 @@ impl StorageManager {
             tx.execute(
                 UPSERT_TETRA_SQL,
                 params![
-                    t.id, t.core.x, t.core.y, t.core.z,
-                    encrypted_content, content_hash, labels_json,
-                    t.mass, t.data.timestamp, aliases_json, vertex_json,
-                    emb_blob, t.data.importance, t.data.enforced as i32,
-                    t.data.rationale, t.data.access_count as i32, t.data.memory_type,
-                    t.data.valid_from, t.data.valid_to,
-                    t.data.identity_stamp, t.data.source_agent,
+                    t.id,
+                    t.core.x,
+                    t.core.y,
+                    t.core.z,
+                    encrypted_content,
+                    content_hash,
+                    labels_json,
+                    t.mass,
+                    t.data.timestamp,
+                    aliases_json,
+                    vertex_json,
+                    emb_blob,
+                    t.data.importance,
+                    t.data.enforced as i32,
+                    t.data.rationale,
+                    t.data.access_count as i32,
+                    t.data.memory_type,
+                    t.data.valid_from,
+                    t.data.valid_to,
+                    t.data.identity_stamp,
+                    t.data.source_agent,
                     t.data.last_reviewed_ts,
-                    t.data.expired_at, t.data.invalidated_at,
+                    t.data.expired_at,
+                    t.data.invalidated_at,
                     t.data.memory_class.clone(),
                 ],
-            ).map_err(|e| format!("upsert tetra {}: {}", t.id, e))?;
+            )
+            .map_err(|e| format!("upsert tetra {}: {}", t.id, e))?;
         }
         Ok(())
     }
 
-    fn save_relations_tx(&self, tx: &rusqlite::Transaction, kg: &KnowledgeGraph) -> Result<(), String> {
+    fn save_relations_tx(
+        &self,
+        tx: &rusqlite::Transaction,
+        kg: &KnowledgeGraph,
+    ) -> Result<(), String> {
         let relations = kg.all_relations();
-        tx.execute("DELETE FROM relations", []).map_err(|e| e.to_string())?;
-        if relations.is_empty() { return Ok(()); }
+        tx.execute("DELETE FROM relations", [])
+            .map_err(|e| e.to_string())?;
+        if relations.is_empty() {
+            return Ok(());
+        }
 
         // 用 prepared statement 避免每次循环重新解析 SQL
         let mut stmt = tx.prepare("INSERT OR IGNORE INTO relations (source, target, rel_type, strength) VALUES (?1, ?2, ?3, ?4)")
@@ -1634,12 +2181,22 @@ impl StorageManager {
         Ok(())
     }
 
-    fn save_concepts_tx(&self, tx: &rusqlite::Transaction, kg: &KnowledgeGraph) -> Result<(), String> {
+    fn save_concepts_tx(
+        &self,
+        tx: &rusqlite::Transaction,
+        kg: &KnowledgeGraph,
+    ) -> Result<(), String> {
         let concepts = kg.get_concepts();
-        tx.execute("DELETE FROM concepts", []).map_err(|e| e.to_string())?;
-        if concepts.is_empty() { return Ok(()); }
+        tx.execute("DELETE FROM concepts", [])
+            .map_err(|e| e.to_string())?;
+        if concepts.is_empty() {
+            return Ok(());
+        }
 
-        let mut stmt = tx.prepare("INSERT INTO concepts (id, label, member_count, centroid) VALUES (?1, ?2, ?3, ?4)")
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO concepts (id, label, member_count, centroid) VALUES (?1, ?2, ?3, ?4)",
+            )
             .map_err(|e| e.to_string())?;
         for c in &concepts {
             let centroid_blob = if c.centroid.is_empty() {
@@ -1737,7 +2294,11 @@ mod tests {
                 content_hash: id * 100,
                 labels: vec![format!("label_{}", id)],
                 timestamp: 1000 + id as i64,
-                aliases: if id > 0 { vec![format!("alias_{}", id)] } else { vec![] },
+                aliases: if id > 0 {
+                    vec![format!("alias_{}", id)]
+                } else {
+                    vec![]
+                },
                 embedding: vec![],
                 importance: 1.0,
                 enforced: false,
@@ -1746,11 +2307,12 @@ mod tests {
                 memory_type: None,
                 identity_stamp: None,
                 source_agent: None,
-            valid_from: 0, valid_to: None,
-            last_reviewed_ts: None,
-            expired_at: None,
-            invalidated_at: None,
-            memory_class: None,
+                valid_from: 0,
+                valid_to: None,
+                last_reviewed_ts: None,
+                expired_at: None,
+                invalidated_at: None,
+                memory_class: None,
             },
             mass,
         }
@@ -1848,7 +2410,9 @@ mod tests {
         storage.upsert_tetra(&t).unwrap();
 
         storage.update_mass(10, 3.14).unwrap();
-        storage.update_aliases(10, &["alias_a".into(), "alias_b".into()]).unwrap();
+        storage
+            .update_aliases(10, &["alias_a".into(), "alias_b".into()])
+            .unwrap();
 
         let space = Space::new();
         storage.load_all(&space, &KnowledgeGraph::new());

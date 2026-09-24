@@ -1,8 +1,7 @@
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-
+use std::sync::Arc;
 
 // ═══════════════════════════════════════════════════════════
 // Legacy Drive Engine (original drive system — kept for backward compat)
@@ -106,33 +105,51 @@ impl DriveEngine {
     }
     pub fn restore_from(&mut self, v: &serde_json::Value) {
         if let Some(s) = v.get("dominant").and_then(|x| x.as_str()) {
-            if let Ok(d) = s.parse::<Drive>() { self.dominant = d; }
+            if let Ok(d) = s.parse::<Drive>() {
+                self.dominant = d;
+            }
         }
-        for (k, field) in [("curiosity", 0), ("coherence", 1), ("efficiency", 2), ("vitality", 3)] {
+        for (k, field) in [
+            ("curiosity", 0),
+            ("coherence", 1),
+            ("efficiency", 2),
+            ("vitality", 3),
+        ] {
             if let Some(x) = v.get(k).and_then(|y| y.as_f64()) {
                 match field {
-                    0 => self.curiosity_score = x, 1 => self.coherence_score = x,
-                    2 => self.efficiency_score = x, _ => self.vitality_score = x,
+                    0 => self.curiosity_score = x,
+                    1 => self.coherence_score = x,
+                    2 => self.efficiency_score = x,
+                    _ => self.vitality_score = x,
                 }
             }
         }
-        if let Some(t) = v.get("tick_count").and_then(|x| x.as_u64()) { self.tick_count = t; }
+        if let Some(t) = v.get("tick_count").and_then(|x| x.as_u64()) {
+            self.tick_count = t;
+        }
         if let Some(h) = v.get("evolution_history").and_then(|x| x.as_array()) {
-            self.evolution_history = h.iter().filter_map(|e| {
-                let tick = e.get("tick")?.as_u64()?;
-                let drive = e.get("drive")?.as_str()?.to_string();
-                let delta = e.get("delta")?.as_f64()?;
-                Some((tick, drive, delta))
-            }).collect();
+            self.evolution_history = h
+                .iter()
+                .filter_map(|e| {
+                    let tick = e.get("tick")?.as_u64()?;
+                    let drive = e.get("drive")?.as_str()?.to_string();
+                    let delta = e.get("delta")?.as_f64()?;
+                    Some((tick, drive, delta))
+                })
+                .collect();
         }
     }
 
     /// δ1: 四驱权重 + 演化历史 — GET /v1/drive/evolution 的数据源
     pub fn evolution_snapshot(&self) -> serde_json::Value {
-        let hist: Vec<serde_json::Value> = self.evolution_history.iter()
-            .map(|(tick, drive, delta)| serde_json::json!({
-                "tick": tick, "drive": drive, "delta": (delta * 1000.0).round() / 1000.0,
-            }))
+        let hist: Vec<serde_json::Value> = self
+            .evolution_history
+            .iter()
+            .map(|(tick, drive, delta)| {
+                serde_json::json!({
+                    "tick": tick, "drive": drive, "delta": (delta * 1000.0).round() / 1000.0,
+                })
+            })
             .collect();
         serde_json::json!({
             "dominant": self.dominant.to_string(),
@@ -159,8 +176,12 @@ impl DriveEngine {
     ) {
         self.tick_count += 1;
         self.last_observe = ObserveState {
-            tetra_count, cluster_count, avg_entropy,
-            energy_ratio, unexplored_ratio, redundancy_ratio,
+            tetra_count,
+            cluster_count,
+            avg_entropy,
+            energy_ratio,
+            unexplored_ratio,
+            redundancy_ratio,
         };
 
         // Simple heuristic: pick the dominant drive based on system state
@@ -185,8 +206,11 @@ impl DriveEngine {
             Drive::Vitality => self.vitality_score += delta,
         }
         // δ1: 记录演化历史 (环4: 回执改策略的可观测证据)
-        self.evolution_history.push_back((self.tick_count, drive_type.to_string(), delta));
-        while self.evolution_history.len() > 50 { self.evolution_history.pop_front(); }
+        self.evolution_history
+            .push_back((self.tick_count, drive_type.to_string(), delta));
+        while self.evolution_history.len() > 50 {
+            self.evolution_history.pop_front();
+        }
     }
 
     pub fn should_pulse(&self) -> bool {
@@ -259,7 +283,9 @@ pub enum DriveUrgency {
 }
 
 impl Default for DriveUrgency {
-    fn default() -> Self { DriveUrgency::Medium }
+    fn default() -> Self {
+        DriveUrgency::Medium
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -272,7 +298,9 @@ pub enum DriveStatus {
     Expired,
 }
 
-pub fn default_status() -> DriveStatus { DriveStatus::Pending }
+pub fn default_status() -> DriveStatus {
+    DriveStatus::Pending
+}
 
 /// Phase 2: 根据 urgency 计算默认 TTL(unix 秒), 信号创建时自动赋期
 /// Critical: 24h, High: 3天, Medium: 7天, Low: 14天
@@ -282,10 +310,10 @@ pub fn default_expires_at(urgency: &DriveUrgency) -> Option<i64> {
         .unwrap_or_default()
         .as_secs() as i64;
     let ttl_secs: i64 = match urgency {
-        DriveUrgency::Critical => 86400,         // 1 天
-        DriveUrgency::High => 3 * 86400,         // 3 天
-        DriveUrgency::Medium => 7 * 86400,       // 7 天
-        DriveUrgency::Low => 14 * 86400,         // 14 天
+        DriveUrgency::Critical => 86400,   // 1 天
+        DriveUrgency::High => 3 * 86400,   // 3 天
+        DriveUrgency::Medium => 7 * 86400, // 7 天
+        DriveUrgency::Low => 14 * 86400,   // 14 天
     };
     Some(now + ttl_secs)
 }
@@ -354,12 +382,40 @@ pub fn strip_canned_will_prefix(desc: &str) -> Option<&str> {
 pub fn will_has_action(text: &str) -> bool {
     let t = text.to_lowercase();
     const EN: &[&str] = &[
-        "implement", "fix", "add ", "deploy", "remove", "change", "migrate",
-        "should", "must", "todo", "next:", "next ", "need to", "needs to", "repair", "patch",
+        "implement",
+        "fix",
+        "add ",
+        "deploy",
+        "remove",
+        "change",
+        "migrate",
+        "should",
+        "must",
+        "todo",
+        "next:",
+        "next ",
+        "need to",
+        "needs to",
+        "repair",
+        "patch",
     ];
     const ZH: &[&str] = &[
-        "需要", "应当", "必须", "落地", "实现", "修复", "修改", "部署",
-        "删除", "增加", "下一刀", "待办", "未做", "要做", "补上", "补测",
+        "需要",
+        "应当",
+        "必须",
+        "落地",
+        "实现",
+        "修复",
+        "修改",
+        "部署",
+        "删除",
+        "增加",
+        "下一刀",
+        "待办",
+        "未做",
+        "要做",
+        "补上",
+        "补测",
     ];
     EN.iter().any(|k| t.contains(k)) || ZH.iter().any(|k| text.contains(k))
 }
@@ -415,7 +471,7 @@ impl DriveQueue {
         }
     }
 
-/// D1: Get notify handle for SSE push subscription
+    /// D1: Get notify handle for SSE push subscription
     pub fn notify_handle(&self) -> Arc<tokio::sync::Notify> {
         self.notify.clone()
     }
@@ -424,7 +480,10 @@ impl DriveQueue {
         loop {
             let candidate = self.next_id.fetch_add(1, Ordering::SeqCst);
             let exists = self.signals.lock().iter().any(|s| s.id == candidate);
-            if !exists { signal.id = candidate; break; }
+            if !exists {
+                signal.id = candidate;
+                break;
+            }
         }
         signal.status = DriveStatus::Pending;
         signal.enqueued_at_ms = std::time::SystemTime::now()
@@ -438,7 +497,10 @@ impl DriveQueue {
             // 之前清Pending导致新信号被吃 → inbox幽灵空
             let mut removed = 0;
             signals.retain(|s| {
-                let is_terminal = matches!(s.status, DriveStatus::Executed | DriveStatus::Rejected | DriveStatus::Expired);
+                let is_terminal = matches!(
+                    s.status,
+                    DriveStatus::Executed | DriveStatus::Rejected | DriveStatus::Expired
+                );
                 if removed < 100 && is_terminal {
                     removed += 1;
                     false
@@ -452,7 +514,13 @@ impl DriveQueue {
         let urg = signal.urgency.clone();
         signals.push(signal);
         self.notify.notify_waiters();
-        tracing::info!("[Drive] signal #{} enqueued: {:?} urgency={:?} desc={}", id, itype, urg, desc);
+        tracing::info!(
+            "[Drive] signal #{} enqueued: {:?} urgency={:?} desc={}",
+            id,
+            itype,
+            urg,
+            desc
+        );
         id
     }
 
@@ -463,12 +531,16 @@ impl DriveQueue {
             if matches!(signal.status, DriveStatus::Pending) {
                 signal.status = DriveStatus::Delivered;
                 to_deliver.push(signal.clone());
-                if to_deliver.len() >= limit { break; }
+                if to_deliver.len() >= limit {
+                    break;
+                }
             }
         }
         if !to_deliver.is_empty() {
             let mut ing = self.ingested.lock();
-            for s in &to_deliver { ing.insert(s.id); }
+            for s in &to_deliver {
+                ing.insert(s.id);
+            }
         }
         let now = chrono::Utc::now().timestamp();
         signals.retain(|s| {
@@ -494,25 +566,33 @@ impl DriveQueue {
                     if now > exp {
                         s.status = DriveStatus::Expired;
                         expired_count += 1;
-                                        self.sweep_total.fetch_add(expired_count as u64, std::sync::atomic::Ordering::Relaxed);
-            tracing::info!(
+                        self.sweep_total
+                            .fetch_add(expired_count as u64, std::sync::atomic::Ordering::Relaxed);
+                        tracing::info!(
                             "[Drive] signal #{} expired via sweep (TTL {}s ago)",
-                            s.id, now - exp
+                            s.id,
+                            now - exp
                         );
                     }
                 }
             }
         }
         if expired_count > 0 {
-            self.sweep_total.fetch_add(expired_count as u64, std::sync::atomic::Ordering::Relaxed);
-            tracing::info!("[Drive] sweep_expired: {} signals -> Expired (total: {})", expired_count, self.sweep_total.load(std::sync::atomic::Ordering::Relaxed));
+            self.sweep_total
+                .fetch_add(expired_count as u64, std::sync::atomic::Ordering::Relaxed);
+            tracing::info!(
+                "[Drive] sweep_expired: {} signals -> Expired (total: {})",
+                expired_count,
+                self.sweep_total.load(std::sync::atomic::Ordering::Relaxed)
+            );
         }
     }
 
     pub fn peek_pending(&self, limit: usize) -> Vec<DriveSignal> {
         self.sweep_expired();
         let signals = self.signals.lock();
-        signals.iter()
+        signals
+            .iter()
             .filter(|s| matches!(s.status, DriveStatus::Pending))
             .take(limit)
             .cloned()
@@ -525,7 +605,8 @@ impl DriveQueue {
         self.sweep_expired();
         let signals = self.signals.lock();
         // P1-6: 新优先 — Pending 排前面, 然后按 ID 降序 (最新的 delivered 先看到)
-        let mut unacked: Vec<&DriveSignal> = signals.iter()
+        let mut unacked: Vec<&DriveSignal> = signals
+            .iter()
             .filter(|s| matches!(s.status, DriveStatus::Pending | DriveStatus::Delivered))
             .collect();
         // Pending 优先, 同状态内按 ID 降序
@@ -541,17 +622,25 @@ impl DriveQueue {
     /// Used by self-driving after processing a signal.
     /// Phase 2: 最大重试次数, 超过则进 dead-letter(Expired)
     const MAX_RETRIES: u32 = 3;
-    pub fn max_retries() -> u32 { Self::MAX_RETRIES }
+    pub fn max_retries() -> u32 {
+        Self::MAX_RETRIES
+    }
 
     pub fn mark_consumed(&self, drive_id: u64, feedback: DriveFeedback) -> (bool, bool) {
         let mut signals = self.signals.lock();
         for signal in signals.iter_mut() {
             if signal.id == drive_id {
-                let is_terminal = matches!(signal.status,
-                    DriveStatus::Executed | DriveStatus::Rejected | DriveStatus::Expired);
+                let is_terminal = matches!(
+                    signal.status,
+                    DriveStatus::Executed | DriveStatus::Rejected | DriveStatus::Expired
+                );
                 if is_terminal {
                     self.stats_duplicate_ack.fetch_add(1, Ordering::SeqCst);
-                    tracing::debug!("[Drive] signal #{} idempotent skip (already {:?})", drive_id, signal.status);
+                    tracing::debug!(
+                        "[Drive] signal #{} idempotent skip (already {:?})",
+                        drive_id,
+                        signal.status
+                    );
                     return (true, false);
                 }
                 if feedback.executed {
@@ -579,7 +668,11 @@ impl DriveQueue {
     pub fn acknowledge(&self, drive_id: u64, feedback: DriveFeedback) -> (bool, bool) {
         let (result, first_ack) = self.mark_consumed(drive_id, feedback.clone());
         if result && first_ack {
-            tracing::info!("[Drive] signal #{} acknowledged: executed={}", drive_id, feedback.executed);
+            tracing::info!(
+                "[Drive] signal #{} acknowledged: executed={}",
+                drive_id,
+                feedback.executed
+            );
         }
         (result, first_ack)
     }
@@ -587,15 +680,43 @@ impl DriveQueue {
     pub fn stats(&self) -> serde_json::Value {
         self.sweep_expired();
         let signals = self.signals.lock();
-        let pending = signals.iter().filter(|s| matches!(s.status, DriveStatus::Pending)).count();
-        let delivered = signals.iter().filter(|s| matches!(s.status, DriveStatus::Delivered)).count();
-        let executed = signals.iter().filter(|s| matches!(s.status, DriveStatus::Executed)).count();
-        let rejected = signals.iter().filter(|s| matches!(s.status, DriveStatus::Rejected)).count();
-        let expired = signals.iter().filter(|s| matches!(s.status, DriveStatus::Expired)).count();
-        let retrying = signals.iter().filter(|s| s.retry_count > 0 && matches!(s.status, DriveStatus::Pending)).count();
+        let pending = signals
+            .iter()
+            .filter(|s| matches!(s.status, DriveStatus::Pending))
+            .count();
+        let delivered = signals
+            .iter()
+            .filter(|s| matches!(s.status, DriveStatus::Delivered))
+            .count();
+        let executed = signals
+            .iter()
+            .filter(|s| matches!(s.status, DriveStatus::Executed))
+            .count();
+        let rejected = signals
+            .iter()
+            .filter(|s| matches!(s.status, DriveStatus::Rejected))
+            .count();
+        let expired = signals
+            .iter()
+            .filter(|s| matches!(s.status, DriveStatus::Expired))
+            .count();
+        let retrying = signals
+            .iter()
+            .filter(|s| s.retry_count > 0 && matches!(s.status, DriveStatus::Pending))
+            .count();
         // P4-5: 区分 dead-letter (retry exhausted) vs TTL-expired
-        let dead_letter_count = signals.iter().filter(|s| matches!(s.status, DriveStatus::Rejected) || (matches!(s.status, DriveStatus::Expired) && s.retry_count > Self::MAX_RETRIES as u32)).count();
-        let ttl_expired_count = signals.iter().filter(|s| matches!(s.status, DriveStatus::Expired) && s.retry_count == 0).count();
+        let dead_letter_count = signals
+            .iter()
+            .filter(|s| {
+                matches!(s.status, DriveStatus::Rejected)
+                    || (matches!(s.status, DriveStatus::Expired)
+                        && s.retry_count > Self::MAX_RETRIES as u32)
+            })
+            .count();
+        let ttl_expired_count = signals
+            .iter()
+            .filter(|s| matches!(s.status, DriveStatus::Expired) && s.retry_count == 0)
+            .count();
         let unique_executed = executed; // 当前无去重计数器，executed 本身就是唯一
         let duplicate_ack_suppressed = self.stats_duplicate_ack.load(Ordering::SeqCst);
         serde_json::json!({
@@ -632,11 +753,17 @@ impl DriveQueue {
         self.sweep_total.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    pub fn snapshot(&self) -> Vec<DriveSignal> { self.signals.lock().clone() }
+    pub fn snapshot(&self) -> Vec<DriveSignal> {
+        self.signals.lock().clone()
+    }
 
     pub fn record_ingested(&self, ids: &[u64]) {
         let mut ing = self.ingested.lock();
-        for id in ids { if *id > 0 { ing.insert(*id); } }
+        for id in ids {
+            if *id > 0 {
+                ing.insert(*id);
+            }
+        }
     }
 
     pub fn ingested_ids(&self) -> Vec<u64> {
@@ -653,7 +780,14 @@ impl DriveQueue {
     pub fn fingerprint(intent: &DriveIntent, evidence: &[u64]) -> String {
         let mut ev: Vec<u64> = evidence.to_vec();
         ev.sort_unstable();
-        format!("{:?}:{}", intent, ev.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(","))
+        format!(
+            "{:?}:{}",
+            intent,
+            ev.iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        )
     }
 
     pub fn has_live_fingerprint(&self, intent: &DriveIntent, evidence: &[u64]) -> bool {
@@ -672,11 +806,17 @@ impl DriveQueue {
         // P1闸接线: Rejected 也是已裁决 — 被执行端明确拒绝的意志不得凭同一证据立即重生
         // (曾只认 Executed, 拒绝后同证据可反复重生直到 policy fail>=3 才消停)
         self.signals.lock().iter().any(|s| {
-            matches!(s.status, DriveStatus::Executed | DriveStatus::Rejected) && s.evidence.iter().any(|e| set.contains(e))
+            matches!(s.status, DriveStatus::Executed | DriveStatus::Rejected)
+                && s.evidence.iter().any(|e| set.contains(e))
         })
     }
 
-    pub fn should_birth(&self, intent: &DriveIntent, evidence: &[u64], description: &str) -> Result<(), &'static str> {
+    pub fn should_birth(
+        &self,
+        intent: &DriveIntent,
+        evidence: &[u64],
+        description: &str,
+    ) -> Result<(), &'static str> {
         if let Some(why) = will_text_reject(description) {
             return Err(why);
         }
@@ -706,8 +846,11 @@ impl DriveQueue {
         let fp = Self::fingerprint(intent, evidence);
         let mut pol = self.policy.lock();
         let entry = pol.entry(fp).or_insert((0, 0));
-        if executed { entry.0 = entry.0.saturating_add(1); }
-        else { entry.1 = entry.1.saturating_add(1); }
+        if executed {
+            entry.0 = entry.0.saturating_add(1);
+        } else {
+            entry.1 = entry.1.saturating_add(1);
+        }
         self.policy_version.fetch_add(1, Ordering::SeqCst);
     }
 
@@ -729,7 +872,10 @@ impl DriveQueue {
 
     pub fn policy_stats(&self) -> (usize, usize) {
         let pol = self.policy.lock();
-        let suppressed = pol.values().filter(|(s, f)| *f >= 3 && *f > s.saturating_mul(2)).count();
+        let suppressed = pol
+            .values()
+            .filter(|(s, f)| *f >= 3 && *f > s.saturating_mul(2))
+            .count();
         (pol.len(), suppressed)
     }
 
@@ -745,7 +891,10 @@ impl DriveQueue {
         drop(queue);
         // Phase 2: restore 后立即 sweep, 重启后过期信号直接转 Expired
         self.sweep_expired();
-        tracing::info!("[Drive] restore: {} signals loaded, sweep_expired applied", count);
+        tracing::info!(
+            "[Drive] restore: {} signals loaded, sweep_expired applied",
+            count
+        );
     }
 }
 
@@ -806,15 +955,26 @@ mod will_valve_tests {
     fn queue_blocks_live_and_executed() {
         let q = DriveQueue::new();
         let id = q.enqueue(sig("下一刀实现过滤阀", vec![77]));
-        assert_eq!(q.should_birth(&DriveIntent::Suggest, &[77], "下一刀实现过滤阀"), Err("pending"));
-        q.acknowledge(id, DriveFeedback {
-            responded_at: 1,
-            executed: true,
-            outcome: "done".into(),
-            reflection: None,
-        });
-        assert_eq!(q.should_birth(&DriveIntent::Suggest, &[77], "下一刀实现过滤阀"), Err("executed"));
-        assert!(q.should_birth(&DriveIntent::Suggest, &[88], "下一刀实现另一件事").is_ok());
+        assert_eq!(
+            q.should_birth(&DriveIntent::Suggest, &[77], "下一刀实现过滤阀"),
+            Err("pending")
+        );
+        q.acknowledge(
+            id,
+            DriveFeedback {
+                responded_at: 1,
+                executed: true,
+                outcome: "done".into(),
+                reflection: None,
+            },
+        );
+        assert_eq!(
+            q.should_birth(&DriveIntent::Suggest, &[77], "下一刀实现过滤阀"),
+            Err("executed")
+        );
+        assert!(q
+            .should_birth(&DriveIntent::Suggest, &[88], "下一刀实现另一件事")
+            .is_ok());
         assert!(!q.should_emit(&DriveIntent::Suggest, &[77]));
     }
 
@@ -836,24 +996,44 @@ mod tests {
         // P1闸接线: 执行端明确拒绝后, 同证据不得立即重生(evidence_done 纳入 Rejected)
         let q = DriveQueue::new();
         let sig = DriveSignal {
-            id: 0, timestamp: 0,
+            id: 0,
+            timestamp: 0,
             intent_type: DriveIntent::Suggest,
             description: "test rejected rebirth".into(),
             evidence: vec![42],
             urgency: DriveUrgency::Medium,
-            target_capability: None, emotion: None, origin_tick: 0,
-            status: default_status(), feedback: None, retry_count: 0,
-            expires_at: None, enqueued_at_ms: 0,
+            target_capability: None,
+            emotion: None,
+            origin_tick: 0,
+            status: default_status(),
+            feedback: None,
+            retry_count: 0,
+            expires_at: None,
+            enqueued_at_ms: 0,
+            time_budget_ms: None,
         };
         let id = q.enqueue(sig);
         // 拒绝 MAX_RETRIES+1 次 → 前3次回Pending重试, 第4次进Rejected(死信)
         for _ in 0..=DriveQueue::MAX_RETRIES {
-            q.mark_consumed(id, DriveFeedback {
-                responded_at: 0, executed: false, outcome: "dismissed".into(), reflection: None,
-            });
+            q.mark_consumed(
+                id,
+                DriveFeedback {
+                    responded_at: 0,
+                    executed: false,
+                    outcome: "dismissed".into(),
+                    reflection: None,
+                },
+            );
         }
-        assert!(q.evidence_done(&[42]), "rejected evidence should count as adjudicated");
+        assert!(
+            q.evidence_done(&[42]),
+            "rejected evidence should count as adjudicated"
+        );
         let verdict = q.should_birth(&DriveIntent::Suggest, &[42], "another desc");
-        assert!(verdict.is_err(), "rebirth after rejection must be blocked: {:?}", verdict);
+        assert!(
+            verdict.is_err(),
+            "rebirth after rejection must be blocked: {:?}",
+            verdict
+        );
     }
 }

@@ -1,6 +1,6 @@
+use parking_lot::{Mutex, RwLock};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use parking_lot::{Mutex, RwLock};
 
 use crate::domain::space::Space;
 use crate::domain::tetra::{MemoryPayload, TetraId};
@@ -22,7 +22,10 @@ fn strip_session_prefix(text: &str) -> &str {
         {
             return trimmed[end + 1..].trim_start();
         }
-        if bracket.contains("|") && (bracket.contains("am") || bracket.contains("pm")) && bracket.len() < 80 {
+        if bracket.contains("|")
+            && (bracket.contains("am") || bracket.contains("pm"))
+            && bracket.len() < 80
+        {
             let after = trimmed[end + 1..].trim_start();
             if !after.is_empty() {
                 return after;
@@ -71,7 +74,11 @@ impl SearchEngineState {
     }
 
     pub fn access_counts_snapshot(&self) -> Vec<(TetraId, u32)> {
-        self.access_counts.lock().iter().map(|(k, v)| (*k, *v)).collect()
+        self.access_counts
+            .lock()
+            .iter()
+            .map(|(k, v)| (*k, *v))
+            .collect()
     }
 
     pub fn invalidate_df_cache(&self) {
@@ -96,7 +103,10 @@ impl SearchEngineState {
         tokens
     }
 
-    fn get_or_build_df(&self, tetras: &[crate::domain::tetra::Tetrahedron]) -> (HashMap<String, usize>, usize, f64) {
+    fn get_or_build_df(
+        &self,
+        tetras: &[crate::domain::tetra::Tetrahedron],
+    ) -> (HashMap<String, usize>, usize, f64) {
         // P4修复:复用 doc_token_cache 避免 build_df_map 重复 tokenize 全量文档。
         // 先检查 df_cache(快路径),miss 时用 get_doc_tokens(命中 token 缓存)构建。
         {
@@ -121,7 +131,11 @@ impl SearchEngineState {
                 }
             }
         }
-        let avg_dl = if doc_count > 0 { total_dl / doc_count as f64 } else { 0.0 };
+        let avg_dl = if doc_count > 0 {
+            total_dl / doc_count as f64
+        } else {
+            0.0
+        };
         let mut cache = self.df_cache.lock();
         *cache = Some(DfCache {
             df_map: df.clone(),
@@ -185,13 +199,42 @@ impl SearchMode {
 /// 启发式线索表 — 由 LongMemEval 分类别成绩背书
 fn query_needs_diffusion(query: &str) -> bool {
     const TEMPORAL_CUES: &[&str] = &[
-        "first", "before", "after", "when did", "when was", "how many days", "how long",
-        "used to", "previously", "no longer", "switched", "changed", "moved to",
-        "最初", "之前", "之后", "先", "几月", "哪年", "什么时候", "多久", "换了", "改了",
+        "first",
+        "before",
+        "after",
+        "when did",
+        "when was",
+        "how many days",
+        "how long",
+        "used to",
+        "previously",
+        "no longer",
+        "switched",
+        "changed",
+        "moved to",
+        "最初",
+        "之前",
+        "之后",
+        "先",
+        "几月",
+        "哪年",
+        "什么时候",
+        "多久",
+        "换了",
+        "改了",
     ];
     const AGGREGATION_CUES: &[&str] = &[
-        "total", "both", "combined", "all the", "how many", "in total", "altogether",
-        "一共", "总共", "都", "哪些",
+        "total",
+        "both",
+        "combined",
+        "all the",
+        "how many",
+        "in total",
+        "altogether",
+        "一共",
+        "总共",
+        "都",
+        "哪些",
     ];
     let q = query.to_lowercase();
     TEMPORAL_CUES.iter().any(|c| q.contains(c)) || AGGREGATION_CUES.iter().any(|c| q.contains(c))
@@ -230,27 +273,166 @@ fn is_cjk(ch: char) -> bool {
 
 fn is_real_english_word(word: &str) -> bool {
     const COMMON: &[&str] = &[
-        "the","be","to","of","and","a","in","that","have","i","it","for","not","on","with","he",
-        "as","you","do","at","this","but","his","by","from","they","we","say","her","she","or","an",
-        "will","my","one","all","would","there","their","what","so","up","out","if","about","who",
-        "get","which","go","me","when","make","can","like","time","no","just","him","know","take",
-        "people","into","year","your","good","some","could","them","see","other","than","then","now",
-        "look","only","come","its","over","think","also","back","after","use","two","how","our","work",
-        "first","well","way","even","new","want","because","any","these","give","day","most","us",
-        "search","query","memory","find","data","list","create","update","delete","pattern","skill",
-        "recall","context","session","summary","decision","feedback","identity","knowledge","reasoning",
-        "error","help","test","rust","code","build","run","start","stop","config","log","debug",
-        "info","warn","trace","system","admin","user","name","type","value","key","token","api",
+        "the",
+        "be",
+        "to",
+        "of",
+        "and",
+        "a",
+        "in",
+        "that",
+        "have",
+        "i",
+        "it",
+        "for",
+        "not",
+        "on",
+        "with",
+        "he",
+        "as",
+        "you",
+        "do",
+        "at",
+        "this",
+        "but",
+        "his",
+        "by",
+        "from",
+        "they",
+        "we",
+        "say",
+        "her",
+        "she",
+        "or",
+        "an",
+        "will",
+        "my",
+        "one",
+        "all",
+        "would",
+        "there",
+        "their",
+        "what",
+        "so",
+        "up",
+        "out",
+        "if",
+        "about",
+        "who",
+        "get",
+        "which",
+        "go",
+        "me",
+        "when",
+        "make",
+        "can",
+        "like",
+        "time",
+        "no",
+        "just",
+        "him",
+        "know",
+        "take",
+        "people",
+        "into",
+        "year",
+        "your",
+        "good",
+        "some",
+        "could",
+        "them",
+        "see",
+        "other",
+        "than",
+        "then",
+        "now",
+        "look",
+        "only",
+        "come",
+        "its",
+        "over",
+        "think",
+        "also",
+        "back",
+        "after",
+        "use",
+        "two",
+        "how",
+        "our",
+        "work",
+        "first",
+        "well",
+        "way",
+        "even",
+        "new",
+        "want",
+        "because",
+        "any",
+        "these",
+        "give",
+        "day",
+        "most",
+        "us",
+        "search",
+        "query",
+        "memory",
+        "find",
+        "data",
+        "list",
+        "create",
+        "update",
+        "delete",
+        "pattern",
+        "skill",
+        "recall",
+        "context",
+        "session",
+        "summary",
+        "decision",
+        "feedback",
+        "identity",
+        "knowledge",
+        "reasoning",
+        "error",
+        "help",
+        "test",
+        "rust",
+        "code",
+        "build",
+        "run",
+        "start",
+        "stop",
+        "config",
+        "log",
+        "debug",
+        "info",
+        "warn",
+        "trace",
+        "system",
+        "admin",
+        "user",
+        "name",
+        "type",
+        "value",
+        "key",
+        "token",
+        "api",
     ];
     let lower = word.to_lowercase();
     COMMON.contains(&lower.as_str())
 }
 
 fn looks_like_keyboard_smash(word: &str) -> bool {
-    if word.len() < 5 { return false; }
+    if word.len() < 5 {
+        return false;
+    }
     let lower = word.to_lowercase();
-    if lower.contains("asdf") || lower.contains("qwer") || lower.contains("zxcv") { return true; }
-    if lower.contains("1234") || lower.contains("aaaa") || lower.contains("qqqq") { return true; }
+    if lower.contains("asdf") || lower.contains("qwer") || lower.contains("zxcv") {
+        return true;
+    }
+    if lower.contains("1234") || lower.contains("aaaa") || lower.contains("qqqq") {
+        return true;
+    }
     let bytes = lower.as_bytes();
     let mut consecutive_consonants = 0;
     let mut max_consecutive = 0;
@@ -262,28 +444,46 @@ fn looks_like_keyboard_smash(word: &str) -> bool {
             consecutive_consonants = 0;
         }
     }
-    if max_consecutive >= 5 { return true; }
+    if max_consecutive >= 5 {
+        return true;
+    }
     false
 }
 
 pub fn is_low_quality_query(query: &str) -> bool {
     let trimmed = query.trim();
-    if trimmed.is_empty() { return true; }
+    if trimmed.is_empty() {
+        return true;
+    }
     let chars: Vec<char> = trimmed.chars().collect();
     let has_cjk = chars.iter().any(|c| is_cjk(*c));
-    if has_cjk { return false; }
+    if has_cjk {
+        return false;
+    }
     let alpha_count = chars.iter().filter(|c| c.is_alphabetic()).count() as f64;
     let total = chars.len() as f64;
-    if total < 3.0 { return true; }
-    if alpha_count / total < 0.5 { return true; }
+    if total < 3.0 {
+        return true;
+    }
+    if alpha_count / total < 0.5 {
+        return true;
+    }
     let tokens = tokenize(trimmed);
-    if tokens.is_empty() { return true; }
-    if tokens.iter().any(|t| is_real_english_word(t)) { return false; }
+    if tokens.is_empty() {
+        return true;
+    }
+    if tokens.iter().any(|t| is_real_english_word(t)) {
+        return false;
+    }
     if tokens.len() == 1 {
         let t = &tokens[0];
-        if looks_like_keyboard_smash(t) { return true; }
+        if looks_like_keyboard_smash(t) {
+            return true;
+        }
         let unique_chars: std::collections::HashSet<char> = t.chars().collect();
-        if t.len() >= 3 && unique_chars.len() <= 2 { return true; }
+        if t.len() >= 3 && unique_chars.len() <= 2 {
+            return true;
+        }
     }
     false
 }
@@ -296,28 +496,58 @@ pub fn tokenize(text: &str) -> Vec<String> {
 
     for ch in lower.chars() {
         if ch.is_whitespace() {
-            if !word_buf.is_empty() { tokens.push(word_buf.clone()); word_buf.clear(); }
-            if !cjk_buf.is_empty() { flush_cjk(&cjk_buf, &mut tokens); cjk_buf.clear(); }
+            if !word_buf.is_empty() {
+                tokens.push(word_buf.clone());
+                word_buf.clear();
+            }
+            if !cjk_buf.is_empty() {
+                flush_cjk(&cjk_buf, &mut tokens);
+                cjk_buf.clear();
+            }
         } else if is_cjk(ch) {
-            if !word_buf.is_empty() { tokens.push(word_buf.clone()); word_buf.clear(); }
+            if !word_buf.is_empty() {
+                tokens.push(word_buf.clone());
+                word_buf.clear();
+            }
             cjk_buf.push(ch);
-        } else if ch.is_alphanumeric() || ch == '-' || ch == '_' || ch == '.' || ch == '/' || ch == ':' {
-            if !cjk_buf.is_empty() { flush_cjk(&cjk_buf, &mut tokens); cjk_buf.clear(); }
+        } else if ch.is_alphanumeric()
+            || ch == '-'
+            || ch == '_'
+            || ch == '.'
+            || ch == '/'
+            || ch == ':'
+        {
+            if !cjk_buf.is_empty() {
+                flush_cjk(&cjk_buf, &mut tokens);
+                cjk_buf.clear();
+            }
             word_buf.push(ch);
         } else {
-            if !word_buf.is_empty() { tokens.push(word_buf.clone()); word_buf.clear(); }
-            if !cjk_buf.is_empty() { flush_cjk(&cjk_buf, &mut tokens); cjk_buf.clear(); }
+            if !word_buf.is_empty() {
+                tokens.push(word_buf.clone());
+                word_buf.clear();
+            }
+            if !cjk_buf.is_empty() {
+                flush_cjk(&cjk_buf, &mut tokens);
+                cjk_buf.clear();
+            }
         }
     }
-    if !word_buf.is_empty() { tokens.push(word_buf); }
-    if !cjk_buf.is_empty() { flush_cjk(&cjk_buf, &mut tokens); }
+    if !word_buf.is_empty() {
+        tokens.push(word_buf);
+    }
+    if !cjk_buf.is_empty() {
+        flush_cjk(&cjk_buf, &mut tokens);
+    }
 
     tokens
 }
 
 fn flush_cjk(buf: &str, tokens: &mut Vec<String>) {
     let chars: Vec<char> = buf.chars().collect();
-    if chars.is_empty() { return; }
+    if chars.is_empty() {
+        return;
+    }
     if chars.len() == 1 {
         tokens.push(chars[0].to_string());
         return;
@@ -378,7 +608,10 @@ fn expand_camel_query_tokens(tokens: &[String]) -> Vec<String> {
             let ext_raw = &lower[dot_pos + 1..];
             // ext 去掉尾部标点(记忆里 "MarkdownText.tsx:" → tokenize 生成 "markdowntext.tsx:",
             // 文档侧 token 带冒号, query 侧 "tsx" 不带; 反之亦然。生成纯净 ext)
-            let ext: String = ext_raw.chars().take_while(|c| c.is_alphanumeric()).collect();
+            let ext: String = ext_raw
+                .chars()
+                .take_while(|c| c.is_alphanumeric())
+                .collect();
             if base.len() >= 3 && !expanded.contains(&base.to_string()) {
                 expanded.push(base.to_string());
             }
@@ -388,7 +621,9 @@ fn expand_camel_query_tokens(tokens: &[String]) -> Vec<String> {
         }
         // 通用尾部清理: 去掉尾部非字母数字字符(: ; , 等)
         // 记忆里 "file.rs:" → token "file.rs:", query "file.rs" 不匹配
-        let trimmed: String = lower.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '-').to_string();
+        let trimmed: String = lower
+            .trim_end_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '-')
+            .to_string();
         if trimmed.len() >= 3 && trimmed != lower && !expanded.contains(&trimmed) {
             expanded.push(trimmed);
         }
@@ -429,26 +664,48 @@ pub fn search_with_mode(
         SearchMode::Fusion => {
             let sem = search_semantic(ctx, query, k, vector, filters)?;
             let grp = search_graph(ctx, query, k, vector, filters)?;
-            let mut rrf: std::collections::HashMap<u64, (f64, usize, usize)> = std::collections::HashMap::new();
-            let mut payloads: std::collections::HashMap<u64, (f64, crate::domain::tetra::MemoryPayload, Vec<&'static str>)> = std::collections::HashMap::new();
+            let mut rrf: std::collections::HashMap<u64, (f64, usize, usize)> =
+                std::collections::HashMap::new();
+            let mut payloads: std::collections::HashMap<
+                u64,
+                (f64, crate::domain::tetra::MemoryPayload, Vec<&'static str>),
+            > = std::collections::HashMap::new();
             for (rank, (id, _sim, mass, payload, mut src)) in sem.into_iter().enumerate() {
                 let e = rrf.entry(id).or_insert((0.0, rank, usize::MAX));
                 e.0 += 1.0 / (60.0 + rank as f64);
-                if rank < e.1 { e.1 = rank; }
+                if rank < e.1 {
+                    e.1 = rank;
+                }
                 payloads.insert(id, (mass, payload, src.clone()));
-                if let Some(p) = payloads.get_mut(&id) { p.2 = src.clone(); }
+                if let Some(p) = payloads.get_mut(&id) {
+                    p.2 = src.clone();
+                }
             }
             for (rank, (id, _sim, mass, payload, src)) in grp.into_iter().enumerate() {
                 let e = rrf.entry(id).or_insert((0.0, usize::MAX, rank));
                 e.0 += 1.0 / (60.0 + rank as f64);
-                if rank < e.2 { e.2 = rank; }
+                if rank < e.2 {
+                    e.2 = rank;
+                }
                 payloads.entry(id).or_insert((mass, payload, src.clone()));
-                if let Some(p) = payloads.get_mut(&id) { p.2.extend(src); }
+                if let Some(p) = payloads.get_mut(&id) {
+                    p.2.extend(src);
+                }
             }
-            let mut fused: Vec<(u64, f64, (f64, crate::domain::tetra::MemoryPayload, Vec<&'static str>))> =
-                rrf.into_iter().map(|(id, (score, _, _))| (id, score, payloads.remove(&id).unwrap())).collect();
+            let mut fused: Vec<(
+                u64,
+                f64,
+                (f64, crate::domain::tetra::MemoryPayload, Vec<&'static str>),
+            )> = rrf
+                .into_iter()
+                .map(|(id, (score, _, _))| (id, score, payloads.remove(&id).unwrap()))
+                .collect();
             fused.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            Ok(fused.into_iter().take(k).map(|(id, score, (mass, payload, src))| (id, score, mass, payload, src)).collect())
+            Ok(fused
+                .into_iter()
+                .take(k)
+                .map(|(id, score, (mass, payload, src))| (id, score, mass, payload, src))
+                .collect())
         }
         SearchMode::Auto => {
             if query_needs_diffusion(query) {
@@ -461,7 +718,10 @@ pub fn search_with_mode(
         }
         SearchMode::Hybrid => {
             let results = search(ctx, query, k, vector, filters)?;
-            Ok(results.into_iter().map(|(id, s, m, p)| (id, s, m, p, Vec::new())).collect())
+            Ok(results
+                .into_iter()
+                .map(|(id, s, m, p)| (id, s, m, p, Vec::new()))
+                .collect())
         }
     }
 }
@@ -486,7 +746,9 @@ fn search_semantic(
     let mut out = Vec::new();
     for (id, sim) in hits {
         if let Some(t) = ctx.space.get_tetrahedron(id) {
-            if !passes_filters(&t, filters) { continue; }
+            if !passes_filters(&t, filters) {
+                continue;
+            }
             out.push((id, sim, t.mass, t.data, vec!["vector"]));
         }
     }
@@ -516,10 +778,16 @@ fn search_graph(
     let seed_sum: f64 = seed_vec.iter().map(|r| r.1).sum();
     if seed_sum <= 0.0 || ctx.knowledge.relation_count() == 0 {
         // 无KG或零分种子: 退化为纯base检索
-        return Ok(seeds.into_iter().take(k).map(|(id, sim, mass, payload)| (id, sim, mass, payload, vec!["hybrid"])).collect());
+        return Ok(seeds
+            .into_iter()
+            .take(k)
+            .map(|(id, sim, mass, payload)| (id, sim, mass, payload, vec!["hybrid"]))
+            .collect());
     }
     let mut seed_dist: HashMap<u64, f64> = HashMap::new();
-    for (id, s) in &seed_vec { seed_dist.insert(*id, s / seed_sum); }
+    for (id, s) in &seed_vec {
+        seed_dist.insert(*id, s / seed_sum);
+    }
 
     // 1) 受限BFS建邻接(含过滤: 无效记忆不入图)
     let mut adj: HashMap<u64, Vec<(u64, f64)>> = HashMap::new();
@@ -528,28 +796,42 @@ fn search_graph(
     for _hop in 0..3 {
         let mut next_frontier: Vec<u64> = Vec::new();
         for u in &frontier {
-            if adj.contains_key(u) { continue; }
-            let edges: Vec<(u64, f64)> = ctx.knowledge.query_relations(*u).into_iter()
+            if adj.contains_key(u) {
+                continue;
+            }
+            let edges: Vec<(u64, f64)> = ctx
+                .knowledge
+                .query_relations(*u)
+                .into_iter()
                 .filter(|(v, _, _)| passes_filters_id(ctx, *v, filters))
                 .map(|(v, _, w)| (v, w.max(0.05)))
                 .collect();
             for (v, _) in &edges {
                 if !adj.contains_key(v) && node_count < PPR_FRONTIER {
-                    next_frontier.push(*v); node_count += 1;
+                    next_frontier.push(*v);
+                    node_count += 1;
                 }
             }
             adj.insert(*u, edges);
         }
-        if next_frontier.is_empty() || node_count >= PPR_FRONTIER { break; }
+        if next_frontier.is_empty() || node_count >= PPR_FRONTIER {
+            break;
+        }
         frontier = next_frontier;
     }
     // 叶子节点的空邻接(幂迭代需要)
     let leaf_targets: Vec<u64> = {
         let mut v: Vec<u64> = Vec::new();
-        for edges in adj.values() { for (t, _) in edges { v.push(*t); } }
+        for edges in adj.values() {
+            for (t, _) in edges {
+                v.push(*t);
+            }
+        }
         v
     };
-    for t in leaf_targets { adj.entry(t).or_default(); }
+    for t in leaf_targets {
+        adj.entry(t).or_default();
+    }
 
     // 2) 幂迭代
     let mut rank: HashMap<u64, f64> = seed_dist.clone();
@@ -557,24 +839,40 @@ fn search_graph(
         let mut next: HashMap<u64, f64> = HashMap::with_capacity(rank.len());
         for (u, edges) in &adj {
             let ru = *rank.get(u).unwrap_or(&0.0);
-            if ru <= 1e-12 || edges.is_empty() { continue; }
+            if ru <= 1e-12 || edges.is_empty() {
+                continue;
+            }
             let wsum: f64 = edges.iter().map(|(_, w)| *w).sum();
-            if wsum <= 0.0 { continue; }
+            if wsum <= 0.0 {
+                continue;
+            }
             for (v, w) in edges {
                 *next.entry(*v).or_insert(0.0) += ru * w / wsum;
             }
         }
-        for v in next.values_mut() { *v *= 1.0 - PPR_RESTART; }
-        for (s, v) in &seed_dist { *next.entry(*s).or_insert(0.0) += PPR_RESTART * v; }
+        for v in next.values_mut() {
+            *v *= 1.0 - PPR_RESTART;
+        }
+        for (s, v) in &seed_dist {
+            *next.entry(*s).or_insert(0.0) += PPR_RESTART * v;
+        }
         rank = next;
     }
 
     // 3) 融合与输出
     let ppr_max = rank.values().cloned().fold(0.0_f64, f64::max).max(1e-9);
-    let seed_max = seed_vec.iter().map(|r| r.1).fold(0.0_f64, f64::max).max(1e-9);
+    let seed_max = seed_vec
+        .iter()
+        .map(|r| r.1)
+        .fold(0.0_f64, f64::max)
+        .max(1e-9);
     let mut scored: Vec<(u64, f64, bool)> = Vec::new();
     for (id, p) in &rank {
-        let s = seed_vec.iter().find(|r| r.0 == *id).map(|r| r.1).unwrap_or(0.0);
+        let s = seed_vec
+            .iter()
+            .find(|r| r.0 == *id)
+            .map(|r| r.1)
+            .unwrap_or(0.0);
         scored.push((*id, 0.6 * (p / ppr_max) + 0.4 * (s / seed_max), s > 0.0));
     }
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -582,7 +880,11 @@ fn search_graph(
     let mut out: Vec<ScoredWithMatch> = Vec::new();
     for (id, score, is_seed) in scored.into_iter().take(k) {
         if let Some(t) = ctx.space.get_tetrahedron(id) {
-            let src: Vec<&str> = if is_seed { vec!["hybrid", "kg-ppr"] } else { vec!["kg-ppr"] };
+            let src: Vec<&str> = if is_seed {
+                vec!["hybrid", "kg-ppr"]
+            } else {
+                vec!["kg-ppr"]
+            };
             out.push((id, score, t.mass, t.data, src));
         }
     }
@@ -631,14 +933,21 @@ fn search_exact(
     let mut candidate_ids: HashSet<u64> = HashSet::new();
     for tok in &query_tokens {
         if let Some(ids) = label_idx.get(tok) {
-            for &id in ids { candidate_ids.insert(id); }
+            for &id in ids {
+                candidate_ids.insert(id);
+            }
         }
     }
     // label 本身作为 token 出现在 query 里
     for (label, ids) in label_idx.iter() {
         let label_lower = label.to_lowercase();
-        if query_tokens.iter().any(|w| label_lower.contains(w.as_str())) {
-            for &id in ids { candidate_ids.insert(id); }
+        if query_tokens
+            .iter()
+            .any(|w| label_lower.contains(w.as_str()))
+        {
+            for &id in ids {
+                candidate_ids.insert(id);
+            }
         }
     }
     drop(label_idx);
@@ -648,23 +957,39 @@ fn search_exact(
 
     let scored: Vec<ScoredWithMatch> = if candidate_ids.is_empty() && !strict {
         // 无 label 候选且非严格模式: 全量 BM25 fallback(exact 模式仍需扫全量找精确命中)
-        all_tetras.into_iter()
+        all_tetras
+            .into_iter()
             .filter(|t| passes_filters(t, filters))
             .map(|t| {
                 let doc_tokens = state_ref.get_doc_tokens(t.id, &t.data.content, &t.data.aliases);
-                score_tetra_exact(&t, &query_tokens, avg_dl, doc_count, df_map_ref, &doc_tokens)
+                score_tetra_exact(
+                    &t,
+                    &query_tokens,
+                    avg_dl,
+                    doc_count,
+                    df_map_ref,
+                    &doc_tokens,
+                )
             })
             .collect()
     } else if candidate_ids.is_empty() {
         // strict 模式但无候选: 返回空(不回填)
         vec![]
     } else {
-        all_tetras.into_iter()
+        all_tetras
+            .into_iter()
             .filter(|t| candidate_ids.contains(&t.id))
             .filter(|t| passes_filters(t, filters))
             .map(|t| {
                 let doc_tokens = state_ref.get_doc_tokens(t.id, &t.data.content, &t.data.aliases);
-                score_tetra_exact(&t, &query_tokens, avg_dl, doc_count, df_map_ref, &doc_tokens)
+                score_tetra_exact(
+                    &t,
+                    &query_tokens,
+                    avg_dl,
+                    doc_count,
+                    df_map_ref,
+                    &doc_tokens,
+                )
             })
             .collect()
     };
@@ -691,7 +1016,9 @@ fn search_exact(
                     s.sort_by(|a, b| b.1.cmp(&a.1));
                     s.truncate(150);
                     top_labels.clear();
-                    for (k, v) in s { top_labels.insert(k, v); }
+                    for (k, v) in s {
+                        top_labels.insert(k, v);
+                    }
                 }
             }
             *ctx.state.access_counts.lock().entry(*id).or_insert(0) += 1;
@@ -713,7 +1040,10 @@ pub fn search(
         match ctx.cognitive.translate_and_expand(query) {
             Ok((en, _translated)) => en,
             Err(e) => {
-                tracing::debug!("[Gateway] translate_and_expand failed: {}, using raw query", e);
+                tracing::debug!(
+                    "[Gateway] translate_and_expand failed: {}, using raw query",
+                    e
+                );
                 query.to_string()
             }
         }
@@ -757,12 +1087,25 @@ pub fn search(
     let mut scored: Vec<(TetraId, f64, f64, MemoryPayload)> = if !hnsw_candidates.is_empty() {
         // HNSW 路径：只取候选 tetra，避免遍历全部
         let candidate_set: HashSet<u64> = hnsw_candidates.iter().map(|(id, _)| *id).collect();
-        all_tetras.into_iter()
+        all_tetras
+            .into_iter()
             .filter(|t| candidate_set.contains(&t.id))
             .filter(|t| passes_filters(t, filters))
             .map(|t| {
                 let doc_tokens = state_ref.get_doc_tokens(t.id, &t.data.content, &t.data.aliases);
-                score_tetra(&t, &query_embedding, query_tokens_ref, avg_dl, doc_count, df_map_ref, false, &access_counts_snapshot, gibberish_query, &doc_tokens, now_ts_search)
+                score_tetra(
+                    &t,
+                    &query_embedding,
+                    query_tokens_ref,
+                    avg_dl,
+                    doc_count,
+                    df_map_ref,
+                    false,
+                    &access_counts_snapshot,
+                    gibberish_query,
+                    &doc_tokens,
+                    now_ts_search,
+                )
             })
             .collect()
     } else {
@@ -770,14 +1113,21 @@ pub fn search(
         let mut candidate_ids: HashSet<u64> = HashSet::new();
         for tok in query_tokens_ref {
             if let Some(ids) = label_idx.get(tok) {
-                for &id in ids { candidate_ids.insert(id); }
+                for &id in ids {
+                    candidate_ids.insert(id);
+                }
             }
         }
         // 预计算 label 小写形式避免重复 to_lowercase
         for (label, ids) in label_idx.iter() {
             let label_lower = label.to_lowercase();
-            if query_tokens_ref.iter().any(|w| label_lower.contains(w.as_str())) {
-                for &id in ids { candidate_ids.insert(id); }
+            if query_tokens_ref
+                .iter()
+                .any(|w| label_lower.contains(w.as_str()))
+            {
+                for &id in ids {
+                    candidate_ids.insert(id);
+                }
             }
         }
         drop(label_idx);
@@ -785,14 +1135,31 @@ pub fn search(
         if candidate_ids.is_empty() {
             let cap = 2000;
             candidate_ids = all_tetras.iter().take(cap).map(|t| t.id).collect();
-            tracing::warn!("[Search] no label candidates, using first {} of {} tetras as fallback", cap, all_tetras.len());
+            tracing::warn!(
+                "[Search] no label candidates, using first {} of {} tetras as fallback",
+                cap,
+                all_tetras.len()
+            );
         }
-        all_tetras.into_iter()
+        all_tetras
+            .into_iter()
             .filter(|t| candidate_ids.contains(&t.id))
             .filter(|t| passes_filters(t, filters))
             .map(|t| {
                 let doc_tokens = state_ref.get_doc_tokens(t.id, &t.data.content, &t.data.aliases);
-                score_tetra(&t, &query_embedding, query_tokens_ref, avg_dl, doc_count, df_map_ref, true, &access_counts_snapshot, gibberish_query, &doc_tokens, now_ts_search)
+                score_tetra(
+                    &t,
+                    &query_embedding,
+                    query_tokens_ref,
+                    avg_dl,
+                    doc_count,
+                    df_map_ref,
+                    true,
+                    &access_counts_snapshot,
+                    gibberish_query,
+                    &doc_tokens,
+                    now_ts_search,
+                )
             })
             .collect()
     };
@@ -801,7 +1168,11 @@ pub fn search(
 
     let best_sim = scored.first().map(|s| s.1).unwrap_or(0.0);
     if gibberish_query && best_sim < 0.25 {
-        tracing::info!("[Search] gibberish query '{}' best_sim={:.3} below threshold, returning empty", query, best_sim);
+        tracing::info!(
+            "[Search] gibberish query '{}' best_sim={:.3} below threshold, returning empty",
+            query,
+            best_sim
+        );
         return Ok(vec![]);
     }
     let need_rerank = {
@@ -811,7 +1182,8 @@ pub fn search(
     };
     if need_rerank {
         let rerank_n = scored.len().min(10);
-        let cand_text: Vec<String> = scored.iter()
+        let cand_text: Vec<String> = scored
+            .iter()
             .take(rerank_n)
             .enumerate()
             .map(|(i, (_id, sim, _mass, payload))| {
@@ -823,7 +1195,10 @@ pub fn search(
                     let a: Vec<String> = payload.aliases.iter().take(3).cloned().collect();
                     format!(" [{}]", a.join("; "))
                 };
-                format!("[{}] [{}] sim={:.3}{} {}", i, labels, sim, alias_str, preview)
+                format!(
+                    "[{}] [{}] sim={:.3}{} {}",
+                    i, labels, sim, alias_str, preview
+                )
             })
             .collect();
         let cand_joined = cand_text.join("\n");
@@ -860,11 +1235,14 @@ pub fn search(
                 }
                 if top_labels.len() > 200 {
                     // 保留 top 150 by count
-                    let mut sorted: Vec<_> = top_labels.iter().map(|(k, v)| (k.clone(), *v)).collect();
+                    let mut sorted: Vec<_> =
+                        top_labels.iter().map(|(k, v)| (k.clone(), *v)).collect();
                     sorted.sort_by(|a, b| b.1.cmp(&a.1));
                     sorted.truncate(150);
                     top_labels.clear();
-                    for (k, v) in sorted { top_labels.insert(k, v); }
+                    for (k, v) in sorted {
+                        top_labels.insert(k, v);
+                    }
                 }
             }
             *ctx.state.access_counts.lock().entry(*id).or_insert(0) += 1;
@@ -886,58 +1264,100 @@ fn passes_filters(t: &crate::domain::tetra::Tetrahedron, filters: Option<&Search
     if let Some(ref labels) = f.labels {
         if !labels.is_empty() {
             let has_any = labels.iter().any(|l| t.data.labels.contains(l));
-            if !has_any { return false; }
+            if !has_any {
+                return false;
+            }
         }
     }
     if let Some(min) = f.min_importance {
-        if t.data.importance < min { return false; }
+        if t.data.importance < min {
+            return false;
+        }
     }
     if let Some(max) = f.max_importance {
-        if t.data.importance > max { return false; }
+        if t.data.importance > max {
+            return false;
+        }
     }
     if let Some(since) = f.since_ts {
-        if t.data.timestamp < since { return false; }
+        if t.data.timestamp < since {
+            return false;
+        }
     }
     if let Some(until) = f.until_ts {
-        if t.data.timestamp > until { return false; }
+        if t.data.timestamp > until {
+            return false;
+        }
     }
     // D4: 时点有效性 — 存在锚点 = valid_from>0 ? valid_from : timestamp(旧数据valid_from恒0, timestamp即故事时间)
     if let Some(as_of) = f.as_of {
-        let from_anchor = if t.data.valid_from > 0 { t.data.valid_from } else { t.data.timestamp };
-        if from_anchor > as_of { return false; }
+        let from_anchor = if t.data.valid_from > 0 {
+            t.data.valid_from
+        } else {
+            t.data.timestamp
+        };
+        if from_anchor > as_of {
+            return false;
+        }
         if let Some(vt) = t.data.valid_to {
-            if vt <= as_of { return false; }
+            if vt <= as_of {
+                return false;
+            }
         }
     }
     if let Some(ref project) = f.project {
-        let has_project = t.data.labels.iter().any(|l| l == project || l.starts_with(&format!("project:{}", project)));
-        if !has_project { return false; }
+        let has_project = t
+            .data
+            .labels
+            .iter()
+            .any(|l| l == project || l.starts_with(&format!("project:{}", project)));
+        if !has_project {
+            return false;
+        }
     }
     true
 }
 
 /// P1 搜索硬化: MemoryPayload 版本的 passes_filters (D1-D3 修复)
-pub fn passes_filters_pub(payload: &crate::domain::tetra::MemoryPayload, f: &SearchFilters) -> bool {
+pub fn passes_filters_pub(
+    payload: &crate::domain::tetra::MemoryPayload,
+    f: &SearchFilters,
+) -> bool {
     if let Some(ref labels) = f.labels {
         if !labels.is_empty() {
             let has_any = labels.iter().any(|l| payload.labels.contains(l));
-            if !has_any { return false; }
+            if !has_any {
+                return false;
+            }
         }
     }
     if let Some(min) = f.min_importance {
-        if payload.importance < min { return false; }
+        if payload.importance < min {
+            return false;
+        }
     }
     if let Some(ref project) = f.project {
-        let has_project = payload.labels.iter().any(|l| l == project || l.starts_with(&format!("project:{}", project)));
-        if !has_project { return false; }
+        let has_project = payload
+            .labels
+            .iter()
+            .any(|l| l == project || l.starts_with(&format!("project:{}", project)));
+        if !has_project {
+            return false;
+        }
     }
     if let Some(since) = f.since_ts {
-        if payload.timestamp < since { return false; }
+        if payload.timestamp < since {
+            return false;
+        }
     }
     true
 }
 
-fn compute_query_embedding(text: &str, vector: Option<&crate::engine::vector::VectorLayer>, embedding: &EmbeddingService) -> Option<Vec<f64>> {
+fn compute_query_embedding(
+    text: &str,
+    vector: Option<&crate::engine::vector::VectorLayer>,
+    embedding: &EmbeddingService,
+) -> Option<Vec<f64>> {
     if let Some(vl) = vector {
         match vl.embed(text) {
             Ok(emb) => return Some(emb),
@@ -973,7 +1393,8 @@ fn keyword_score(query_tokens: &[String], payload: &MemoryPayload) -> f64 {
     let content_lower = payload.content.to_lowercase();
     let alias_text = payload.aliases.join(" ").to_lowercase();
     let searchable = format!("{} {}", content_lower, alias_text);
-    let matched = query_tokens.iter()
+    let matched = query_tokens
+        .iter()
         .filter(|w| searchable.contains(w.as_str()))
         .count();
     matched as f64 / query_tokens.len() as f64
@@ -984,37 +1405,56 @@ fn compute_label_boost(query_tokens: &[String], labels: &[String]) -> f64 {
         return 0.0;
     }
     let label_text = labels.join(" ").to_lowercase();
-    let label_match = query_tokens.iter()
+    let label_match = query_tokens
+        .iter()
         .filter(|w| label_text.contains(w.as_str()))
         .count();
     label_match as f64 / query_tokens.len() as f64
 }
 
 fn compute_entity_boost(query_tokens: &[String], labels: &[String]) -> f64 {
-    if query_tokens.is_empty() { return 0.0; }
+    if query_tokens.is_empty() {
+        return 0.0;
+    }
     let entity_labels: Vec<&String> = labels.iter().filter(|l| l.starts_with("entity:")).collect();
-    if entity_labels.is_empty() { return 0.0; }
-    let entity_text = entity_labels.iter()
+    if entity_labels.is_empty() {
+        return 0.0;
+    }
+    let entity_text = entity_labels
+        .iter()
         .map(|l| l.trim_start_matches("entity:").to_lowercase())
         .collect::<Vec<_>>()
         .join(" ");
-    let matched = query_tokens.iter()
+    let matched = query_tokens
+        .iter()
         .filter(|w| entity_text.contains(w.as_str()))
         .count();
     matched as f64 / query_tokens.len() as f64
 }
 
 fn compute_alias_boost(query_tokens: &[String], aliases: &[String]) -> f64 {
-    if aliases.is_empty() { return 0.0; }
-    if query_tokens.is_empty() { return 0.0; }
+    if aliases.is_empty() {
+        return 0.0;
+    }
+    if query_tokens.is_empty() {
+        return 0.0;
+    }
     let alias_text = aliases.join(" ").to_lowercase();
-    let matched = query_tokens.iter()
+    let matched = query_tokens
+        .iter()
         .filter(|w| alias_text.contains(w.as_str()))
         .count();
     matched as f64 / query_tokens.len() as f64
 }
 
-fn bm25_score(query_tokens: &[String], doc_tokens: &[String], dl: f64, avg_dl: f64, doc_count: usize, df_map: &std::collections::HashMap<String, usize>) -> f64 {
+fn bm25_score(
+    query_tokens: &[String],
+    doc_tokens: &[String],
+    dl: f64,
+    avg_dl: f64,
+    doc_count: usize,
+    df_map: &std::collections::HashMap<String, usize>,
+) -> f64 {
     if query_tokens.is_empty() {
         return 0.0;
     }
@@ -1032,7 +1472,9 @@ fn bm25_score(query_tokens: &[String], doc_tokens: &[String], dl: f64, avg_dl: f
     let mut score = 0.0;
     for term in query_tokens {
         let tf = *tf_map.get(term).unwrap_or(&0.0);
-        if tf == 0.0 { continue; }
+        if tf == 0.0 {
+            continue;
+        }
         let df = *df_map.get(term).unwrap_or(&1) as f64;
         let idf = ((n - df + 0.5) / (df + 0.5) + 1.0).ln();
         let tf_norm = (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * dl / avg_dl));
@@ -1043,16 +1485,25 @@ fn bm25_score(query_tokens: &[String], doc_tokens: &[String], dl: f64, avg_dl: f
 
 fn is_auto_generated(labels: &[String]) -> bool {
     labels.iter().any(|l| {
-        l == "reflect" || l == "session-summary" || l == "auto-extracted"
-        || l == "ctx-finding" || l == "cognitive-output" || l == "auto-generated"
-        || l == "dream-insight"
+        l == "reflect"
+            || l == "session-summary"
+            || l == "auto-extracted"
+            || l == "ctx-finding"
+            || l == "cognitive-output"
+            || l == "auto-generated"
+            || l == "dream-insight"
     })
 }
 
 fn is_noise_label(labels: &[String]) -> bool {
     labels.iter().any(|l| {
         let lower = l.to_lowercase();
-        lower == "test" || lower == "testing" || lower == "junk" || lower == "scratch" || lower == "tmp" || lower == "temp"
+        lower == "test"
+            || lower == "testing"
+            || lower == "junk"
+            || lower == "scratch"
+            || lower == "tmp"
+            || lower == "temp"
     })
 }
 
@@ -1062,7 +1513,14 @@ fn is_noise_content(content: &str) -> bool {
     if trimmed.len() < 10 {
         return true;
     }
-    let noise_phrases = ["test", "testing 123", "hello world", "测试中文", "测试内容", "test content"];
+    let noise_phrases = [
+        "test",
+        "testing 123",
+        "hello world",
+        "测试中文",
+        "测试内容",
+        "test content",
+    ];
     for phrase in &noise_phrases {
         if lower == *phrase || trimmed.eq_ignore_ascii_case(phrase) {
             return true;
@@ -1107,7 +1565,7 @@ fn score_tetra(
     let dl = doc_tokens.len() as f64;
     let bm25 = bm25_score(query_tokens, doc_tokens, dl, avg_dl, doc_count, df_map);
     let has_exact_match = has_exact_keyword_match(query_tokens, &t.data);
-    let bm25_norm = (bm25 / (bm25 + 1.0)) * if has_exact_match { 0.40 } else { 0.30 };  // 检索突破：无精确匹配从0.20→0.35，让BM25能补偿向量失败
+    let bm25_norm = (bm25 / (bm25 + 1.0)) * if has_exact_match { 0.40 } else { 0.30 }; // 检索突破：无精确匹配从0.20→0.35，让BM25能补偿向量失败
     let hybrid = vec_sim * 0.55 + bm25_norm;
     let label_boost = compute_label_boost(query_tokens, &t.data.labels);
     let entity_boost = compute_entity_boost(query_tokens, &t.data.labels);
@@ -1126,21 +1584,28 @@ fn score_tetra(
     let exact_substring_boost = {
         if query_tokens.len() >= 3 {
             // 重建查询原文（取前8个token拼接，用于子串检测）
-            let query_fragment: String = query_tokens.iter().take(8)
-                .cloned().collect::<Vec<_>>().join(" ");
+            let query_fragment: String = query_tokens
+                .iter()
+                .take(8)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" ");
             let content_lower = t.data.content.to_lowercase();
             // 检查查询片段是否作为子串出现在内容中
             if query_fragment.len() > 10 && content_lower.contains(&query_fragment) {
-                0.25  // 检索突破3: 强加分提升到0.25——足以压过向量噪声
+                0.25 // 检索突破3: 强加分提升到0.25——足以压过向量噪声
             } else {
                 // 也检查token级别的重合度（无序匹配）
                 let content_tokens = doc_tokens;
-                let query_set: std::collections::HashSet<&str> = query_tokens.iter().take(10).map(|s| s.as_str()).collect();
-                let doc_set: std::collections::HashSet<&str> = content_tokens.iter().map(|s| s.as_str()).collect();
+                let query_set: std::collections::HashSet<&str> =
+                    query_tokens.iter().take(10).map(|s| s.as_str()).collect();
+                let doc_set: std::collections::HashSet<&str> =
+                    content_tokens.iter().map(|s| s.as_str()).collect();
                 let overlap = query_set.intersection(&doc_set).count();
                 let overlap_ratio = overlap as f64 / query_set.len().max(1) as f64;
-                if overlap_ratio > 0.5 {  // 50%+ token重合（降低阈值捕获更多匹配）
-                    0.12 * overlap_ratio  // 检索突破3: token重叠信号增强
+                if overlap_ratio > 0.5 {
+                    // 50%+ token重合（降低阈值捕获更多匹配）
+                    0.12 * overlap_ratio // 检索突破3: token重叠信号增强
                 } else {
                     0.0
                 }
@@ -1152,7 +1617,11 @@ fn score_tetra(
 
     // 加性融合：向量+BM25 混合分作为主体（55%），信号作为加分项
     // 检索突破3: exact_substring匹配时hybrid权重×1.2（让精确匹配的记忆更靠前）
-    let hybrid_weight = if exact_substring_boost > 0.15 { 0.60 } else { 0.50 };
+    let hybrid_weight = if exact_substring_boost > 0.15 {
+        0.60
+    } else {
+        0.50
+    };
     let mut score = hybrid * hybrid_weight;
     score += label_boost * 0.10;
     score += entity_boost * 0.10;
@@ -1163,9 +1632,21 @@ fn score_tetra(
     score += exact_substring_boost;
 
     // 惩罚项改为减法（而非乘法），避免归零
-    let penalty = if t.data.labels.iter().any(|l| l.starts_with("meta-")) { 0.1 } else { 0.0 };
-    let noise_penalty = if is_noise_label(&t.data.labels) || is_noise_content(&t.data.content) { 0.2 } else { 0.0 };
-    let auto_penalty = if is_auto_generated(&t.data.labels) { 0.05 } else { 0.0 };
+    let penalty = if t.data.labels.iter().any(|l| l.starts_with("meta-")) {
+        0.1
+    } else {
+        0.0
+    };
+    let noise_penalty = if is_noise_label(&t.data.labels) || is_noise_content(&t.data.content) {
+        0.2
+    } else {
+        0.0
+    };
+    let auto_penalty = if is_auto_generated(&t.data.labels) {
+        0.05
+    } else {
+        0.0
+    };
     let validity_penalty = if t.data.valid_to.is_some() { 0.3 } else { 0.0 };
     score -= (penalty + noise_penalty + auto_penalty + validity_penalty);
     score = score.max(0.0).min(1.0);
@@ -1174,10 +1655,18 @@ fn score_tetra(
 }
 
 fn has_exact_keyword_match(query_tokens: &[String], payload: &MemoryPayload) -> bool {
-    if query_tokens.is_empty() { return false; }
+    if query_tokens.is_empty() {
+        return false;
+    }
     let content_lower = payload.content.to_lowercase();
-    let all_text = format!("{} {} {}", content_lower, payload.aliases.join(" ").to_lowercase(), payload.labels.join(" ").to_lowercase());
-    let match_count = query_tokens.iter()
+    let all_text = format!(
+        "{} {} {}",
+        content_lower,
+        payload.aliases.join(" ").to_lowercase(),
+        payload.labels.join(" ").to_lowercase()
+    );
+    let match_count = query_tokens
+        .iter()
         .filter(|t| all_text.contains(t.as_str()))
         .count();
     match_count as f64 / query_tokens.len() as f64 > 0.5
@@ -1189,21 +1678,37 @@ fn has_exact_keyword_match(query_tokens: &[String], payload: &MemoryPayload) -> 
 /// exact 模式契约是"包含特定标识符的记忆都要返回",所以任一命中即可。
 /// BM25 分数自然决定排序(含更多 token 的分数更高)。
 fn has_any_token_match(query_tokens: &[String], payload: &MemoryPayload) -> bool {
-    if query_tokens.is_empty() { return false; }
+    if query_tokens.is_empty() {
+        return false;
+    }
     let content_lower = payload.content.to_lowercase();
-    let all_text = format!("{} {} {}", content_lower, payload.aliases.join(" ").to_lowercase(), payload.labels.join(" ").to_lowercase());
+    let all_text = format!(
+        "{} {} {}",
+        content_lower,
+        payload.aliases.join(" ").to_lowercase(),
+        payload.labels.join(" ").to_lowercase()
+    );
     query_tokens.iter().any(|t| all_text.contains(t.as_str()))
 }
 
 /// Phase 1: 计算一条结果的命中来源(可解释性)
 /// 返回哪些信号匹配了查询 token, 用于 exact 模式的 matched_by 字段
-fn compute_matched_by(query_tokens: &[String], payload: &MemoryPayload, doc_tokens: &[String]) -> MatchedBy {
+fn compute_matched_by(
+    query_tokens: &[String],
+    payload: &MemoryPayload,
+    doc_tokens: &[String],
+) -> MatchedBy {
     let mut sources: MatchedBy = Vec::new();
-    if query_tokens.is_empty() { return sources; }
+    if query_tokens.is_empty() {
+        return sources;
+    }
 
     // BM25 命中: query token 出现在文档 token 集合里
     let doc_set: HashSet<&str> = doc_tokens.iter().map(|s| s.as_str()).collect();
-    let bm25_hits = query_tokens.iter().filter(|t| doc_set.contains(t.as_str())).count();
+    let bm25_hits = query_tokens
+        .iter()
+        .filter(|t| doc_set.contains(t.as_str()))
+        .count();
     if bm25_hits > 0 {
         sources.push("bm25");
     }
@@ -1211,7 +1716,10 @@ fn compute_matched_by(query_tokens: &[String], payload: &MemoryPayload, doc_toke
     // alias 命中
     if !payload.aliases.is_empty() {
         let alias_text = payload.aliases.join(" ").to_lowercase();
-        let alias_hits = query_tokens.iter().filter(|t| alias_text.contains(t.as_str())).count();
+        let alias_hits = query_tokens
+            .iter()
+            .filter(|t| alias_text.contains(t.as_str()))
+            .count();
         if alias_hits > 0 {
             sources.push("alias");
         }
@@ -1220,7 +1728,10 @@ fn compute_matched_by(query_tokens: &[String], payload: &MemoryPayload, doc_toke
     // label 命中
     if !payload.labels.is_empty() {
         let label_text = payload.labels.join(" ").to_lowercase();
-        let label_hits = query_tokens.iter().filter(|t| label_text.contains(t.as_str())).count();
+        let label_hits = query_tokens
+            .iter()
+            .filter(|t| label_text.contains(t.as_str()))
+            .count();
         if label_hits > 0 {
             sources.push("label");
         }
@@ -1228,8 +1739,12 @@ fn compute_matched_by(query_tokens: &[String], payload: &MemoryPayload, doc_toke
 
     // 精确子串命中(最强信号): query 原文片段出现在 content 里
     if query_tokens.len() >= 2 {
-        let query_fragment: String = query_tokens.iter().take(6)
-            .cloned().collect::<Vec<_>>().join(" ");
+        let query_fragment: String = query_tokens
+            .iter()
+            .take(6)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ");
         let content_lower = payload.content.to_lowercase();
         if query_fragment.len() > 8 && content_lower.contains(&query_fragment) {
             sources.push("exact_substring");
@@ -1283,7 +1798,11 @@ fn score_tetra_exact(
     }
 
     // 惩罚项(与 hybrid 一致: 噪声/过期记忆降权)
-    let noise_penalty = if is_noise_label(&t.data.labels) || is_noise_content(&t.data.content) { 0.3 } else { 0.0 };
+    let noise_penalty = if is_noise_label(&t.data.labels) || is_noise_content(&t.data.content) {
+        0.3
+    } else {
+        0.0
+    };
     let validity_penalty = if t.data.valid_to.is_some() { 0.3 } else { 0.0 };
     score -= (noise_penalty + validity_penalty);
     score = score.max(0.0).min(1.0);

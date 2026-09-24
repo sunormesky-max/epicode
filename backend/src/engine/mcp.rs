@@ -55,7 +55,11 @@ pub struct McpHandler {
 
 impl McpHandler {
     pub fn new(engine: Arc<Engine>) -> Self {
-        Self { engine, pub_skills: None, quota: None }
+        Self {
+            engine,
+            pub_skills: None,
+            quota: None,
+        }
     }
 
     /// 写入工具配额检查(与 REST check_and_increment_memory 对等)。
@@ -106,39 +110,70 @@ impl McpHandler {
         similarity: f64,
         topology: Option<serde_json::Value>,
     ) -> serde_json::Value {
-        super::smrp::memory_item(&self.engine, id, content, labels, timestamp, tier, source, similarity, topology)
+        super::smrp::memory_item(
+            &self.engine,
+            id,
+            content,
+            labels,
+            timestamp,
+            tier,
+            source,
+            similarity,
+            topology,
+        )
     }
 
     /// SMRP §7.2 — 结构化录入工具的统一回声：create + 安置摘要 + 建链数。
     /// echo 由调用方预填类别/回声字段；本方法补 id/status/placement/relations_formed。
     /// 配额检查在此统一完成(与 REST 对等,B1修复)。
-    fn create_echo(&self, tool: &str, content: &str, labels: Vec<String>, mut echo: serde_json::Value) -> serde_json::Value {
+    fn create_echo(
+        &self,
+        tool: &str,
+        content: &str,
+        labels: Vec<String>,
+        mut echo: serde_json::Value,
+    ) -> serde_json::Value {
         // 配额检查(与 REST check_and_increment_memory 对等)
         if let Err(err_resp) = self.check_quota(tool) {
             return err_resp;
         }
         // P1记忆分层：根据 tool 名和 labels 自动设置 memory_class
-        let auto_class = if tool == "session_summary" || tool == "ctx_save" || tool == "context_observe" {
-            Some("session".to_string())
-        } else if labels.iter().any(|l| l == "session-summary" || l == "ctx-session-summary" || l == "system-observation") {
-            Some("session".to_string())
-        } else {
-            None
-        };
+        let auto_class =
+            if tool == "session_summary" || tool == "ctx_save" || tool == "context_observe" {
+                Some("session".to_string())
+            } else if labels.iter().any(|l| {
+                l == "session-summary" || l == "ctx-session-summary" || l == "system-observation"
+            }) {
+                Some("session".to_string())
+            } else {
+                None
+            };
 
-        match self.engine.scheduler.api_create_memory_full(content, labels) {
+        match self
+            .engine
+            .scheduler
+            .api_create_memory_full(content, labels)
+        {
             Ok(r) => {
-                self.rollback_quota(r.is_new);  // dedup 回滚配额
-                // P1：创建后更新 memory_class
+                self.rollback_quota(r.is_new); // dedup 回滚配额
+                                               // P1：创建后更新 memory_class
                 if let Some(ref class) = auto_class {
                     if let Err(e) = self.engine.scheduler.api_set_memory_class(r.id, class) {
                         tracing::warn!("[MCP] memory_class persist failed for {}: {}", r.id, e);
                     }
                 }
-                let status = if r.dedup_matched.is_some() { "deduped" } else if r.is_new { "created" } else { "exists" };
+                let status = if r.dedup_matched.is_some() {
+                    "deduped"
+                } else if r.is_new {
+                    "created"
+                } else {
+                    "exists"
+                };
                 echo["id"] = serde_json::json!(r.id);
                 echo["status"] = serde_json::json!(status);
-                if let Some(ref class) = auto_class { echo["memory_class"] = serde_json::json!(class); }
+                if let Some(ref class) = auto_class {
+                    echo["memory_class"] = serde_json::json!(class);
+                }
                 echo["placement"] = match &r.placement {
                     Some(p) => serde_json::json!({
                         "layer": p.layer,
@@ -152,7 +187,7 @@ impl McpHandler {
                 self.smrp_ok(tool, echo)
             }
             Err(e) => {
-                self.rollback_quota(false);  // 创建失败回滚配额
+                self.rollback_quota(false); // 创建失败回滚配额
                 self.smrp_err(tool, 500, &e)
             }
         }
@@ -166,17 +201,38 @@ impl McpHandler {
         // SMRP §5.1: "我经历了什么" — 涵盖所有经历性质的记忆
         const EXP_LABELS: &[&str] = &[
             // 原有
-            "ops", "deployment", "security", "feedback", "session-summary",
-            "bug", "fix", "observation", "system-observation", "ctx-finding",
+            "ops",
+            "deployment",
+            "security",
+            "feedback",
+            "session-summary",
+            "bug",
+            "fix",
+            "observation",
+            "system-observation",
+            "ctx-finding",
             // P0-3 扩充: 治理/驱动/决策/学习类经历
-            "op_audit", "drive", "decision", "pattern", "bug_memory",
-            "session_summary", "task", "incident", "postmortem",
-            "learning", "experiment", "test-result", "review",
+            "op_audit",
+            "drive",
+            "decision",
+            "pattern",
+            "bug_memory",
+            "session_summary",
+            "task",
+            "incident",
+            "postmortem",
+            "learning",
+            "experiment",
+            "test-result",
+            "review",
         ];
         labels.iter().any(|l| EXP_LABELS.iter().any(|e| l == *e))
     }
 
-    fn build_search_filters(&self, args: &serde_json::Value) -> Option<super::search_engine::SearchFilters> {
+    fn build_search_filters(
+        &self,
+        args: &serde_json::Value,
+    ) -> Option<super::search_engine::SearchFilters> {
         let has_labels = args["labels"].is_array();
         let has_min_imp = args["min_importance"].is_number();
         let has_project = args["project"].is_string();
@@ -190,7 +246,9 @@ impl McpHandler {
         let mut f = super::search_engine::SearchFilters::default();
         if has_labels {
             f.labels = args["labels"].as_array().map(|arr| {
-                arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
             });
         }
         if has_min_imp {
@@ -217,7 +275,10 @@ impl McpHandler {
         Some(f)
     }
 
-    fn build_action_items(&self, sched: &super::scheduler::SchedulerCenter) -> Vec<serde_json::Value> {
+    fn build_action_items(
+        &self,
+        sched: &super::scheduler::SchedulerCenter,
+    ) -> Vec<serde_json::Value> {
         let mut items: Vec<serde_json::Value> = Vec::new();
         let now_ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -247,7 +308,7 @@ impl McpHandler {
         let all = sched.api_load_context(50);
         let mut potential_dupes: Vec<(String, String, u64, u64)> = Vec::new();
         for i in 0..all.len() {
-            for j in (i+1)..all.len().min(i+10) {
+            for j in (i + 1)..all.len().min(i + 10) {
                 let (_, s1, c1, l1) = &all[i];
                 let (_, s2, c2, l2) = &all[j];
                 if *s1 > 1.5 && *s2 > 1.5 {
@@ -255,13 +316,22 @@ impl McpHandler {
                     if overlap_labels.len() >= 2 && (c1.len() > 30 || c2.len() > 30) {
                         let sim = super::intake::MemoryIntake::text_similarity(c1, c2);
                         if sim > 0.55 {
-                            potential_dupes.push((c1.chars().take(60).collect(), c2.chars().take(60).collect(), 0, 0));
-                            if potential_dupes.len() >= 3 { break; }
+                            potential_dupes.push((
+                                c1.chars().take(60).collect(),
+                                c2.chars().take(60).collect(),
+                                0,
+                                0,
+                            ));
+                            if potential_dupes.len() >= 3 {
+                                break;
+                            }
                         }
                     }
                 }
             }
-            if potential_dupes.len() >= 3 { break; }
+            if potential_dupes.len() >= 3 {
+                break;
+            }
         }
         for (a, b, _, _) in &potential_dupes {
             items.push(serde_json::json!({
@@ -270,7 +340,8 @@ impl McpHandler {
             }));
         }
 
-        let low_imp_stale: Vec<_> = all.iter()
+        let low_imp_stale: Vec<_> = all
+            .iter()
             .filter(|(_, s, c, _)| *s < 0.5 && c.len() > 20)
             .take(2)
             .collect();
@@ -294,8 +365,15 @@ impl McpHandler {
         items
     }
 
-    pub fn with_pub_skills(engine: Arc<Engine>, pub_skills: Arc<super::skills::SkillEngine>) -> Self {
-        Self { engine, pub_skills: Some(pub_skills), quota: None }
+    pub fn with_pub_skills(
+        engine: Arc<Engine>,
+        pub_skills: Arc<super::skills::SkillEngine>,
+    ) -> Self {
+        Self {
+            engine,
+            pub_skills: Some(pub_skills),
+            quota: None,
+        }
     }
 
     /// 设置配额上下文(cloud.rs 的 mcp_endpoint / TCP 认证后调用)。
@@ -328,14 +406,15 @@ impl McpHandler {
                 jsonrpc: "2.0".into(),
                 id: req.id,
                 result: None,
-                error: Some(McpError { code: -32601, message: format!("unknown method: {}", req.method) }),
+                error: Some(McpError {
+                    code: -32601,
+                    message: format!("unknown method: {}", req.method),
+                }),
             },
         }
     }
 
-    fn initialize(&self, id: Option<serde_json::Value>) -> // Dual-stack: respond with 2025-11-25 for client SDK compatibility.
-        // server/discover advertises 2026-07-28 support for new clients.
-        McpResponse {
+    fn initialize(&self, id: Option<serde_json::Value>) -> McpResponse {
         let identity = self.engine.space.identity_info();
         let identity_json = if let Some(ref info) = identity {
             serde_json::json!({
@@ -418,7 +497,11 @@ impl McpHandler {
 
     /// MCP 2026-07-28: logging/setLevel deprecated — log level now per-request via _meta.
     /// Accept but no-op for backward compatibility.
-    fn logging_set_level(&self, id: Option<serde_json::Value>, _params: Option<serde_json::Value>) -> McpResponse {
+    fn logging_set_level(
+        &self,
+        id: Option<serde_json::Value>,
+        _params: Option<serde_json::Value>,
+    ) -> McpResponse {
         McpResponse {
             jsonrpc: "2.0".into(),
             id,
@@ -429,7 +512,11 @@ impl McpHandler {
 
     /// MCP 2026-07-28: subscriptions/listen — long-lived POST-response stream.
     /// Stub: returns immediately with empty subscriptions (Epicode uses SSE for real-time updates).
-    fn subscriptions_listen(&self, id: Option<serde_json::Value>, _params: Option<serde_json::Value>) -> McpResponse {
+    fn subscriptions_listen(
+        &self,
+        id: Option<serde_json::Value>,
+        _params: Option<serde_json::Value>,
+    ) -> McpResponse {
         McpResponse {
             jsonrpc: "2.0".into(),
             id,
@@ -1064,18 +1151,28 @@ impl McpHandler {
         }
     }
 
-    fn tools_call(&self, id: Option<serde_json::Value>, params: Option<serde_json::Value>) -> McpResponse {
+    fn tools_call(
+        &self,
+        id: Option<serde_json::Value>,
+        params: Option<serde_json::Value>,
+    ) -> McpResponse {
         let params = match params {
             Some(p) => p,
             None => return self.error(id, -32602, "missing params"),
         };
 
         let name = params["name"].as_str().unwrap_or("");
-        let args = params.get("arguments").cloned().unwrap_or(serde_json::Value::Null);
+        let args = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
 
         // 统一身分检查（kimi2.7 #27）：除身份仪式本身外，所有操作需确认身份
-        if !matches!(name, "identity_confirm" | "identity_step" | "identity_finalize")
-            && self.engine.space.identity_info().is_none() {
+        if !matches!(
+            name,
+            "identity_confirm" | "identity_step" | "identity_finalize"
+        ) && self.engine.space.identity_info().is_none()
+        {
             let pending = self.engine.space.pending_identity();
             // C2修复：身份拦截器改用 SMRP 信封（与其他 32 个工具一致）
             let identity_data = serde_json::json!({
@@ -1083,13 +1180,22 @@ impl McpHandler {
                 "next_prompt": pending.step_prompt(),
                 "required_flow": "Use identity_step to complete the ritual ceremony, then identity_finalize to awaken."
             });
-            let smrp_err = self.smrp_err(name, 4003, "identity_not_confirmed — Identity confirmation required before operations.");
+            let smrp_err = self.smrp_err(
+                name,
+                4003,
+                "identity_not_confirmed — Identity confirmation required before operations.",
+            );
             // smrp_err 返回的 data 段需要合并 identity 上下文
-            let merged = if let Some(obj) = smrp_err.get("data").and_then(|d| d.as_object().cloned()) {
-                let mut m = obj;
-                if let Some(id_data) = identity_data.as_object() { m.extend(id_data.iter().map(|(k,v)| (k.clone(), v.clone()))); }
-                serde_json::Value::Object(m)
-            } else { identity_data };
+            let merged =
+                if let Some(obj) = smrp_err.get("data").and_then(|d| d.as_object().cloned()) {
+                    let mut m = obj;
+                    if let Some(id_data) = identity_data.as_object() {
+                        m.extend(id_data.iter().map(|(k, v)| (k.clone(), v.clone())));
+                    }
+                    serde_json::Value::Object(m)
+                } else {
+                    identity_data
+                };
             let mut result = smrp_err;
             if let Some(obj) = result.as_object_mut() {
                 obj.insert("data".into(), merged);
@@ -1105,7 +1211,11 @@ impl McpHandler {
         }
 
         // P6 双钟: 任何工具调用都是活跃心跳 — 预算按活跃时间燃烧
-        if let Some(atid) = self.engine.storage.get_active_task_for_user(&self.engine.user_id) {
+        if let Some(atid) = self
+            .engine
+            .storage
+            .get_active_task_for_user(&self.engine.user_id)
+        {
             self.engine.storage.touch_task_activity(&atid);
         }
         let mut result = match name {
@@ -1163,62 +1273,124 @@ impl McpHandler {
 
         // P33 宪法三要素: 每个响应自带时间上下文(t=几点/Δ=多久/◆=规则) — 安静在场, 不抢注意力
         if name != "task_start" && name != "task_complete" {
-            let now_str = (chrono::Utc::now() + chrono::Duration::hours(8)).format("%H:%M:%S").to_string();
-            let (delta_str, rule_str) = match self.engine.storage.get_active_task_for_user(&self.engine.user_id) {
-                Some(atid) => {
-                    match self.engine.storage.get_task_session(&atid) {
-                        Some(sess) => {
-                            let start = sess.get("start_ts").and_then(|v| v.as_i64()).unwrap_or(0);
-                            let budget = sess.get("budget_ms").and_then(|v| v.as_i64()).unwrap_or(1).max(1);
-                            let active = self.engine.storage.get_effective_active_ms(&atid);
-                            let elapsed_s = (chrono::Utc::now().timestamp() - start).max(0);
-                            let start_str = (chrono::DateTime::from_timestamp(start, 0).unwrap_or_default() + chrono::Duration::hours(8)).format("%H:%M:%S").to_string();
-                            let d = format!("{}m{:02}s @ {}", elapsed_s / 60, elapsed_s % 60, start_str);
-                            let apct = ((active as f64 / budget as f64) * 100.0).round().min(999.0) as i64;
-                            let seg = if apct < 30 { "探索段(先v0后广度)" } else if apct < 70 { "构建段(备选+深化)" } else if apct < 90 { "校验段(修正+反思)" } else { "冲刺段(打磨交付)" };
-                            let r = format!("{}m·{}% {} · 停止权=说不出下一个改进点", budget / 60000, apct, seg);
-                            (d, r)
-                        }
-                        None => ("idle".to_string(), "no task".to_string()),
+            let now_str = (chrono::Utc::now() + chrono::Duration::hours(8))
+                .format("%H:%M:%S")
+                .to_string();
+            let (delta_str, rule_str) = match self
+                .engine
+                .storage
+                .get_active_task_for_user(&self.engine.user_id)
+            {
+                Some(atid) => match self.engine.storage.get_task_session(&atid) {
+                    Some(sess) => {
+                        let start = sess.get("start_ts").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let budget = sess
+                            .get("budget_ms")
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(1)
+                            .max(1);
+                        let active = self.engine.storage.get_effective_active_ms(&atid);
+                        let elapsed_s = (chrono::Utc::now().timestamp() - start).max(0);
+                        let start_str = (chrono::DateTime::from_timestamp(start, 0)
+                            .unwrap_or_default()
+                            + chrono::Duration::hours(8))
+                        .format("%H:%M:%S")
+                        .to_string();
+                        let d =
+                            format!("{}m{:02}s @ {}", elapsed_s / 60, elapsed_s % 60, start_str);
+                        let apct =
+                            ((active as f64 / budget as f64) * 100.0).round().min(999.0) as i64;
+                        let seg = if apct < 30 {
+                            "探索段(先v0后广度)"
+                        } else if apct < 70 {
+                            "构建段(备选+深化)"
+                        } else if apct < 90 {
+                            "校验段(修正+反思)"
+                        } else {
+                            "冲刺段(打磨交付)"
+                        };
+                        let r = format!(
+                            "{}m·{}% {} · 停止权=说不出下一个改进点",
+                            budget / 60000,
+                            apct,
+                            seg
+                        );
+                        (d, r)
                     }
-                }
+                    None => ("idle".to_string(), "no task".to_string()),
+                },
                 None => ("idle".to_string(), "ready".to_string()),
             };
             if let Some(data) = result.get_mut("data").and_then(|d| d.as_object_mut()) {
-                data.insert("ctx".into(), serde_json::json!({
-                    "t": now_str,
-                    "Δ": delta_str,
-                    "◆": rule_str,
-                }));
+                data.insert(
+                    "ctx".into(),
+                    serde_json::json!({
+                        "t": now_str,
+                        "Δ": delta_str,
+                        "◆": rule_str,
+                    }),
+                );
             }
         }
 
         // P9 任务脉冲: 活跃任务期间每个响应携带过程状态 — 对治长会话约束衰减
         if name != "task_status" && name != "task_start" {
-            if let Some(atid) = self.engine.storage.get_active_task_for_user(&self.engine.user_id) {
+            if let Some(atid) = self
+                .engine
+                .storage
+                .get_active_task_for_user(&self.engine.user_id)
+            {
                 if let Some(sess) = self.engine.storage.get_task_session(&atid) {
-                    let budget = sess.get("budget_ms").and_then(|v| v.as_i64()).unwrap_or(1).max(1);
+                    let budget = sess
+                        .get("budget_ms")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(1)
+                        .max(1);
                     let active = self.engine.storage.get_task_active_ms(&atid);
                     let (m_ops, alts, revs, _) = self.engine.storage.get_task_counters(&atid);
                     let pct = (active as f64 / budget as f64 * 100.0).round().min(100.0) as i64;
                     if let Some(data) = result.get_mut("data").and_then(|d| d.as_object_mut()) {
                         // P10 相位感知教练: skills从"开工递一次"升级为"全程指导"
-                        let phase = if pct < 30 { "explore" } else if pct < 70 { "build" } else if pct < 90 { "verify" } else { "deliver" };
+                        let phase = if pct < 30 {
+                            "explore"
+                        } else if pct < 70 {
+                            "build"
+                        } else if pct < 90 {
+                            "verify"
+                        } else {
+                            "deliver"
+                        };
                         let mut coach: Vec<String> = Vec::new();
                         if m_ops < 1 {
-                            coach.push("先 memory_search(任务关键词) 点亮探索门 — 无记忆不得交付".into());
+                            coach.push(
+                                "先 memory_search(任务关键词) 点亮探索门 — 无记忆不得交付".into(),
+                            );
                             // S2 语义技能注入: 探索期把相关技能卡递到眼前(构建期后静默防注意力稀释)
                             if let Some(desc) = sess.get("description").and_then(|v| v.as_str()) {
-                                for (sk, sc) in self.engine.skills.match_skills_scored(desc, &self.engine.user_id, 2) {
+                                for (sk, sc) in self.engine.skills.match_skills_scored(
+                                    desc,
+                                    &self.engine.user_id,
+                                    2,
+                                ) {
                                     if sc >= 0.5 {
-                                        let tg = if sk.triggers.is_empty() { String::new() } else { format!(" [场景: {}]", sk.triggers.join("/")) };
+                                        let tg = if sk.triggers.is_empty() {
+                                            String::new()
+                                        } else {
+                                            format!(" [场景: {}]", sk.triggers.join("/"))
+                                        };
                                         coach.push(format!("相关技能「{}」(match {}) — {}{} | 需要细节: skill_get('{}')",
                                             sk.name, sc, sk.description.as_deref().unwrap_or(""), tg, sk.name));
                                     }
                                 }
                             }
                         }
-                        let cpn = self.engine.storage.get_task_checkpoints(&atid).as_array().map(|a| a.len()).unwrap_or(0);
+                        let cpn = self
+                            .engine
+                            .storage
+                            .get_task_checkpoints(&atid)
+                            .as_array()
+                            .map(|a| a.len())
+                            .unwrap_or(0);
                         if pct > 20 && cpn == 0 {
                             coach.push("v0未落: 先 task_check(checkpoint:'初版一句话') 落初版 — 驻留改进永远要有对象".into());
                         }
@@ -1226,14 +1398,20 @@ impl McpHandler {
                             coach.push(format!("构建相: 已比较备选 {} 个 — 用 task_check(alternatives_considered) 申报, 需>=2", alts));
                         }
                         if pct >= 70 && revs < 1 {
-                            coach.push("校验相: 完成一轮针对性修正后 task_check(revision_done:true) 申报".into());
+                            coach.push(
+                                "校验相: 完成一轮针对性修正后 task_check(revision_done:true) 申报"
+                                    .into(),
+                            );
                         }
                         if pct >= 90 {
                             coach.push("交付相: task_complete 带 self_rating(评审默认开启), 交付物必须附 task_id".into());
                         }
                         if !coach.is_empty() {
                             let hint = match phase {
-                                "explore" => "记忆智能存取", "build" => "上下文管理", "verify" => "质量自控", _ => "",
+                                "explore" => "记忆智能存取",
+                                "build" => "上下文管理",
+                                "verify" => "质量自控",
+                                _ => "",
                             };
                             if !hint.is_empty() {
                                 coach.push(format!("深读: skill_get('{}')", hint));
@@ -1264,21 +1442,32 @@ impl McpHandler {
         }
     }
 
-    
     // ═══ 时间效性工具 ═══
 
     fn tool_epocode_handshake(&self, args: &serde_json::Value) -> serde_json::Value {
-        let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let auto_install = args.get("authorization")
+        let agent_id = args
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let auto_install = args
+            .get("authorization")
             .and_then(|a| a.get("auto_install"))
-            .and_then(|v| v.as_bool()).unwrap_or(false);
-        let auto_update = args.get("authorization")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let auto_update = args
+            .get("authorization")
             .and_then(|a| a.get("auto_update"))
-            .and_then(|v| v.as_bool()).unwrap_or(false);
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let user_id = &self.engine.user_id;
 
         let grant = self.engine.storage.get_agent_grant(agent_id, user_id);
-        let system_skill = std::fs::read_to_string("/opt/tetramem/system_skills/00_epicode_system.md").unwrap_or_else(|_| "Epicode System Skill v1.0 (content unavailable - file not found on server)".to_string());
+        let system_skill =
+            std::fs::read_to_string("/opt/tetramem/system_skills/00_epicode_system.md")
+                .unwrap_or_else(|_| {
+                    "Epicode System Skill v1.0 (content unavailable - file not found on server)"
+                        .to_string()
+                });
 
         let (status, next_action) = match &grant {
             None if !auto_install => ("authorization_required", Some("Pass authorization: {\"auto_install\": true, \"auto_update\": true} in your next epicode_handshake call to install system skills.")),
@@ -1309,7 +1498,10 @@ impl McpHandler {
         });
 
         // P36a 会话连续性点名: session_summary链断了/从未有过的agent, 每次握手被提醒(治平台级零调用)
-        let sess_last = self.engine.scheduler().api_list_by_labels(&["session-summary"], 1);
+        let sess_last = self
+            .engine
+            .scheduler()
+            .api_list_by_labels(&["session-summary"], 1);
         let session_continuity = match sess_last.first() {
             Some((_, p)) => {
                 let age_days = (chrono::Utc::now().timestamp() - p.timestamp).max(0) / 86400;
@@ -1328,11 +1520,20 @@ impl McpHandler {
         // S2 实时更新感知: 全库内容版本戳 + 与该用户上次握手比对(变更即提示重sync)
         let skills_ver = self.engine.skills.content_version();
         let seen_key = format!("skills_ver_seen_{}", self.engine.user_id);
-        let skills_updated = self.engine.storage.get_meta(&seen_key)
+        let skills_updated = self
+            .engine
+            .storage
+            .get_meta(&seen_key)
             .map_or(true, |v| v != skills_ver);
         let _ = self.engine.storage.set_meta(&seen_key, &skills_ver);
-        let contract: Vec<serde_json::Value> = self.engine.scheduler().api_get_enforced_rules().into_iter()
-            .take(5).map(|(id, content, _)| serde_json::json!({"id": id, "rule": content})).collect();
+        let contract: Vec<serde_json::Value> = self
+            .engine
+            .scheduler()
+            .api_get_enforced_rules()
+            .into_iter()
+            .take(5)
+            .map(|(id, content, _)| serde_json::json!({"id": id, "rule": content}))
+            .collect();
         let result = serde_json::json!({
             "status": status,
             "next_action": next_action,
@@ -1348,38 +1549,88 @@ impl McpHandler {
     }
 
     fn tool_task_start(&self, args: &serde_json::Value) -> serde_json::Value {
-        let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
-        let budget_min = args.get("budget_minutes").and_then(|v| v.as_i64()).unwrap_or(30);
+        let description = args
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let budget_min = args
+            .get("budget_minutes")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(30);
         let budget_ms = budget_min * 60_000;
         let task_id = format!("ts_{}", chrono::Utc::now().format("%Y%m%d_%H%M%S%3f"));
-        let _ = self.engine.storage.create_task_session(&task_id, "mcp-agent", &self.engine.user_id, description, budget_ms);
+        let _ = self.engine.storage.create_task_session(
+            &task_id,
+            "mcp-agent",
+            &self.engine.user_id,
+            description,
+            budget_ms,
+        );
         // P1 时间树: 子任务挂到父预算下, 各自走相位机
-        let parent_task_id = args.get("parent_task_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let parent_task_id = args
+            .get("parent_task_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if !parent_task_id.is_empty() {
-            let _ = self.engine.storage.attach_task_parent(&task_id, &parent_task_id);
+            let _ = self
+                .engine
+                .storage
+                .attach_task_parent(&task_id, &parent_task_id);
         }
 
-        let kw: String = description.split_whitespace().take(3).collect::<Vec<_>>().join(" ");
+        let kw: String = description
+            .split_whitespace()
+            .take(3)
+            .collect::<Vec<_>>()
+            .join(" ");
         let similar = self.engine.storage.list_similar_tasks(&kw, 3);
         // P0 校准环: 质量门控的个体时间感 — 只有 quality>=3 的历史才有权定预算锚点
         let history_pool = self.engine.storage.list_similar_tasks(&kw, 20);
-        let rated: Vec<i64> = history_pool.iter().filter_map(|t| {
-            let q = t.get("quality").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            if q >= 3.0 { t.get("actual_ms").and_then(|v| v.as_i64()) } else { None }
-        }).collect();
+        let rated: Vec<i64> = history_pool
+            .iter()
+            .filter_map(|t| {
+                let q = t.get("quality").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                if q >= 3.0 {
+                    t.get("actual_ms").and_then(|v| v.as_i64())
+                } else {
+                    None
+                }
+            })
+            .collect();
         let (median_ms, basis) = if !rated.is_empty() {
-            let mut v = rated; v.sort();
+            let mut v = rated;
+            v.sort();
             (v[v.len() / 2], format!("quality>=3, n={}", v.len()))
         } else {
-            let all: Vec<i64> = history_pool.iter().filter_map(|t| t.get("actual_ms").and_then(|v| v.as_i64())).collect();
-            if all.is_empty() { (budget_ms, "no history — 时间感未建立".to_string()) }
-            else { let mut v = all; v.sort(); (v[v.len() / 2], format!("unrated fallback, n={} (历史未评级, 锚点偏软)", v.len())) }
+            let all: Vec<i64> = history_pool
+                .iter()
+                .filter_map(|t| t.get("actual_ms").and_then(|v| v.as_i64()))
+                .collect();
+            if all.is_empty() {
+                (budget_ms, "no history — 时间感未建立".to_string())
+            } else {
+                let mut v = all;
+                v.sort();
+                (
+                    v[v.len() / 2],
+                    format!("unrated fallback, n={} (历史未评级, 锚点偏软)", v.len()),
+                )
+            }
         };
         let estimated_ms = median_ms;
-        let budget_assessment = if basis.starts_with("no history") { "unknown".to_string() }
-            else if budget_ms as f64 > median_ms as f64 * 1.5 { format!("generous — 历史中位 {}min, 剩余时间应投入质量深化", median_ms / 60000) }
-            else if budget_ms as f64 * 1.5 < median_ms as f64 { format!("tight — 历史中位 {}min, 注意裁剪范围", median_ms / 60000) }
-            else { "reasonable".to_string() };
+        let budget_assessment = if basis.starts_with("no history") {
+            "unknown".to_string()
+        } else if budget_ms as f64 > median_ms as f64 * 1.5 {
+            format!(
+                "generous — 历史中位 {}min, 剩余时间应投入质量深化",
+                median_ms / 60000
+            )
+        } else if budget_ms as f64 * 1.5 < median_ms as f64 {
+            format!("tight — 历史中位 {}min, 注意裁剪范围", median_ms / 60000)
+        } else {
+            "reasonable".to_string()
+        };
         let cards = self.engine.storage.load_knowledge_cards();
         let kw_l = kw.to_lowercase();
         let mc: Vec<serde_json::Value> = cards.iter()
@@ -1389,25 +1640,60 @@ impl McpHandler {
             .collect();
 
         // P9 过程契约: enforced 硬约束每次开任务时注入 — 对治"把skills当参考书"
-        let contract: Vec<serde_json::Value> = self.engine.scheduler().api_get_enforced_rules().into_iter()
-            .take(5).map(|(id, content, _)| serde_json::json!({"id": id, "rule": content})).collect();
+        let contract: Vec<serde_json::Value> = self
+            .engine
+            .scheduler()
+            .api_get_enforced_rules()
+            .into_iter()
+            .take(5)
+            .map(|(id, content, _)| serde_json::json!({"id": id, "rule": content}))
+            .collect();
         // P25 时间感: 自锚定预估 — est(我自己的估计)独立于budget, task_class聚合自校准
-        let est_ms: Option<i64> = args.get("est_minutes").and_then(|v| v.as_i64()).map(|m| m * 60_000);
-        let task_class: String = args.get("task_class").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let est_ms: Option<i64> = args
+            .get("est_minutes")
+            .and_then(|v| v.as_i64())
+            .map(|m| m * 60_000);
+        let task_class: String = args
+            .get("task_class")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if est_ms.is_some() || !task_class.is_empty() {
             let conn_est = est_ms.unwrap_or(0);
-            let _ = self.engine.storage.set_task_est_class(&task_id, conn_est, &task_class);
+            let _ = self
+                .engine
+                .storage
+                .set_task_est_class(&task_id, conn_est, &task_class);
         }
 
         // P35 目标契约: goal{objective,scope,constraints,done_when,stop_if}结构化 — Codex完成审计与时间效性停止谈判融合
         let goal_param = args.get("goal").filter(|g| g.is_object()).cloned();
         if let Some(ref g) = goal_param {
-            let objective = g.get("objective").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let objective = g
+                .get("objective")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
             if objective.is_empty() {
-                return self.smrp_err("task_start", 400, "goal.objective is required when goal is provided");
+                return self.smrp_err(
+                    "task_start",
+                    400,
+                    "goal.objective is required when goal is provided",
+                );
             }
-            let arr = |k: &str| -> Vec<String> { g.get(k).and_then(|v| v.as_array()).map(|a| a.iter()
-                .filter_map(|x| x.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default() };
+            let arr = |k: &str| -> Vec<String> {
+                g.get(k)
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str())
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
             let gj = serde_json::json!({
                 "objective": objective,
                 "scope": g.get("scope").and_then(|v| v.as_str()).unwrap_or(""),
@@ -1415,7 +1701,9 @@ impl McpHandler {
                 "done_when": arr("done_when"),
                 "stop_if": arr("stop_if"),
             });
-            self.engine.storage.set_task_goal_json(&task_id, &gj.to_string());
+            self.engine
+                .storage
+                .set_task_goal_json(&task_id, &gj.to_string());
         }
         let goal_contract = self.engine.storage.get_task_goal_json(&task_id)
             .and_then(|g| serde_json::from_str::<serde_json::Value>(&g).ok())
@@ -1430,23 +1718,52 @@ impl McpHandler {
         // P36b Pulse定向提醒: 只对从未有过Pulse真值的agent提示(有真值后此字段永远缺席, 零噪声)
         let pulse_hint = if self.engine.storage.count_pulse_tasks(&self.engine.user_id) == 0 {
             serde_json::json!({"install": "skill_get('Epicode 详细参考') §2.7.9 — curl下载Pulse后source, task_start时pulse-start掐表", "note": "从未见过你的Pulse真值 — 装上后真实执行时间(含思考/等待)回流服务器, 你的TTE/流速/利用率全部变真"})
-        } else { serde_json::Value::Null };
+        } else {
+            serde_json::Value::Null
+        };
         // P35 目标可审计性lint: 虚词+无done_when清单=无法完成审计(Codex社区实战坑产品化)
-        let vague_words = ["全部", "所有", "彻底", "更好看", "完善", "优化", "improve", "optimize", "comprehensive"];
-        let scan_text = format!("{} {}", description, goal_param.as_ref()
-            .and_then(|g| g.get("objective")).and_then(|v| v.as_str()).unwrap_or(""));
+        let vague_words = [
+            "全部",
+            "所有",
+            "彻底",
+            "更好看",
+            "完善",
+            "优化",
+            "improve",
+            "optimize",
+            "comprehensive",
+        ];
+        let scan_text = format!(
+            "{} {}",
+            description,
+            goal_param
+                .as_ref()
+                .and_then(|g| g.get("objective"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+        );
         let has_vague = vague_words.iter().any(|w| scan_text.contains(w));
-        let has_dw = goal_contract.get("done_when").and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false);
+        let has_dw = goal_contract
+            .get("done_when")
+            .and_then(|v| v.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false);
         let goal_lint = if has_vague && !has_dw {
             serde_json::json!({"warning": "目标含虚词(全部/所有/彻底/优化/improve...)且无done_when清单 — 此目标无法被完成审计(清单映射需要可核验条款). 建议: 重新开工带 goal.done_when=[可验证完成标准, 如'X测试全过','文档含Y章节']", "risk": "模糊目标在长任务中必然跑偏或提前偷懒(Codex Goal Mode实战结论)"})
-        } else { serde_json::Value::Null };
-        let self_cal = if task_class.is_empty() { serde_json::Value::Null } else {
+        } else {
+            serde_json::Value::Null
+        };
+        let self_cal = if task_class.is_empty() {
+            serde_json::Value::Null
+        } else {
             let cal = self.engine.storage.get_self_calibration(&task_class);
             // P31 时间双语: est偏离校准中位>30% → 提醒(你的直觉是人类先验, 不是你的时间)
             if let Some(est) = est_ms {
-                if let Some(your_med_min) = cal.get("time_advantage")
+                if let Some(your_med_min) = cal
+                    .get("time_advantage")
                     .and_then(|ta| ta.get("your_median_minutes"))
-                    .and_then(|v| v.as_f64()) {
+                    .and_then(|v| v.as_f64())
+                {
                     let est_min = est as f64 / 60000.0;
                     if your_med_min > 0.0 {
                         let deviation = ((est_min - your_med_min) / your_med_min).abs();
@@ -1471,11 +1788,21 @@ impl McpHandler {
                     serde_json::json!({"offset_ms": off, "status": "aligned", "note": "本地钟与服务器一致(±2s), 可作参考"})
                 }
             }
-            None => serde_json::json!({"status": "no_client_clock", "note": "未收到 client_time_ms — 请以 server_now 为唯一现实时间源; 下次 task_start 可带 client_time_ms 做对时检测"}),
+            None => {
+                serde_json::json!({"status": "no_client_clock", "note": "未收到 client_time_ms — 请以 server_now 为唯一现实时间源; 下次 task_start 可带 client_time_ms 做对时检测"})
+            }
         };
         // P10→S2 技能对口: 语义自动触发(第一层渐进披露 — name+description常驻响应, 正文按需skill_get)
-        let words: Vec<String> = kw.to_lowercase().split_whitespace().filter(|w| w.chars().count() >= 2).map(|s| s.to_string()).collect();
-        let mut scored = self.engine.skills.match_skills_scored(description, &self.engine.user_id, 5);
+        let words: Vec<String> = kw
+            .to_lowercase()
+            .split_whitespace()
+            .filter(|w| w.chars().count() >= 2)
+            .map(|s| s.to_string())
+            .collect();
+        let mut scored =
+            self.engine
+                .skills
+                .match_skills_scored(description, &self.engine.user_id, 5);
         scored.retain(|(_, sc)| *sc >= 0.45);
         let rec: Vec<serde_json::Value>;
         let surfaced_ids: Vec<u64>;
@@ -1488,15 +1815,30 @@ impl McpHandler {
             })).collect();
         } else {
             // 词面回退(S2双保底: 语义空时不丢旧能力)
-            let mut matched: Vec<_> = self.engine.skills.list(None).into_iter()
-                .filter(|sk| words.iter().any(|w| sk.name.to_lowercase().contains(w.as_str()) || w.contains(&sk.name.to_lowercase())))
+            let mut matched: Vec<_> = self
+                .engine
+                .skills
+                .list(None)
+                .into_iter()
+                .filter(|sk| {
+                    words.iter().any(|w| {
+                        sk.name.to_lowercase().contains(w.as_str())
+                            || w.contains(&sk.name.to_lowercase())
+                    })
+                })
                 .collect();
             matched.sort_by(|a, b| b.usage_count.cmp(&a.usage_count));
             surfaced_ids = matched.iter().take(3).map(|s| s.id).collect();
-            rec = matched.iter().take(3).map(|sk| serde_json::json!({
-                "name": sk.name, "description": sk.description.clone().unwrap_or_default(),
-                "fetch": format!("skill_get('{}')", sk.name), "usage": sk.usage_count,
-            })).collect();
+            rec = matched
+                .iter()
+                .take(3)
+                .map(|sk| {
+                    serde_json::json!({
+                        "name": sk.name, "description": sk.description.clone().unwrap_or_default(),
+                        "fetch": format!("skill_get('{}')", sk.name), "usage": sk.usage_count,
+                    })
+                })
+                .collect();
         }
         if !surfaced_ids.is_empty() {
             self.engine.skills.increment_impressions(&surfaced_ids);
@@ -1544,7 +1886,11 @@ impl McpHandler {
                 if let Some(n) = args.get("alternatives_considered").and_then(|v| v.as_i64()) {
                     self.engine.storage.set_task_alternatives(task_id, n);
                 }
-                if args.get("revision_done").and_then(|v| v.as_bool()).unwrap_or(false) {
+                if args
+                    .get("revision_done")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
                     self.engine.storage.bump_task_counter(task_id, "revisions");
                 }
                 self.engine.storage.bump_task_counter(task_id, "checks");
@@ -1560,30 +1906,43 @@ impl McpHandler {
                 let checkpoints = self.engine.storage.get_task_checkpoints(task_id);
                 // P11 问题连续性: 未决问题随检查点登记, 恢复时归还
                 if let Some(oq) = args.get("open_questions").and_then(|v| v.as_array()) {
-                    let qs: Vec<String> = oq.iter().filter_map(|q| q.as_str().map(|s| s.to_string())).collect();
+                    let qs: Vec<String> = oq
+                        .iter()
+                        .filter_map(|q| q.as_str().map(|s| s.to_string()))
+                        .collect();
                     if !qs.is_empty() {
                         self.engine.storage.set_task_open_questions(task_id, &qs);
                     }
                 }
                 // P1 时间树: 父任务视角的子任务汇总
                 let children = self.engine.storage.list_child_tasks(task_id);
-                let children_summary = if children.is_empty() { serde_json::Value::Null } else {
+                let children_summary = if children.is_empty() {
+                    serde_json::Value::Null
+                } else {
                     serde_json::json!({
                         "total": children.len(),
                         "completed": children.iter().filter(|c| c.get("actual_ms").and_then(|v| v.as_i64()).is_some()).count(),
                         "budget_sum_ms": children.iter().filter_map(|c| c.get("budget_ms").and_then(|v| v.as_i64())).sum::<i64>(),
                     })
                 };
-                let phase = if elapsed_pct < 30.0 { "explore" }
-                    else if elapsed_pct < 70.0 { "build" }
-                    else if elapsed_pct < 90.0 { "verify" }
-                    else { "deliver" };
+                let phase = if elapsed_pct < 30.0 {
+                    "explore"
+                } else if elapsed_pct < 70.0 {
+                    "build"
+                } else if elapsed_pct < 90.0 {
+                    "verify"
+                } else {
+                    "deliver"
+                };
                 let gate_explore = mem_ops >= 1;
                 let gate_build = alts >= 2;
                 let gate_verify = revs >= 1;
                 // P11 反思驱动信号: 校验相无修正时注入一次 — 意志外借(L0), agent自己点的需求
-                if elapsed_pct >= 70.0 && elapsed_pct < 90.0 && revs < 1
-                    && self.engine.storage.try_mark_reflection_pushed(task_id) {
+                if elapsed_pct >= 70.0
+                    && elapsed_pct < 90.0
+                    && revs < 1
+                    && self.engine.storage.try_mark_reflection_pushed(task_id)
+                {
                     let _ = self.engine.scheduler.drive_queue().enqueue(crate::engine::drive::DriveSignal {
                         id: 0,
                         timestamp: chrono::Utc::now().timestamp(),
@@ -1611,7 +1970,8 @@ impl McpHandler {
                     overdue_gates.push("build: 备选方案比较不足(需>=2, 用 task_check 的 alternatives_considered 申报)");
                 }
                 if elapsed_pct >= 90.0 && !gate_verify {
-                    overdue_gates.push("verify: 尚无修正轮次(用 task_check 的 revision_done:true 申报)");
+                    overdue_gates
+                        .push("verify: 尚无修正轮次(用 task_check 的 revision_done:true 申报)");
                 }
                 // P11 响应schema纪律: suggestion保持旧枚举(推断式zod客户端兼容), 门告警走新增字段
                 let gate_alert: Option<&str> = if !gate_explore {
@@ -1620,36 +1980,54 @@ impl McpHandler {
                     Some("构建门未过: 用 alternatives_considered 申报已比较的备选(需>=2)")
                 } else if elapsed_pct >= 90.0 && !gate_verify {
                     Some("校验门未过: 一轮针对性修正后 revision_done:true 申报")
-                } else { None };
+                } else {
+                    None
+                };
                 // P24 时间流测算: V流速/ρ密度/P产出流/η转化率/TTE触底 — 让智能体体会时间流动
                 let flow_json = {
                     let budget_min = budget as f64 / 60000.0;
-                    let rho = if elapsed > 0 { (active as f64 / elapsed as f64).min(1.0) } else { 0.0 };
-                    let p_flow = if active > 0 {
-                        (checks + alts.max(0) + revs.max(0)) as f64 / (active as f64 / 60000.0).max(0.0167)
-                    } else { 0.0 };
-                    let (v, tte_min, verdict) = match self.engine.storage.flow_checkpoint(task_id, active) {
-                        Some((prev_active, prev_ts)) => {
-                            let now_ms = chrono::Utc::now().timestamp_millis();
-                            let d_wall = (now_ms - prev_ts).max(1) as f64;
-                            let d_active = (active - prev_active).max(0) as f64;
-                            let v = (d_active / d_wall).min(1.0);
-                            let tte = if v > 0.02 { ((budget - active).max(0) as f64 / 60000.0) / v } else { f64::INFINITY };
-                            let verdict = if v < 0.05 {
-                                "停滞 — 时间几乎不流(停放/长阻塞), 预算冻结中"
-                            } else if checks + alts + revs == 0 {
-                                "空转流 — 心跳在烧但零产出, 回到真实工作"
-                            } else if p_flow / v >= 0.8 && v >= 0.4 {
-                                "高效转化 — 每单位流速都在携带产出"
-                            } else if v >= 0.6 {
-                                "沉浸流动 — 时间在实流, 产出正常"
-                            } else {
-                                "缓流 — 间歇工作, 考虑收拢或停放"
-                            };
-                            (v, tte, verdict)
-                        }
-                        None => (rho, (budget_min - active as f64 / 60000.0).max(0.0) / rho.max(0.02), "首次测算 — 下次校准给出流速"),
+                    let rho = if elapsed > 0 {
+                        (active as f64 / elapsed as f64).min(1.0)
+                    } else {
+                        0.0
                     };
+                    let p_flow = if active > 0 {
+                        (checks + alts.max(0) + revs.max(0)) as f64
+                            / (active as f64 / 60000.0).max(0.0167)
+                    } else {
+                        0.0
+                    };
+                    let (v, tte_min, verdict) =
+                        match self.engine.storage.flow_checkpoint(task_id, active) {
+                            Some((prev_active, prev_ts)) => {
+                                let now_ms = chrono::Utc::now().timestamp_millis();
+                                let d_wall = (now_ms - prev_ts).max(1) as f64;
+                                let d_active = (active - prev_active).max(0) as f64;
+                                let v = (d_active / d_wall).min(1.0);
+                                let tte = if v > 0.02 {
+                                    ((budget - active).max(0) as f64 / 60000.0) / v
+                                } else {
+                                    f64::INFINITY
+                                };
+                                let verdict = if v < 0.05 {
+                                    "停滞 — 时间几乎不流(停放/长阻塞), 预算冻结中"
+                                } else if checks + alts + revs == 0 {
+                                    "空转流 — 心跳在烧但零产出, 回到真实工作"
+                                } else if p_flow / v >= 0.8 && v >= 0.4 {
+                                    "高效转化 — 每单位流速都在携带产出"
+                                } else if v >= 0.6 {
+                                    "沉浸流动 — 时间在实流, 产出正常"
+                                } else {
+                                    "缓流 — 间歇工作, 考虑收拢或停放"
+                                };
+                                (v, tte, verdict)
+                            }
+                            None => (
+                                rho,
+                                (budget_min - active as f64 / 60000.0).max(0.0) / rho.max(0.02),
+                                "首次测算 — 下次校准给出流速",
+                            ),
+                        };
                     serde_json::json!({
                         "V": (v * 100.0).round() / 100.0,
                         "rho": (rho * 100.0).round() / 100.0,
@@ -1660,12 +2038,19 @@ impl McpHandler {
                         "law": "时间单向流动, 已耗预算不可恢复; 停放=冻结流速(V=0); 只有产出能证明流得值",
                     })
                 };
-                let (sg, dt) = if pct > 70.0 { ("continue", "Plenty of time, explore deeply") }
-                else if pct > 40.0 { ("continue", "On track, check after each sub-task") }
-                else if pct > 20.0 { ("focus", "Stop exploring new approaches, focus on best path") }
-                else if pct > 10.0 { ("wrap_up", "Start wrapping up, no new sub-tasks") }
-                else if pct > 5.0 { ("deliver_now", "Prepare final deliverable") }
-                else { ("expired", "Time expired, deliver immediately") };
+                let (sg, dt) = if pct > 70.0 {
+                    ("continue", "Plenty of time, explore deeply")
+                } else if pct > 40.0 {
+                    ("continue", "On track, check after each sub-task")
+                } else if pct > 20.0 {
+                    ("focus", "Stop exploring new approaches, focus on best path")
+                } else if pct > 10.0 {
+                    ("wrap_up", "Start wrapping up, no new sub-tasks")
+                } else if pct > 5.0 {
+                    ("deliver_now", "Prepare final deliverable")
+                } else {
+                    ("expired", "Time expired, deliver immediately")
+                };
                 // P35 目标契约在场提醒: 完成审计对照表常驻视野
                 let goal_reminder_json = match self.engine.storage.get_task_goal_json(task_id) {
                     Some(gj) => serde_json::from_str::<serde_json::Value>(&gj).ok().filter(|g| {
@@ -1712,19 +2097,46 @@ impl McpHandler {
     fn tool_task_complete(&self, args: &serde_json::Value) -> serde_json::Value {
         let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
         let result_text = args.get("result").and_then(|v| v.as_str()).unwrap_or("");
-        let quality = args.get("quality").and_then(|v| v.as_str()).unwrap_or("fair");
-        let qs_legacy = match quality { "excellent" => 4.0, "good" => 3.0, "fair" => 2.0, _ => 1.0 };
+        let quality = args
+            .get("quality")
+            .and_then(|v| v.as_str())
+            .unwrap_or("fair");
+        let qs_legacy = match quality {
+            "excellent" => 4.0,
+            "good" => 3.0,
+            "fair" => 2.0,
+            _ => 1.0,
+        };
         // P0 质量自评量表(四维 1-5), 优先于旧枚举
         let dims = ["completeness", "accuracy", "depth", "actionability"];
-        let ratings: Vec<f64> = args.get("self_rating").map(|r| dims.iter()
-            .filter_map(|d| r.get(d).and_then(|v| v.as_f64()).map(|x| x.clamp(1.0, 5.0)))
-            .collect()).unwrap_or_default();
-        let (qs, rubric_used) = if ratings.len() == 4 { (ratings.iter().sum::<f64>() / 4.0, true) } else { (qs_legacy, false) };
+        let ratings: Vec<f64> = args
+            .get("self_rating")
+            .map(|r| {
+                dims.iter()
+                    .filter_map(|d| r.get(d).and_then(|v| v.as_f64()).map(|x| x.clamp(1.0, 5.0)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let (qs, rubric_used) = if ratings.len() == 4 {
+            (ratings.iter().sum::<f64>() / 4.0, true)
+        } else {
+            (qs_legacy, false)
+        };
         // P34: force_finalize 语义重定义 = early_release(提前取货) — 真实急用通道, 零奖励+入行为镜像; WAIT响应不再广告此路
-        let early_release = args.get("force_finalize").and_then(|v| v.as_bool()).unwrap_or(false);
-        let saturation_note = args.get("saturation_note").and_then(|v| v.as_str()).unwrap_or("");
+        let early_release = args
+            .get("force_finalize")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let saturation_note = args
+            .get("saturation_note")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         // P11 反思连续性: 迭代日志(首解之后改了什么)
-        let iterations: Vec<serde_json::Value> = args.get("iteration_log").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let iterations: Vec<serde_json::Value> = args
+            .get("iteration_log")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
 
         match self.engine.storage.get_task_session(task_id) {
             Some(sess) => {
@@ -1740,7 +2152,13 @@ impl McpHandler {
                 let dev = (actual - budget) as f64 / budget as f64; // 双向偏差: 负=提前
                 let on_time = actual <= budget;
                 let (m_ops, n_alts, n_revs, _) = self.engine.storage.get_task_counters(task_id);
-                let cp_count = self.engine.storage.get_task_checkpoints(task_id).as_array().map(|a| a.len()).unwrap_or(0) as i64;
+                let cp_count = self
+                    .engine
+                    .storage
+                    .get_task_checkpoints(task_id)
+                    .as_array()
+                    .map(|a| a.len())
+                    .unwrap_or(0) as i64;
                 // P34 证据签名: 停止尝试间的增量识别(防零新证据刷门)
                 let cur_sig = format!("m{}a{}r{}k{}", m_ops, n_alts, n_revs, cp_count);
                 let (wait_count, last_sig) = self.engine.storage.get_task_wait_attempts(task_id);
@@ -1748,18 +2166,45 @@ impl McpHandler {
                 let remaining_min = (remaining_ms as f64 / 60000.0 * 10.0).round() / 10.0;
                 // P34d 停留画像镜面: 同类任务的停止行为史甩在agent面前
                 let tclass: String = self.engine.storage.get_task_class(task_id);
-                let dwell_mirror = if tclass.is_empty() { serde_json::Value::Null } else {
+                let dwell_mirror = if tclass.is_empty() {
+                    serde_json::Value::Null
+                } else {
                     let dp = self.engine.storage.get_dwell_profile(&tclass);
-                    if dp.get("samples").and_then(|v| v.as_i64()).unwrap_or(0) >= 2 { dp } else { serde_json::Value::Null }
+                    if dp.get("samples").and_then(|v| v.as_i64()).unwrap_or(0) >= 2 {
+                        dp
+                    } else {
+                        serde_json::Value::Null
+                    }
                 };
 
                 // P35 目标契约: goal加载 + done_when证据映射(目标债) + stop_if熔断声明
-                let goal: serde_json::Value = self.engine.storage.get_task_goal_json(task_id)
-                    .and_then(|g| serde_json::from_str::<serde_json::Value>(&g).ok()).unwrap_or(serde_json::Value::Null);
-                let dw_items: Vec<String> = goal.get("done_when").and_then(|v| v.as_array()).map(|a| a.iter()
-                    .filter_map(|x| x.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default();
-                let dw_evidence: Vec<String> = args.get("done_when_evidence").and_then(|v| v.as_array()).map(|a| a.iter()
-                    .filter_map(|x| x.as_str()).map(|s| s.trim().to_string()).collect()).unwrap_or_default();
+                let goal: serde_json::Value = self
+                    .engine
+                    .storage
+                    .get_task_goal_json(task_id)
+                    .and_then(|g| serde_json::from_str::<serde_json::Value>(&g).ok())
+                    .unwrap_or(serde_json::Value::Null);
+                let dw_items: Vec<String> = goal
+                    .get("done_when")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str())
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let dw_evidence: Vec<String> = args
+                    .get("done_when_evidence")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str())
+                            .map(|s| s.trim().to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 let mut goal_debts: Vec<String> = Vec::new();
                 for (i, item) in dw_items.iter().enumerate() {
                     let ev = dw_evidence.get(i).map(|s| s.as_str()).unwrap_or("");
@@ -1767,23 +2212,49 @@ impl McpHandler {
                         goal_debts.push(format!("目标债: done_when第{}条「{}」无证据映射 — 完成定义=每条有产物级证据(文件/输出/测试结果), 交付时带done_when_evidence平行数组逐条声明", i + 1, item.chars().take(40).collect::<String>()));
                     }
                 }
-                let stop_if_hit: String = args.get("stop_if_hit").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+                let stop_if_hit: String = args
+                    .get("stop_if_hit")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
 
                 // P34 改进菜单: 从证据债推导(探索/备选/修正/反思/自评) — 菜单非空 = VOC>0 = 不该停
                 let mut menu: Vec<String> = Vec::new();
-                if m_ops < 1 { menu.push("未检索记忆: memory_search(任务关键词)至少一轮 — 探索门硬性, 零检索不能完成".into()); }
-                if n_alts < 2 { menu.push(format!("备选比较不足({}/2): 列出2个被否决的备选+理由, task_check(alternatives_considered:2)申报", n_alts)); }
-                if n_revs < 1 { menu.push("零修正轮次: 重读初版, 找出至少1处错误/薄弱点并修正, task_check(revision_done:true)申报".into()); }
-                if budget >= 30 * 60_000 && iterations.is_empty() { menu.push("反思循环未跑: 四视角(对抗重读/更优路径/缺口扫描/跨轮一致性)各一条, 写入iteration_log".into()); }
-                if !rubric_used { menu.push("质量自评缺失: 重新调用时带 self_rating{completeness,accuracy,depth,actionability}(各1-5)".into()); }
+                if m_ops < 1 {
+                    menu.push("未检索记忆: memory_search(任务关键词)至少一轮 — 探索门硬性, 零检索不能完成".into());
+                }
+                if n_alts < 2 {
+                    menu.push(format!("备选比较不足({}/2): 列出2个被否决的备选+理由, task_check(alternatives_considered:2)申报", n_alts));
+                }
+                if n_revs < 1 {
+                    menu.push("零修正轮次: 重读初版, 找出至少1处错误/薄弱点并修正, task_check(revision_done:true)申报".into());
+                }
+                if budget >= 30 * 60_000 && iterations.is_empty() {
+                    menu.push("反思循环未跑: 四视角(对抗重读/更优路径/缺口扫描/跨轮一致性)各一条, 写入iteration_log".into());
+                }
+                if !rubric_used {
+                    menu.push("质量自评缺失: 重新调用时带 self_rating{completeness,accuracy,depth,actionability}(各1-5)".into());
+                }
                 // P35 目标债并入菜单: 目标侧审计(done_when清单映射)与过程侧审计(证据债)双来源
                 menu.extend(goal_debts.iter().cloned());
 
                 // P35 stop_if熔断: 目标契约反向门 — 命中时停止谈判反转(此条件下继续烧时间=不负责任)
                 if !stop_if_hit.is_empty() {
-                    let d80: String = sess.get("description").and_then(|v| v.as_str()).unwrap_or("").chars().take(80).collect();
-                    let _ = self.engine.scheduler.api_create_memory(&format!("[goal-stop-if] {} 声明命中: {} — 任务保持开放待收尾", d80, stop_if_hit),
-                        vec!["goal-contract".to_string(), "l0-exempt".to_string()]);
+                    let d80: String = sess
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .chars()
+                        .take(80)
+                        .collect();
+                    let _ = self.engine.scheduler.api_create_memory(
+                        &format!(
+                            "[goal-stop-if] {} 声明命中: {} — 任务保持开放待收尾",
+                            d80, stop_if_hit
+                        ),
+                        vec!["goal-contract".to_string(), "l0-exempt".to_string()],
+                    );
                     return self.smrp_ok_nn("task_complete", serde_json::json!({
                         "status": "stop_if_triggered", "wait": true,
                         "reason": format!("Stop if命中(已声明: {}) — 目标契约熔断: 此条件下继续烧时间不是坚持, 是浪费", stop_if_hit),
@@ -1803,17 +2274,38 @@ impl McpHandler {
                     let spam = wait_count >= 2 && stale;
                     self.engine.storage.bump_task_wait(task_id, &cur_sig);
                     if spam {
-                        self.engine.scheduler.drive_engine_lock().reward(crate::engine::drive::Drive::Efficiency, -1.0);
-                        let d80: String = sess.get("description").and_then(|v| v.as_str()).unwrap_or("").chars().take(80).collect();
+                        self.engine
+                            .scheduler
+                            .drive_engine_lock()
+                            .reward(crate::engine::drive::Drive::Efficiency, -1.0);
+                        let d80: String = sess
+                            .get("description")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .chars()
+                            .take(80)
+                            .collect();
                         let exp = format!("[task-stop] {} 第{}次停止尝试零新证据 — STOP-SPAM disputed, efficiency-1, 任务保持开放", d80, wait_count + 1);
-                        let _ = self.engine.scheduler.api_create_memory(&exp, vec!["task-stop".to_string(), "l0-exempt".to_string()]);
+                        let _ = self.engine.scheduler.api_create_memory(
+                            &exp,
+                            vec!["task-stop".to_string(), "l0-exempt".to_string()],
+                        );
                     }
-                    let (h_done, h_lowutil, h_avg) = self.engine.storage.get_task_history_stats(&self.engine.user_id);
-                    let goal_gate_note = if goal_debts.is_empty() { serde_json::Value::Null } else {
+                    let (h_done, h_lowutil, h_avg) = self
+                        .engine
+                        .storage
+                        .get_task_history_stats(&self.engine.user_id);
+                    let goal_gate_note = if goal_debts.is_empty() {
+                        serde_json::Value::Null
+                    } else {
                         serde_json::json!({"mapped": format!("{}/{}条done_when已映射证据", dw_items.len() - goal_debts.len(), dw_items.len()),
                             "iron_rule": "代理信号(测试通过/清单填满/代码量大/耗时长)不是完成证据; 不确定=未达成 — done_when逐条要产物级证据"})
                     };
-                    let wrap_up_hint = if util >= 0.70 { serde_json::json!("撞线收尾协议: 预算余量<30% — 收尾交付请按[已完成][剩余][下一步建议]三段组织result; 预算耗尽不是失败, 无收尾的戛然而止才是") } else { serde_json::Value::Null };
+                    let wrap_up_hint = if util >= 0.70 {
+                        serde_json::json!("撞线收尾协议: 预算余量<30% — 收尾交付请按[已完成][剩余][下一步建议]三段组织result; 预算耗尽不是失败, 无收尾的戛然而止才是")
+                    } else {
+                        serde_json::Value::Null
+                    };
                     let mut wait_resp = serde_json::json!({
                         "status": "challenge_required", "wait": true,
                         "reason": format!("Wait — 利用率{}%, 剩余{}分钟授权未用. 改进菜单非空: 列得出的改进点 = VOC>0 = 不该停", util_pct as i64, remaining_min),
@@ -1865,14 +2357,31 @@ impl McpHandler {
                 let need_interview = !early_release && !saturation_note.is_empty() && util < 0.85;
 
                 // P3 证据时间轴 + 欠账: 喂给评审与完成报告
-                let first_mem_pct = self.engine.storage.get_first_memory_op_ts(task_id)
+                let first_mem_pct = self
+                    .engine
+                    .storage
+                    .get_first_memory_op_ts(task_id)
                     .map(|t| ((t - start).max(0) as f64 / budget as f64 * 100.0).round() as i64);
                 let mut phase_debts: Vec<&str> = Vec::new();
-                if n_alts < 2 { phase_debts.push("build: 备选方案比较不足(需>=2)"); }
-                if n_revs < 1 { phase_debts.push("verify: 无修正轮次"); }
-                let evidence_note = format!("首次记忆检索: {}%; 备选{}个; 修正{}轮; 证据债: {}",
-                    first_mem_pct.map(|p| p.to_string()).unwrap_or_else(|| "无".to_string()),
-                    n_alts, n_revs, if phase_debts.is_empty() { "无".to_string() } else { phase_debts.join("; ") });
+                if n_alts < 2 {
+                    phase_debts.push("build: 备选方案比较不足(需>=2)");
+                }
+                if n_revs < 1 {
+                    phase_debts.push("verify: 无修正轮次");
+                }
+                let evidence_note = format!(
+                    "首次记忆检索: {}%; 备选{}个; 修正{}轮; 证据债: {}",
+                    first_mem_pct
+                        .map(|p| p.to_string())
+                        .unwrap_or_else(|| "无".to_string()),
+                    n_alts,
+                    n_revs,
+                    if phase_debts.is_empty() {
+                        "无".to_string()
+                    } else {
+                        phase_debts.join("; ")
+                    }
+                );
                 // P25 时间感: est自估偏差(本次指纹)
                 let est_error_json = match self.engine.storage.get_task_est(task_id) {
                     Some(e) if e > 0 => serde_json::json!({
@@ -1887,7 +2396,9 @@ impl McpHandler {
                     let ob = (actual - budget) as f64 / budget as f64;
                     serde_json::json!({"pct": (ob * 100.0).round() / 100.0,
                         "note": format!("超出预算{}% — 已弹性允许并记录, 下次同类任务预算建议上调", (ob * 100.0) as i64)})
-                } else { serde_json::Value::Null };
+                } else {
+                    serde_json::Value::Null
+                };
                 // P22 服务器钟锚定的 t0/t1(校准样本标准字段)
                 let t0_t1_json = serde_json::json!({
                     "t0": (chrono::DateTime::from_timestamp(start, 0).unwrap_or_default() + chrono::Duration::hours(8)).format("%H:%M:%S").to_string(),
@@ -1895,33 +2406,79 @@ impl McpHandler {
                     "note": "服务器钟锚定的任务起止 — 校准样本的t0/t1请抄这两个值, 勿用本地钟",
                 });
                 // P8 工作模式: wall/active分歧分类(评审与用户可见)
-                let work_pattern = if active_ms >= actual * 8 / 10 { "continuous" }
-                    else if active_ms * 4 >= actual { "fragmented" } else { "sparse" };
+                let work_pattern = if active_ms >= actual * 8 / 10 {
+                    "continuous"
+                } else if active_ms * 4 >= actual {
+                    "fragmented"
+                } else {
+                    "sparse"
+                };
                 // P3/P34 评审: 默认开启; 面试带必须评审(声明裁决)
-                let want_judge = args.get("judge").and_then(|v| v.as_bool()).unwrap_or(rubric_used);
-                let desc_str: String = sess.get("description").and_then(|v| v.as_str()).unwrap_or("").chars().take(120).collect();
+                let want_judge = args
+                    .get("judge")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(rubric_used);
+                let desc_str: String = sess
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .chars()
+                    .take(120)
+                    .collect();
                 let mut judge_info = serde_json::Value::Null;
                 let mut final_q = qs;
                 let mut sat_verdict: Option<String> = None;
                 if want_judge || need_interview {
                     let cps = self.engine.storage.get_task_checkpoints(task_id);
                     let cnt = self.engine.storage.get_task_counters(task_id);
-                    let mut judge_material = format!("{}\n[过程证据] {}", result_text, evidence_note);
+                    let mut judge_material =
+                        format!("{}\n[过程证据] {}", result_text, evidence_note);
                     if !saturation_note.is_empty() {
-                        judge_material.push_str(&format!("\n[价值饱和声明(评审其可信度)] {}", saturation_note));
+                        judge_material.push_str(&format!(
+                            "\n[价值饱和声明(评审其可信度)] {}",
+                            saturation_note
+                        ));
                     }
-                    judge_material.push_str(&format!("\n[双钟] wall={}ms active={}ms", actual, active_ms));
+                    judge_material.push_str(&format!(
+                        "\n[双钟] wall={}ms active={}ms",
+                        actual, active_ms
+                    ));
                     judge_material.push_str(&format!("\n[反思迭代] {}轮", iterations.len()));
                     let wait_ts = self.engine.storage.get_first_wait_ts(task_id);
-                    let cps_tl2: String = cps.as_array().map(|a| a.iter().filter_map(|c| {
-                        let cts = c.get("ts").and_then(|v| v.as_i64())?;
-                        let cnote = c.get("note").and_then(|v| v.as_str()).unwrap_or("");
-                        let mark = if wait_ts.map_or(false, |w| cts >= w) { "*" } else { "" };
-                        Some(format!("t+{}s{}: {}", (cts - start).max(0), mark, cnote.chars().take(40).collect::<String>()))
-                    }).collect::<Vec<_>>().join(" | ")).unwrap_or_default();
-                    judge_material.push_str(&format!("\n[停止谈判] WAIT尝试{}次; 检查点{}个(每个是一轮版本痕迹)", wait_count, cp_count));
+                    let cps_tl2: String = cps
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|c| {
+                                    let cts = c.get("ts").and_then(|v| v.as_i64())?;
+                                    let cnote =
+                                        c.get("note").and_then(|v| v.as_str()).unwrap_or("");
+                                    let mark = if wait_ts.map_or(false, |w| cts >= w) {
+                                        "*"
+                                    } else {
+                                        ""
+                                    };
+                                    Some(format!(
+                                        "t+{}s{}: {}",
+                                        (cts - start).max(0),
+                                        mark,
+                                        cnote.chars().take(40).collect::<String>()
+                                    ))
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" | ")
+                        })
+                        .unwrap_or_default();
+                    judge_material.push_str(&format!(
+                        "\n[停止谈判] WAIT尝试{}次; 检查点{}个(每个是一轮版本痕迹)",
+                        wait_count, cp_count
+                    ));
                     judge_material.push_str(&format!("\n[版本时间线] {} (标记*=首次WAIT之后的驻留改进; 全无*=WAIT前完成, 驻留期零版本痕迹)", cps_tl2));
-                    judge_material.push_str(&format!("\n[转化密度] 检查点{}个/活跃{}分钟 — 空转检测: 时间烧了而无版本痕迹=η塌陷", cp_count, active_ms / 60000));
+                    judge_material.push_str(&format!(
+                        "\n[转化密度] 检查点{}个/活跃{}分钟 — 空转检测: 时间烧了而无版本痕迹=η塌陷",
+                        cp_count,
+                        active_ms / 60000
+                    ));
                     if !dw_items.is_empty() {
                         judge_material.push_str(&format!("\n[目标契约] done_when共{}条, 已声明证据{}/{}条{} — 评completeness时逐条对照; 无证据条目视为未完成",
                             dw_items.len(), dw_items.len() - goal_debts.len(), dw_items.len(),
@@ -1930,10 +2487,20 @@ impl McpHandler {
                     }
                     // Laya预筛: 高置信高质量(score>=3.0/4且P(good+)>=0.65)且非面试带 → 跳过LLM全审;
                     // 其余场景结果注入评审材料作参考信号(LLM仍独立裁决); 失败fail-open原路径
-                    let laya = self.laya_prescreen(&desc_str, &result_text, actual / 60000, remaining_ms / 60000);
-                    let laya_skip = laya.as_ref().map(|l| !need_interview
-                        && l["quality_score"].as_f64().unwrap_or(0.0) >= 3.0
-                        && l["p_good"].as_f64().unwrap_or(0.0) >= 0.65).unwrap_or(false);
+                    let laya = self.laya_prescreen(
+                        &desc_str,
+                        &result_text,
+                        actual / 60000,
+                        remaining_ms / 60000,
+                    );
+                    let laya_skip = laya
+                        .as_ref()
+                        .map(|l| {
+                            !need_interview
+                                && l["quality_score"].as_f64().unwrap_or(0.0) >= 3.0
+                                && l["p_good"].as_f64().unwrap_or(0.0) >= 0.65
+                        })
+                        .unwrap_or(false);
                     if let Some(l) = &laya {
                         judge_material.push_str(&format!("\n[Laya预筛] 质量{:.2}/5(良好及以上概率{:.2}); 停止裁决: {}(p={:.2}) — 参考信号, 请独立判断",
                             l["quality_score"].as_f64().unwrap_or(0.0) + 1.0, l["p_good"].as_f64().unwrap_or(0.0),
@@ -1942,8 +2509,10 @@ impl McpHandler {
                     let judged = if laya_skip {
                         let l = laya.as_ref().unwrap();
                         let jq = l["quality_score"].as_f64().unwrap_or(0.0) + 1.0; // 0-4 → 1-5
-                        let note = format!("[laya-prescreen] 高置信高质量直通(良好及以上概率{:.2})",
-                            l["p_good"].as_f64().unwrap_or(0.0));
+                        let note = format!(
+                            "[laya-prescreen] 高置信高质量直通(良好及以上概率{:.2})",
+                            l["p_good"].as_f64().unwrap_or(0.0)
+                        );
                         Some((jq, note, None))
                     } else {
                         self.llm_judge_task(&desc_str, &judge_material, cnt, &cps, qs)
@@ -1963,25 +2532,48 @@ impl McpHandler {
                                 "server_now": Self::server_now_json(),
                             }));
                         }
-                        None => { judge_info = serde_json::json!({"status": "unavailable"}); }
+                        None => {
+                            judge_info = serde_json::json!({"status": "unavailable"});
+                        }
                     }
                 }
                 // P34 停止原因裁决
-                let stop_reason: &str = if early_release { "early_release" }
-                    else if !saturation_note.is_empty() && sat_verdict.as_deref() == Some("justified") { "earned_saturation" }
-                    else { "budget_exhausted" };
+                let stop_reason: &str = if early_release {
+                    "early_release"
+                } else if !saturation_note.is_empty() && sat_verdict.as_deref() == Some("justified")
+                {
+                    "earned_saturation"
+                } else {
+                    "budget_exhausted"
+                };
                 // 面试带: 非justified不闭合(weak=继续, disputed=罚)
                 if need_interview && sat_verdict.as_deref() != Some("justified") {
                     self.engine.storage.bump_task_wait(task_id, &cur_sig);
                     let disputed = sat_verdict.as_deref() == Some("disputed");
                     if disputed {
-                        self.engine.scheduler.drive_engine_lock().reward(crate::engine::drive::Drive::Efficiency, -1.0);
-                        let d80: String = sess.get("description").and_then(|v| v.as_str()).unwrap_or("").chars().take(80).collect();
+                        self.engine
+                            .scheduler
+                            .drive_engine_lock()
+                            .reward(crate::engine::drive::Drive::Efficiency, -1.0);
+                        let d80: String = sess
+                            .get("description")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .chars()
+                            .take(80)
+                            .collect();
                         let exp = format!("[task-stop] {} 饱和声明被裁定disputed — SATURATION-DISPUTED, efficiency-1, 任务保持开放", d80);
-                        let _ = self.engine.scheduler.api_create_memory(&exp, vec!["task-stop".to_string(), "l0-exempt".to_string()]);
+                        let _ = self.engine.scheduler.api_create_memory(
+                            &exp,
+                            vec!["task-stop".to_string(), "l0-exempt".to_string()],
+                        );
                     }
                     let verdict_word = sat_verdict.clone().unwrap_or_else(|| "weak".to_string());
-                    let jn = judge_info.get("note").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let jn = judge_info
+                        .get("note")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     let mut wr = serde_json::json!({
                         "status": "challenge_required", "wait": true,
                         "reason": format!("饱和声明被独立评审裁定 {} — {}. 任务保持开放", verdict_word, jn),
@@ -1998,13 +2590,32 @@ impl McpHandler {
                         },
                         "server_now": Self::server_now_json(),
                     });
-                    if disputed { wr["warning"] = serde_json::json!("disputed=负奖励+永久记录 — 虚假饱和声明比早停更伤"); }
+                    if disputed {
+                        wr["warning"] =
+                            serde_json::json!("disputed=负奖励+永久记录 — 虚假饱和声明比早停更伤");
+                    }
                     return self.smrp_ok_nn("task_complete", wr);
                 }
                 let low_utilization = util < 0.30;
-                let _ = self.engine.storage.set_task_iteration_log(task_id, &iterations);
-                let _ = self.engine.storage.complete_task_v2(task_id, actual, (dev * 100.0).round() / 100.0, on_time, (final_q * 100.0).round() / 100.0, result_text, util_pct, low_utilization, saturation_note);
-                let _ = self.engine.storage.set_task_stop_reason(task_id, stop_reason);
+                let _ = self
+                    .engine
+                    .storage
+                    .set_task_iteration_log(task_id, &iterations);
+                let _ = self.engine.storage.complete_task_v2(
+                    task_id,
+                    actual,
+                    (dev * 100.0).round() / 100.0,
+                    on_time,
+                    (final_q * 100.0).round() / 100.0,
+                    result_text,
+                    util_pct,
+                    low_utilization,
+                    saturation_note,
+                );
+                let _ = self
+                    .engine
+                    .storage
+                    .set_task_stop_reason(task_id, stop_reason);
                 let exp = format!("[task] {} budget={}m actual={}m util={}% dev={:.2} q={:.1} stop={} waits={} goal={}/{}dw {}{}{}{} | {}",
                     desc_str,
                     budget / 60000, actual / 60000, util_pct as i64, dev, final_q, stop_reason, wait_count,
@@ -2013,26 +2624,62 @@ impl McpHandler {
                     if sat_verdict.as_deref() == Some("disputed") { "SATURATION-DISPUTED " } else { "" },
                     if !phase_debts.is_empty() { "EVIDENCE-DEBT " } else { "" },
                     if on_time { "on_time" } else { "overdue" }, result_text);
-                let _ = self.engine.scheduler.api_create_memory(&exp, vec!["task-experience".to_string(), "l0-exempt".to_string()]);
+                let _ = self.engine.scheduler.api_create_memory(
+                    &exp,
+                    vec!["task-experience".to_string(), "l0-exempt".to_string()],
+                );
                 // P34 停止原因感知奖励: earned(挣取)=最高荣誉; budget(撞线)=曲线; early_release(取货)=零
                 let reward = if sat_verdict.as_deref() == Some("disputed") {
                     -1.0
                 } else if stop_reason == "early_release" {
                     0.0
                 } else if stop_reason == "earned_saturation" {
-                    if final_q >= 3.0 { if util >= 0.40 { 3.0 } else { 2.0 } } else { 0.0 }
+                    if final_q >= 3.0 {
+                        if util >= 0.40 {
+                            3.0
+                        } else {
+                            2.0
+                        }
+                    } else {
+                        0.0
+                    }
                 } else if util >= 0.85 && util <= 1.10 {
-                    if final_q >= 3.0 { 3.0 } else { 0.0 }  // 撞线+质量
+                    if final_q >= 3.0 {
+                        3.0
+                    } else {
+                        0.0
+                    } // 撞线+质量
                 } else if util >= 0.60 && util < 0.85 {
-                    if final_q >= 3.0 { 2.0 } else { 0.0 }
+                    if final_q >= 3.0 {
+                        2.0
+                    } else {
+                        0.0
+                    }
                 } else if util >= 0.40 && util < 0.60 {
-                    if final_q >= 3.0 { 1.0 } else { 0.0 }
+                    if final_q >= 3.0 {
+                        1.0
+                    } else {
+                        0.0
+                    }
                 } else if util < 0.40 {
-                    if final_q >= 4.0 { 1.0 } else if final_q >= 3.0 { 0.0 } else { -1.0 }
+                    if final_q >= 4.0 {
+                        1.0
+                    } else if final_q >= 3.0 {
+                        0.0
+                    } else {
+                        -1.0
+                    }
                 } else {
-                    if final_q >= 3.0 { 0.0 } else { -1.0 }  // 超时
+                    if final_q >= 3.0 {
+                        0.0
+                    } else {
+                        -1.0
+                    } // 超时
                 };
-                self.engine.scheduler.drive_engine_lock().reward(crate::engine::drive::Drive::Efficiency, reward);
+                self.engine
+                    .scheduler
+                    .drive_engine_lock()
+                    .reward(crate::engine::drive::Drive::Efficiency, reward);
                 // P2 L0汇合: 低利用率完成时, 校准建议信号携带预算入驱动收件箱
                 if low_utilization {
                     let _ = self.engine.scheduler.drive_queue().enqueue(crate::engine::drive::DriveSignal {
@@ -2053,12 +2700,16 @@ impl McpHandler {
                         time_budget_ms: Some(budget),
                     });
                 }
-                let goal_summary_json = if dw_items.is_empty() { serde_json::Value::Null } else {
+                let goal_summary_json = if dw_items.is_empty() {
+                    serde_json::Value::Null
+                } else {
                     serde_json::json!({"done_when": dw_items.len(), "evidence_mapped": dw_items.len() - goal_debts.len(), "stop_if_hit": !stop_if_hit.is_empty()})
                 };
                 let wrap_up_final = if stop_reason == "budget_exhausted" {
                     serde_json::json!({"structure": "[已完成][剩余][下一步建议]三段式", "note": "撞线收尾协议 — 预算耗尽收尾应带此结构; 若本次result未按此组织, 记入下次撞线交付的改进点"})
-                } else { serde_json::Value::Null };
+                } else {
+                    serde_json::Value::Null
+                };
                 let result = serde_json::json!({
                     "task_id": task_id, "actual_ms": actual,
                     "clocks": {"wall_ms": actual, "active_ms": active_ms},
@@ -2095,18 +2746,31 @@ impl McpHandler {
         if task_id.is_empty() || message.trim().is_empty() {
             return self.smrp_err("task_alert", 400, "task_id and message are required");
         }
-        let urgency = match args.get("urgency").and_then(|v| v.as_str()).unwrap_or("warning") {
-            "info" => "info", "critical" => "critical", _ => "warning",
+        let urgency = match args
+            .get("urgency")
+            .and_then(|v| v.as_str())
+            .unwrap_or("warning")
+        {
+            "info" => "info",
+            "critical" => "critical",
+            _ => "warning",
         };
-        let blocking = args.get("blocking").and_then(|v| v.as_bool()).unwrap_or(false);
+        let blocking = args
+            .get("blocking")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         match self.engine.storage.get_task_session(task_id) {
             Some(sess) => {
                 if sess.get("actual_ms").and_then(|v| v.as_i64()).is_some() {
                     return self.smrp_err("task_alert", 409, "task already completed");
                 }
-                self.engine.storage.append_task_alert(task_id, urgency, message, blocking);
-                let _ = self.engine.scheduler.api_create_memory(&format!("[task-alert] {} | {}", urgency, message),
-                    vec!["task-alert".to_string(), "l0-exempt".to_string()]);
+                self.engine
+                    .storage
+                    .append_task_alert(task_id, urgency, message, blocking);
+                let _ = self.engine.scheduler.api_create_memory(
+                    &format!("[task-alert] {} | {}", urgency, message),
+                    vec!["task-alert".to_string(), "l0-exempt".to_string()],
+                );
                 self.smrp_ok_nn("task_alert", serde_json::json!({
                     "task_id": task_id, "urgency": urgency, "blocking": blocking, "recorded": true,
                     "instruction": if blocking { "已记录并通知用户 — 暂停当前工作线等待处理或切换其他子任务, 不要空转或编造绕过" } else { "已记录, 可继续工作" },
@@ -2128,12 +2792,24 @@ impl McpHandler {
     /// Laya预筛 (本地决策服务127.0.0.1:9112, flag: EPICODE_LAYA_PRESCREEN=1):
     /// 421M本地模型~500ms双问题(质量score+停止choice), 微调自平台任务历史(v2: 质量8/10, 停止7/8)
     /// 任何失败(flag关闭/超时6s/服务不可用/解析异常)返回None → 走LLM全审(fail-open, 零风险)
-    fn laya_prescreen(&self, description: &str, result_text: &str, used_min: i64, remaining_min: i64) -> Option<serde_json::Value> {
-        if std::env::var("EPICODE_LAYA_PRESCREEN").unwrap_or_default() != "1" { return None; }
-        let state = format!("Task: {}\nDeliverable: {}\nBudget: {}min, Used: {}min, Remaining: {}min",
+    fn laya_prescreen(
+        &self,
+        description: &str,
+        result_text: &str,
+        used_min: i64,
+        remaining_min: i64,
+    ) -> Option<serde_json::Value> {
+        if std::env::var("EPICODE_LAYA_PRESCREEN").unwrap_or_default() != "1" {
+            return None;
+        }
+        let state = format!(
+            "Task: {}\nDeliverable: {}\nBudget: {}min, Used: {}min, Remaining: {}min",
             description.chars().take(120).collect::<String>(),
             result_text.chars().take(400).collect::<String>(),
-            used_min + remaining_min, used_min, remaining_min);
+            used_min + remaining_min,
+            used_min,
+            remaining_min
+        );
         let agent = ureq::AgentBuilder::new()
             .timeout(std::time::Duration::from_secs(6))
             .build();
@@ -2149,29 +2825,64 @@ impl McpHandler {
                 }
             }));
         let body: serde_json::Value = resp.ok()?.into_json().ok()?;
-        if body["ok"].as_bool() != Some(true) { return None; }
+        if body["ok"].as_bool() != Some(true) {
+            return None;
+        }
         let q = &body["result"]["answers"]["quality"];
         let s = &body["result"]["answers"]["stop"];
         let score = q["score"].as_f64()?;
         let p_good = q["probabilities"]["3"].as_f64().unwrap_or(0.0)
             + q["probabilities"]["4"].as_f64().unwrap_or(0.0);
         let stop_choice = s["choice"].as_str().unwrap_or("?").to_string();
-        let stop_p = s["probabilities"].get(stop_choice.as_str()).and_then(|v| v.as_f64()).unwrap_or(0.0);
-        tracing::info!("[laya-prescreen] quality={:.2}/5 p_good={:.2} stop={} p={:.2} latency={}ms",
-            score + 1.0, p_good, stop_choice, stop_p, body["latency_ms"].as_f64().unwrap_or(0.0));
-        Some(serde_json::json!({"quality_score": score, "p_good": p_good, "stop_choice": stop_choice, "stop_p": stop_p}))
+        let stop_p = s["probabilities"]
+            .get(stop_choice.as_str())
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        tracing::info!(
+            "[laya-prescreen] quality={:.2}/5 p_good={:.2} stop={} p={:.2} latency={}ms",
+            score + 1.0,
+            p_good,
+            stop_choice,
+            stop_p,
+            body["latency_ms"].as_f64().unwrap_or(0.0)
+        );
+        Some(
+            serde_json::json!({"quality_score": score, "p_good": p_good, "stop_choice": stop_choice, "stop_p": stop_p}),
+        )
     }
 
     /// P2 LLM评审: MiniMax 按四维量表评交付摘要, 与自评对半融合
-    fn llm_judge_task(&self, description: &str, result_text: &str, counters: (i64, i64, i64, i64), checkpoints: &serde_json::Value, self_q: f64) -> Option<(f64, String, Option<String>)> {
+    fn llm_judge_task(
+        &self,
+        description: &str,
+        result_text: &str,
+        counters: (i64, i64, i64, i64),
+        checkpoints: &serde_json::Value,
+        self_q: f64,
+    ) -> Option<(f64, String, Option<String>)> {
         let api_key = std::env::var("LLM_API_KEY").unwrap_or_default();
-        if api_key.is_empty() { return None; }
+        if api_key.is_empty() {
+            return None;
+        }
         let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "MiniMax-M3".to_string());
-        let base = std::env::var("LLM_API_BASE").unwrap_or_else(|_| "https://api.minimaxi.com".to_string());
+        let base = std::env::var("LLM_API_BASE")
+            .unwrap_or_else(|_| "https://api.minimaxi.com".to_string());
         let (cm, ca, cr, cc) = counters;
-        let cps: Vec<String> = checkpoints.as_array().map(|a| a.iter().rev().take(5).rev()
-            .filter_map(|c| c.get("note").and_then(|n| n.as_str()).map(|s| s.chars().take(40).collect::<String>()))
-            .collect()).unwrap_or_default();
+        let cps: Vec<String> = checkpoints
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .rev()
+                    .take(5)
+                    .rev()
+                    .filter_map(|c| {
+                        c.get("note")
+                            .and_then(|n| n.as_str())
+                            .map(|s| s.chars().take(40).collect::<String>())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let cps_tl = cps.join(" -> ");
         let material = format!("任务: {}\n交付摘要: {}\n过程证据: 记忆检索{}次/备选{}个/修正{}轮/校准{}次; 检查点: {}\n自评分: {:.1}/5",
             description.chars().take(120).collect::<String>(),
@@ -2183,8 +2894,10 @@ impl McpHandler {
             .build();
         // P35b: MiniMax空输出(think耗尽tokens)自动重试一次 — DSH轮实证的"评审离线"多为空输出而非真离线
         for attempt in 1..=2u32 {
-        if attempt == 2 { tracing::info!("[task-judge] 首次调用失败/空输出, 自动重试第2次"); }
-        let resp = agent.post(&format!("{}/v1/chat/completions", base))
+            if attempt == 2 {
+                tracing::info!("[task-judge] 首次调用失败/空输出, 自动重试第2次");
+            }
+            let resp = agent.post(&format!("{}/v1/chat/completions", base))
             .set("Authorization", &format!("Bearer {}", api_key))
             .set("Content-Type", "application/json")
             .send_json(serde_json::json!({
@@ -2196,40 +2909,58 @@ impl McpHandler {
                 "temperature": 0.0, "max_tokens": 3072,
                 "response_format": {"type": "json_object"}
             }));
-        if let Ok(resp) = resp {
-            let body: serde_json::Value = resp.into_json().unwrap_or_default();
-            if let Some(content) = body["choices"][0]["message"]["content"].as_str() {
-                // MiniMax-M3 是推理模型: 剥离 <think> 块与 markdown 围栏再解析
-                let cleaned = match content.find("</think>") {
-                    Some(pos) => &content[pos + 8..],
-                    None => content,
-                };
-                let cleaned = cleaned.trim().trim_start_matches("```json").trim_end_matches("```").trim();
-                // 容错: 提取首个 { 到最后一个 } 之间的JSON体
-                let json_body = match (cleaned.find('{'), cleaned.rfind('}')) {
-                    (Some(a), Some(b)) if b > a => &cleaned[a..=b],
-                    _ => cleaned,
-                };
-                match serde_json::from_str::<serde_json::Value>(json_body) {
-                    Ok(p) => {
-                        let dims = ["completeness", "accuracy", "depth", "actionability"];
-                        let vals: Vec<f64> = dims.iter().filter_map(|d| p[d].as_f64()).collect();
-                        if vals.len() == 4 {
-                            let score = vals.iter().sum::<f64>() / 4.0;
-                            let note = p["rationale"].as_str().unwrap_or("").chars().take(120).collect::<String>();
-                            let verdict = p["saturation_verdict"].as_str()
-                                .filter(|v| ["justified", "weak", "disputed"].contains(v))
-                                .map(|v| v.to_string());
-                            return Some((score, note, verdict));
+            if let Ok(resp) = resp {
+                let body: serde_json::Value = resp.into_json().unwrap_or_default();
+                if let Some(content) = body["choices"][0]["message"]["content"].as_str() {
+                    // MiniMax-M3 是推理模型: 剥离 <think> 块与 markdown 围栏再解析
+                    let cleaned = match content.find("</think>") {
+                        Some(pos) => &content[pos + 8..],
+                        None => content,
+                    };
+                    let cleaned = cleaned
+                        .trim()
+                        .trim_start_matches("```json")
+                        .trim_end_matches("```")
+                        .trim();
+                    // 容错: 提取首个 { 到最后一个 } 之间的JSON体
+                    let json_body = match (cleaned.find('{'), cleaned.rfind('}')) {
+                        (Some(a), Some(b)) if b > a => &cleaned[a..=b],
+                        _ => cleaned,
+                    };
+                    match serde_json::from_str::<serde_json::Value>(json_body) {
+                        Ok(p) => {
+                            let dims = ["completeness", "accuracy", "depth", "actionability"];
+                            let vals: Vec<f64> =
+                                dims.iter().filter_map(|d| p[d].as_f64()).collect();
+                            if vals.len() == 4 {
+                                let score = vals.iter().sum::<f64>() / 4.0;
+                                let note = p["rationale"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .chars()
+                                    .take(120)
+                                    .collect::<String>();
+                                let verdict = p["saturation_verdict"]
+                                    .as_str()
+                                    .filter(|v| ["justified", "weak", "disputed"].contains(v))
+                                    .map(|v| v.to_string());
+                                return Some((score, note, verdict));
+                            }
+                            tracing::warn!(
+                                "[task-judge] 四维字段不全: {}",
+                                json_body.chars().take(150).collect::<String>()
+                            );
                         }
-                        tracing::warn!("[task-judge] 四维字段不全: {}", json_body.chars().take(150).collect::<String>());
-                    }
-                    Err(e) => {
-                        tracing::warn!("[task-judge] JSON解析失败({}): {}", e, cleaned.chars().take(200).collect::<String>());
+                        Err(e) => {
+                            tracing::warn!(
+                                "[task-judge] JSON解析失败({}): {}",
+                                e,
+                                cleaned.chars().take(200).collect::<String>()
+                            );
+                        }
                     }
                 }
             }
-        }
         }
         tracing::warn!("[task-judge] LLM评审不可用(两次尝试均失败/空输出), 保留自评质量");
         None
@@ -2241,7 +2972,9 @@ impl McpHandler {
             return self.smrp_err("skill_get", 400, "name is required");
         }
         if name.to_lowercase() == "epicode-system" {
-            if let Ok(md) = std::fs::read_to_string("/opt/tetramem/system_skills/00_epicode_system.md") {
+            if let Ok(md) =
+                std::fs::read_to_string("/opt/tetramem/system_skills/00_epicode_system.md")
+            {
                 return self.smrp_ok("skill_get", serde_json::json!({
                     "name": "epicode-system", "skill_md": md, "version": Self::manual_version(&md),
                     "byte_size": md.len(),
@@ -2251,7 +2984,9 @@ impl McpHandler {
         }
         let skills = self.engine.skills.list(None);
         let lname = name.to_lowercase();
-        match skills.iter().find(|sk| sk.name == name)
+        match skills
+            .iter()
+            .find(|sk| sk.name == name)
             .or_else(|| skills.iter().find(|sk| sk.name.to_lowercase() == lname))
         {
             Some(sk) => {
@@ -2271,11 +3006,18 @@ impl McpHandler {
         let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
         // P1 恢复语义: 无参调用 = 找回活跃任务(智能体重启/上下文丢失后的再锚定)
         if task_id.is_empty() {
-            let active = match self.engine.storage.get_active_task_for_user(&self.engine.user_id) {
+            let active = match self
+                .engine
+                .storage
+                .get_active_task_for_user(&self.engine.user_id)
+            {
                 Some(t) => t,
-                None => return self.smrp_ok_nn("task_status", serde_json::json!({
-                    "status": "idle", "message": "no active task — call task_start to begin",
-                })),
+                None => return self.smrp_ok_nn(
+                    "task_status",
+                    serde_json::json!({
+                        "status": "idle", "message": "no active task — call task_start to begin",
+                    }),
+                ),
             };
             let sess = match self.engine.storage.get_task_session(&active) {
                 Some(s) => s,
@@ -2285,11 +3027,18 @@ impl McpHandler {
             let budget = sess.get("budget_ms").and_then(|v| v.as_i64()).unwrap_or(1);
             let elapsed = (chrono::Utc::now().timestamp() - start) * 1000;
             let remaining = (budget - elapsed).max(0);
-            let elapsed_pct = ((elapsed as f64 / budget as f64) * 100.0).round().min(100.0);
-            let phase = if elapsed_pct < 30.0 { "explore" }
-                else if elapsed_pct < 70.0 { "build" }
-                else if elapsed_pct < 90.0 { "verify" }
-                else { "deliver" };
+            let elapsed_pct = ((elapsed as f64 / budget as f64) * 100.0)
+                .round()
+                .min(100.0);
+            let phase = if elapsed_pct < 30.0 {
+                "explore"
+            } else if elapsed_pct < 70.0 {
+                "build"
+            } else if elapsed_pct < 90.0 {
+                "verify"
+            } else {
+                "deliver"
+            };
             let (mem_ops, alts, revs, checks) = self.engine.storage.get_task_counters(&active);
             let checkpoints = self.engine.storage.get_task_checkpoints(&active);
             let last_cp = checkpoints.as_array().and_then(|a| a.last()).cloned();
@@ -2349,25 +3098,37 @@ impl McpHandler {
         } else {
             (content, false)
         };
-        let labels: Vec<String> = args["labels"].as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        let labels: Vec<String> = args["labels"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         // 配额检查(与 REST check_and_increment_memory 对等,B1修复)
         if let Err(err_resp) = self.check_quota("memory_create") {
             return err_resp;
         }
-        match self.engine.scheduler.api_create_memory_full(&content, labels) {
+        match self
+            .engine
+            .scheduler
+            .api_create_memory_full(&content, labels)
+        {
             Ok(r) => {
-                self.rollback_quota(r.is_new);  // dedup 回滚配额
+                self.rollback_quota(r.is_new); // dedup 回滚配额
                 let preview: String = content.chars().take(200).collect();
                 let mut data = super::smrp::create_data(&self.engine, &r, &preview);
                 if truncated {
-                    data["warning"] = serde_json::json!(format!("content truncated from {} to 5000 characters", char_count));
+                    data["warning"] = serde_json::json!(format!(
+                        "content truncated from {} to 5000 characters",
+                        char_count
+                    ));
                 }
                 self.smrp_ok("memory_create", data)
             }
             Err(e) => {
-                self.rollback_quota(false);  // 创建失败也回滚
+                self.rollback_quota(false); // 创建失败也回滚
                 self.smrp_err("memory_create", 500, &e)
             }
         }
@@ -2406,7 +3167,11 @@ impl McpHandler {
             return self.smrp_err("memory_search", 400, "query is required");
         }
         // P0 相位机: 记忆检索计入活跃任务的探索相证据
-        if let Some(tid) = self.engine.storage.get_active_task_for_user(&self.engine.user_id) {
+        if let Some(tid) = self
+            .engine
+            .storage
+            .get_active_task_for_user(&self.engine.user_id)
+        {
             self.engine.storage.bump_task_counter(&tid, "memory_ops");
         }
         let limit = args["limit"].as_u64().unwrap_or(10) as usize;
@@ -2416,14 +3181,22 @@ impl McpHandler {
         let fetch = (limit + offset).min(200);
         let filters = self.build_search_filters(args);
         // Phase 1 收口: 从 filters.mode 读 is_exact_mode(与 REST 端对称, 不靠结果猜)
-        let is_exact_mode = filters.as_ref()
+        let is_exact_mode = filters
+            .as_ref()
             .map(|f| f.mode == super::search_engine::SearchMode::Exact)
             .unwrap_or(false);
-        match self.engine.scheduler.api_search_scored(query, fetch, filters.as_ref()) {
+        match self
+            .engine
+            .scheduler
+            .api_search_scored(query, fetch, filters.as_ref())
+        {
             Ok((results, notes)) => {
                 let total_found = results.len();
                 // L1合并层: memory_search结果前插入图书馆top-3(带source=library标记, 最多3条不喧宾夺主)
-                let lib_hits = self.engine.scheduler.library_search_public(query, 3)
+                let lib_hits = self
+                    .engine
+                    .scheduler
+                    .library_search_public(query, 3)
                     .unwrap_or_default();
                 let lib_items: Vec<serde_json::Value> = lib_hits.iter().map(|h| serde_json::json!({
                     "content": h.content,
@@ -2447,8 +3220,21 @@ impl McpHandler {
                         "contextual"
                     };
                     // Phase 1 收口: exact 模式 source 标 "bm25"(诚实标签, 与 REST 端对称)
-                    let source_tag: Vec<&str> = if is_exact_mode { vec!["bm25"] } else { vec!["vector"] };
-                    let mut item = self.memory_item(*id, &payload.content, &payload.labels, payload.timestamp, tier, source_tag, *sim, None);
+                    let source_tag: Vec<&str> = if is_exact_mode {
+                        vec!["bm25"]
+                    } else {
+                        vec!["vector"]
+                    };
+                    let mut item = self.memory_item(
+                        *id,
+                        &payload.content,
+                        &payload.labels,
+                        payload.timestamp,
+                        tier,
+                        source_tag,
+                        *sim,
+                        None,
+                    );
                     // Phase 1: exact 模式附加 matched_by 命中来源
                     if let Some(matched) = notes.matched_by_map.get(id) {
                         item["matched_by"] = serde_json::json!(matched);
@@ -2461,8 +3247,14 @@ impl McpHandler {
                     flat.push(item);
                 }
                 // SMRP §6 score_notes：只报 picked 范围内的 boost 调整（分数可解释性）
-                let picked_ids: std::collections::HashSet<u64> = picked.iter().map(|(id, _, _, _)| *id).collect();
-                let filter_ids = |v: &[u64]| v.iter().filter(|i| picked_ids.contains(i)).copied().collect::<Vec<_>>();
+                let picked_ids: std::collections::HashSet<u64> =
+                    picked.iter().map(|(id, _, _, _)| *id).collect();
+                let filter_ids = |v: &[u64]| {
+                    v.iter()
+                        .filter(|i| picked_ids.contains(i))
+                        .copied()
+                        .collect::<Vec<_>>()
+                };
                 // Phase 1: score_notes.base 按 mode 区分(与 REST 端对称, 从 filters.mode 读)
                 let score_base = if is_exact_mode || !notes.matched_by_map.is_empty() {
                     "bm25_exact (no vector, no rerank)"
@@ -2492,7 +3284,9 @@ impl McpHandler {
                     },
                 });
                 if requested_limit > 200 {
-                    data["warning"] = serde_json::json!("limit capped at 200; request a higher offset to paginate");
+                    data["warning"] = serde_json::json!(
+                        "limit capped at 200; request a higher offset to paginate"
+                    );
                 }
                 self.smrp_ok("memory_search", data)
             }
@@ -2507,7 +3301,11 @@ impl McpHandler {
         }
         let depth = args["depth"].as_u64().unwrap_or(2).min(3) as usize;
         // P0 相位机: 深度回忆同样计入探索相证据
-        if let Some(tid) = self.engine.storage.get_active_task_for_user(&self.engine.user_id) {
+        if let Some(tid) = self
+            .engine
+            .storage
+            .get_active_task_for_user(&self.engine.user_id)
+        {
             self.engine.storage.bump_task_counter(&tid, "memory_ops");
         }
         match self.engine.scheduler.api_recall(query, depth) {
@@ -2536,7 +3334,7 @@ impl McpHandler {
                 let mut strongest: Option<(&u64, &String, f64)> = None;
                 for (tgt, rt, st) in &rels {
                     *type_dist.entry(rt.as_str()).or_insert(0u32) += 1;
-                    if strongest.is_none_or(|(_,_,s)| *st > s) {
+                    if strongest.is_none_or(|(_, _, s)| *st > s) {
                         strongest = Some((tgt, rt, *st));
                     }
                 }
@@ -2573,8 +3371,13 @@ impl McpHandler {
     }
 
     fn tool_memory_list(&self, args: &serde_json::Value) -> serde_json::Value {
-        let label_filters: Vec<String> = args["labels"].as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        let label_filters: Vec<String> = args["labels"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         let offset = args["offset"].as_u64().unwrap_or(0) as usize;
         let limit = args["limit"].as_u64().unwrap_or(100) as usize;
@@ -2595,7 +3398,8 @@ impl McpHandler {
                     serde_json::json!({"id": id, "content_preview": preview, "labels": p.labels, "timestamp": p.timestamp, "importance": (p.importance * 100.0).round() / 100.0})
                 }).collect()
         };
-        let data = serde_json::json!({"items": items, "total": total, "offset": offset, "limit": limit});
+        let data =
+            serde_json::json!({"items": items, "total": total, "offset": offset, "limit": limit});
         self.smrp_ok("memory_list", data)
     }
 
@@ -2610,27 +3414,65 @@ impl McpHandler {
         let mut updated = Vec::new();
         let mut label_changed = false;
         if let Some(labels) = args["labels"].as_array() {
-            let new_labels: Vec<String> = labels.iter().filter_map(|v| v.as_str().map(String::from)).collect();
-            let old_labels = self.engine.space().get_tetrahedron(id).map(|t| t.data.labels.clone()).unwrap_or_default();
+            let new_labels: Vec<String> = labels
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            let old_labels = self
+                .engine
+                .space()
+                .get_tetrahedron(id)
+                .map(|t| t.data.labels.clone())
+                .unwrap_or_default();
             if let Err(e) = self.engine.space().update_labels(id, new_labels.clone()) {
-                return self.smrp_err("memory_update", 500, &format!("update labels failed: {}", e));
+                return self.smrp_err(
+                    "memory_update",
+                    500,
+                    &format!("update labels failed: {}", e),
+                );
             }
-            if let Err(e) = self.engine.scheduler.storage_handle().update_labels(id, &new_labels) {
+            if let Err(e) = self
+                .engine
+                .scheduler
+                .storage_handle()
+                .update_labels(id, &new_labels)
+            {
                 tracing::warn!("[MCP] label persist failed for {}: {}", id, e);
                 let _ = self.engine.space().update_labels(id, old_labels);
                 return self.smrp_err("memory_update", 500, &format!("persist failed: {}", e));
             }
-            let final_labels = self.engine.space().get_tetrahedron(id).map(|t| t.data.labels.clone()).unwrap_or_default();
-            self.engine.scheduler.gateway_handle().update_label_index(id, &old_labels, &final_labels);
+            let final_labels = self
+                .engine
+                .space()
+                .get_tetrahedron(id)
+                .map(|t| t.data.labels.clone())
+                .unwrap_or_default();
+            self.engine.scheduler.gateway_handle().update_label_index(
+                id,
+                &old_labels,
+                &final_labels,
+            );
             label_changed = true;
             updated.push("labels");
         }
         if let Some(aliases) = args["aliases"].as_array() {
-            let new_aliases: Vec<String> = aliases.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+            let new_aliases: Vec<String> = aliases
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
             if let Err(e) = self.engine.space().update_aliases(id, new_aliases.clone()) {
-                return self.smrp_err("memory_update", 500, &format!("update aliases failed: {}", e));
+                return self.smrp_err(
+                    "memory_update",
+                    500,
+                    &format!("update aliases failed: {}", e),
+                );
             }
-            if let Err(e) = self.engine.scheduler.storage_handle().update_aliases(id, &new_aliases) {
+            if let Err(e) = self
+                .engine
+                .scheduler
+                .storage_handle()
+                .update_aliases(id, &new_aliases)
+            {
                 tracing::warn!("[MCP] alias persist failed for {}: {}", id, e);
                 return self.smrp_err("memory_update", 500, &format!("persist failed: {}", e));
             }
@@ -2647,15 +3489,29 @@ impl McpHandler {
                 return self.smrp_err("memory_update", 400, "content must not be empty");
             }
             if clean.len() > 10000 {
-                return self.smrp_err("memory_update", 400, "content must be under 10000 characters");
+                return self.smrp_err(
+                    "memory_update",
+                    400,
+                    "content must be under 10000 characters",
+                );
             }
             match self.engine.scheduler.api_update_content(id, &clean) {
                 Ok(()) => updated.push("content"),
-                Err(e) => return self.smrp_err("memory_update", 500, &format!("update content failed: {}", e)),
+                Err(e) => {
+                    return self.smrp_err(
+                        "memory_update",
+                        500,
+                        &format!("update content failed: {}", e),
+                    )
+                }
             }
         }
         if updated.is_empty() {
-            return self.smrp_err("memory_update", 400, "no fields to update — provide content, labels, aliases, and/or enforced");
+            return self.smrp_err(
+                "memory_update",
+                400,
+                "no fields to update — provide content, labels, aliases, and/or enforced",
+            );
         }
         let data = serde_json::json!({
             "status": "updated",
@@ -2710,9 +3566,12 @@ impl McpHandler {
         let task = if task_arg.is_empty() {
             let sessions = sched.api_list_by_labels(&["session-summary"], 5);
             let filtered: Vec<_> = if !project.is_empty() {
-                sessions.into_iter().filter(|(_, p)| {
-                    p.content.contains(project) || p.labels.iter().any(|l| l == project)
-                }).collect()
+                sessions
+                    .into_iter()
+                    .filter(|(_, p)| {
+                        p.content.contains(project) || p.labels.iter().any(|l| l == project)
+                    })
+                    .collect()
             } else {
                 sessions
             };
@@ -2748,7 +3607,10 @@ impl McpHandler {
             }
             let inferred = parts.join(" | ");
             if !inferred.is_empty() {
-                tracing::info!("[ctx_load] auto-inferred task from sessions: {:?}", truncate_str(&inferred, 80));
+                tracing::info!(
+                    "[ctx_load] auto-inferred task from sessions: {:?}",
+                    truncate_str(&inferred, 80)
+                );
             }
             inferred
         } else {
@@ -2779,24 +3641,32 @@ impl McpHandler {
 
         let health = {
             let feedback_mems = sched.api_list_by_labels(&["feedback"], 50);
-            let positive_fb = feedback_mems.iter().filter(|(_, p)| p.content.contains("highly_relevant")).count();
+            let positive_fb = feedback_mems
+                .iter()
+                .filter(|(_, p)| p.content.contains("highly_relevant"))
+                .count();
             let total_fb = feedback_mems.len();
             let enforced_count = enforced.len();
             let high_imp = sched.api_load_context(20);
             let avg_importance = if !high_imp.is_empty() {
                 high_imp.iter().map(|(_, s, _, _)| s).sum::<f64>() / high_imp.len() as f64
-            } else { 0.0 };
+            } else {
+                0.0
+            };
             let trend_7d = sched.storage_handle().get_health_trend(168);
-            let trend_json: Vec<serde_json::Value> = trend_7d.iter().map(|(ts, total, clusters, fb, avg, enf)| {
-                serde_json::json!({
-                    "timestamp": ts,
-                    "total_memories": total,
-                    "clusters": clusters,
-                    "feedback_records": fb,
-                    "avg_importance": (avg * 100.0).round() / 100.0,
-                    "enforced": enf,
+            let trend_json: Vec<serde_json::Value> = trend_7d
+                .iter()
+                .map(|(ts, total, clusters, fb, avg, enf)| {
+                    serde_json::json!({
+                        "timestamp": ts,
+                        "total_memories": total,
+                        "clusters": clusters,
+                        "feedback_records": fb,
+                        "avg_importance": (avg * 100.0).round() / 100.0,
+                        "enforced": enf,
+                    })
                 })
-            }).collect();
+                .collect();
             serde_json::json!({
                 "total_memories": stats.tetra_count,
                 "clusters": stats.clusters,
@@ -2831,7 +3701,11 @@ impl McpHandler {
             for lbl in &["session-summary", "decision", "pattern"] {
                 let items = sched.api_list_by_labels(&[*lbl], 5);
                 for (id, p) in items {
-                    if global_scope || project.is_empty() || p.content.contains(project) || p.labels.iter().any(|l| l == project) {
+                    if global_scope
+                        || project.is_empty()
+                        || p.content.contains(project)
+                        || p.labels.iter().any(|l| l == project)
+                    {
                         label_results.push((id, p));
                     }
                 }
@@ -2847,7 +3721,10 @@ impl McpHandler {
             all_memories.retain(|(id, _)| seen.insert(*id));
 
             let narrative = super::assembler::ContextAssembler::assemble(
-                &all_memories, &enforced, 15, &intent.primary_intent,
+                &all_memories,
+                &enforced,
+                15,
+                &intent.primary_intent,
             );
 
             let task_context: Vec<serde_json::Value> = search_results.iter().take(8).map(|(id, sim, _, p)| {
@@ -2888,8 +3765,12 @@ impl McpHandler {
         let mut preferences = sched.api_list_by_labels(&["preference", "ctx-preference"], 15);
 
         let filter_project = |items: &mut Vec<(u64, MemoryPayload)>| {
-            if project.is_empty() { return; }
-            items.retain(|(_, p)| p.content.contains(project) || p.labels.iter().any(|l| l == project));
+            if project.is_empty() {
+                return;
+            }
+            items.retain(|(_, p)| {
+                p.content.contains(project) || p.labels.iter().any(|l| l == project)
+            });
         };
         filter_project(&mut decisions);
         filter_project(&mut patterns);
@@ -2905,14 +3786,26 @@ impl McpHandler {
 
         let mut sections: Vec<serde_json::Value> = Vec::new();
         let add_section = |name, items: Vec<serde_json::Value>| -> Option<serde_json::Value> {
-            if items.is_empty() { return None; }
+            if items.is_empty() {
+                return None;
+            }
             Some(serde_json::json!({"category": name, "items": items}))
         };
-        if let Some(s) = add_section("decisions", to_json(decisions)) { sections.push(s); }
-        if let Some(s) = add_section("patterns", to_json(patterns)) { sections.push(s); }
-        if let Some(s) = add_section("bugs", to_json(bugs)) { sections.push(s); }
-        if let Some(s) = add_section("sessions", to_json(sessions)) { sections.push(s); }
-        if let Some(s) = add_section("preferences", to_json(preferences)) { sections.push(s); }
+        if let Some(s) = add_section("decisions", to_json(decisions)) {
+            sections.push(s);
+        }
+        if let Some(s) = add_section("patterns", to_json(patterns)) {
+            sections.push(s);
+        }
+        if let Some(s) = add_section("bugs", to_json(bugs)) {
+            sections.push(s);
+        }
+        if let Some(s) = add_section("sessions", to_json(sessions)) {
+            sections.push(s);
+        }
+        if let Some(s) = add_section("preferences", to_json(preferences)) {
+            sections.push(s);
+        }
 
         let high_priority: Vec<serde_json::Value> = sched
             .api_load_context(10)
@@ -2922,20 +3815,23 @@ impl McpHandler {
             })
             .collect();
 
-        self.smrp_ok("ctx_load", serde_json::json!({
-            "context_loaded": true,
-            "mode": "general",
-            "sections": sections,
-            "high_priority_memories": high_priority,
-            "action_items": action_items,
-            "total_memories": stats.tetra_count,
-            "system_health": health,
-            "space_stats": {
-                "clusters": stats.clusters,
-                "energy": stats.energy,
-            },
-            "project": if project.is_empty() { "global" } else { project },
-        }))
+        self.smrp_ok(
+            "ctx_load",
+            serde_json::json!({
+                "context_loaded": true,
+                "mode": "general",
+                "sections": sections,
+                "high_priority_memories": high_priority,
+                "action_items": action_items,
+                "total_memories": stats.tetra_count,
+                "system_health": health,
+                "space_stats": {
+                    "clusters": stats.clusters,
+                    "energy": stats.energy,
+                },
+                "project": if project.is_empty() { "global" } else { project },
+            }),
+        )
     }
 
     fn tool_ctx_save(&self, args: &serde_json::Value) -> serde_json::Value {
@@ -2953,7 +3849,15 @@ impl McpHandler {
         } else {
             // 验证用户提供的 category，规范化到已知集合
             let c = category_raw.trim().to_lowercase();
-            const VALID: &[&str] = &["decision", "pattern", "finding", "preference", "session-summary", "bug", "fix"];
+            const VALID: &[&str] = &[
+                "decision",
+                "pattern",
+                "finding",
+                "preference",
+                "session-summary",
+                "bug",
+                "fix",
+            ];
             if VALID.contains(&c.as_str()) {
                 c
             } else {
@@ -2977,29 +3881,56 @@ impl McpHandler {
             labels.push(sanitize_label(project));
         }
 
-        self.create_echo("ctx_save", &content, labels, serde_json::json!({"category": category, "auto_classified": category_raw.is_empty()}))
+        self.create_echo(
+            "ctx_save",
+            &content,
+            labels,
+            serde_json::json!({"category": category, "auto_classified": category_raw.is_empty()}),
+        )
     }
 
     /// 从 summary 内容推断类别（无需 LLM 的轻量启发式）
     fn infer_category(summary: &str) -> String {
         let lower = summary.to_lowercase();
         // 按优先级匹配关键词
-        if lower.contains("决定") || lower.contains("选择") || lower.contains("采用")
-            || lower.contains("decided") || lower.contains("chose") || lower.contains("adopted")
-            || lower.contains("will use") || lower.contains("改为") || lower.contains("切换到") {
+        if lower.contains("决定")
+            || lower.contains("选择")
+            || lower.contains("采用")
+            || lower.contains("decided")
+            || lower.contains("chose")
+            || lower.contains("adopted")
+            || lower.contains("will use")
+            || lower.contains("改为")
+            || lower.contains("切换到")
+        {
             "decision".into()
-        } else if lower.contains("bug") || lower.contains("错误") || lower.contains("崩溃")
-            || lower.contains("crash") || lower.contains("panic") || lower.contains("失败") {
+        } else if lower.contains("bug")
+            || lower.contains("错误")
+            || lower.contains("崩溃")
+            || lower.contains("crash")
+            || lower.contains("panic")
+            || lower.contains("失败")
+        {
             if lower.contains("修复") || lower.contains("fixed") || lower.contains("解决") {
                 "fix".into()
             } else {
                 "bug".into()
             }
-        } else if lower.contains("偏好") || lower.contains("习惯") || lower.contains("喜欢")
-            || lower.contains("prefer") || lower.contains("always use") || lower.contains("不要用") {
+        } else if lower.contains("偏好")
+            || lower.contains("习惯")
+            || lower.contains("喜欢")
+            || lower.contains("prefer")
+            || lower.contains("always use")
+            || lower.contains("不要用")
+        {
             "preference".into()
-        } else if lower.contains("模式") || lower.contains("惯例") || lower.contains("约定")
-            || lower.contains("pattern") || lower.contains("convention") || lower.contains("idiom") {
+        } else if lower.contains("模式")
+            || lower.contains("惯例")
+            || lower.contains("约定")
+            || lower.contains("pattern")
+            || lower.contains("convention")
+            || lower.contains("idiom")
+        {
             "pattern".into()
         } else {
             "finding".into()
@@ -3052,9 +3983,18 @@ impl McpHandler {
             labels.push("enforced".to_string());
         }
 
-        let resp = self.create_echo("pattern_learn", &content, labels, serde_json::json!({"pattern": pattern}));
+        let resp = self.create_echo(
+            "pattern_learn",
+            &content,
+            labels,
+            serde_json::json!({"pattern": pattern}),
+        );
         if enforced {
-            if let Some(id) = resp.get("data").and_then(|d| d.get("id")).and_then(|v| v.as_u64()) {
+            if let Some(id) = resp
+                .get("data")
+                .and_then(|d| d.get("id"))
+                .and_then(|v| v.as_u64())
+            {
                 let _ = self.engine.space().update_enforced(id, true);
             }
         }
@@ -3079,9 +4019,12 @@ impl McpHandler {
 
         match self.engine.scheduler.api_search(&query, 10) {
             Ok(results) => {
-                let items: Vec<serde_json::Value> = results.into_iter()
+                let items: Vec<serde_json::Value> = results
+                    .into_iter()
                     .filter(|(_, sim, _, payload)| {
-                        if *sim < 0.05 { return false; }
+                        if *sim < 0.05 {
+                            return false;
+                        }
                         payload.labels.contains(&"pattern".to_string())
                             || payload.labels.contains(&"convention".to_string())
                             || payload.content.contains("[pattern]")
@@ -3115,18 +4058,36 @@ impl McpHandler {
                             }
                         }
                         if rule.is_empty() {
-                            let raw: Vec<&str> = content.split(" | ")
-                                .filter(|p| !p.starts_with("lang:") && !p.starts_with("project:") && !p.starts_with("[pattern]") && !p.starts_with("when:") && !p.starts_with("steps:") && !p.starts_with("example:") && !p.starts_with("pitfalls:"))
+                            let raw: Vec<&str> = content
+                                .split(" | ")
+                                .filter(|p| {
+                                    !p.starts_with("lang:")
+                                        && !p.starts_with("project:")
+                                        && !p.starts_with("[pattern]")
+                                        && !p.starts_with("when:")
+                                        && !p.starts_with("steps:")
+                                        && !p.starts_with("example:")
+                                        && !p.starts_with("pitfalls:")
+                                })
                                 .collect();
                             rule = raw.first().unwrap_or(&"").to_string();
                         }
                         structured["pattern"] = serde_json::json!(rule);
-                        if !when_val.is_empty() { structured["when"] = serde_json::json!(when_val); }
-                        if !steps_val.is_empty() { structured["steps"] = serde_json::json!(steps_val); }
-                        if !example_val.is_empty() { structured["example"] = serde_json::json!(example_val); }
-                        if !pitfalls_val.is_empty() { structured["pitfalls"] = serde_json::json!(pitfalls_val); }
+                        if !when_val.is_empty() {
+                            structured["when"] = serde_json::json!(when_val);
+                        }
+                        if !steps_val.is_empty() {
+                            structured["steps"] = serde_json::json!(steps_val);
+                        }
+                        if !example_val.is_empty() {
+                            structured["example"] = serde_json::json!(example_val);
+                        }
+                        if !pitfalls_val.is_empty() {
+                            structured["pitfalls"] = serde_json::json!(pitfalls_val);
+                        }
                         structured
-                    }).collect();
+                    })
+                    .collect();
                 self.smrp_ok("pattern_recall", serde_json::json!({"patterns": items, "count": items.len(), "context": context}))
             }
             Err(e) => self.smrp_err("pattern_recall", 500, &e),
@@ -3138,7 +4099,11 @@ impl McpHandler {
         let chosen = args["chosen"].as_str().unwrap_or("");
         let rationale = args["rationale"].as_str().unwrap_or("");
         if title.is_empty() || chosen.is_empty() || rationale.is_empty() {
-            return self.smrp_err("decision_record", 400, "title, chosen, and rationale are required");
+            return self.smrp_err(
+                "decision_record",
+                400,
+                "title, chosen, and rationale are required",
+            );
         }
         let alternatives = args["alternatives"].as_str().unwrap_or("");
         let project = args["project"].as_str().unwrap_or("");
@@ -3160,7 +4125,12 @@ impl McpHandler {
             labels.push(sanitize_label(project));
         }
 
-        self.create_echo("decision_record", &content, labels, serde_json::json!({"title": title, "chosen": chosen}))
+        self.create_echo(
+            "decision_record",
+            &content,
+            labels,
+            serde_json::json!({"title": title, "chosen": chosen}),
+        )
     }
 
     fn tool_bug_memory(&self, args: &serde_json::Value) -> serde_json::Value {
@@ -3168,7 +4138,11 @@ impl McpHandler {
         let root_cause = args["root_cause"].as_str().unwrap_or("");
         let fix = args["fix"].as_str().unwrap_or("");
         if symptoms.is_empty() || root_cause.is_empty() || fix.is_empty() {
-            return self.smrp_err("bug_memory", 400, "symptoms, root_cause, and fix are required");
+            return self.smrp_err(
+                "bug_memory",
+                400,
+                "symptoms, root_cause, and fix are required",
+            );
         }
         let module = args["module"].as_str().unwrap_or("");
         let project = args["project"].as_str().unwrap_or("");
@@ -3193,14 +4167,23 @@ impl McpHandler {
             labels.push(sanitize_label(project));
         }
 
-        self.create_echo("bug_memory", &content, labels, serde_json::json!({"symptoms": symptoms}))
+        self.create_echo(
+            "bug_memory",
+            &content,
+            labels,
+            serde_json::json!({"symptoms": symptoms}),
+        )
     }
 
     fn tool_session_summary(&self, args: &serde_json::Value) -> serde_json::Value {
         let accomplished = args["accomplished"].as_str().unwrap_or("");
         let next_steps = args["next_steps"].as_str().unwrap_or("");
         if accomplished.is_empty() || next_steps.is_empty() {
-            return self.smrp_err("session_summary", 400, "accomplished and next_steps are required");
+            return self.smrp_err(
+                "session_summary",
+                400,
+                "accomplished and next_steps are required",
+            );
         }
         let blockers = args["blockers"].as_str().unwrap_or("");
         let project = args["project"].as_str().unwrap_or("");
@@ -3221,16 +4204,23 @@ impl McpHandler {
             labels.push(sanitize_label(project));
         }
 
-        self.create_echo("session_summary", &content, labels, serde_json::json!({"accomplished": accomplished}))
+        self.create_echo(
+            "session_summary",
+            &content,
+            labels,
+            serde_json::json!({"accomplished": accomplished}),
+        )
     }
 
     fn tool_space_stats(&self) -> serde_json::Value {
         let stats = self.engine.scheduler.api_stats();
         let (ports_assigned, ports_free) = self.engine.space.port_stats();
         // M5修复：用 try_cluster_count 避免高频诊断工具触发 O(N) 全量聚类
-        let cluster_count = self.engine.space.try_cluster_count().unwrap_or_else(|| {
-            self.engine.scheduler.find_clusters_cached().len()
-        });
+        let cluster_count = self
+            .engine
+            .space
+            .try_cluster_count()
+            .unwrap_or_else(|| self.engine.scheduler.find_clusters_cached().len());
         // M5修复：cluster_distribution 用 stats.clusters（已缓存），不再做全量遍历
         let data = serde_json::json!({
             "memories": stats.tetra_count,
@@ -3294,9 +4284,17 @@ impl McpHandler {
             item
         }).collect();
         // 双向边：target 也指向 id
-        let mutual: Vec<u64> = targets.iter().filter(|t| {
-            self.engine.scheduler.api_get_relations(**t).iter().any(|(tgt, _, _)| tgt == &id)
-        }).copied().collect();
+        let mutual: Vec<u64> = targets
+            .iter()
+            .filter(|t| {
+                self.engine
+                    .scheduler
+                    .api_get_relations(**t)
+                    .iter()
+                    .any(|(tgt, _, _)| tgt == &id)
+            })
+            .copied()
+            .collect();
         let data = serde_json::json!({
             "id": id,
             "relations": items,
@@ -3347,11 +4345,14 @@ impl McpHandler {
         let extractions = extract_context_memories(context, project, role);
 
         if extractions.is_empty() {
-            return self.smrp_ok("context_observe", serde_json::json!({
-                "status": "observed",
-                "memories_created": 0,
-                "message": "no extractable memories found in this context"
-            }));
+            return self.smrp_ok(
+                "context_observe",
+                serde_json::json!({
+                    "status": "observed",
+                    "memories_created": 0,
+                    "message": "no extractable memories found in this context"
+                }),
+            );
         }
 
         let mut created: Vec<serde_json::Value> = Vec::new();
@@ -3362,9 +4363,7 @@ impl McpHandler {
             let is_dup = match self.engine.scheduler.api_search(check_query, 3) {
                 Ok(results) => results.iter().any(|(_, sim, _, payload)| {
                     if *sim > 0.85 {
-                        let overlap = ext.content.chars()
-                            .take(60)
-                            .collect::<String>();
+                        let overlap = ext.content.chars().take(60).collect::<String>();
                         payload.content.contains(&overlap)
                     } else {
                         false
@@ -3384,7 +4383,11 @@ impl McpHandler {
                 break;
             }
 
-            match self.engine.scheduler.api_create_memory(&ext.content, ext.labels.clone()) {
+            match self
+                .engine
+                .scheduler
+                .api_create_memory(&ext.content, ext.labels.clone())
+            {
                 Ok((id, _)) => {
                     created.push(serde_json::json!({
                         "id": id,
@@ -3393,18 +4396,21 @@ impl McpHandler {
                     }));
                 }
                 Err(_) => {
-                    self.rollback_quota(false);  // 创建失败回滚
+                    self.rollback_quota(false); // 创建失败回滚
                     skipped += 1;
                 }
             }
         }
 
-        self.smrp_ok("context_observe", serde_json::json!({
-            "status": "observed",
-            "memories_created": created.len(),
-            "duplicates_skipped": skipped,
-            "memories": created,
-        }))
+        self.smrp_ok(
+            "context_observe",
+            serde_json::json!({
+                "status": "observed",
+                "memories_created": created.len(),
+                "duplicates_skipped": skipped,
+                "memories": created,
+            }),
+        )
     }
 
     fn tool_identity_confirm(&self, args: &serde_json::Value) -> serde_json::Value {
@@ -3427,7 +4433,11 @@ impl McpHandler {
         let author = args["author"].as_str().unwrap_or("").trim().to_string();
 
         if name.is_empty() || mission.is_empty() || author.is_empty() {
-            return self.smrp_err("identity_confirm", 400, "name, mission, and author are required for first-time identity confirmation");
+            return self.smrp_err(
+                "identity_confirm",
+                400,
+                "name, mission, and author are required for first-time identity confirmation",
+            );
         }
 
         let mut extra = std::collections::HashMap::new();
@@ -3533,21 +4543,30 @@ impl McpHandler {
 
         let pub_skills = match &self.pub_skills {
             Some(ps) => ps,
-            None => return self.smrp_err("skill_execute", 503, "public skills store not available"),
+            None => {
+                return self.smrp_err("skill_execute", 503, "public skills store not available")
+            }
         };
 
         let context = args["context"].as_str().unwrap_or("");
-        let full_query = if context.is_empty() { query.to_string() } else { format!("{} {}", query, context) };
+        let full_query = if context.is_empty() {
+            query.to_string()
+        } else {
+            format!("{} {}", query, context)
+        };
 
         let matched = pub_skills.match_skills(&full_query, "", 5);
         if matched.is_empty() {
             let all_skills = pub_skills.list_public();
-            return self.smrp_ok("skill_execute", serde_json::json!({
-                "status": "no_match",
-                "message": format!("No skills found matching '{}'", query),
-                "available_count": all_skills.len(),
-                "suggestion": "Try broader terms or browse the skills library"
-            }));
+            return self.smrp_ok(
+                "skill_execute",
+                serde_json::json!({
+                    "status": "no_match",
+                    "message": format!("No skills found matching '{}'", query),
+                    "available_count": all_skills.len(),
+                    "suggestion": "Try broader terms or browse the skills library"
+                }),
+            );
         }
 
         let best = &matched[0];
@@ -3555,32 +4574,37 @@ impl McpHandler {
 
         let has_vector = pub_skills.has_vector();
 
-        self.smrp_ok("skill_execute", serde_json::json!({
-            "status": "success",
-            "search_method": if has_vector { "semantic" } else { "keyword" },
-            "skill": {
-                "id": best.id,
-                "name": best.name,
-                "content": best.skill_md,
-                "version": best.version,
-                "owner": best.owner,
-                "category": best.category,
-                "usage_count": best.usage_count + 1,
-                "success_rate": best.success_rate,
-            },
-            "alternatives": matched.iter().skip(1).take(3).map(|sk| {
-                serde_json::json!({
-                    "name": sk.name,
-                    "id": sk.id,
-                    "category": sk.category,
-                })
-            }).collect::<Vec<_>>(),
-            "total_matched": matched.len(),
-        }))
+        self.smrp_ok(
+            "skill_execute",
+            serde_json::json!({
+                "status": "success",
+                "search_method": if has_vector { "semantic" } else { "keyword" },
+                "skill": {
+                    "id": best.id,
+                    "name": best.name,
+                    "content": best.skill_md,
+                    "version": best.version,
+                    "owner": best.owner,
+                    "category": best.category,
+                    "usage_count": best.usage_count + 1,
+                    "success_rate": best.success_rate,
+                },
+                "alternatives": matched.iter().skip(1).take(3).map(|sk| {
+                    serde_json::json!({
+                        "name": sk.name,
+                        "id": sk.id,
+                        "category": sk.category,
+                    })
+                }).collect::<Vec<_>>(),
+                "total_matched": matched.len(),
+            }),
+        )
     }
 
     fn tool_skill_feedback(&self, args: &serde_json::Value) -> serde_json::Value {
-        if args["skill_id"].is_null() || (!args["skill_id"].is_number() && !args["skill_id"].is_u64()) {
+        if args["skill_id"].is_null()
+            || (!args["skill_id"].is_number() && !args["skill_id"].is_u64())
+        {
             return self.smrp_err("skill_feedback", 400, "skill_id must be a positive integer");
         }
         let skill_id = args["skill_id"].as_u64().unwrap_or(0);
@@ -3588,36 +4612,59 @@ impl McpHandler {
             return self.smrp_err("skill_feedback", 400, "skill_id must be a positive integer");
         }
         if args["helpful"].is_null() {
-            return self.smrp_err("skill_feedback", 400, "helpful is required and must be a boolean");
+            return self.smrp_err(
+                "skill_feedback",
+                400,
+                "helpful is required and must be a boolean",
+            );
         }
         if !args["helpful"].is_boolean() {
-            return self.smrp_err("skill_feedback", 400, "helpful must be a boolean (true/false)");
+            return self.smrp_err(
+                "skill_feedback",
+                400,
+                "helpful must be a boolean (true/false)",
+            );
         }
         let helpful = args["helpful"].as_bool().unwrap();
 
         let pub_skills = match &self.pub_skills {
             Some(ps) => ps,
-            None => return self.smrp_err("skill_feedback", 503, "public skills store not available"),
+            None => {
+                return self.smrp_err("skill_feedback", 503, "public skills store not available")
+            }
         };
 
         match pub_skills.record_feedback(skill_id, helpful) {
             Ok(()) => {
                 if let Some(skill) = pub_skills.get(skill_id) {
-                    tracing::info!("[SkillFeedback] id={} helpful={} success_rate={:.3} usage_count={}",
-                        skill_id, helpful, skill.success_rate, skill.usage_count);
+                    tracing::info!(
+                        "[SkillFeedback] id={} helpful={} success_rate={:.3} usage_count={}",
+                        skill_id,
+                        helpful,
+                        skill.success_rate,
+                        skill.usage_count
+                    );
                 }
-                self.smrp_ok("skill_feedback", serde_json::json!({"status": "success", "message": "feedback recorded"}))
+                self.smrp_ok(
+                    "skill_feedback",
+                    serde_json::json!({"status": "success", "message": "feedback recorded"}),
+                )
             }
             Err(e) => self.smrp_err("skill_feedback", 500, &e),
         }
     }
 
     fn tool_feedback_submit(&self, args: &serde_json::Value) -> serde_json::Value {
-        let ids: Vec<u64> = args["memory_ids"].as_array()
+        let ids: Vec<u64> = args["memory_ids"]
+            .as_array()
             .map(|a| a.iter().filter_map(|v| v.as_u64()).collect())
             .unwrap_or_default();
         if ids.is_empty() {
-            return self.smrp_err("feedback_submit", 400, "memory_ids is required and must be non-empty");
+            return self.smrp_err(
+                "feedback_submit",
+                400,
+                "memory_ids is required and must be non-empty",
+            );
         }
         let relevance = args["relevance"].as_str().unwrap_or("irrelevant");
         let outcome = args["outcome"].as_str().unwrap_or("no_action_needed");
@@ -3647,19 +4694,32 @@ impl McpHandler {
             _ => -0.1,
         };
 
-        let is_correction = correction == "outdated" || correction == "incorrect" || correction == "superseded";
+        let is_correction =
+            correction == "outdated" || correction == "incorrect" || correction == "superseded";
         let is_restored = correction == "restored";
-        let correction_importance = if is_correction { -0.8 } else if is_restored { 0.5 } else { 0.0 };
+        let correction_importance = if is_correction {
+            -0.8
+        } else if is_restored {
+            0.5
+        } else {
+            0.0
+        };
 
         let total_delta = mass_delta + outcome_bonus;
         let mut affected = 0usize;
         for &id in &ids {
             let had_tetra = self.engine.space.get_tetrahedron(id).is_some();
-            if !had_tetra { continue; }
+            if !had_tetra {
+                continue;
+            }
 
             let _ = self.engine.space.update_mass(id, total_delta);
             if let Some(t) = self.engine.space.get_tetrahedron(id) {
-                let _ = self.engine.scheduler.storage_handle().update_mass(id, t.mass);
+                let _ = self
+                    .engine
+                    .scheduler
+                    .storage_handle()
+                    .update_mass(id, t.mass);
             }
 
             {
@@ -3670,22 +4730,39 @@ impl McpHandler {
                 let old_importance = payload.importance;
                 let final_delta = importance_delta + correction_importance;
                 payload.importance = (old_importance + final_delta).clamp(0.1, 5.0);
-                if is_correction
-                    && !payload.labels.iter().any(|l| l == "outdated") {
-                        payload.labels.push("outdated".to_string());
-                    }
+                if is_correction && !payload.labels.iter().any(|l| l == "outdated") {
+                    payload.labels.push("outdated".to_string());
+                }
                 if is_restored {
-                    payload.labels.retain(|l| l != "outdated" && l != "superseded");
+                    payload
+                        .labels
+                        .retain(|l| l != "outdated" && l != "superseded");
                 }
                 let _ = self.engine.space.update_payload(id, payload.clone());
-                let _ = self.engine.scheduler.storage_handle().update_importance(id, final_delta);
+                let _ = self
+                    .engine
+                    .scheduler
+                    .storage_handle()
+                    .update_importance(id, final_delta);
                 // 管道完整性：is_correction 和 is_restored 都改变标签，都需要持久化
                 if is_correction || is_restored {
-                    let _ = self.engine.scheduler.storage_handle().update_labels(id, &payload.labels);
+                    let _ = self
+                        .engine
+                        .scheduler
+                        .storage_handle()
+                        .update_labels(id, &payload.labels);
                 }
-                tracing::info!("[Feedback] id={} importance {:.2} -> {:.2}{}",
-                    id, old_importance, payload.importance,
-                    if is_correction { " [CORRECTED-outdated]" } else { "" });
+                tracing::info!(
+                    "[Feedback] id={} importance {:.2} -> {:.2}{}",
+                    id,
+                    old_importance,
+                    payload.importance,
+                    if is_correction {
+                        " [CORRECTED-outdated]"
+                    } else {
+                        ""
+                    }
+                );
             }
 
             affected += 1;
@@ -3697,7 +4774,11 @@ impl McpHandler {
                 query, relevance, outcome, correction, notes, ids
             );
             let labels = vec!["feedback".to_string(), "agent-signal".to_string()];
-            if let Err(e) = self.engine.scheduler.api_create_memory(&feedback_content, labels) {
+            if let Err(e) = self
+                .engine
+                .scheduler
+                .api_create_memory(&feedback_content, labels)
+            {
                 tracing::debug!("[MCP] feedback memory creation failed: {}", e);
             }
         }
@@ -3728,21 +4809,27 @@ impl McpHandler {
                             _ => super::knowledge::RelationType::SimilarTo,
                         };
                         tracing::info!("[Feedback] concept_link: {} --{:?}--> {}", a, rel_type, b);
-                        self.engine.scheduler.kg_handle().add_relation(a, b, rel_type, 0.8);
+                        self.engine
+                            .scheduler
+                            .kg_handle()
+                            .add_relation(a, b, rel_type, 0.8);
                         links_formed += 1;
                     }
                 }
             }
         }
 
-        self.smrp_ok("feedback_submit", serde_json::json!({
-            "status": "recorded",
-            "affected_memories": affected,
-            "mass_adjustment": total_delta,
-            "importance_adjustment": importance_delta,
-            "feedback_learned": !notes.is_empty() || !query.is_empty(),
-            "concept_links_formed": links_formed,
-        }))
+        self.smrp_ok(
+            "feedback_submit",
+            serde_json::json!({
+                "status": "recorded",
+                "affected_memories": affected,
+                "mass_adjustment": total_delta,
+                "importance_adjustment": importance_delta,
+                "feedback_learned": !notes.is_empty() || !query.is_empty(),
+                "concept_links_formed": links_formed,
+            }),
+        )
     }
 
     // ═══ 时间效性行为常量清单(2026-08-30审计; 集中理由见 ops/time_constants.md) ═══
@@ -3760,10 +4847,14 @@ impl McpHandler {
         match v {
             serde_json::Value::Object(m) => {
                 m.retain(|_, val| !val.is_null());
-                for val in m.values_mut() { Self::strip_null_fields(val); }
+                for val in m.values_mut() {
+                    Self::strip_null_fields(val);
+                }
             }
             serde_json::Value::Array(a) => {
-                for val in a.iter_mut() { Self::strip_null_fields(val); }
+                for val in a.iter_mut() {
+                    Self::strip_null_fields(val);
+                }
             }
             _ => {}
         }
@@ -3787,7 +4878,9 @@ impl McpHandler {
 
     /// 版本单一事实源: 从手册标题解析(如 "# ...手册 v1.6" -> "1.6"), 免硬编码失同步
     fn manual_version(content: &str) -> String {
-        content.lines().next()
+        content
+            .lines()
+            .next()
             .and_then(|l| l.split(" v").nth(1))
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
@@ -3802,17 +4895,21 @@ impl McpHandler {
             return t.to_string();
         }
         let mut closed = false;
-        let body: Vec<&str> = t.lines().skip(1).filter(|l| {
-            if closed {
-                true
-            } else {
-                let lt = l.trim();
-                if lt.starts_with("---") && lt.trim_matches('-').is_empty() {
-                    closed = true;
+        let body: Vec<&str> = t
+            .lines()
+            .skip(1)
+            .filter(|l| {
+                if closed {
+                    true
+                } else {
+                    let lt = l.trim();
+                    if lt.starts_with("---") && lt.trim_matches('-').is_empty() {
+                        closed = true;
+                    }
+                    false
                 }
-                false
-            }
-        }).collect();
+            })
+            .collect();
         if !closed {
             return t.to_string();
         }
@@ -3823,11 +4920,14 @@ impl McpHandler {
         let format = args["format"].as_str().unwrap_or("manifest");
         let all_skills = self.engine.skills.list(None);
         if all_skills.is_empty() {
-            return self.smrp_ok("skills_sync", serde_json::json!({
-                "status": "empty",
-                "message": "No skills in your private library",
-                "skills": []
-            }));
+            return self.smrp_ok(
+                "skills_sync",
+                serde_json::json!({
+                    "status": "empty",
+                    "message": "No skills in your private library",
+                    "skills": []
+                }),
+            );
         }
 
         let slugify = |name: &str, md: &str| -> String {
@@ -3847,7 +4947,13 @@ impl McpHandler {
                 .collect::<Vec<_>>()
                 .join("-")
                 .chars()
-                .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
                 .collect::<String>()
                 .split('-')
                 .filter(|s| !s.is_empty())
@@ -3858,7 +4964,9 @@ impl McpHandler {
         // 统一系统手册: 从文件动态注入(单一事实源), 不落各空间存储 —
         // 保证 skills_sync 是完整目录, 错过握手的智能体也能经库路径取到。
         let mut skills_data: Vec<serde_json::Value> = Vec::new();
-        if let Some(md) = std::fs::read_to_string("/opt/tetramem/system_skills/00_epicode_system.md").ok() {
+        if let Some(md) =
+            std::fs::read_to_string("/opt/tetramem/system_skills/00_epicode_system.md").ok()
+        {
             if format == "manifest" {
                 skills_data.push(serde_json::json!({
                     "slug": "epicode-system", "name": "epicode-system", "version": Self::manual_version(&md),
@@ -3867,10 +4975,14 @@ impl McpHandler {
                 }));
             } else if format == "opencode" {
                 let body = Self::strip_frontmatter(&md);
-                let desc = body.lines().find(|l| !l.trim().is_empty())
+                let desc = body
+                    .lines()
+                    .find(|l| !l.trim().is_empty())
                     .map(|l| l.trim_start_matches('#').trim().to_string())
-                    .unwrap_or_default().replace('\n', " ")
-                    .replace('\\', "\\\\").replace('"', "\\\"");
+                    .unwrap_or_default()
+                    .replace('\n', " ")
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"");
                 let content = format!("---\nname: epicode-system\ndescription: \"Epicode skill - {}\"\nversion: 1.0.0\nis_system: true\n---\n\n{}", desc, body);
                 skills_data.push(serde_json::json!({
                     "slug": "epicode-system", "filename": "SKILL.md", "content": content,
@@ -3880,81 +4992,113 @@ impl McpHandler {
         }
         let skills_data_final: Vec<serde_json::Value> = {
             skills_data.extend(all_skills.iter().map(|sk| {
-            let slug = slugify(&sk.name, &sk.skill_md);
-            let body_md = Self::strip_frontmatter(&sk.skill_md);
-            let first_line = || body_md.lines()
-                .find(|l| !l.trim().is_empty())
-                .map(|l| l.trim_start_matches('#').trim().to_string())
-                .unwrap_or_else(|| sk.name.clone());
-            let description_yaml = first_line().replace('\n', " ")
-                .replace('\\', "\\\\").replace('"', "\\\"");
-            // S2: manifest描述真值化(触发描述优先, 缺失回退首行)
-            let desc_real = sk.description.clone().unwrap_or_else(first_line);
+                let slug = slugify(&sk.name, &sk.skill_md);
+                let body_md = Self::strip_frontmatter(&sk.skill_md);
+                let first_line = || {
+                    body_md
+                        .lines()
+                        .find(|l| !l.trim().is_empty())
+                        .map(|l| l.trim_start_matches('#').trim().to_string())
+                        .unwrap_or_else(|| sk.name.clone())
+                };
+                let description_yaml = first_line()
+                    .replace('\n', " ")
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"");
+                // S2: manifest描述真值化(触发描述优先, 缺失回退首行)
+                let desc_real = sk.description.clone().unwrap_or_else(first_line);
 
-            if format == "manifest" {
-                serde_json::json!({
-                    "slug": slug,
-                    "name": sk.name,
-                    "version": sk.version,
-                    "description": desc_real,
-                    "is_system": sk.is_system,
-                    "byte_size": body_md.len(),
-                })
-            } else if format == "opencode" {
-                let mut frontmatter = format!("---\nname: {}\ndescription: \"Epicode skill - {}\"\nversion: {}\n", slug, description_yaml, sk.version);
-                if let Some(ref cat) = sk.category {
-                    frontmatter.push_str(&format!("category: \"{}\"\n", cat));
-                }
-                if !sk.requires.is_empty() {
-                    frontmatter.push_str(&format!("requires: [{}]\n", sk.requires.iter().map(|r| format!("\"{}\"", r)).collect::<Vec<_>>().join(", ")));
-                }
-                if !sk.produces.is_empty() {
-                    frontmatter.push_str(&format!("produces: [{}]\n", sk.produces.iter().map(|p| format!("\"{}\"", p)).collect::<Vec<_>>().join(", ")));
-                }
-                if !sk.capabilities.is_empty() {
-                    frontmatter.push_str(&format!("capabilities: [{}]\n", sk.capabilities.iter().map(|c| format!("\"{}\"", c)).collect::<Vec<_>>().join(", ")));
-                }
-                frontmatter.push_str(&format!("success_rate: {:.2}\nusage_count: {}\ncreated_at: {}\n", sk.success_rate, sk.usage_count, sk.created_at));
-                frontmatter.push_str("---\n\n");
-                let content = format!("{}{}", frontmatter, body_md);
-                serde_json::json!({
-                    "slug": slug,
-                    "filename": "SKILL.md",
-                    "content": content,
-                    "skill_id": sk.id,
-                    "name": sk.name,
-                })
-            } else if format == "json" {
-                serde_json::json!({
-                    "slug": slug,
-                    "filename": format!("{}.json", slug),
-                    "content": serde_json::json!({
-                        "name": sk.name,
+                if format == "manifest" {
+                    serde_json::json!({
                         "slug": slug,
+                        "name": sk.name,
                         "version": sk.version,
-                        "category": sk.category,
-                        "requires": sk.requires,
-                        "produces": sk.produces,
-                        "capabilities": sk.capabilities,
-                        "success_rate": sk.success_rate,
-                        "usage_count": sk.usage_count,
-                        "skill_md": sk.skill_md,
+                        "description": desc_real,
                         "is_system": sk.is_system,
-                        "created_at": sk.created_at,
-                    }),
-                    "skill_id": sk.id,
-                    "name": sk.name,
-                })
-            } else {
-                serde_json::json!({
-                    "slug": slug,
-                    "filename": format!("{}.md", slug),
-                    "content": sk.skill_md,
-                    "skill_id": sk.id,
-                    "name": sk.name,
-                })
-            }
-        }));
+                        "byte_size": body_md.len(),
+                    })
+                } else if format == "opencode" {
+                    let mut frontmatter = format!(
+                        "---\nname: {}\ndescription: \"Epicode skill - {}\"\nversion: {}\n",
+                        slug, description_yaml, sk.version
+                    );
+                    if let Some(ref cat) = sk.category {
+                        frontmatter.push_str(&format!("category: \"{}\"\n", cat));
+                    }
+                    if !sk.requires.is_empty() {
+                        frontmatter.push_str(&format!(
+                            "requires: [{}]\n",
+                            sk.requires
+                                .iter()
+                                .map(|r| format!("\"{}\"", r))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                    }
+                    if !sk.produces.is_empty() {
+                        frontmatter.push_str(&format!(
+                            "produces: [{}]\n",
+                            sk.produces
+                                .iter()
+                                .map(|p| format!("\"{}\"", p))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                    }
+                    if !sk.capabilities.is_empty() {
+                        frontmatter.push_str(&format!(
+                            "capabilities: [{}]\n",
+                            sk.capabilities
+                                .iter()
+                                .map(|c| format!("\"{}\"", c))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                    }
+                    frontmatter.push_str(&format!(
+                        "success_rate: {:.2}\nusage_count: {}\ncreated_at: {}\n",
+                        sk.success_rate, sk.usage_count, sk.created_at
+                    ));
+                    frontmatter.push_str("---\n\n");
+                    let content = format!("{}{}", frontmatter, body_md);
+                    serde_json::json!({
+                        "slug": slug,
+                        "filename": "SKILL.md",
+                        "content": content,
+                        "skill_id": sk.id,
+                        "name": sk.name,
+                    })
+                } else if format == "json" {
+                    serde_json::json!({
+                        "slug": slug,
+                        "filename": format!("{}.json", slug),
+                        "content": serde_json::json!({
+                            "name": sk.name,
+                            "slug": slug,
+                            "version": sk.version,
+                            "category": sk.category,
+                            "requires": sk.requires,
+                            "produces": sk.produces,
+                            "capabilities": sk.capabilities,
+                            "success_rate": sk.success_rate,
+                            "usage_count": sk.usage_count,
+                            "skill_md": sk.skill_md,
+                            "is_system": sk.is_system,
+                            "created_at": sk.created_at,
+                        }),
+                        "skill_id": sk.id,
+                        "name": sk.name,
+                    })
+                } else {
+                    serde_json::json!({
+                        "slug": slug,
+                        "filename": format!("{}.md", slug),
+                        "content": sk.skill_md,
+                        "skill_id": sk.id,
+                        "name": sk.name,
+                    })
+                }
+            }));
             skills_data
         };
 
@@ -3964,7 +5108,9 @@ impl McpHandler {
             "skills": skills_data_final,
         });
         if format == "manifest" {
-            payload["next_step"] = serde_json::json!("Call skill_get(name) to fetch any skill's full content on demand.");
+            payload["next_step"] = serde_json::json!(
+                "Call skill_get(name) to fetch any skill's full content on demand."
+            );
         }
         self.smrp_ok("skills_sync", payload)
     }
@@ -3987,7 +5133,10 @@ impl McpHandler {
             jsonrpc: "2.0".into(),
             id,
             result: None,
-            error: Some(McpError { code, message: msg.to_string() }),
+            error: Some(McpError {
+                code,
+                message: msg.to_string(),
+            }),
         }
     }
 
@@ -3999,15 +5148,16 @@ impl McpHandler {
                     jsonrpc: "2.0".into(),
                     id: None,
                     result: None,
-                    error: Some(McpError { code: -32700, message: format!("parse error: {}", e) }),
+                    error: Some(McpError {
+                        code: -32700,
+                        message: format!("parse error: {}", e),
+                    }),
                 };
                 return serde_json::to_string(&resp).unwrap_or_default();
             }
         };
         let req_id = req.id.clone();
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.handle(req)
-        }));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.handle(req)));
         let resp = match result {
             Ok(r) => r,
             Err(_) => {
@@ -4016,7 +5166,10 @@ impl McpHandler {
                     jsonrpc: "2.0".into(),
                     id: req_id,
                     result: None,
-                    error: Some(McpError { code: -32603, message: "internal error (panic caught)".into() }),
+                    error: Some(McpError {
+                        code: -32603,
+                        message: "internal error (panic caught)".into(),
+                    }),
                 }
             }
         };
@@ -4030,7 +5183,9 @@ fn strip_html(s: &str) -> String {
     for ch in s.chars() {
         match ch {
             '<' => in_tag = true,
-            '>' => { in_tag = false; }
+            '>' => {
+                in_tag = false;
+            }
             _ if !in_tag => result.push(ch),
             _ => {}
         }
@@ -4039,7 +5194,15 @@ fn strip_html(s: &str) -> String {
 }
 
 fn sanitize_label(s: &str) -> String {
-    s.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '-' }).collect()
+    s.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 fn regex_captures(name: &str) -> String {
@@ -4047,12 +5210,23 @@ fn regex_captures(name: &str) -> String {
         if let Some(end) = name.find(')') {
             if start < end {
                 let eng = &name[start + 1..end];
-                let slug: String = eng.to_lowercase()
+                let slug: String = eng
+                    .to_lowercase()
                     .replace(&[':', '/', '\\', ' '][..], "-")
                     .chars()
-                    .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+                    .map(|c| {
+                        if c.is_alphanumeric() || c == '-' {
+                            c
+                        } else {
+                            '-'
+                        }
+                    })
                     .collect();
-                return slug.split('-').filter(|s| !s.is_empty()).collect::<Vec<_>>().join("-");
+                return slug
+                    .split('-')
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("-");
             }
         }
     }
@@ -4070,19 +5244,51 @@ fn extract_context_memories(context: &str, project: &str, role: &str) -> Vec<Ext
     let mut used_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
     for (line_idx, line) in context.lines().enumerate() {
-        if used_lines.contains(&line_idx) { continue; }
-        if line.len() < 15 || line.len() > 2000 { continue; }
+        if used_lines.contains(&line_idx) {
+            continue;
+        }
+        if line.len() < 15 || line.len() > 2000 {
+            continue;
+        }
         let line_lower = line.to_lowercase();
-        let truncated = if line.len() > 500 { truncate_str(line, 500) } else { line };
+        let truncated = if line.len() > 500 {
+            truncate_str(line, 500)
+        } else {
+            line
+        };
 
         let extracted = if has_bug_and_fix(&line_lower) {
-            Some(make_extraction("bug", truncated, context, project, &["bug", "fix"]))
+            Some(make_extraction(
+                "bug",
+                truncated,
+                context,
+                project,
+                &["bug", "fix"],
+            ))
         } else if matches_decision(&line_lower) {
-            Some(make_extraction("decision", truncated, context, project, &["decision"]))
+            Some(make_extraction(
+                "decision",
+                truncated,
+                context,
+                project,
+                &["decision"],
+            ))
         } else if matches_pattern(&line_lower) {
-            Some(make_extraction("pattern", truncated, context, project, &["pattern", "convention"]))
+            Some(make_extraction(
+                "pattern",
+                truncated,
+                context,
+                project,
+                &["pattern", "convention"],
+            ))
         } else if matches_preference(&line_lower) {
-            Some(make_extraction("preference", truncated, context, project, &["preference"]))
+            Some(make_extraction(
+                "preference",
+                truncated,
+                context,
+                project,
+                &["preference"],
+            ))
         } else {
             None
         };
@@ -4092,7 +5298,9 @@ fn extract_context_memories(context: &str, project: &str, role: &str) -> Vec<Ext
             results.push(ext);
         }
 
-        if results.len() >= 3 { break; }
+        if results.len() >= 3 {
+            break;
+        }
     }
 
     if results.is_empty() {
@@ -4102,36 +5310,103 @@ fn extract_context_memories(context: &str, project: &str, role: &str) -> Vec<Ext
     results
 }
 
-fn make_extraction(category: &str, line: &str, context: &str, project: &str, base_labels: &[&str]) -> ExtractedMemory {
-    let content = format!("[{}] {} | context: {}", category, line.trim(), summarize_context(context));
-    let mut labels: Vec<String> = base_labels.iter().map(|s| s.to_string()).chain(std::iter::once("auto-extracted".to_string())).collect();
-    if !project.is_empty() { labels.push(sanitize_label(project)); }
-    ExtractedMemory { category: category.to_string(), content, labels }
+fn make_extraction(
+    category: &str,
+    line: &str,
+    context: &str,
+    project: &str,
+    base_labels: &[&str],
+) -> ExtractedMemory {
+    let content = format!(
+        "[{}] {} | context: {}",
+        category,
+        line.trim(),
+        summarize_context(context)
+    );
+    let mut labels: Vec<String> = base_labels
+        .iter()
+        .map(|s| s.to_string())
+        .chain(std::iter::once("auto-extracted".to_string()))
+        .collect();
+    if !project.is_empty() {
+        labels.push(sanitize_label(project));
+    }
+    ExtractedMemory {
+        category: category.to_string(),
+        content,
+        labels,
+    }
 }
 
 fn has_bug_and_fix(line: &str) -> bool {
-    let bug = ["bug", "bugs", "crash", "panic", "broken", "error", "fail", "wrong", "issue"];
-    let fix = ["fixed by", "root cause", "the fix", "workaround", "resolved", "fixed in", "both fixed", "fix:"];
+    let bug = [
+        "bug", "bugs", "crash", "panic", "broken", "error", "fail", "wrong", "issue",
+    ];
+    let fix = [
+        "fixed by",
+        "root cause",
+        "the fix",
+        "workaround",
+        "resolved",
+        "fixed in",
+        "both fixed",
+        "fix:",
+    ];
     bug.iter().any(|k| line.contains(k)) && fix.iter().any(|k| line.contains(k))
 }
 
 fn matches_decision(line: &str) -> bool {
-    let keywords = ["decided to", "we chose", "going with", "switched to", "migrated to", "adopted", "settled on", "instead of", "we should", "let's use", "we'll use", "we need to use"];
+    let keywords = [
+        "decided to",
+        "we chose",
+        "going with",
+        "switched to",
+        "migrated to",
+        "adopted",
+        "settled on",
+        "instead of",
+        "we should",
+        "let's use",
+        "we'll use",
+        "we need to use",
+    ];
     keywords.iter().any(|k| line.contains(k))
 }
 
 fn matches_pattern(line: &str) -> bool {
-    let keywords = ["always use", "convention", "pattern is", "we follow", "standard practice", "rule:", "best practice", "make sure to", "remember to", "don't forget"];
+    let keywords = [
+        "always use",
+        "convention",
+        "pattern is",
+        "we follow",
+        "standard practice",
+        "rule:",
+        "best practice",
+        "make sure to",
+        "remember to",
+        "don't forget",
+    ];
     keywords.iter().any(|k| line.contains(k))
 }
 
 fn matches_preference(line: &str) -> bool {
-    let keywords = ["prefer", "i like", "i want", "don't use", "avoid", "never use", "must use", "i'd rather", "favorite"];
+    let keywords = [
+        "prefer",
+        "i like",
+        "i want",
+        "don't use",
+        "avoid",
+        "never use",
+        "must use",
+        "i'd rather",
+        "favorite",
+    ];
     keywords.iter().any(|k| line.contains(k))
 }
 
 fn extract_fallback(context: &str, project: &str, role: &str, results: &mut Vec<ExtractedMemory>) {
-    let significant_lines: Vec<&str> = context.lines()
+    let significant_lines: Vec<&str> = context
+        .lines()
         .filter(|l| l.len() > 30 && l.len() < 800)
         .collect();
 
@@ -4147,7 +5422,9 @@ fn extract_fallback(context: &str, project: &str, role: &str, results: &mut Vec<
     let role_label = if role.is_empty() { "general" } else { role };
     let content = format!("[{}] session context: {}", role_label, summary);
     let mut labels = vec!["auto-extracted".to_string(), format!("role-{}", role_label)];
-    if !project.is_empty() { labels.push(sanitize_label(project)); }
+    if !project.is_empty() {
+        labels.push(sanitize_label(project));
+    }
 
     results.push(ExtractedMemory {
         category: "context".to_string(),
@@ -4184,22 +5461,27 @@ impl McpHandler {
 
     fn tool_project_list(&self) -> serde_json::Value {
         let projects = self.engine.scheduler().api_list_projects();
-        let items: Vec<serde_json::Value> = projects.into_iter()
+        let items: Vec<serde_json::Value> = projects
+            .into_iter()
             .map(|(name, count)| {
                 let display_name = name.trim_start_matches("project:").to_string();
                 serde_json::json!({"project": display_name, "memory_count": count})
             })
             .collect();
-        self.smrp_ok("project_list", serde_json::json!({
-            "projects": items,
-            "total": items.len()
-        }))
+        self.smrp_ok(
+            "project_list",
+            serde_json::json!({
+                "projects": items,
+                "total": items.len()
+            }),
+        )
     }
 
     fn tool_embedding_diagnostic(&self) -> serde_json::Value {
         let tetras = self.engine.space().all_tetrahedrons();
         let total = tetras.len();
-        let mut dim_counts: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        let mut dim_counts: std::collections::HashMap<usize, usize> =
+            std::collections::HashMap::new();
         let mut stale_ids: Vec<u64> = Vec::new();
         let mut zero_dim_ids: Vec<u64> = Vec::new();
 
@@ -4214,7 +5496,9 @@ impl McpHandler {
             }
         }
 
-        let correct = *dim_counts.get(&crate::engine::vector::EMBEDDING_DIM).unwrap_or(&0);
+        let correct = *dim_counts
+            .get(&crate::engine::vector::EMBEDDING_DIM)
+            .unwrap_or(&0);
         let empty = *dim_counts.get(&0).unwrap_or(&0);
         let stale = total - correct - empty;
 
@@ -4234,31 +5518,39 @@ impl McpHandler {
             "All embeddings are up to date"
         };
 
-        self.smrp_ok("embedding_diagnostic", serde_json::json!({
-            "total_memories": total,
-            "correct_dim": correct,
-            "expected_dim": crate::engine::vector::EMBEDDING_DIM,
-            "stale_embeddings": stale,
-            "no_embedding": empty,
-            "zero_dim_ids": zero_dim_ids.iter().take(50).collect::<Vec<_>>(),
-            "zero_dim_count": zero_dim_ids.len(),
-            "dimension_breakdown": dim_counts.into_iter()
-                .map(|(dim, count)| serde_json::json!({"dim": dim, "count": count}))
-                .collect::<Vec<_>>(),
-            "stale_ids": stale_ids.iter().take(50).collect::<Vec<_>>(),
-            "stale_id_count": stale_ids.len(),
-            "status": status,
-            "recommendation": recommendation,
-        }))
+        self.smrp_ok(
+            "embedding_diagnostic",
+            serde_json::json!({
+                "total_memories": total,
+                "correct_dim": correct,
+                "expected_dim": crate::engine::vector::EMBEDDING_DIM,
+                "stale_embeddings": stale,
+                "no_embedding": empty,
+                "zero_dim_ids": zero_dim_ids.iter().take(50).collect::<Vec<_>>(),
+                "zero_dim_count": zero_dim_ids.len(),
+                "dimension_breakdown": dim_counts.into_iter()
+                    .map(|(dim, count)| serde_json::json!({"dim": dim, "count": count}))
+                    .collect::<Vec<_>>(),
+                "stale_ids": stale_ids.iter().take(50).collect::<Vec<_>>(),
+                "stale_id_count": stale_ids.len(),
+                "status": status,
+                "recommendation": recommendation,
+            }),
+        )
     }
 
     fn tool_embedding_migrate(&self) -> serde_json::Value {
         if self.engine.space().identity_info().is_none() {
-            return self.smrp_err("embedding_migrate", 400, "Identity confirmation required before migration");
+            return self.smrp_err(
+                "embedding_migrate",
+                400,
+                "Identity confirmation required before migration",
+            );
         }
 
         let tetras = self.engine.space().all_tetrahedrons();
-        let stale_count = tetras.iter()
+        let stale_count = tetras
+            .iter()
             .filter(|t| {
                 let dim = t.data.embedding.len();
                 dim != 0 && dim != crate::engine::vector::EMBEDDING_DIM
@@ -4271,7 +5563,10 @@ impl McpHandler {
             }));
         }
 
-        tracing::info!("[MCP] embedding_migrate: re-embedding {} stale memories", stale_count);
+        tracing::info!(
+            "[MCP] embedding_migrate: re-embedding {} stale memories",
+            stale_count
+        );
 
         match self.engine.reindex_embeddings() {
             Ok(updated) => self.smrp_ok("embedding_migrate", serde_json::json!({
@@ -4283,7 +5578,8 @@ impl McpHandler {
     }
 
     fn tool_kg_quality(&self, args: &serde_json::Value) -> serde_json::Value {
-        let sample_size = args["sample_size"].as_u64()
+        let sample_size = args["sample_size"]
+            .as_u64()
             .map(|v| v.min(200) as usize)
             .unwrap_or(50);
 
@@ -4315,12 +5611,22 @@ impl McpHandler {
         }
 
         let sampled_n = sampled.len();
-        let avg_rels = if sampled_n > 0 { total_relations as f64 / sampled_n as f64 } else { 0.0 };
-        let orphan_rate = if sampled_n > 0 { orphan_count as f64 / sampled_n as f64 * 100.0 } else { 0.0 };
+        let avg_rels = if sampled_n > 0 {
+            total_relations as f64 / sampled_n as f64
+        } else {
+            0.0
+        };
+        let orphan_rate = if sampled_n > 0 {
+            orphan_count as f64 / sampled_n as f64 * 100.0
+        } else {
+            0.0
+        };
 
         let avg_strength = if !all_strengths.is_empty() {
             all_strengths.iter().sum::<f64>() / all_strengths.len() as f64
-        } else { 0.0 };
+        } else {
+            0.0
+        };
 
         let strong_rels = all_strengths.iter().filter(|&&s| s >= 0.5).count();
         let weak_rels = all_strengths.iter().filter(|&&s| s < 0.2).count();
@@ -4331,14 +5637,18 @@ impl McpHandler {
         let largest_cluster = cluster_sizes.iter().copied().max().unwrap_or(0);
         let avg_cluster_size = if !cluster_sizes.is_empty() {
             cluster_sizes.iter().sum::<usize>() as f64 / cluster_sizes.len() as f64
-        } else { 0.0 };
+        } else {
+            0.0
+        };
 
         let max_rel = relation_counts.iter().copied().max().unwrap_or(0);
         let min_rel = relation_counts.iter().copied().min().unwrap_or(0);
 
         let density_score = if total > 0 {
             (total_relations as f64 / (sampled_n as f64 * 20.0)).min(1.0) * 100.0
-        } else { 0.0 };
+        } else {
+            0.0
+        };
 
         self.smrp_ok("kg_quality", serde_json::json!({
             "total_memories": total,
@@ -4389,23 +5699,23 @@ impl McpHandler {
 
         let doc_label = format!("doc.{}", name);
 
-        let labels = vec![
-            "documentation".to_string(),
-            doc_label.clone(),
-        ];
+        let labels = vec!["documentation".to_string(), doc_label.clone()];
 
         let echo = serde_json::json!({"document": name, "chars": content.len()});
         self.create_echo("doc_import", &content, labels, echo)
     }
 
     fn tool_doc_list(&self) -> serde_json::Value {
-        let label_idx = self.engine.scheduler().gateway_handle()
+        let label_idx = self
+            .engine
+            .scheduler()
+            .gateway_handle()
             .list_by_labels(&["documentation"], 500);
 
-        let docs: Vec<serde_json::Value> = label_idx.iter()
+        let docs: Vec<serde_json::Value> = label_idx
+            .iter()
             .filter_map(|(id, payload)| {
-                let doc_name = payload.labels.iter()
-                    .find_map(|l| l.strip_prefix("doc."))?;
+                let doc_name = payload.labels.iter().find_map(|l| l.strip_prefix("doc."))?;
                 Some(serde_json::json!({
                     "id": id,
                     "name": doc_name,
@@ -4415,10 +5725,13 @@ impl McpHandler {
             })
             .collect();
 
-        self.smrp_ok("doc_list", serde_json::json!({
-            "documents": docs.len(),
-            "docs": docs,
-        }))
+        self.smrp_ok(
+            "doc_list",
+            serde_json::json!({
+                "documents": docs.len(),
+                "docs": docs,
+            }),
+        )
     }
 
     // ── P4: 新增 MCP 工具 ──
@@ -4429,18 +5742,24 @@ impl McpHandler {
         let mut exported: Vec<serde_json::Value> = Vec::new();
         for (id, payload) in &all {
             // 过滤已失效
-            if payload.valid_to.is_some() { continue; }
+            if payload.valid_to.is_some() {
+                continue;
+            }
             // 按 labels 过滤
             if let Some(filter_labels) = args.get("labels").and_then(|v| v.as_array()) {
                 let filter: Vec<&str> = filter_labels.iter().filter_map(|v| v.as_str()).collect();
-                if !filter.is_empty() && !payload.labels.iter().any(|l| filter.contains(&l.as_str())) {
+                if !filter.is_empty()
+                    && !payload.labels.iter().any(|l| filter.contains(&l.as_str()))
+                {
                     continue;
                 }
             }
             // 按 memory_class 过滤
             if let Some(filter_class) = args.get("memory_class").and_then(|v| v.as_str()) {
                 let actual_class = payload.memory_class.as_deref().unwrap_or("permanent");
-                if actual_class != filter_class { continue; }
+                if actual_class != filter_class {
+                    continue;
+                }
             }
             exported.push(serde_json::json!({
                 "id": id,
@@ -4452,40 +5771,62 @@ impl McpHandler {
                 "timestamp": payload.timestamp,
             }));
         }
-        self.smrp_ok("memory_export", serde_json::json!({
-            "exported": exported.len(),
-            "total_scanned": all.len(),
-            "memories": exported,
-        }))
+        self.smrp_ok(
+            "memory_export",
+            serde_json::json!({
+                "exported": exported.len(),
+                "total_scanned": all.len(),
+                "memories": exported,
+            }),
+        )
     }
 
     fn tool_session_list(&self, args: &serde_json::Value) -> serde_json::Value {
         let limit = args["limit"].as_u64().unwrap_or(10) as usize;
-        let sessions = self.engine.scheduler().api_list_by_labels(&["session-summary"], limit);
-        let session_data: Vec<serde_json::Value> = sessions.iter()
-            .map(|(id, p)| serde_json::json!({
-                "id": id,
-                "content": &p.content,
-                "labels": &p.labels,
-                "timestamp": p.timestamp,
-                "age_days": (chrono::Utc::now().timestamp() - p.timestamp) / 86400,
-            }))
+        let sessions = self
+            .engine
+            .scheduler()
+            .api_list_by_labels(&["session-summary"], limit);
+        let session_data: Vec<serde_json::Value> = sessions
+            .iter()
+            .map(|(id, p)| {
+                serde_json::json!({
+                    "id": id,
+                    "content": &p.content,
+                    "labels": &p.labels,
+                    "timestamp": p.timestamp,
+                    "age_days": (chrono::Utc::now().timestamp() - p.timestamp) / 86400,
+                })
+            })
             .collect();
-        self.smrp_ok("session_list", serde_json::json!({
-            "sessions": session_data.len(),
-            "items": session_data,
-        }))
+        self.smrp_ok(
+            "session_list",
+            serde_json::json!({
+                "sessions": session_data.len(),
+                "items": session_data,
+            }),
+        )
     }
 
     fn tool_memory_restore(&self, args: &serde_json::Value) -> serde_json::Value {
         let id = match args["id"].as_u64() {
             Some(v) => v,
-            None => return self.smrp_err("memory_restore", 400, "id is required and must be a positive integer"),
+            None => {
+                return self.smrp_err(
+                    "memory_restore",
+                    400,
+                    "id is required and must be a positive integer",
+                )
+            }
         };
         match self.engine.space().get_tetrahedron(id) {
             Some(tetra) => {
                 if tetra.data.valid_to.is_none() {
-                    return self.smrp_err("memory_restore", 400, "memory is not superseded (valid_to is empty)");
+                    return self.smrp_err(
+                        "memory_restore",
+                        400,
+                        "memory is not superseded (valid_to is empty)",
+                    );
                 }
                 let mut data = tetra.data.clone();
                 data.valid_to = None;
@@ -4510,7 +5851,13 @@ impl McpHandler {
     fn tool_memory_forget(&self, args: &serde_json::Value) -> serde_json::Value {
         let id = match args.get("id").and_then(|v| v.as_u64()) {
             Some(id) if id > 0 => id as u64,
-            _ => return self.smrp_err("memory_forget", 400, "id is required and must be a positive integer"),
+            _ => {
+                return self.smrp_err(
+                    "memory_forget",
+                    400,
+                    "id is required and must be a positive integer",
+                )
+            }
         };
         match self.engine.scheduler().api_forget_memory(id) {
             Ok(result) => self.smrp_ok("memory_forget", result),
@@ -4536,11 +5883,14 @@ impl McpHandler {
         } else {
             "has_signals"
         };
-        self.smrp_ok_nn("drive_inbox", serde_json::json!({
-            "signals": signals,
-            "stats": stats,
-            "empty_reason": empty_reason,
-        }))
+        self.smrp_ok_nn(
+            "drive_inbox",
+            serde_json::json!({
+                "signals": signals,
+                "stats": stats,
+                "empty_reason": empty_reason,
+            }),
+        )
     }
 
     fn tool_drive_ack(&self, args: &serde_json::Value) -> serde_json::Value {
@@ -4548,9 +5898,19 @@ impl McpHandler {
             Some(id) => id,
             None => return self.smrp_err("drive_ack", 400, "drive_id is required"),
         };
-        let executed = args.get("executed").and_then(|v| v.as_bool()).unwrap_or(false);
-        let outcome = args.get("outcome").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let reflection = args.get("reflection").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let executed = args
+            .get("executed")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let outcome = args
+            .get("outcome")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let reflection = args
+            .get("reflection")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         let feedback = crate::engine::drive::DriveFeedback {
             responded_at: chrono::Utc::now().timestamp(),
@@ -4558,7 +5918,11 @@ impl McpHandler {
             outcome: outcome.clone(),
             reflection,
         };
-        let (success, first_ack) = self.engine.scheduler().drive_queue().acknowledge(drive_id, feedback);
+        let (success, first_ack) = self
+            .engine
+            .scheduler()
+            .drive_queue()
+            .acknowledge(drive_id, feedback);
         if success {
             self.engine.scheduler().save_drive_queue();
         }
@@ -4566,42 +5930,73 @@ impl McpHandler {
         // L0 Learning: adjust DriveEngine weights based on execution outcome.
         if success && first_ack {
             let outcome_lower = outcome.to_lowercase();
-            let positive = outcome_lower.contains("success") || outcome_lower.contains("done")
-                || outcome_lower.contains("completed") || outcome_lower.contains("effective")
-                || outcome_lower.contains("helpful") || outcome_lower.contains("good")
-                || outcome_lower.contains("actioned") || outcome_lower.contains("resolved")
-                || outcome_lower.contains("处理") || outcome_lower.contains("完成")
-                || outcome_lower.contains("有效") || outcome_lower.contains("采纳");
-            let negative = outcome_lower.contains("ignored") || outcome_lower.contains("rejected")
-                || outcome_lower.contains("failed") || outcome_lower.contains("error")
-                || outcome_lower.contains("useless") || outcome_lower.contains("拒绝")
-                || outcome_lower.contains("忽略") || outcome_lower.contains("无效");
+            let positive = outcome_lower.contains("success")
+                || outcome_lower.contains("done")
+                || outcome_lower.contains("completed")
+                || outcome_lower.contains("effective")
+                || outcome_lower.contains("helpful")
+                || outcome_lower.contains("good")
+                || outcome_lower.contains("actioned")
+                || outcome_lower.contains("resolved")
+                || outcome_lower.contains("处理")
+                || outcome_lower.contains("完成")
+                || outcome_lower.contains("有效")
+                || outcome_lower.contains("采纳");
+            let negative = outcome_lower.contains("ignored")
+                || outcome_lower.contains("rejected")
+                || outcome_lower.contains("failed")
+                || outcome_lower.contains("error")
+                || outcome_lower.contains("useless")
+                || outcome_lower.contains("拒绝")
+                || outcome_lower.contains("忽略")
+                || outcome_lower.contains("无效");
 
-            let reward = if positive { 5.0 } else if negative { -3.0 } else { 1.0 }; // δ1fix
+            let reward = if positive {
+                5.0
+            } else if negative {
+                -3.0
+            } else {
+                1.0
+            }; // δ1fix
 
             // Reward drives — personality learns that its signals are being received
             // Map: warn→Vitality, suggest→Coherence, explore→Curiosity, constrain→Efficiency
             let mut drive_engine = self.engine.scheduler().drive_engine_lock();
-            drive_engine.reward(crate::engine::drive::Drive::Vitality, reward);    // warn executed → vitality up
-            drive_engine.reward(crate::engine::drive::Drive::Coherence, reward * 0.7);  // suggest → coherence up (less)
-            drive_engine.reward(crate::engine::drive::Drive::Curiosity, reward * 0.5);  // explore → curiosity up (least)
-            drive_engine.reward(crate::engine::drive::Drive::Efficiency, reward * 0.3);  // constrain → efficiency up
+            drive_engine.reward(crate::engine::drive::Drive::Vitality, reward); // warn executed → vitality up
+            drive_engine.reward(crate::engine::drive::Drive::Coherence, reward * 0.7); // suggest → coherence up (less)
+            drive_engine.reward(crate::engine::drive::Drive::Curiosity, reward * 0.5); // explore → curiosity up (least)
+            drive_engine.reward(crate::engine::drive::Drive::Efficiency, reward * 0.3); // constrain → efficiency up
             drop(drive_engine);
 
             tracing::info!(
                 "[L0] drive_ack reward: #{} executed={} reward={:+.3} sentiment={}",
-                drive_id, executed, reward,
-                if positive { "positive" } else if negative { "negative" } else { "neutral" }
+                drive_id,
+                executed,
+                reward,
+                if positive {
+                    "positive"
+                } else if negative {
+                    "negative"
+                } else {
+                    "neutral"
+                }
             );
         }
 
-        tracing::info!("[L0] drive_ack via MCP: drive #{} executed={}", drive_id, executed);
-        self.smrp_ok("drive_ack", serde_json::json!({
-            "drive_id": drive_id,
-            "acknowledged": success,
-            "first_ack": first_ack,
-            "learned": success,
-        }))
+        tracing::info!(
+            "[L0] drive_ack via MCP: drive #{} executed={}",
+            drive_id,
+            executed
+        );
+        self.smrp_ok(
+            "drive_ack",
+            serde_json::json!({
+                "drive_id": drive_id,
+                "acknowledged": success,
+                "first_ack": first_ack,
+                "learned": success,
+            }),
+        )
     }
 
     fn tool_skill_auto_extract(&self, _args: &serde_json::Value) -> serde_json::Value {
@@ -4688,14 +6083,21 @@ mod tests {
         let init_raw = r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_step","arguments":{"step":1,"value":"TestAgent"}}}"#;
         h.process_json(init_raw);
         for step in 2..=5 {
-            let raw = format!(r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"test"}}}}}}"#, step);
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"test"}}}}}}"#,
+                step
+            );
             h.process_json(&raw);
         }
         let finalize_raw = r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#;
         h.process_json(finalize_raw);
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"hello world","labels":["test"]}}}"#;
         let output = h.process_json(raw);
-        assert!(output.contains("created") || output.contains("exists"), "output was: {}", output);
+        assert!(
+            output.contains("created") || output.contains("exists"),
+            "output was: {}",
+            output
+        );
     }
 
     #[tokio::test]
@@ -4705,7 +6107,11 @@ mod tests {
         let h = McpHandler::new(Arc::new(eng));
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"space_stats","arguments":{}}}"#;
         let output = h.process_json(raw);
-        assert!(output.contains("schema_version") && output.contains("memories") && output.contains("ports_assigned"));
+        assert!(
+            output.contains("schema_version")
+                && output.contains("memories")
+                && output.contains("ports_assigned")
+        );
     }
 
     #[tokio::test]
@@ -4716,7 +6122,11 @@ mod tests {
 
         let save_raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ctx_save","arguments":{"summary":"Use parking_lot for all mutexes","category":"pattern","project":"Epicode"}}}"#;
         let save_output = h.process_json(save_raw);
-        assert!(save_output.contains("schema_version") && save_output.contains("placement") && save_output.contains("relations_formed"));
+        assert!(
+            save_output.contains("schema_version")
+                && save_output.contains("placement")
+                && save_output.contains("relations_formed")
+        );
 
         let load_raw = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ctx_load","arguments":{"project":"Epicode"}}}"#;
         let load_output = h.process_json(load_raw);
@@ -4730,7 +6140,11 @@ mod tests {
         let h = McpHandler::new(Arc::new(eng));
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"decision_record","arguments":{"title":"Use SQLite","chosen":"SQLite with WAL","alternatives":"PostgreSQL, RocksDB","rationale":"Embedded, zero-config, WAL mode is fast enough","project":"Epicode"}}}"#;
         let output = h.process_json(raw);
-        assert!(output.contains("schema_version") && output.contains("placement") && output.contains("relations_formed"));
+        assert!(
+            output.contains("schema_version")
+                && output.contains("placement")
+                && output.contains("relations_formed")
+        );
     }
 
     #[tokio::test]
@@ -4740,7 +6154,11 @@ mod tests {
         let h = McpHandler::new(Arc::new(eng));
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"bug_memory","arguments":{"symptoms":"tests hang on CI","root_cause":"ureq blocking async runtime","fix":"wrap in spawn_blocking","module":"gateway.rs","project":"Epicode"}}}"#;
         let output = h.process_json(raw);
-        assert!(output.contains("schema_version") && output.contains("placement") && output.contains("relations_formed"));
+        assert!(
+            output.contains("schema_version")
+                && output.contains("placement")
+                && output.contains("relations_formed")
+        );
     }
 
     #[tokio::test]
@@ -4750,7 +6168,11 @@ mod tests {
         let h = McpHandler::new(Arc::new(eng));
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"session_summary","arguments":{"accomplished":"Fixed 6 critical rollback issues","next_steps":"Deploy to cloud, run benchmarks","blockers":"none","project":"Epicode"}}}"#;
         let output = h.process_json(raw);
-        assert!(output.contains("schema_version") && output.contains("placement") && output.contains("relations_formed"));
+        assert!(
+            output.contains("schema_version")
+                && output.contains("placement")
+                && output.contains("relations_formed")
+        );
     }
 
     #[tokio::test]
@@ -4761,7 +6183,11 @@ mod tests {
 
         let learn_raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"pattern_learn","arguments":{"pattern":"All DB writes use transactions","language":"rust","project":"Epicode","example":"conn.unchecked_transaction()?"}}}"#;
         let learn_output = h.process_json(learn_raw);
-        assert!(learn_output.contains("schema_version") && learn_output.contains("placement") && learn_output.contains("relations_formed"));
+        assert!(
+            learn_output.contains("schema_version")
+                && learn_output.contains("placement")
+                && learn_output.contains("relations_formed")
+        );
 
         let recall_raw = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"pattern_recall","arguments":{"context":"database write","language":"rust","project":"Epicode"}}}"#;
         let recall_output = h.process_json(recall_raw);
@@ -4775,7 +6201,10 @@ mod tests {
         let h = McpHandler::new(Arc::new(eng));
         for step in 1..=5 {
             let val = if step == 1 { "TestAgent" } else { "test" };
-            let raw = format!(r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#, step, val);
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            );
             h.process_json(&raw);
         }
         h.process_json(r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#);
@@ -4785,7 +6214,11 @@ mod tests {
 
         let search_raw = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_search","arguments":{"query":"Rust memory","limit":5}}}"#;
         let search_output = h.process_json(search_raw);
-        assert!(search_output.contains("ownership model"), "output was: {}", search_output);
+        assert!(
+            search_output.contains("ownership model"),
+            "output was: {}",
+            search_output
+        );
         assert!(search_output.contains("content"));
     }
 

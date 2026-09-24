@@ -4,8 +4,8 @@ use axum::http::StatusCode;
 use axum::middleware;
 use axum::Json;
 
-use epicode::engine::Engine;
 use epicode::engine::user_manager::UserInfo;
+use epicode::engine::Engine;
 
 use super::state::CloudState;
 
@@ -51,9 +51,20 @@ pub async fn security_headers_middleware(
     headers.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
     headers.insert("X-Frame-Options", "DENY".parse().unwrap());
     headers.insert("X-XSS-Protection", "1; mode=block".parse().unwrap());
-    headers.insert("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'".parse().unwrap());
-    headers.insert("Strict-Transport-Security", "max-age=31536000; includeSubDomains".parse().unwrap());
-    headers.insert("Referrer-Policy", "strict-origin-when-cross-origin".parse().unwrap());
+    headers.insert(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+            .parse()
+            .unwrap(),
+    );
+    headers.insert(
+        "Strict-Transport-Security",
+        "max-age=31536000; includeSubDomains".parse().unwrap(),
+    );
+    headers.insert(
+        "Referrer-Policy",
+        "strict-origin-when-cross-origin".parse().unwrap(),
+    );
     response
 }
 
@@ -78,46 +89,65 @@ pub fn disk_free_gb() -> f64 {
     100.0
 }
 
-pub fn require_admin(admin_key: &str, headers: &axum::http::HeaderMap) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-    let provided = headers.get("X-Admin-Key").and_then(|v| v.to_str().ok()).unwrap_or("");
+pub fn require_admin(
+    admin_key: &str,
+    headers: &axum::http::HeaderMap,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    let provided = headers
+        .get("X-Admin-Key")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
     if !epicode::engine::crypto::constant_time_eq(provided, admin_key) {
-        return Err((StatusCode::FORBIDDEN, Json(serde_json::json!({"success": false, "error": "admin key required"}))));
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"success": false, "error": "admin key required"})),
+        ));
     }
     Ok(())
 }
 
-pub fn get_engine(st: &CloudState, user: &UserInfo) -> Result<std::sync::Arc<epicode::engine::Engine>, Json<serde_json::Value>> {
-    st.user_mgr.get_engine(&user.user_id).map_err(|e| Json(serde_json::json!({"success": false, "error": e})))
+pub fn get_engine(
+    st: &CloudState,
+    user: &UserInfo,
+) -> Result<std::sync::Arc<epicode::engine::Engine>, Json<serde_json::Value>> {
+    st.user_mgr
+        .get_engine(&user.user_id)
+        .map_err(|e| Json(serde_json::json!({"success": false, "error": e})))
 }
 
 /// 对于没有 per-user 上下文的公共/管理端点（如 explore_public_skills），
 /// 取任意一个已加载 engine 仅为填充 SMRP status 段；空系统时返回 None。
 pub fn first_engine(st: &CloudState) -> Option<std::sync::Arc<epicode::engine::Engine>> {
-    st.user_mgr.list_users()
+    st.user_mgr
+        .list_users()
         .into_iter()
         .filter_map(|u| st.user_mgr.get_engine(&u.user_id).ok())
         .next()
 }
 
 /// D2.3: Check if current request is from the primary_executor
-pub fn check_primary_executor(st: &CloudState, user_id: &str) -> Option<super::state::ExecutorBinding> {
+pub fn check_primary_executor(
+    st: &CloudState,
+    user_id: &str,
+) -> Option<super::state::ExecutorBinding> {
     let executors = st.primary_executors.read();
-    executors.get(user_id)
-        .filter(|b| !b.is_expired())
-        .cloned()
+    executors.get(user_id).filter(|b| !b.is_expired()).cloned()
 }
 
 pub fn require_identity(engine: &Engine) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     if engine.space.identity_info().is_none() {
-        return Err((StatusCode::FORBIDDEN, Json(serde_json::json!({
-            "success": false,
-            "error": "identity_not_confirmed",
-            "message": "Identity confirmation required. Call POST /v1/identity/confirm first.",
-            "required_flow": {
-                "step1": "POST /v1/identity/confirm with {name, mission, author}",
-                "step2": "After confirmation, all memory operations will be available"
-            }
-        }))));
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "success": false,
+                "error": "identity_not_confirmed",
+                "message": "Identity confirmation required. Call POST /v1/identity/confirm first.",
+                "required_flow": {
+                    "step1": "POST /v1/identity/confirm with {name, mission, author}",
+                    "step2": "After confirmation, all memory operations will be available"
+                }
+            })),
+        ));
     }
     Ok(())
 }
@@ -126,7 +156,10 @@ pub fn validate_user_id(id: &str) -> Result<(), String> {
     if id.is_empty() || id.len() > 64 {
         return Err("user_id must be 1-64 characters".into());
     }
-    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         return Err("user_id: only a-z A-Z 0-9 - _ allowed".into());
     }
     Ok(())
@@ -138,7 +171,9 @@ pub fn strip_html(s: &str) -> String {
     for ch in s.chars() {
         match ch {
             '<' => in_tag = true,
-            '>' => { in_tag = false; }
+            '>' => {
+                in_tag = false;
+            }
             _ if !in_tag => result.push(ch),
             _ => {}
         }
@@ -168,7 +203,10 @@ pub fn validate_query(query: &str) -> Result<(), String> {
 }
 
 pub fn error_response(status: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
-    (status, Json(serde_json::json!({"success": false, "error": msg})))
+    (
+        status,
+        Json(serde_json::json!({"success": false, "error": msg})),
+    )
 }
 
 // ── H5: AuthedEngine extractor ──
@@ -190,18 +228,18 @@ impl FromRequestParts<CloudState> for AuthedEngine {
     ) -> Result<Self, Self::Rejection> {
         use epicode::engine::user_manager::PersonaState;
 
-        let user = parts.extensions
-            .get::<UserInfo>()
-            .cloned()
-            .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "authentication required").into_response())?;
+        let user = parts.extensions.get::<UserInfo>().cloned().ok_or_else(|| {
+            error_response(StatusCode::UNAUTHORIZED, "authentication required").into_response()
+        })?;
 
         // Phase 3 P0: Persona readiness gate (Tester-Q契约 #1658)
         // 先检查 persona_state
         let persona = state.user_mgr.get_persona_state(&user.user_id);
         match persona {
             PersonaState::Ready => {
-                let engine = state.user_mgr.get_engine(&user.user_id)
-                    .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response())?;
+                let engine = state.user_mgr.get_engine(&user.user_id).map_err(|e| {
+                    error_response(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response()
+                })?;
                 require_identity(&engine).map_err(|e| e.into_response())?;
 
                 // P0-2b: 在 async 路径 once-start quiet loop（Tester-Q契约 #1658）
@@ -217,8 +255,16 @@ impl FromRequestParts<CloudState> for AuthedEngine {
                         } else {
                             engine_clone.start_quiet_arc(120000);
                         }
-                        let mode = if std::env::var("ENABLE_COGNITIVE").as_deref() == Ok("1") { "full" } else { "quiet" };
-                        tracing::info!("[AuthedEngine] {} loop started for user {} (async once)", mode, uid);
+                        let mode = if std::env::var("ENABLE_COGNITIVE").as_deref() == Ok("1") {
+                            "full"
+                        } else {
+                            "quiet"
+                        };
+                        tracing::info!(
+                            "[AuthedEngine] {} loop started for user {} (async once)",
+                            mode,
+                            uid
+                        );
                     });
                 }
 
@@ -240,23 +286,32 @@ impl FromRequestParts<CloudState> for AuthedEngine {
                 tokio::task::spawn_blocking(move || {
                     tracing::info!("[UserManager] spawn_blocking persona load for {}", uid);
                     // panic加固: fire-and-forget任务的panic会被tokio吞掉且clear_loading永不执行 → 永久WARMING
-                    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| mgr.get_engine_for_loader(&uid)));
+                    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        mgr.get_engine_for_loader(&uid)
+                    }));
                     match r {
                         Err(_) => {
                             mgr.clear_loading(&uid);
-                            tracing::error!("[UserManager] async persona load PANIC for {} — loading cleared", uid);
+                            tracing::error!(
+                                "[UserManager] async persona load PANIC for {} — loading cleared",
+                                uid
+                            );
                             return;
                         }
                         Ok(inner) => match inner {
-                        Ok(_) => {
-                            mgr.clear_loading(&uid);
-                            tracing::info!("[UserManager] persona load COMPLETE for {}", uid);
-                        }
-                        Err(e) => {
-                            mgr.clear_loading(&uid);
-                            tracing::error!("[UserManager] async persona load FAILED for {}: {}", uid, e);
-                        }
-                        }
+                            Ok(_) => {
+                                mgr.clear_loading(&uid);
+                                tracing::info!("[UserManager] persona load COMPLETE for {}", uid);
+                            }
+                            Err(e) => {
+                                mgr.clear_loading(&uid);
+                                tracing::error!(
+                                    "[UserManager] async persona load FAILED for {}: {}",
+                                    uid,
+                                    e
+                                );
+                            }
+                        },
                     }
                 });
                 // 立即返回 WARMING_UP（不等待加载）
