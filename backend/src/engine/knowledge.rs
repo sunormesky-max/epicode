@@ -1,3 +1,4 @@
+use parking_lot::Mutex;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -26,6 +27,12 @@ pub enum RelationType {
     Precedes,
     Contains,
     Related,
+    BelongsTo,
+    MergedInto,
+    /// P3 Agentic GraphRAG: two memories share the same extracted entity
+    /// (code symbol, proper noun, identifier). Created by entity-level
+    /// schema induction in auto_link_one.
+    SameEntity,
 }
 
 impl std::fmt::Display for RelationType {
@@ -36,6 +43,9 @@ impl std::fmt::Display for RelationType {
             RelationType::Precedes => write!(f, "precedes"),
             RelationType::Contains => write!(f, "contains"),
             RelationType::Related => write!(f, "related"),
+            RelationType::BelongsTo => write!(f, "belongs_to"),
+            RelationType::MergedInto => write!(f, "merged_into"),
+            RelationType::SameEntity => write!(f, "same_entity"),
         }
     }
 }
@@ -51,6 +61,11 @@ pub struct ConceptPrototype {
 
 pub struct KnowledgeGraph {
     relations: RwLock<Vec<Relation>>,
+    /// F4增量持久化: 待写/待删关系 — auto_save只写增量, 全量重写仅final_save
+    pending_upserts: Mutex<Vec<Relation>>,
+    pending_deletes: Mutex<Vec<(TetraId, TetraId, RelationType)>>,
+    /// 加载期抑制: load_relations重放不得灌爆增量队列
+    pub loading: std::sync::atomic::AtomicBool,
     adj_index: RwLock<HashMap<TetraId, Vec<usize>>>,
     concepts: RwLock<Vec<ConceptPrototype>>,
     dirty: std::sync::atomic::AtomicBool,
@@ -66,19 +81,39 @@ impl KnowledgeGraph {
     pub fn new() -> Self {
         Self {
             relations: RwLock::new(Vec::new()),
+            pending_upserts: Mutex::new(Vec::new()),
+            pending_deletes: Mutex::new(Vec::new()),
+            loading: std::sync::atomic::AtomicBool::new(false),
             adj_index: RwLock::new(HashMap::new()),
             concepts: RwLock::new(Vec::new()),
             dirty: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
+    /// F4: 取增量(并把队列还给调用方) — 空返回时调用方应回退全量
+    pub fn drain_pending_relations(
+        &self,
+    ) -> (Vec<Relation>, Vec<(TetraId, TetraId, RelationType)>) {
+        let ups = std::mem::take(&mut *self.pending_upserts.lock());
+        let dels = std::mem::take(&mut *self.pending_deletes.lock());
+        (ups, dels)
+    }
+    pub fn set_loading(&self, v: bool) {
+        self.loading.store(v, std::sync::atomic::Ordering::Relaxed);
+        if !v {
+            // 加载结束: 清空加载期误入队的残留
+            self.pending_upserts.lock().clear();
+            self.pending_deletes.lock().clear();
+        }
+    }
+
     pub fn is_dirty(&self) -> bool {
-        self.dirty.load(std::sync::atomic::Ordering::Acquire)
+        self.dirty.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn clear_dirty(&self) {
         self.dirty
-            .store(false, std::sync::atomic::Ordering::Release);
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn rebuild_adj_index(&self, relations: &[Relation]) -> HashMap<TetraId, Vec<usize>> {
@@ -109,10 +144,20 @@ impl KnowledgeGraph {
         tick: u64,
     ) {
         let mut relations = self.relations.write();
-        let exists = relations.iter().any(|r| {
-            (r.source == source && r.target == target || r.source == target && r.target == source)
-                && r.relation_type == rel_type
-        });
+        // 归属关系(BelongsTo/MergedInto)做单向去重——只检查相同方向
+        // 其他关系(similar/contradicts等)做双向去重
+        let exists = if rel_type == RelationType::BelongsTo || rel_type == RelationType::MergedInto
+        {
+            relations
+                .iter()
+                .any(|r| r.source == source && r.target == target && r.relation_type == rel_type)
+        } else {
+            relations.iter().any(|r| {
+                (r.source == source && r.target == target
+                    || r.source == target && r.target == source)
+                    && r.relation_type == rel_type
+            })
+        };
         if exists {
             return;
         }
@@ -120,28 +165,87 @@ impl KnowledgeGraph {
             let adj = self.adj_index.read();
             let src_count = adj.get(&source).map(|v| v.len()).unwrap_or(0);
             let tgt_count = adj.get(&target).map(|v| v.len()).unwrap_or(0);
-            if src_count >= MAX_RELATIONS_PER_NODE || tgt_count >= MAX_RELATIONS_PER_NODE {
+            // 归属关系不受数量限制（否则高连接度的旧节点无法加入档案库层级）
+            let is_structural =
+                rel_type == RelationType::BelongsTo || rel_type == RelationType::MergedInto;
+            if !is_structural
+                && (src_count >= MAX_RELATIONS_PER_NODE || tgt_count >= MAX_RELATIONS_PER_NODE)
+            {
                 return;
             }
         }
-        relations.push(Relation {
+        let new_rel = Relation {
             source,
             target,
             relation_type: rel_type,
             strength,
             created_tick: tick,
-        });
+        };
+        relations.push(new_rel.clone());
         *self.adj_index.write() = self.rebuild_adj_index(&relations);
-        self.dirty.store(true, std::sync::atomic::Ordering::Release);
+        if !self.loading.load(std::sync::atomic::Ordering::Relaxed) {
+            self.pending_upserts.lock().push(new_rel);
+        }
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn remove_relations_for(&self, id: TetraId) {
         let mut relations = self.relations.write();
         let before = relations.len();
+        let removed: Vec<(TetraId, TetraId, RelationType)> = relations
+            .iter()
+            .filter(|r| r.source == id || r.target == id)
+            .map(|r| (r.source, r.target, r.relation_type.clone()))
+            .collect();
         relations.retain(|r| r.source != id && r.target != id);
         if relations.len() < before {
             *self.adj_index.write() = self.rebuild_adj_index(&relations);
-            self.dirty.store(true, std::sync::atomic::Ordering::Release);
+            if !self.loading.load(std::sync::atomic::Ordering::Relaxed) {
+                self.pending_deletes.lock().extend(removed);
+            }
+        }
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// 精确删除：只删 source→target 且类型匹配的关系
+    pub fn remove_relation(&self, source: TetraId, target: TetraId, rel_type: RelationType) {
+        let mut relations = self.relations.write();
+        let before = relations.len();
+        relations
+            .retain(|r| !(r.source == source && r.target == target && r.relation_type == rel_type));
+        if relations.len() < before {
+            *self.adj_index.write() = self.rebuild_adj_index(&relations);
+            if !self.loading.load(std::sync::atomic::Ordering::Relaxed) {
+                self.pending_deletes.lock().push((source, target, rel_type));
+            }
+        }
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// 计算/更新所有 concept 的 centroid（成员 embedding 均值）。
+    /// 之前断联：centroid 永远 vec![]，概念聚类只能靠标签 Jaccard。
+    pub fn recompute_centroids(&self, space: &crate::domain::space::Space) {
+        let mut concepts = self.concepts.write();
+        for c in concepts.iter_mut() {
+            if c.member_ids.is_empty() {
+                c.centroid.clear();
+                continue;
+            }
+            let mut sum = vec![0.0_f64; 1024]; // bge-m3 1024 dim
+            let mut count = 0usize;
+            for &mid in &c.member_ids {
+                if let Some(t) = space.get_tetrahedron(mid) {
+                    if t.data.embedding.len() == 1024 {
+                        for (i, &v) in t.data.embedding.iter().enumerate() {
+                            sum[i] += v;
+                        }
+                        count += 1;
+                    }
+                }
+            }
+            if count > 0 {
+                c.centroid = sum.iter().map(|v| v / count as f64).collect();
+            }
         }
     }
 
@@ -216,6 +320,11 @@ impl KnowledgeGraph {
         } else {
             candidates.truncate(20);
         }
+        // P3 Agentic GraphRAG: entity-level schema induction.
+        let new_entities = extract_entities(&new_tetra.data.content);
+        let new_entity_set: std::collections::HashSet<&str> =
+            new_entities.iter().map(|s| s.as_str()).collect();
+
         for t in &candidates {
             let sim = VectorLayer::best_similarity(
                 &new_tetra.data.embedding,
@@ -225,6 +334,88 @@ impl KnowledgeGraph {
             );
             if sim > 0.3 {
                 self.add_relation(new_id, t.id, RelationType::SimilarTo, sim);
+            }
+
+            // P3: Entity-based linking - shared entities create SameEntity relations
+            // even when vector similarity is only moderate. This captures semantic
+            // connections that pure vector distance misses (e.g. two memories both
+            // referencing the MemoryPayload struct).
+            if !new_entities.is_empty() {
+                let t_entities = extract_entities(&t.data.content);
+                let shared_count = t_entities
+                    .iter()
+                    .filter(|e| new_entity_set.contains(e.as_str()))
+                    .count();
+                if shared_count > 0 {
+                    let t_set_size = t_entities.len();
+                    let union = new_entities.len() + t_set_size - shared_count;
+                    let entity_sim = if union > 0 {
+                        shared_count as f64 / union as f64
+                    } else {
+                        0.0
+                    };
+                    if entity_sim > 0.15 {
+                        let strength = (entity_sim * 0.6 + sim * 0.4).min(0.9);
+                        if strength > 0.2 {
+                            self.add_relation(new_id, t.id, RelationType::SameEntity, strength);
+                        }
+                    }
+                }
+            }
+
+            if sim > 0.25 {
+                let (older, newer) = if new_tetra.data.timestamp <= t.data.timestamp {
+                    (new_id, t.id)
+                } else {
+                    (t.id, new_id)
+                };
+                let ts_gap = (new_tetra.data.timestamp - t.data.timestamp).unsigned_abs();
+                if ts_gap > 60 {
+                    let strength = (0.4 + sim * 0.4).min(0.8);
+                    self.add_relation(older, newer, RelationType::Precedes, strength);
+                }
+
+                let longer = if new_tetra.data.content.len() >= t.data.content.len() {
+                    (&new_tetra.data.content, new_id, t.id)
+                } else {
+                    (&t.data.content, t.id, new_id)
+                };
+                if longer.0.len() > 50 {
+                    let shorter_content = if new_tetra.data.content.len() >= t.data.content.len() {
+                        &t.data.content
+                    } else {
+                        &new_tetra.data.content
+                    };
+                    if shorter_content.len() > 20 && longer.0.contains(&shorter_content[..]) {
+                        self.add_relation(longer.1, longer.2, RelationType::Contains, sim * 0.7);
+                    }
+                }
+
+                // 能力A：A-MEM 记忆进化 — 高相似度时，新记忆的独有标签回流到历史记忆。
+                // 这让历史记忆随着系统积累变得更丰富（A-MEM 论文的核心机制）。
+                // 只对高相似度(>0.7)且新记忆更"新"的情况触发，避免标签膨胀。
+                if sim > 0.7 && new_tetra.data.timestamp > t.data.timestamp {
+                    let mut new_labels_to_add: Vec<String> = Vec::new();
+                    for label in &new_tetra.data.labels {
+                        if !t.data.labels.contains(label)
+                            && !label.starts_with("meta-")
+                            && !label.starts_with("entity:")
+                        {
+                            new_labels_to_add.push(label.clone());
+                        }
+                    }
+                    if !new_labels_to_add.is_empty() && t.data.labels.len() < 15 {
+                        // 限制每次进化最多补 3 个标签（避免标签爆炸）
+                        let to_add: Vec<String> = new_labels_to_add.into_iter().take(3).collect();
+                        let mut updated_labels = t.data.labels.clone();
+                        updated_labels.extend(to_add);
+                        let _ = space.update_labels(t.id, updated_labels);
+                        tracing::debug!(
+                            "[A-MEM] evolved tetra #{}: added labels from new tetra #{} (sim={:.3})",
+                            t.id, new_id, sim
+                        );
+                    }
+                }
             }
         }
     }
@@ -239,7 +430,7 @@ impl KnowledgeGraph {
         let removed = before - relations.len();
         if removed > 0 {
             *self.adj_index.write() = self.rebuild_adj_index(&relations);
-            self.dirty.store(true, std::sync::atomic::Ordering::Release);
+            self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         removed
     }
@@ -292,18 +483,61 @@ impl KnowledgeGraph {
         result
     }
 
+    /// P3 Agentic GraphRAG: Adaptive multi-hop traversal.
+    ///
+    /// Dynamically decides traversal depth based on graph density and seed count:
+    /// - Few seeds (1-3) + sparse graph (avg_degree < 5): 3 hops for deeper reach
+    /// - Dense graph (avg_degree > 20): 1 hop to avoid explosion
+    /// - Default: 2 hops (balanced)
+    ///
+    /// Then trims to max_results.
+    pub fn multi_hop_adaptive(&self, seeds: &[TetraId], max_results: usize) -> Vec<(TetraId, f64)> {
+        if seeds.is_empty() {
+            return Vec::new();
+        }
+
+        let adj = self.adj_index.read();
+        let total_nodes = adj.len();
+        let total_edges: usize = adj.values().map(|v| v.len()).sum();
+        let avg_degree = if total_nodes > 0 {
+            total_edges as f64 / total_nodes as f64
+        } else {
+            0.0
+        };
+        drop(adj);
+
+        let depth = if seeds.len() <= 3 && avg_degree < 5.0 {
+            3
+        } else if avg_degree > 20.0 {
+            1
+        } else {
+            2
+        };
+
+        tracing::debug!(
+            "[P3 multi_hop_adaptive] seeds={} avg_degree={:.1} -> depth={} (cap={})",
+            seeds.len(),
+            avg_degree,
+            depth,
+            max_results
+        );
+
+        let mut results = self.multi_hop(seeds, depth);
+        if results.len() > max_results {
+            results.truncate(max_results);
+        }
+        results
+    }
+
     pub fn update_concepts(&self, tetras: &[(TetraId, Vec<String>)]) {
         let mut concepts = self.concepts.write();
+        let labels_map: HashMap<TetraId, &Vec<String>> =
+            tetras.iter().map(|(id, l)| (*id, l)).collect();
 
         for &(id, ref labels) in tetras {
             let mut best: Option<(usize, f64)> = None;
             for (i, c) in concepts.iter().enumerate() {
-                let sim = label_jaccard(
-                    labels,
-                    &c.member_ids,
-                    &self.relations.read(),
-                    &self.adj_index.read(),
-                );
+                let sim = label_jaccard(labels, &c.member_ids, &labels_map);
                 match &best {
                     None => best = Some((i, sim)),
                     Some((_, s)) if sim > *s => best = Some((i, sim)),
@@ -318,24 +552,32 @@ impl KnowledgeGraph {
                     if concepts[idx].member_ids.len() > 100 {
                         concepts[idx].member_ids.drain(0..10);
                     }
+                    // centroid 在 assign 时无法取 embedding（labels_map 只有标签）
+                    // centroid 改为在 save_concepts 时由外部计算（见 save 时传入 embedding）
                 }
                 _ => {
-                    let next_id = concepts.len() as u64;
-                    let label = labels
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| format!("concept_{next_id}"));
-                    concepts.push(ConceptPrototype {
-                        id: next_id,
-                        centroid: vec![],
-                        member_count: 1,
-                        label,
-                        member_ids: vec![id],
-                    });
+                    // 修复：不为孤立 tetra 创建 member_count=1 的垃圾 concept_N。
+                    // 只有当 tetra 有有意义的 labels 时才创建概念（避免 concept_N 噪音）。
+                    // 孤立 tetra（无标签或标签太特殊）不归属任何概念，等未来有相似记忆时再聚类。
+                    if !labels.is_empty() {
+                        let next_id = concepts.len() as u64;
+                        // 用第一个 label 作为概念名，而不是 concept_N（更有语义意义）
+                        concepts.push(ConceptPrototype {
+                            id: next_id,
+                            centroid: vec![],
+                            member_count: 1,
+                            label: labels
+                                .first()
+                                .cloned()
+                                .unwrap_or_else(|| format!("cluster_{}", next_id)),
+                            member_ids: vec![id],
+                        });
+                    }
+                    // labels 为空的 tetra：不创建概念（之前会生成 concept_N 垃圾）
                 }
             }
         }
-        self.dirty.store(true, std::sync::atomic::Ordering::Release);
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn get_concepts(&self) -> Vec<ConceptPrototype> {
@@ -353,63 +595,21 @@ impl KnowledgeGraph {
         labeled
     }
 
-    pub fn generate_concepts(&self, space: &Space) -> Vec<ConceptPrototype> {
-        let clusters = space.find_clusters();
-        let mut new_concepts = Vec::new();
-        let tetras = space.all_tetrahedrons();
-        let tetra_map: std::collections::HashMap<u64, _> =
-            tetras.iter().map(|t| (t.id, t)).collect();
-
-        for (idx, cluster) in clusters.iter().enumerate() {
-            if cluster.tetra_ids.len() < 3 {
-                continue;
-            }
-
-            let mut sum_x = 0.0;
-            let mut sum_y = 0.0;
-            let mut sum_z = 0.0;
-            let mut label_counts: std::collections::HashMap<String, usize> =
-                std::collections::HashMap::new();
-
-            for &id in &cluster.tetra_ids {
-                if let Some(t) = tetra_map.get(&id) {
-                    sum_x += t.core.x;
-                    sum_y += t.core.y;
-                    sum_z += t.core.z;
-                    for label in &t.data.labels {
-                        *label_counts.entry(label.clone()).or_insert(0) += 1;
-                    }
-                }
-            }
-
-            let count = cluster.tetra_ids.len() as f64;
-            let centroid = vec![sum_x / count, sum_y / count, sum_z / count];
-
-            let dominant_label = label_counts
-                .iter()
-                .max_by_key(|(_, c)| *c)
-                .map(|(l, _)| l.clone())
-                .unwrap_or_else(|| "general".to_string());
-
-            new_concepts.push(ConceptPrototype {
-                id: idx as u64 + 1,
-                centroid,
-                member_count: cluster.tetra_ids.len() as u64,
-                label: dominant_label,
-                member_ids: cluster.tetra_ids.clone(),
-            });
-        }
-
-        let mut stored = self.concepts.write();
-        *stored = new_concepts.clone();
-        self.dirty.store(true, std::sync::atomic::Ordering::Release);
-        new_concepts
-    }
-
-    pub fn export_graph(&self, space: &Space) -> GraphExport {
+    /// node_limit>0 时按质量取top-N(图谱export曾12MB/74s致客户端499超时)
+    pub fn export_graph(&self, space: &Space, node_limit: usize) -> GraphExport {
         let relations = self.relations.read();
         let concepts = self.concepts.read();
-        let tetras = space.all_tetrahedrons();
+        let mut tetras = space.all_tetrahedrons();
+        let total_count = tetras.len();
+        let truncated = node_limit > 0 && total_count > node_limit;
+        if truncated {
+            tetras.sort_by(|a, b| {
+                b.mass
+                    .partial_cmp(&a.mass)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            tetras.truncate(node_limit);
+        }
 
         let mut node_map: HashMap<TetraId, GraphNodeExport> = HashMap::new();
         for t in &tetras {
@@ -421,6 +621,9 @@ impl KnowledgeGraph {
                     labels: t.data.labels.clone(),
                     mass: t.mass,
                     timestamp: t.data.timestamp as u64,
+                    core_x: t.core.x,
+                    core_y: t.core.y,
+                    core_z: t.core.z,
                 },
             );
         }
@@ -438,11 +641,15 @@ impl KnowledgeGraph {
 
         let concept_exports: Vec<ConceptExport> = concepts
             .iter()
-            .map(|c| ConceptExport {
-                id: c.id,
-                label: c.label.clone(),
-                member_count: c.member_count,
-                member_ids: c.member_ids.clone(),
+            .map(|c| {
+                let mut ids = c.member_ids.clone();
+                ids.truncate(50);
+                ConceptExport {
+                    id: c.id,
+                    label: c.label.clone(),
+                    member_count: c.member_count,
+                    member_ids: ids,
+                }
             })
             .collect();
 
@@ -477,7 +684,7 @@ impl KnowledgeGraph {
                 sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
                 ClusterExport {
                     size: c.tetra_ids.len(),
-                    member_ids: c.tetra_ids.clone(),
+                    member_ids: c.tetra_ids.iter().take(50).copied().collect(),
                     top_labels: sorted
                         .iter()
                         .take(3)
@@ -487,30 +694,40 @@ impl KnowledgeGraph {
             })
             .collect();
 
+        // O(relations) 单遍: 先建 tetra→cluster 索引, 一次扫描统计跨簇对(原三重循环42亿次运算=74s超时主因)
         let mut inter_cluster_edges: Vec<GraphEdgeExport> = Vec::new();
-        for i in 0..clusters.len() {
-            for j in (i + 1)..clusters.len() {
-                let set_i: HashSet<TetraId> = clusters[i].tetra_ids.iter().copied().collect();
-                let count = relations
-                    .iter()
-                    .filter(|r| {
-                        (set_i.contains(&r.source) && clusters[j].tetra_ids.contains(&r.target))
-                            || (set_i.contains(&r.target)
-                                && clusters[j].tetra_ids.contains(&r.source))
-                    })
-                    .count();
-                if count > 0 {
-                    inter_cluster_edges.push(GraphEdgeExport {
-                        source: clusters[i].tetra_ids.first().copied().unwrap_or(0),
-                        target: clusters[j].tetra_ids.first().copied().unwrap_or(0),
-                        relation_type: "inter_cluster".to_string(),
-                        strength: count as f64,
-                    });
+        {
+            let mut tetra_cluster: HashMap<TetraId, usize> = HashMap::new();
+            for (ci, c) in clusters.iter().enumerate() {
+                for &tid in &c.tetra_ids {
+                    tetra_cluster.insert(tid, ci);
                 }
+            }
+            let mut pair_count: HashMap<(usize, usize), usize> = HashMap::new();
+            for r in relations.iter() {
+                if let (Some(&ci), Some(&cj)) =
+                    (tetra_cluster.get(&r.source), tetra_cluster.get(&r.target))
+                {
+                    if ci != cj {
+                        let key = if ci < cj { (ci, cj) } else { (cj, ci) };
+                        *pair_count.entry(key).or_insert(0) += 1;
+                    }
+                }
+            }
+            let mut pairs: Vec<_> = pair_count.into_iter().collect();
+            pairs.sort_by_key(|p| std::cmp::Reverse(p.1));
+            for ((i, j), count) in pairs.into_iter().take(200) {
+                inter_cluster_edges.push(GraphEdgeExport {
+                    source: clusters[i].tetra_ids.first().copied().unwrap_or(0),
+                    target: clusters[j].tetra_ids.first().copied().unwrap_or(0),
+                    relation_type: "inter_cluster".to_string(),
+                    strength: count as f64,
+                });
             }
         }
 
         GraphExport {
+            truncated,
             nodes: node_map.into_values().collect(),
             edges: edge_exports,
             inter_cluster_edges,
@@ -520,7 +737,7 @@ impl KnowledgeGraph {
                 .into_iter()
                 .map(|(l, c)| serde_json::json!({"label": l, "count": c}))
                 .collect(),
-            total_nodes: tetras.len(),
+            total_nodes: total_count,
             total_edges: relations.len(),
         }
     }
@@ -571,6 +788,68 @@ impl KnowledgeGraph {
 
     pub fn restore_concepts(&self, concepts: Vec<ConceptPrototype>) {
         *self.concepts.write() = concepts;
+    }
+
+    pub fn merge_duplicate_concepts(&self) -> usize {
+        let mut concepts = self.concepts.write();
+        if concepts.len() <= 1 {
+            return 0;
+        }
+
+        let mut groups: std::collections::HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, c) in concepts.iter().enumerate() {
+            let key = c.label.to_lowercase().replace(['-', ' '], "_");
+            groups.entry(key).or_default().push(i);
+        }
+
+        let mut merged_count = 0usize;
+        let mut to_remove: Vec<usize> = Vec::new();
+        let mut to_update: Vec<(usize, u64, Vec<u64>)> = Vec::new();
+
+        for indices in groups.values() {
+            if indices.len() <= 1 {
+                continue;
+            }
+            let primary = indices[0];
+            let mut total_count = concepts[primary].member_count;
+            let mut all_ids = concepts[primary].member_ids.clone();
+
+            for &dup_idx in &indices[1..] {
+                total_count += concepts[dup_idx].member_count;
+                all_ids.extend(concepts[dup_idx].member_ids.iter().copied());
+                to_remove.push(dup_idx);
+                merged_count += 1;
+            }
+
+            if all_ids.len() > 100 {
+                all_ids = all_ids.split_off(all_ids.len() - 100);
+            }
+            to_update.push((primary, total_count, all_ids));
+        }
+
+        for (idx, count, ids) in to_update {
+            concepts[idx].member_count = count;
+            concepts[idx].member_ids = ids;
+        }
+
+        to_remove.sort_unstable_by(|a, b| b.cmp(a));
+        for idx in to_remove {
+            concepts.remove(idx);
+        }
+
+        for (i, c) in concepts.iter_mut().enumerate() {
+            c.id = i as u64;
+        }
+
+        if merged_count > 0 {
+            self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+            tracing::info!(
+                "[KG] merged {} duplicate concepts, {} remaining",
+                merged_count,
+                concepts.len()
+            );
+        }
+        merged_count
     }
 
     pub fn analysis(&self, space: &Space) -> KgAnalysis {
@@ -657,31 +936,89 @@ impl KnowledgeGraph {
     }
 }
 
+/// P3 Agentic GraphRAG: Extract entity-like tokens from memory content.
+///
+/// Lightweight heuristic entity extractor (no LLM needed for hot path).
+/// Identifies:
+/// - PascalCase identifiers (e.g. MemoryPayload, VectorLayer)
+/// - UPPER_SNAKE_CASE constants (e.g. VERTEX_MERGE_EPSILON)
+/// - snake_case identifiers with underscores (e.g. search_engine, valid_to)
+///
+/// Returns deduplicated lowercase entity strings.
+fn extract_entities(content: &str) -> Vec<String> {
+    use std::collections::HashSet;
+    let mut entities: HashSet<String> = HashSet::new();
+
+    for token in content.split(|c: char| !c.is_alphanumeric() && c != '_') {
+        let token = token.trim();
+        if token.len() < 4 || token.len() > 40 {
+            continue;
+        }
+
+        let chars: Vec<char> = token.chars().collect();
+        let starts_upper = !chars.is_empty() && chars[0].is_uppercase();
+        let has_lower = chars.iter().any(|c| c.is_lowercase());
+        let has_upper_inside = chars.len() > 1 && chars[1..].iter().any(|c| c.is_uppercase());
+        let has_underscore = token.contains('_');
+        let all_alpha_or_underscore = token.chars().all(|c| c.is_alphanumeric() || c == '_');
+
+        if !all_alpha_or_underscore {
+            continue;
+        }
+
+        // PascalCase: starts uppercase, has lowercase, has uppercase inside
+        if starts_upper && has_lower && has_upper_inside {
+            entities.insert(token.to_lowercase());
+            continue;
+        }
+
+        // UPPER_SNAKE_CASE: all uppercase + underscores, length > 4
+        if has_underscore
+            && token
+                .chars()
+                .all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
+            && token.len() > 4
+        {
+            entities.insert(token.to_lowercase());
+            continue;
+        }
+
+        // snake_case: has underscore, reasonable length
+        if has_underscore && token.len() > 6 {
+            entities.insert(token.to_lowercase());
+            continue;
+        }
+    }
+
+    entities.into_iter().collect()
+}
 fn label_jaccard(
     labels: &[String],
     concept_member_ids: &[TetraId],
-    _relations: &[Relation],
-    _adj: &HashMap<TetraId, Vec<usize>>,
+    labels_map: &HashMap<TetraId, &Vec<String>>,
 ) -> f64 {
     if concept_member_ids.is_empty() || labels.is_empty() {
         return 0.0;
     }
-    if labels.len() == 1 {
-        return if !concept_member_ids.is_empty() {
-            0.6
-        } else {
-            0.0
-        };
+    // 聚合 concept 成员的 labels（kimi #2：之前错误地用 labels 自比导致恒为 1.0）
+    let mut concept_labels: HashSet<&str> = HashSet::new();
+    for &mid in concept_member_ids {
+        if let Some(ml) = labels_map.get(&mid) {
+            for l in ml.iter() {
+                concept_labels.insert(l.as_str());
+            }
+        }
+    }
+    if concept_labels.is_empty() {
+        return 0.0;
     }
     let label_set: HashSet<&str> = labels.iter().map(|s| s.as_str()).collect();
-    let concept_labels: HashSet<String> = labels.iter().cloned().collect();
-    let concept_set: HashSet<&str> = concept_labels.iter().map(|s| s.as_str()).collect();
-    let intersection = label_set.intersection(&concept_set).count() as f64;
-    let union = label_set.union(&concept_set).count() as f64;
-    if union == 0.0 {
+    let intersection = label_set.intersection(&concept_labels).count();
+    let union = label_set.union(&concept_labels).count();
+    if union == 0 {
         0.0
     } else {
-        intersection / union
+        intersection as f64 / union as f64
     }
 }
 
@@ -705,6 +1042,7 @@ pub struct KgAnalysis {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct GraphExport {
+    pub truncated: bool,
     pub nodes: Vec<GraphNodeExport>,
     pub edges: Vec<GraphEdgeExport>,
     pub inter_cluster_edges: Vec<GraphEdgeExport>,
@@ -722,6 +1060,9 @@ pub struct GraphNodeExport {
     pub labels: Vec<String>,
     pub mass: f64,
     pub timestamp: u64,
+    pub core_x: f64,
+    pub core_y: f64,
+    pub core_z: f64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -780,10 +1121,10 @@ mod tests {
                     enforced: false,
                     rationale: None,
                     access_count: 0,
-                    quality_score: 1.0,
                     memory_type: None,
-                    valid_from: None,
-                    valid_until: None,
+                    identity_stamp: None,
+                    source_agent: None,
+                    ..Default::default()
                 },
                 mass: 1.0,
             };
@@ -854,92 +1195,5 @@ mod tests {
             kg.add_relation(0, i, RelationType::SimilarTo, 0.5);
         }
         assert!(kg.relation_count() <= MAX_RELATIONS_PER_NODE);
-    }
-
-    #[test]
-    fn concept_generation_from_clusters() {
-        let space = Space::new();
-        let kg = KnowledgeGraph::new();
-
-        // Create 3 tetras at the same position (same cluster)
-        for i in 0..3 {
-            let core = Point3::new(0.0, 0.0, 0.0);
-            let pos = Tetrahedron::compute_vertices(core);
-            let t = Tetrahedron {
-                id: i,
-                vertex_ids: [i * 4, i * 4 + 1, i * 4 + 2, i * 4 + 3],
-                core,
-                data: crate::domain::tetra::MemoryPayload {
-                    content: format!("hello {}", i),
-                    content_hash: 0,
-                    labels: vec!["greeting".to_string()],
-                    timestamp: 0,
-                    aliases: vec![],
-                    embedding: vec![],
-                    importance: 1.0,
-                    enforced: false,
-                    rationale: None,
-                    access_count: 0,
-                    quality_score: 1.0,
-                    memory_type: None,
-                    valid_from: None,
-                    valid_until: None,
-                },
-                mass: 1.0,
-            };
-            space.add_tetrahedron(&t, &pos).unwrap();
-        }
-
-        let concepts = kg.generate_concepts(&space);
-        assert!(
-            !concepts.is_empty(),
-            "should generate at least 1 concept from cluster of 3"
-        );
-        assert_eq!(
-            concepts[0].label, "greeting",
-            "concept should have greeting label"
-        );
-        assert_eq!(concepts[0].member_count, 3, "concept should have 3 members");
-    }
-
-    #[test]
-    fn concept_generation_skips_small_clusters() {
-        let space = Space::new();
-        let kg = KnowledgeGraph::new();
-
-        for i in 0..2 {
-            let core = Point3::new(i as f64 * 2.0, 0.0, 0.0);
-            let pos = Tetrahedron::compute_vertices(core);
-            let t = Tetrahedron {
-                id: i,
-                vertex_ids: [i * 4, i * 4 + 1, i * 4 + 2, i * 4 + 3],
-                core,
-                data: crate::domain::tetra::MemoryPayload {
-                    content: format!("small {}", i),
-                    content_hash: 0,
-                    labels: vec!["tiny".to_string()],
-                    timestamp: 0,
-                    aliases: vec![],
-                    embedding: vec![],
-                    importance: 1.0,
-                    enforced: false,
-                    rationale: None,
-                    access_count: 0,
-                    quality_score: 1.0,
-                    memory_type: None,
-                    valid_from: None,
-                    valid_until: None,
-                },
-                mass: 1.0,
-            };
-            space.add_tetrahedron(&t, &pos).unwrap();
-        }
-
-        let concepts = kg.generate_concepts(&space);
-        assert_eq!(
-            concepts.len(),
-            0,
-            "cluster with 2 tetras should not generate a concept"
-        );
     }
 }

@@ -3,85 +3,12 @@ use parking_lot::Mutex;
 const DEFAULT_EMBEDDING_URL: &str = "http://localhost:11434/api/embed";
 const DEFAULT_EMBEDDING_MODEL: &str = "nomic-embed-text";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EmbeddingProvider {
-    Ollama,
-    OpenAI,
-    Generic,
-}
-
-impl EmbeddingProvider {
-    pub fn detect(api_url: &str, model: &str) -> Self {
-        let provider_env = std::env::var("EMBEDDING_PROVIDER")
-            .unwrap_or_default()
-            .to_lowercase();
-        match provider_env.as_str() {
-            "openai" => return EmbeddingProvider::OpenAI,
-            "ollama" => return EmbeddingProvider::Ollama,
-            "generic" => return EmbeddingProvider::Generic,
-            _ => {}
-        }
-
-        if api_url.contains("openai.com") || model.starts_with("text-embedding") {
-            return EmbeddingProvider::OpenAI;
-        }
-        if api_url.contains("11434")
-            || api_url.contains("localhost")
-            || api_url.contains("127.0.0.1")
-        {
-            return EmbeddingProvider::Ollama;
-        }
-        EmbeddingProvider::Generic
-    }
-
-    pub fn api_url(&self, configured_url: &str) -> String {
-        match self {
-            EmbeddingProvider::OpenAI => "https://api.openai.com/v1/embeddings".to_string(),
-            EmbeddingProvider::Ollama => configured_url.to_string(),
-            EmbeddingProvider::Generic => configured_url.to_string(),
-        }
-    }
-
-    pub fn request_body(&self, model: &str, input: &str) -> serde_json::Value {
-        match self {
-            EmbeddingProvider::Ollama => serde_json::json!({
-                "model": model,
-                "input": input
-            }),
-            EmbeddingProvider::OpenAI | EmbeddingProvider::Generic => serde_json::json!({
-                "model": model,
-                "input": input,
-                "encoding_format": "float"
-            }),
-        }
-    }
-
-    pub fn extract_embedding(&self, resp: &serde_json::Value) -> Result<Vec<f64>, String> {
-        let vec = match self {
-            EmbeddingProvider::Ollama => resp["embeddings"][0]
-                .as_array()
-                .ok_or_else(|| "no embeddings array in ollama response".to_string())?
-                .iter()
-                .filter_map(|v| v.as_f64())
-                .collect::<Vec<f64>>(),
-            EmbeddingProvider::OpenAI | EmbeddingProvider::Generic => resp["data"][0]["embedding"]
-                .as_array()
-                .ok_or_else(|| "no embedding array in response".to_string())?
-                .iter()
-                .filter_map(|v| v.as_f64())
-                .collect::<Vec<f64>>(),
-        };
-        Ok(vec)
-    }
-}
-
 pub struct EmbeddingService {
-    client: attohttpc::Session,
+    client: ureq::Agent,
     api_key: String,
     api_url: String,
     model: String,
     enabled: bool,
-    provider: EmbeddingProvider,
     cache: Mutex<std::collections::HashMap<String, Vec<f64>>>,
     cache_order: Mutex<Vec<String>>,
 }
@@ -95,18 +22,16 @@ impl EmbeddingService {
         let api_key = std::env::var("EMBEDDING_API_KEY")
             .or_else(|_| std::env::var("SILICONFLOW_API_KEY"))
             .unwrap_or_default();
-        let provider = EmbeddingProvider::detect(&api_url, &model);
-        let is_ollama = matches!(provider, EmbeddingProvider::Ollama);
-
-        let client = attohttpc::Session::new();
+        let is_ollama = api_url.contains("11434")
+            || api_url.contains("localhost")
+            || api_url.contains("127.0.0.1");
 
         Self {
-            client,
+            client: ureq::AgentBuilder::new().build(),
             enabled: !api_key.is_empty() || is_ollama,
             api_key,
-            api_url: provider.api_url(&api_url),
+            api_url,
             model,
-            provider,
             cache: Mutex::new(std::collections::HashMap::new()),
             cache_order: Mutex::new(Vec::new()),
         }
@@ -129,22 +54,78 @@ impl EmbeddingService {
             }
         }
 
-        let body = self.provider.request_body(&self.model, &truncated);
+        let is_ollama = self.api_url.contains("11434")
+            || self.api_url.contains("localhost")
+            || self.api_url.contains("127.0.0.1");
 
-        let mut req = self.client.post(&self.api_url);
+        let mut req = self
+            .client
+            .post(&self.api_url)
+            .timeout(std::time::Duration::from_secs(3))
+            .set("Content-Type", "application/json");
         if !self.api_key.is_empty() {
-            req = req.header("Authorization", format!("Bearer {}", self.api_key));
+            req = req.set("Authorization", &format!("Bearer {}", self.api_key));
         }
 
-        let resp: serde_json::Value = req
-            .json(&body)
-            .map_err(|e| format!("embedding request build: {e}"))?
-            .send()
-            .map_err(|e| format!("embedding HTTP: {e}"))?
-            .json()
-            .map_err(|e| format!("embedding JSON: {e}"))?;
+        let body: serde_json::Value = if is_ollama {
+            ureq::json!({
+                "model": self.model,
+                "input": truncated
+            })
+        } else {
+            ureq::json!({
+                "model": self.model,
+                "input": truncated,
+                "encoding_format": "float"
+            })
+        };
 
-        let embedding = self.provider.extract_embedding(&resp)?;
+        // 瞬时网络错误重试 1 次（500ms 间隔），避免抖动导致静默空 embedding
+        let resp: serde_json::Value = match req.send_json(body.clone()) {
+            Ok(r) => r
+                .into_json()
+                .map_err(|e| format!("embedding JSON: {}", e))?,
+            Err(e) => {
+                let is_transient = matches!(e, ureq::Error::Transport(_));
+                if is_transient {
+                    tracing::warn!("[Embedding] transient error ({}), retrying after 500ms", e);
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    // 重建请求（ureq Request 被 send_json 消耗）
+                    let mut retry_req = self
+                        .client
+                        .post(&self.api_url)
+                        .timeout(std::time::Duration::from_secs(3))
+                        .set("Content-Type", "application/json");
+                    if !self.api_key.is_empty() {
+                        retry_req =
+                            retry_req.set("Authorization", &format!("Bearer {}", self.api_key));
+                    }
+                    retry_req
+                        .send_json(body)
+                        .map_err(|e| format!("embedding HTTP retry: {}", e))?
+                        .into_json()
+                        .map_err(|e| format!("embedding JSON: {}", e))?
+                } else {
+                    return Err(format!("embedding HTTP: {}", e));
+                }
+            }
+        };
+
+        let embedding: Vec<f64> = if is_ollama {
+            resp["embeddings"][0]
+                .as_array()
+                .ok_or("no embeddings array in ollama response")?
+                .iter()
+                .filter_map(|v| v.as_f64())
+                .collect()
+        } else {
+            resp["data"][0]["embedding"]
+                .as_array()
+                .ok_or("no embedding array in response")?
+                .iter()
+                .filter_map(|v| v.as_f64())
+                .collect()
+        };
 
         if embedding.is_empty() {
             return Err("empty embedding vector".into());
@@ -204,137 +185,65 @@ mod tests {
     }
 
     #[test]
+    fn cosine_different_lengths() {
+        assert_eq!(
+            super::super::vector::VectorLayer::cosine_similarity(&[1.0], &[1.0, 2.0]),
+            0.0
+        );
+    }
+
+    #[test]
+    #[allow(clippy::approx_constant)] // 测试夹具值
+    fn blob_roundtrip() {
+        let original: Vec<f64> = vec![1.0, -2.5, 3.14, 0.0, 1e-10];
+        let blob = super::super::vector::VectorLayer::embedding_to_blob(&original);
+        let restored = super::super::vector::VectorLayer::blob_to_embedding(&blob);
+        assert_eq!(restored.len(), original.len());
+        for (a, b) in original.iter().zip(restored.iter()) {
+            assert!((a - b).abs() < 1e-15);
+        }
+    }
+
+    #[test]
+    fn blob_empty() {
+        let blob = super::super::vector::VectorLayer::embedding_to_blob(&[]);
+        assert!(blob.is_empty());
+        assert!(super::super::vector::VectorLayer::blob_to_embedding(&blob).is_empty());
+    }
+
+    #[test]
+    fn best_sim_prefers_embedding() {
+        let emb_a = vec![1.0, 0.0, 0.0];
+        let emb_b = vec![0.9, 0.1, 0.0];
+        let labels_a = vec!["rust".to_string()];
+        let labels_b = vec!["python".to_string()];
+        let sim = super::super::vector::VectorLayer::best_similarity(
+            &emb_a, &labels_a, &emb_b, &labels_b,
+        );
+        assert!(sim > 0.8);
+    }
+
+    #[test]
+    fn best_sim_falls_back_to_labels() {
+        let labels_a = vec!["rust".to_string()];
+        let labels_b = vec!["rust".to_string()];
+        let sim =
+            super::super::vector::VectorLayer::best_similarity(&[], &labels_a, &[], &labels_b);
+        assert!((sim - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
     fn service_disabled_without_key() {
         let svc = EmbeddingService {
-            client: attohttpc::Session::new(),
+            client: ureq::AgentBuilder::new().build(),
             api_key: String::new(),
-            api_url: "http://example.com".to_string(),
-            model: "test".to_string(),
+            api_url: DEFAULT_EMBEDDING_URL.to_string(),
+            model: DEFAULT_EMBEDDING_MODEL.to_string(),
             enabled: false,
-            provider: EmbeddingProvider::Generic,
             cache: Mutex::new(std::collections::HashMap::new()),
             cache_order: Mutex::new(Vec::new()),
         };
+        assert!(!svc.enabled());
         assert!(svc.embed("test").is_err());
-    }
-
-    #[test]
-    fn provider_detect_openai_by_url() {
-        assert_eq!(
-            EmbeddingProvider::detect("https://api.openai.com/v1/embeddings", "model"),
-            EmbeddingProvider::OpenAI
-        );
-    }
-
-    #[test]
-    fn provider_detect_openai_by_model() {
-        assert_eq!(
-            EmbeddingProvider::detect("http://example.com", "text-embedding-3-small"),
-            EmbeddingProvider::OpenAI
-        );
-    }
-
-    #[test]
-    fn provider_detect_ollama() {
-        assert_eq!(
-            EmbeddingProvider::detect("http://localhost:11434/api/embed", "nomic-embed-text"),
-            EmbeddingProvider::Ollama
-        );
-        assert_eq!(
-            EmbeddingProvider::detect("http://127.0.0.1:11434/api/embed", "model"),
-            EmbeddingProvider::Ollama
-        );
-    }
-
-    #[test]
-    fn provider_detect_generic() {
-        assert_eq!(
-            EmbeddingProvider::detect("https://api.siliconflow.cn/v1/embeddings", "model"),
-            EmbeddingProvider::Generic
-        );
-    }
-
-    #[test]
-    fn provider_env_override() {
-        std::env::set_var("EMBEDDING_PROVIDER", "openai");
-        assert_eq!(
-            EmbeddingProvider::detect("http://localhost:11434", "nomic-embed-text"),
-            EmbeddingProvider::OpenAI
-        );
-        std::env::set_var("EMBEDDING_PROVIDER", "ollama");
-        assert_eq!(
-            EmbeddingProvider::detect("https://api.openai.com", "text-embedding-3-small"),
-            EmbeddingProvider::Ollama
-        );
-        std::env::remove_var("EMBEDDING_PROVIDER");
-    }
-
-    #[test]
-    fn ollama_request_body_format() {
-        let body = EmbeddingProvider::Ollama.request_body("nomic-embed-text", "hello");
-        assert_eq!(body["model"], "nomic-embed-text");
-        assert_eq!(body["input"], "hello");
-        assert!(body.get("encoding_format").is_none());
-    }
-
-    #[test]
-    fn openai_request_body_format() {
-        let body = EmbeddingProvider::OpenAI.request_body("text-embedding-3-small", "hello");
-        assert_eq!(body["model"], "text-embedding-3-small");
-        assert_eq!(body["input"], "hello");
-        assert_eq!(body["encoding_format"], "float");
-    }
-
-    #[test]
-    fn generic_request_body_format() {
-        let body = EmbeddingProvider::Generic.request_body("model", "hello");
-        assert_eq!(body["model"], "model");
-        assert_eq!(body["input"], "hello");
-        assert_eq!(body["encoding_format"], "float");
-    }
-
-    #[test]
-    fn ollama_extract_embedding() {
-        let resp = serde_json::json!({"embeddings": [[0.1, 0.2, 0.3]]});
-        let emb = EmbeddingProvider::Ollama.extract_embedding(&resp).unwrap();
-        assert_eq!(emb, vec![0.1, 0.2, 0.3]);
-    }
-
-    #[test]
-    fn openai_extract_embedding() {
-        let resp = serde_json::json!({"data": [{"embedding": [0.1, 0.2, 0.3]}]});
-        let emb = EmbeddingProvider::OpenAI.extract_embedding(&resp).unwrap();
-        assert_eq!(emb, vec![0.1, 0.2, 0.3]);
-    }
-
-    #[test]
-    fn generic_extract_embedding() {
-        let resp = serde_json::json!({"data": [{"embedding": [0.4, 0.5, 0.6]}]});
-        let emb = EmbeddingProvider::Generic.extract_embedding(&resp).unwrap();
-        assert_eq!(emb, vec![0.4, 0.5, 0.6]);
-    }
-
-    #[test]
-    fn openai_api_url() {
-        assert_eq!(
-            EmbeddingProvider::OpenAI.api_url("http://ignored"),
-            "https://api.openai.com/v1/embeddings"
-        );
-    }
-
-    #[test]
-    fn ollama_api_url_uses_configured() {
-        assert_eq!(
-            EmbeddingProvider::Ollama.api_url("http://localhost:11434/api/embed"),
-            "http://localhost:11434/api/embed"
-        );
-    }
-
-    #[test]
-    fn generic_api_url_uses_configured() {
-        assert_eq!(
-            EmbeddingProvider::Generic.api_url("https://api.siliconflow.cn/v1/embeddings"),
-            "https://api.siliconflow.cn/v1/embeddings"
-        );
     }
 }

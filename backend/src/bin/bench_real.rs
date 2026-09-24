@@ -5,16 +5,11 @@ use std::time::Instant;
 use epicode::engine::mcp::McpHandler;
 use epicode::engine::Engine;
 
-fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(format!("EPICODE_{}", name))
-        .or_else(|_| std::env::var(format!("TETRAMEM_{}", name)))
-}
-
 #[tokio::main]
 async fn main() {
     std::env::set_var("EMBEDDING_API_URL", "disabled://none");
 
-    let data_dir = env_var("DATA_DIR")
+    let data_dir = std::env::var("TETRAMEM_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("data_bench"));
     if data_dir.exists() {
@@ -31,10 +26,11 @@ async fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(100);
 
-    eprintln!("=== Epicode Benchmark: {mem_count} memories ===");
+    eprintln!("=== Epicode Benchmark: {} memories ===", mem_count);
 
     // Phase 1: Create memories
-    let categories = [
+    #[allow(clippy::useless_vec)] // 语义为集合
+    let categories = vec![
         (
             "architecture",
             "System uses microservices with event-driven communication pattern",
@@ -76,7 +72,8 @@ async fn main() {
     for i in 0..mem_count {
         let (cat, template) = &categories[i % categories.len()];
         let content = format!(
-            "[{cat}] {template} — instance #{i} with unique context about {cat} operations"
+            "[{}] {} — instance #{} with unique context about {} operations",
+            cat, template, i, cat
         );
         let labels = vec![cat.to_string(), format!("bench-{}", i % 10)];
 
@@ -116,7 +113,7 @@ async fn main() {
     );
 
     // Phase 2: Search
-    let queries = [
+    let queries = vec![
         "memory leak connection pool",
         "microservices architecture pattern",
         "database selection decision",
@@ -194,7 +191,7 @@ async fn main() {
     let resp = handler.process_json(stats_raw);
     if let Ok(p) = serde_json::from_str::<serde_json::Value>(&resp) {
         if let Some(inner) = p["result"]["content"][0]["text"].as_str() {
-            eprintln!("Stats: {inner}");
+            eprintln!("Stats: {}", inner);
         }
     }
 
@@ -214,7 +211,7 @@ async fn main() {
     let resp = handler.process_json(observe_raw);
     if let Ok(p) = serde_json::from_str::<serde_json::Value>(&resp) {
         if let Some(inner) = p["result"]["content"][0]["text"].as_str() {
-            eprintln!("context_observe: {inner}");
+            eprintln!("context_observe: {}", inner);
         }
     }
 

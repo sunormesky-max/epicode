@@ -107,11 +107,16 @@ fn main() {
     for (topic, texts) in &topics {
         for text in texts {
             match gateway.create_memory(text, vec![topic.to_string()]) {
-                Ok(id) => {
+                Ok(g) => {
                     count += 1;
-                    println!("  [{}] {} → id={}", topic, &text[..30.min(text.len())], id);
+                    println!(
+                        "  [{}] {} → id={}",
+                        topic,
+                        &text[..30.min(text.len())],
+                        g.id
+                    );
                 }
-                Err(e) => println!("  FAIL: {text} → {e}"),
+                Err(e) => println!("  FAIL: {} → {}", text, e),
             }
         }
     }
@@ -140,7 +145,7 @@ fn main() {
             .label_distribution
             .iter()
             .max_by_key(|(_, &v)| v)
-            .map(|(k, v)| format!("{k}:{v}"))
+            .map(|(k, v)| format!("{}:{}", k, v))
             .unwrap_or("none".into());
         println!(
             "    簇{}: {}个 [{}] entropy={:.3} centroid=({:.1},{:.1},{:.1})",
@@ -222,6 +227,20 @@ fn main() {
                     } => {
                         println!("    {}. reflect: {} | {}", i + 1, observation, insight);
                     }
+                    epicode::engine::cognitive::SchedulerAction::ActOutward {
+                        intent,
+                        description,
+                        evidence,
+                        ..
+                    } => {
+                        println!(
+                            "    {}. act_outward({}): {} | evidence={:?}",
+                            i + 1,
+                            intent,
+                            description,
+                            evidence
+                        );
+                    }
                 }
             }
 
@@ -239,7 +258,7 @@ fn main() {
             println!("  能量剩余: {:.0}", energy.available());
         }
         Err(e) => {
-            println!("\n  [ERROR] LLM调用失败: {e}");
+            println!("\n  [ERROR] LLM调用失败: {}", e);
         }
     }
 

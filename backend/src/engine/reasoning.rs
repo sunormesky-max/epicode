@@ -47,11 +47,11 @@ impl ReasoningEngine {
                 }
             }
         } else {
-            let mut rng = rand::rng();
+            let mut rng = rand::thread_rng();
             for _ in 0..(max_pairs * 2) {
-                use rand::RngExt;
-                let i = rng.random_range(0..tetras.len());
-                let j = rng.random_range(0..tetras.len());
+                use rand::Rng;
+                let i = rng.gen_range(0..tetras.len());
+                let j = rng.gen_range(0..tetras.len());
                 if i >= j {
                     continue;
                 }
@@ -113,7 +113,7 @@ impl ReasoningEngine {
 
         let orphans = clusters.iter().filter(|c| c.tetra_ids.len() == 1).count();
         if orphans > 0 {
-            patterns.push(format!("{orphans} orphan tetras detected"));
+            patterns.push(format!("{} orphan tetras detected", orphans));
         }
 
         if let Some(largest) = clusters.iter().max_by_key(|c| c.tetra_ids.len()) {
@@ -167,10 +167,10 @@ mod tests {
                     enforced: false,
                     rationale: None,
                     access_count: 0,
-                    quality_score: 1.0,
                     memory_type: None,
-                    valid_from: None,
-                    valid_until: None,
+                    identity_stamp: None,
+                    source_agent: None,
+                    ..Default::default()
                 },
                 mass: 1.0,
             };

@@ -4,52 +4,46 @@ version = "1.0.1"  # x-release-please-version
 edition = "2021"
 description = "Epicode — AI Memory Operating System with MCP and SMRP"
 license = "MIT"
-authors = ["sunormesky-max"]
+authors = ["sunormesky-max <sunormesky@gmail.com>"]
 repository = "https://github.com/sunormesky-max/epicode"
+rust-version = "1.88"
 homepage = "https://epicode.cn"
 documentation = "https://epicode.cn/#/docs"
 readme = "../README.md"
-rust-version = "1.88"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "io-util"] }
 dashmap = "6"
-axum = { version = "0.8", features = ["macros", "ws"] }
-tower-http = { version = "0.7", features = ["cors", "trace", "compression-gzip"] }
+axum = { version = "0.7", features = ["macros"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip", "limit"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-rand = "0.10"
-chrono = { version = "0.4", features = ["serde"] }
-attohttpc = { version = "0.31", features = ["json"] }
-rusqlite = { version = "0.32", features = ["bundled", "blob"] }
-r2d2 = "0.8"
-r2d2_sqlite = "0.25"
+rand = "0.8"
+chrono = "0.4"
+ureq = { version = "2", features = ["json"] }
+rusqlite = { version = "0.31", features = ["bundled", "blob"] }
 futures = "0.3"
 tokio-stream = "0.1"
-ort = { version = "2.0.0-rc.12", features = ["ndarray"] }
-tokenizers = "0.23"
-ndarray = "0.17"
+ort = { version = "2.0.0-rc.9", features = ["ndarray"] }
+tokenizers = "0.21"
+ndarray = "0.16"
 parking_lot = "0.12"
 aes-gcm = "0.10"
+rsa = { version = "0.9", features = ["sha2"] }
 sha2 = "0.10"
 hmac = "0.12"
 base64 = "0.22"
-argon2 = "0.5"
 zeroize = { version = "1", features = ["derive"] }
-moka = { version = "0.12", features = ["future"] }
-redis = "0.24"
-hex = "0.4"
-bincode = "1.3"
-html2text = "0.17.1"
+argon2 = { version = "0.5", features = ["password-hash"] }
 
 [profile.release]
 strip = true
 lto = "fat"
 codegen-units = 1
-panic = "abort"
+panic = "unwind"
 opt-level = 3
 
 [[bin]]

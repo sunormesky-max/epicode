@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::domain::space::{Cluster, Space};
-use crate::domain::tetra::{TetraId, Tetrahedron};
+use crate::domain::tetra::{TetraId, TetraMeta};
 use crate::domain::vertex::Point3;
 
 use super::adaptive::AdaptiveParams;
@@ -37,7 +37,7 @@ pub struct AutoFissionOutcome {
 
 pub fn auto_pulse(
     ctx: &AutoPipelineCtx,
-    tetras: &[Tetrahedron],
+    tetras: &[TetraMeta],
     clusters: &[Cluster],
     _core_map: &HashMap<u64, Point3>,
 ) -> u32 {
@@ -45,6 +45,9 @@ pub fn auto_pulse(
         return 0;
     }
 
+    // P0-21修复:建 HashMap 索引避免 O(C×N) 线性查找
+    let tetra_map: std::collections::HashMap<u64, &crate::domain::tetra::TetraMeta> =
+        tetras.iter().map(|t| (t.id, t)).collect();
     let mut cluster_origins: Vec<(usize, Vec<(u64, f64)>)> = Vec::new();
     for (ci, cluster) in clusters.iter().enumerate() {
         if cluster.tetra_ids.len() < 2 {
@@ -54,8 +57,8 @@ pub fn auto_pulse(
             .tetra_ids
             .iter()
             .filter_map(|&tid| {
-                let t = tetras.iter().find(|t| t.id == tid)?;
-                if t.data.labels.iter().any(|l| l.starts_with("meta-")) {
+                let t = tetra_map.get(&tid)?;
+                if t.labels.iter().any(|l| l.starts_with("meta-")) {
                     return None;
                 }
                 Some((tid, t.mass))
@@ -144,6 +147,9 @@ pub fn auto_fission(
 
     for (ci, size) in &sorted_clusters {
         let entropy = dynamics::compute_entropy_from_labels(&clusters[*ci].tetra_ids, labels_map);
+        if !super::security::SecurityGuard::fission_allowed(entropy, *size) {
+            continue;
+        }
         if (*size >= 30
             || entropy
                 >= ctx
@@ -290,20 +296,19 @@ pub fn auto_dream(
         tracing::warn!("[AutoDream] insufficient energy");
         return None;
     }
-    let report = DreamEngine::cycle(ctx.space, 0.3, 2);
+    let report = DreamEngine::cycle(ctx.space, ctx.knowledge, 0.3, 2, false);
 
-    let total_removed = report.evicted_ids.len() + report.merged_remove_ids.len();
-    for &id in report
-        .evicted_ids
-        .iter()
-        .chain(report.merged_remove_ids.iter())
-    {
+    // P0-23修复:只删 merged_remove_ids(真合并掉的),不删 evicted_ids(quarantine的)。
+    // Dream Phase 1 quarantine 只加标签+降权+valid_to,记忆仍在空间(记忆神圣原则:NEVER delete)。
+    // 之前 evicted_ids 也被 purge_fn 删除,违反宪法。
+    let total_removed = report.merged_remove_ids.len();
+    for &id in report.merged_remove_ids.iter() {
         purge_fn(id);
     }
     if total_removed > 0 {
         tracing::info!(
-            "[AutoDream] purged {} tetrahedrons (KG+HNSW+indexes cleaned)",
-            total_removed
+            "[AutoDream] purged {} merged tetrahedrons (KG+HNSW+indexes cleaned), {} quarantined (kept)",
+            total_removed, report.evicted_ids.len()
         );
     }
 
@@ -326,6 +331,7 @@ pub fn auto_dream(
         .map(|t| (t.id, t.data.labels.clone()))
         .collect();
     ctx.knowledge.update_concepts(&label_data);
+    ctx.knowledge.merge_duplicate_concepts();
 
     Some(DreamOutcome {
         total_removed,
@@ -335,7 +341,7 @@ pub fn auto_dream(
 
 pub fn evict_low_quality(
     ctx: &AutoPipelineCtx,
-    tetras: &[Tetrahedron],
+    tetras: &[TetraMeta],
     purge_fn: &dyn Fn(TetraId),
 ) -> usize {
     if tetras.len() <= 50 {
@@ -345,16 +351,16 @@ pub fn evict_low_quality(
     let candidates: Vec<u64> = tetras
         .iter()
         .filter(|t| {
-            let is_junk = t.data.labels.iter().any(|l| l == "junk");
-            let is_auto = t.data.labels.iter().any(|l| l == "auto-extracted");
+            let is_junk = t.labels.iter().any(|l| l == "junk");
+            let is_auto = t.labels.iter().any(|l| l == "auto-extracted");
             let low_mass = t.mass
                 < ctx
                     .adaptive
                     .get(super::adaptive::Param::EvictionMassThreshold);
-            let is_test = t.data.content.len() < 20
-                || t.data.content.starts_with("test ")
-                || t.data.content.starts_with("persistence-test")
-                || t.data.content.starts_with("[session] accomplished: test");
+            let is_test = t.content.chars().count() < 20  // P1-24修复:字节长度→字符长度(CJK安全)
+                || t.content.starts_with("test ")
+                || t.content.starts_with("persistence-test")
+                || t.content.starts_with("[session] accomplished: test");
             is_junk || (is_auto && low_mass) || (low_mass && is_test)
         })
         .take(20)
@@ -405,12 +411,8 @@ pub fn perform_fission_from_snap(
         return None;
     }
     let entropy = dynamics::compute_entropy_from_labels(&cluster.tetra_ids, labels_map);
-    if !ctx.energy.consume(energy_cost) {
-        tracing::warn!("[{}] fission: insufficient energy", tag);
-        return None;
-    }
 
-    let mut label_map: HashMap<String, Vec<u64>> = HashMap::new();
+    let mut label_counts: HashMap<&str, usize> = HashMap::new();
     for &id in &cluster.tetra_ids {
         if let Some(labels) = labels_map.get(&id) {
             if labels
@@ -419,23 +421,92 @@ pub fn perform_fission_from_snap(
             {
                 continue;
             }
-            let key = labels.first().map(|s| s.as_str()).unwrap_or("general");
-            label_map.entry(key.to_string()).or_default().push(id);
+            for l in labels {
+                *label_counts.entry(l.as_str()).or_default() += 1;
+            }
         }
     }
-    let mut sorted_groups: Vec<(String, Vec<u64>)> = label_map.into_iter().collect();
-    sorted_groups.sort_by_key(|b| std::cmp::Reverse(b.1.len()));
-    if sorted_groups.len() < 2 {
+
+    let total: usize = cluster.tetra_ids.len();
+    let best_split = label_counts
+        .iter()
+        .map(|(&label, &count)| {
+            let ratio = count as f64 / total.max(1) as f64;
+            let score = (ratio - 0.5).abs();
+            (label, count, score, ratio)
+        })
+        .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+
+    let (dominant_label, dominant_ids, minority_ids): (String, HashSet<u64>, Vec<u64>) =
+        match best_split {
+            Some((label, count, _, ratio)) if ratio > 0.0 && ratio < 1.0 && count > 0 => {
+                let dom: HashSet<u64> = cluster
+                    .tetra_ids
+                    .iter()
+                    .filter(|&&id| {
+                        labels_map.get(&id).is_some_and(|ls| {
+                            !ls.iter()
+                                .any(|l| l.starts_with("meta-") || l.starts_with("bridge"))
+                                && ls.iter().any(|l| l.as_str() == label)
+                        })
+                    })
+                    .copied()
+                    .collect();
+                let min: Vec<u64> = cluster
+                    .tetra_ids
+                    .iter()
+                    .filter(|&&id| {
+                        labels_map.get(&id).is_some_and(|ls| {
+                            !ls.iter()
+                                .any(|l| l.starts_with("meta-") || l.starts_with("bridge"))
+                                && !ls.iter().any(|l| l.as_str() == label)
+                        })
+                    })
+                    .copied()
+                    .collect();
+                (label.to_string(), dom, min)
+            }
+            _ => {
+                let mut label_map: HashMap<String, Vec<u64>> = HashMap::new();
+                for &id in &cluster.tetra_ids {
+                    if let Some(labels) = labels_map.get(&id) {
+                        if labels
+                            .iter()
+                            .any(|l| l.starts_with("meta-") || l.starts_with("bridge"))
+                        {
+                            continue;
+                        }
+                        let key = labels.first().map(|s| s.as_str()).unwrap_or("general");
+                        label_map.entry(key.to_string()).or_default().push(id);
+                    }
+                }
+                let mut sorted_groups: Vec<(String, Vec<u64>)> = label_map.into_iter().collect();
+                sorted_groups.sort_by_key(|b| std::cmp::Reverse(b.1.len()));
+                if sorted_groups.len() < 2 {
+                    tracing::debug!(
+                        "[AutoFission] cluster {} cannot split: all same labels, entropy={:.3}",
+                        cluster_index,
+                        entropy
+                    );
+                    return None;
+                }
+                let dom_label = sorted_groups[0].0.clone();
+                let dom: HashSet<u64> = sorted_groups[0].1.iter().copied().collect();
+                let min: Vec<u64> = sorted_groups
+                    .iter()
+                    .skip(1)
+                    .flat_map(|(_, ids)| ids.iter().copied())
+                    .collect();
+                (dom_label, dom, min)
+            }
+        };
+
+    if minority_ids.is_empty() || dominant_ids.is_empty() {
         return None;
     }
-    let dominant_label = &sorted_groups[0].0;
-    let dominant_ids: HashSet<u64> = sorted_groups[0].1.iter().copied().collect();
-    let minority_ids: Vec<u64> = sorted_groups
-        .iter()
-        .skip(1)
-        .flat_map(|(_, ids)| ids.iter().copied())
-        .collect();
-    if minority_ids.is_empty() {
+
+    if !ctx.energy.consume(energy_cost) {
+        tracing::warn!("[{}] fission: insufficient energy", tag);
         return None;
     }
 
@@ -461,23 +532,16 @@ pub fn perform_fission_from_snap(
         }
     }
 
-    let minority_labels: Vec<&str> = sorted_groups
-        .iter()
-        .skip(1)
-        .map(|(l, _)| l.as_str())
-        .take(3)
-        .collect();
     if moved_count > 0 {
         ctx.gateway.rebuild_hnsw();
     }
     tracing::info!(
-        "[{}] fission cluster {} COMPLETE: kept '{}' ({}), moved {} from [{}], entropy={:.3}",
+        "[{}] fission cluster {} COMPLETE: kept '{}' ({}), moved {} minority, entropy={:.3}",
         tag,
         cluster_index,
         dominant_label,
         dominant_ids.len(),
         moved_count,
-        minority_labels.join(","),
         entropy
     );
     Some(FissionResult { moved_count, tick })

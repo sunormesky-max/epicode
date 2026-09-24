@@ -1,5 +1,4 @@
 use crate::domain::space::Space;
-use crate::domain::tetra::Tetrahedron;
 
 use super::cognitive::CognitiveEngine;
 use super::gateway::GatewayCenter;
@@ -12,10 +11,14 @@ pub struct CognitiveHooksCtx<'a> {
     pub cognitive: &'a CognitiveEngine,
 }
 
-pub fn generate_aliases(ctx: &CognitiveHooksCtx, round: usize, tetras: &[Tetrahedron]) {
+pub fn generate_aliases(
+    ctx: &CognitiveHooksCtx,
+    round: usize,
+    tetras: &[crate::domain::tetra::TetraMeta],
+) {
     let content_tetras: Vec<_> = tetras
         .iter()
-        .filter(|t| !t.data.labels.iter().any(|l| l.starts_with("meta-")))
+        .filter(|t| !t.labels.iter().any(|l| l.starts_with("meta-")))
         .collect();
     let total = content_tetras.len();
     if total == 0 {
@@ -27,7 +30,7 @@ pub fn generate_aliases(ctx: &CognitiveHooksCtx, round: usize, tetras: &[Tetrahe
         .cycle()
         .skip(offset)
         .take(8)
-        .map(|t| (t.id, t.data.content.clone(), t.data.labels.clone()))
+        .map(|t| (t.id, t.content.clone(), t.labels.clone()))
         .collect();
 
     if needs_aliases.is_empty() {
@@ -78,12 +81,15 @@ pub fn generate_aliases(ctx: &CognitiveHooksCtx, round: usize, tetras: &[Tetrahe
     }
 }
 
-pub fn reclassify_memories(ctx: &CognitiveHooksCtx, round: usize, tetras: &[Tetrahedron]) {
+pub fn reclassify_memories(
+    ctx: &CognitiveHooksCtx,
+    round: usize,
+    tetras: &[crate::domain::tetra::TetraMeta],
+) {
     let content_tetras: Vec<_> = tetras
         .iter()
         .filter(|t| {
-            !t.data
-                .labels
+            !t.labels
                 .iter()
                 .any(|l| l.starts_with("meta-") || l.starts_with("bridge"))
         })
@@ -105,12 +111,12 @@ pub fn reclassify_memories(ctx: &CognitiveHooksCtx, round: usize, tetras: &[Tetr
 
     for t in &targets {
         let id = t.id;
-        let old_labels = t.data.labels.clone();
+        let old_labels = t.labels.clone();
         if old_labels.is_empty() {
             continue;
         }
 
-        if let Ok(new_labels) = ctx.cognitive.classify_content(&t.data.content) {
+        if let Ok(new_labels) = ctx.cognitive.classify_content(&t.content) {
             if new_labels != old_labels {
                 if let Err(e) = ctx.space.update_labels(id, new_labels.clone()) {
                     tracing::warn!("[Reclassify] update labels failed for {}: {}", id, e);
@@ -132,13 +138,17 @@ pub fn reclassify_memories(ctx: &CognitiveHooksCtx, round: usize, tetras: &[Tetr
     }
 }
 
-pub fn extract_entities(ctx: &CognitiveHooksCtx, round: usize, tetras: &[Tetrahedron]) {
+pub fn extract_entities(
+    ctx: &CognitiveHooksCtx,
+    round: usize,
+    tetras: &[crate::domain::tetra::TetraMeta],
+) {
     let content_tetras: Vec<_> = tetras
         .iter()
         .filter(|t| {
-            !t.data.labels.iter().any(|l| l.starts_with("meta-"))
-                && !t.data.labels.iter().any(|l| l.starts_with("entity:"))
-                && !t.data.content.is_empty()
+            !t.labels.iter().any(|l| l.starts_with("meta-"))
+                && !t.labels.iter().any(|l| l.starts_with("entity."))
+                && !t.content.is_empty()
         })
         .collect();
     let total = content_tetras.len();
@@ -152,7 +162,7 @@ pub fn extract_entities(ctx: &CognitiveHooksCtx, round: usize, tetras: &[Tetrahe
         .cycle()
         .skip(offset)
         .take(5)
-        .map(|t| (t.id, t.data.content.clone()))
+        .map(|t| (t.id, t.content.clone()))
         .collect();
 
     if batch.is_empty() {

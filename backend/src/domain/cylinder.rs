@@ -6,8 +6,10 @@ use super::vertex::{Point3, VertexId};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CylinderLayer {
     Instinct,
+    Relation,
     Cognitive,
     Service,
+    Cycle,
     Identity,
 }
 
@@ -15,8 +17,10 @@ impl CylinderLayer {
     pub fn all() -> &'static [CylinderLayer] {
         &[
             CylinderLayer::Instinct,
+            CylinderLayer::Relation,
             CylinderLayer::Cognitive,
             CylinderLayer::Service,
+            CylinderLayer::Cycle,
             CylinderLayer::Identity,
         ]
     }
@@ -29,6 +33,14 @@ impl CylinderLayer {
             || lower_joined.contains("identity")
         {
             return CylinderLayer::Identity;
+        }
+        if lower
+            .iter()
+            .any(|l| l == "cycle" || l == "loop" || l == "proactive" || l == "initiative")
+            || lower_joined.contains("主动")
+            || lower_joined.contains("循环")
+        {
+            return CylinderLayer::Cycle;
         }
         if lower.iter().any(|l| {
             l == "engineering"
@@ -55,24 +67,51 @@ impl CylinderLayer {
         }) {
             return CylinderLayer::Cognitive;
         }
+        if lower.iter().any(|l| {
+            l == "relation"
+                || l == "knowledge-graph"
+                || l == "kg"
+                || l == "concept"
+                || l == "entity"
+        }) || lower_joined.contains("关系")
+            || lower_joined.contains("图谱")
+            || lower_joined.contains("知识")
+        {
+            return CylinderLayer::Relation;
+        }
         CylinderLayer::Instinct
     }
 
     pub fn index(self) -> usize {
         match self {
             CylinderLayer::Instinct => 0,
-            CylinderLayer::Cognitive => 1,
-            CylinderLayer::Service => 2,
-            CylinderLayer::Identity => 3,
+            CylinderLayer::Relation => 1,
+            CylinderLayer::Cognitive => 2,
+            CylinderLayer::Service => 3,
+            CylinderLayer::Cycle => 4,
+            CylinderLayer::Identity => 5,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CylinderLayer::Instinct => "instinct",
+            CylinderLayer::Relation => "relation",
+            CylinderLayer::Cognitive => "cognitive",
+            CylinderLayer::Service => "service",
+            CylinderLayer::Cycle => "cycle",
+            CylinderLayer::Identity => "identity",
         }
     }
 
     pub fn from_index(i: usize) -> Option<Self> {
         match i {
             0 => Some(CylinderLayer::Instinct),
-            1 => Some(CylinderLayer::Cognitive),
-            2 => Some(CylinderLayer::Service),
-            3 => Some(CylinderLayer::Identity),
+            1 => Some(CylinderLayer::Relation),
+            2 => Some(CylinderLayer::Cognitive),
+            3 => Some(CylinderLayer::Service),
+            4 => Some(CylinderLayer::Cycle),
+            5 => Some(CylinderLayer::Identity),
             _ => None,
         }
     }
@@ -250,7 +289,7 @@ pub struct HealthReport {
     pub pulses_sent: usize,
     pub pulses_returned: usize,
     pub broken_ports: usize,
-    pub layer_reports: [LayerHealth; 4],
+    pub layer_reports: [LayerHealth; 6],
 }
 
 #[derive(Debug, Clone, Default)]
@@ -273,7 +312,7 @@ impl LayerHealth {
 }
 
 const INITIAL_RADIUS: f64 = 2.0;
-const INITIAL_HEIGHT: f64 = 8.0;
+const INITIAL_HEIGHT: f64 = 12.0;
 const INNER_RADIUS_RATIO: f64 = 0.3;
 const PORTS_PER_RING: usize = 8;
 const RING_SPACING: f64 = 1.0;
@@ -282,7 +321,7 @@ pub struct Cylinder {
     radius: f64,
     height: f64,
     inner_radius: f64,
-    zones: [LayerZone; 4],
+    zones: [LayerZone; 6],
     ports: Vec<Port>,
     next_vertex_id: VertexId,
     identity: Option<IdentityInfo>,
@@ -298,7 +337,7 @@ impl Default for Cylinder {
 impl Cylinder {
     pub fn new() -> Self {
         let inner_radius = INITIAL_RADIUS * INNER_RADIUS_RATIO;
-        let layer_height = INITIAL_HEIGHT / 4.0;
+        let layer_height = INITIAL_HEIGHT / 6.0;
 
         let zones = [
             LayerZone {
@@ -307,18 +346,28 @@ impl Cylinder {
                 z_max: layer_height,
             },
             LayerZone {
-                layer: CylinderLayer::Cognitive,
+                layer: CylinderLayer::Relation,
                 z_min: layer_height,
                 z_max: layer_height * 2.0,
             },
             LayerZone {
-                layer: CylinderLayer::Service,
+                layer: CylinderLayer::Cognitive,
                 z_min: layer_height * 2.0,
                 z_max: layer_height * 3.0,
             },
             LayerZone {
-                layer: CylinderLayer::Identity,
+                layer: CylinderLayer::Service,
                 z_min: layer_height * 3.0,
+                z_max: layer_height * 4.0,
+            },
+            LayerZone {
+                layer: CylinderLayer::Cycle,
+                z_min: layer_height * 4.0,
+                z_max: layer_height * 5.0,
+            },
+            LayerZone {
+                layer: CylinderLayer::Identity,
+                z_min: layer_height * 5.0,
                 z_max: INITIAL_HEIGHT,
             },
         ];
@@ -435,18 +484,18 @@ impl Cylinder {
             .ports
             .iter_mut()
             .find(|p| p.id == port_id)
-            .ok_or_else(|| format!("port {port_id} not found"))?;
+            .ok_or_else(|| format!("port {} not found", port_id))?;
         if !port.is_free() {
-            return Err(format!("port {port_id} is not free"));
+            return Err(format!("port {} is not free", port_id));
         }
         port.assign(tetra_id);
         Ok(())
     }
 
     pub fn expand(&mut self) {
-        let old_layer_height = self.height / 4.0;
-        self.height += 4.0;
-        let new_layer_height = self.height / 4.0;
+        let old_layer_height = self.height / 6.0;
+        self.height += 6.0;
+        let new_layer_height = self.height / 6.0;
 
         for zone in &mut self.zones {
             let idx = zone.layer.index();
@@ -542,7 +591,7 @@ impl Cylinder {
     }
 
     pub fn health_check(&self, reports: &[PulseReport]) -> HealthReport {
-        let mut layer_reports: [LayerHealth; 4] = Default::default();
+        let mut layer_reports: [LayerHealth; 6] = Default::default();
         for (i, lh) in layer_reports.iter_mut().enumerate() {
             lh.layer = CylinderLayer::from_index(i);
         }
@@ -739,7 +788,8 @@ mod tests {
             if layer.has_ports() {
                 assert!(
                     c.free_port_count(*layer) > 0,
-                    "{layer:?} should have free ports"
+                    "{:?} should have free ports",
+                    layer
                 );
             }
         }
@@ -817,5 +867,81 @@ mod tests {
         for layer in CylinderLayer::all() {
             assert_eq!(CylinderLayer::from_index(layer.index()), Some(*layer));
         }
+    }
+
+    #[test]
+    fn six_layer_structure() {
+        let c = Cylinder::new();
+        assert_eq!(c.zones.len(), 6, "should have 6 zones");
+
+        let layer_height = 12.0 / 6.0;
+        for (i, zone) in c.zones.iter().enumerate() {
+            let expected_min = i as f64 * layer_height;
+            let expected_max = (i as f64 + 1.0) * layer_height;
+            assert!(
+                (zone.z_min - expected_min).abs() < 1e-6,
+                "zone {} z_min mismatch",
+                i
+            );
+            assert!(
+                (zone.z_max - expected_max).abs() < 1e-6,
+                "zone {} z_max mismatch",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn identity_layer_has_no_ports() {
+        let _c = Cylinder::new();
+        assert!(
+            !CylinderLayer::Identity.has_ports(),
+            "Identity layer must not have ports"
+        );
+        for layer in CylinderLayer::all() {
+            if *layer != CylinderLayer::Identity {
+                assert!(layer.has_ports(), "{:?} should have ports", layer);
+            }
+        }
+    }
+
+    #[test]
+    fn port_vertex_ids_start_at_one_million() {
+        let c = Cylinder::new();
+        for port in c.all_ports() {
+            assert!(
+                port.id >= 1_000_000,
+                "port vid {} must be >= 1_000_000",
+                port.id
+            );
+        }
+    }
+
+    #[test]
+    fn from_labels_six_way() {
+        assert_eq!(
+            CylinderLayer::from_labels(&["identity".into()]),
+            CylinderLayer::Identity
+        );
+        assert_eq!(
+            CylinderLayer::from_labels(&["cycle".into()]),
+            CylinderLayer::Cycle
+        );
+        assert_eq!(
+            CylinderLayer::from_labels(&["engineering".into()]),
+            CylinderLayer::Service
+        );
+        assert_eq!(
+            CylinderLayer::from_labels(&["ai".into()]),
+            CylinderLayer::Cognitive
+        );
+        assert_eq!(
+            CylinderLayer::from_labels(&["knowledge-graph".into()]),
+            CylinderLayer::Relation
+        );
+        assert_eq!(
+            CylinderLayer::from_labels(&["random".into()]),
+            CylinderLayer::Instinct
+        );
     }
 }

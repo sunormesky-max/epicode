@@ -6,21 +6,6 @@ use epicode::engine::mcp::McpHandler;
 use epicode::engine::user_manager::UserManager;
 use epicode::engine::Engine;
 
-fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(format!("EPICODE_{}", name))
-        .or_else(|_| std::env::var(format!("TETRAMEM_{}", name)))
-}
-
-fn parse_directive(s: &str) -> tracing_subscriber::filter::Directive {
-    match s.parse() {
-        Ok(d) => d,
-        Err(e) => {
-            tracing::error!("invalid tracing directive '{}': {}", s, e);
-            std::process::exit(1);
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() {
     // tokio runtime needed for Engine::start() which uses tokio::spawn internally
@@ -32,13 +17,14 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(parse_directive("epicode=warn"))
-                .add_directive(parse_directive("epicode_mcp=info")),
+                .add_directive("epicode=warn".parse().unwrap())
+                .add_directive("epicode_mcp=info".parse().unwrap()),
         )
         .with_writer(io::stderr)
         .init();
 
-    let is_multi_user = env_var("PORT").is_ok() || env_var("MULTI_USER").is_ok();
+    let is_multi_user =
+        std::env::var("TETRAMEM_PORT").is_ok() || std::env::var("TETRAMEM_MULTI_USER").is_ok();
 
     if is_multi_user {
         run_multi_user_server(data_dir);
@@ -86,7 +72,7 @@ fn run_single_user(data_dir: PathBuf) {
             tracing::warn!("slow request: {}ms", t.elapsed().as_millis());
         }
 
-        if let Err(e) = writeln!(stdout, "{response}") {
+        if let Err(e) = writeln!(stdout, "{}", response) {
             tracing::error!("stdout write error: {}", e);
             break;
         }
@@ -114,12 +100,12 @@ fn run_multi_user_server(data_dir: PathBuf) {
         Arc::new(UserManager::new(&data_dir))
     };
 
-    let port: u16 = env_var("PORT")
+    let port: u16 = std::env::var("TETRAMEM_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(19100);
-    let bind_addr = env_var("BIND").unwrap_or_else(|_| "127.0.0.1".into());
-    let addr = format!("{bind_addr}:{port}");
+    let bind_addr = std::env::var("TETRAMEM_BIND").unwrap_or_else(|_| "127.0.0.1".into());
+    let addr = format!("{}:{}", bind_addr, port);
 
     let listener = match std::net::TcpListener::bind(&addr) {
         Ok(l) => l,
@@ -169,14 +155,11 @@ fn handle_authenticated_connection(
     use std::io::{BufReader, BufWriter};
 
     stream.set_nonblocking(false).ok();
-    let reader_stream = match stream.try_clone() {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!("failed to clone stream for {}: {}", peer, e);
-            return;
-        }
-    };
-    let reader = BufReader::new(reader_stream);
+    let reader = BufReader::new(
+        stream
+            .try_clone()
+            .unwrap_or_else(|_| stream.try_clone().expect("failed to clone stream")),
+    );
     let mut writer = BufWriter::new(stream);
 
     let mut handler: Option<Arc<McpHandler>> = None;
@@ -199,7 +182,7 @@ fn handle_authenticated_connection(
                                 "jsonrpc": "2.0", "id": extract_id(trimmed),
                                 "result": {"status": "authenticated", "user_id": user_id}
                             });
-                            if let Err(e) = writeln!(writer, "{resp}") {
+                            if let Err(e) = writeln!(writer, "{}", resp) {
                                 tracing::warn!("write error to {}: {}", peer, e);
                                 break;
                             }
@@ -209,7 +192,7 @@ fn handle_authenticated_connection(
                             continue;
                         }
                         Err(resp_str) => {
-                            if let Err(_e) = writeln!(writer, "{resp_str}") {
+                            if let Err(_e) = writeln!(writer, "{}", resp_str) {
                                 break;
                             }
                             if writer.flush().is_err() {
@@ -234,7 +217,7 @@ fn handle_authenticated_connection(
                             t.elapsed().as_millis()
                         );
                     }
-                    if let Err(e) = writeln!(writer, "{response}") {
+                    if let Err(e) = writeln!(writer, "{}", response) {
                         tracing::warn!("write error to {}: {}", peer, e);
                         break;
                     }
@@ -317,7 +300,7 @@ fn do_final_save_handler(handler: &McpHandler) {
 }
 
 fn resolve_data_dir() -> PathBuf {
-    if let Ok(dir) = env_var("DATA_DIR") {
+    if let Ok(dir) = std::env::var("TETRAMEM_DATA_DIR") {
         return PathBuf::from(dir);
     }
     let mut dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));

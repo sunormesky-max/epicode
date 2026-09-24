@@ -1,5 +1,15 @@
 use crate::domain::tetra::MemoryPayload;
-use crate::util::truncate_str;
+
+fn truncate_str(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
 
 pub struct IntakeResult {
     pub labels: Vec<String>,
@@ -638,10 +648,10 @@ mod tests {
             enforced: false,
             rationale: None,
             access_count: 0,
-            quality_score: 1.0,
             memory_type: None,
-            valid_from: None,
-            valid_until: None,
+            identity_stamp: None,
+            source_agent: None,
+            ..Default::default()
         };
         let similar = vec![(1u64, 0.85f64, 0.5f64, payload)];
         let conflicts = MemoryIntake::check_conflict(

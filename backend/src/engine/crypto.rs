@@ -1,18 +1,14 @@
 use aes_gcm::{
-    aead::{rand_core::RngCore, Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit, OsRng},
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use hmac::{Hmac, Mac};
+use rand::RngCore;
 use sha2::Sha256;
 use zeroize::Zeroize;
 
 type HmacSha256 = Hmac<Sha256>;
-
-fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(format!("EPICODE_{}", name))
-        .or_else(|_| std::env::var(format!("TETRAMEM_{}", name)))
-}
 
 pub fn constant_time_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
@@ -42,11 +38,11 @@ pub struct CryptoEngine {
 
 impl CryptoEngine {
     pub fn from_env() -> Result<Self, String> {
-        let key_b64 = env_var("MASTER_KEY")
-            .map_err(|_| "EPICODE_MASTER_KEY (or TETRAMEM_MASTER_KEY) not set".to_string())?;
+        let key_b64 = std::env::var("TETRAMEM_MASTER_KEY")
+            .map_err(|_| "TETRAMEM_MASTER_KEY not set".to_string())?;
         let key = STANDARD
             .decode(&key_b64)
-            .map_err(|e| format!("invalid master key base64: {e}"))?;
+            .map_err(|e| format!("invalid master key base64: {}", e))?;
         if key.len() != 32 {
             return Err("master key must be 32 bytes (base64-encoded)".to_string());
         }
@@ -82,13 +78,13 @@ impl CryptoEngine {
     pub fn encrypt(&self, plaintext: &[u8], context_key: &[u8]) -> Result<Vec<u8>, String> {
         let mut derived = self.derive_aes_key(context_key);
         let cipher =
-            Aes256Gcm::new_from_slice(&derived).map_err(|e| format!("cipher init: {e}"))?;
+            Aes256Gcm::new_from_slice(&derived).map_err(|e| format!("cipher init: {}", e))?;
         let mut nonce_bytes = [0u8; 12];
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
         let mut ciphertext = cipher
             .encrypt(nonce, plaintext)
-            .map_err(|e| format!("encrypt: {e}"))?;
+            .map_err(|e| format!("encrypt: {}", e))?;
         let mut output = Vec::with_capacity(12 + ciphertext.len());
         output.extend_from_slice(&nonce_bytes);
         output.append(&mut ciphertext);
@@ -103,11 +99,11 @@ impl CryptoEngine {
         let (nonce_bytes, ciphertext) = data.split_at(12);
         let mut derived = self.derive_aes_key(context_key);
         let cipher =
-            Aes256Gcm::new_from_slice(&derived).map_err(|e| format!("cipher init: {e}"))?;
+            Aes256Gcm::new_from_slice(&derived).map_err(|e| format!("cipher init: {}", e))?;
         let nonce = Nonce::from_slice(nonce_bytes);
         let result = cipher
             .decrypt(nonce, ciphertext)
-            .map_err(|e| format!("decrypt: {e}"));
+            .map_err(|e| format!("decrypt: {}", e));
         derived.zeroize();
         result
     }
@@ -123,10 +119,10 @@ impl CryptoEngine {
         let mut context = self.user_context(user_id);
         let data = STANDARD
             .decode(encrypted)
-            .map_err(|e| format!("base64 decode: {e}"))?;
+            .map_err(|e| format!("base64 decode: {}", e))?;
         let decrypted = self.decrypt(&data, &context)?;
         context.zeroize();
-        String::from_utf8(decrypted).map_err(|e| format!("utf8: {e}"))
+        String::from_utf8(decrypted).map_err(|e| format!("utf8: {}", e))
     }
 
     pub fn encrypt_embedding(&self, embedding: &[f64], user_id: &str) -> Result<Vec<u8>, String> {
@@ -147,7 +143,11 @@ impl CryptoEngine {
             .as_chunks::<8>()
             .0
             .iter()
-            .map(|chunk| f64::from_le_bytes(*chunk))
+            .map(|chunk| {
+                f64::from_le_bytes([
+                    chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
+                ])
+            })
             .collect());
         context.zeroize();
         result
@@ -184,13 +184,13 @@ pub struct UserKey {
 impl UserKey {
     pub fn encrypt_data(&self, plaintext: &[u8]) -> Result<Vec<u8>, String> {
         let cipher =
-            Aes256Gcm::new_from_slice(&self.key).map_err(|e| format!("cipher init: {e}"))?;
+            Aes256Gcm::new_from_slice(&self.key).map_err(|e| format!("cipher init: {}", e))?;
         let mut nonce_bytes = [0u8; 12];
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
         let mut ciphertext = cipher
             .encrypt(nonce, plaintext)
-            .map_err(|e| format!("encrypt: {e}"))?;
+            .map_err(|e| format!("encrypt: {}", e))?;
         let mut output = Vec::with_capacity(12 + ciphertext.len());
         output.extend_from_slice(&nonce_bytes);
         output.append(&mut ciphertext);
@@ -203,11 +203,11 @@ impl UserKey {
         }
         let (nonce_bytes, ciphertext) = data.split_at(12);
         let cipher =
-            Aes256Gcm::new_from_slice(&self.key).map_err(|e| format!("cipher init: {e}"))?;
+            Aes256Gcm::new_from_slice(&self.key).map_err(|e| format!("cipher init: {}", e))?;
         let nonce = Nonce::from_slice(nonce_bytes);
         cipher
             .decrypt(nonce, ciphertext)
-            .map_err(|e| format!("decrypt: {e}"))
+            .map_err(|e| format!("decrypt: {}", e))
     }
 }
 

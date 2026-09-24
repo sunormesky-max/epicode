@@ -53,11 +53,10 @@ impl DigestionEngine {
 
     fn extract_json(&self, raw: &str) -> Result<String, String> {
         let val: serde_json::Value =
-            serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {e}"))?;
+            serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {}", e))?;
         Ok(self.flatten_json_value(&val, 0))
     }
 
-    #[allow(clippy::only_used_in_recursion)]
     fn flatten_json_value(&self, val: &serde_json::Value, depth: usize) -> String {
         match val {
             serde_json::Value::String(s) => s.clone(),
@@ -76,9 +75,9 @@ impl DigestionEngine {
                     .map(|(k, v)| {
                         let child = self.flatten_json_value(v, depth + 1);
                         if child.contains('\n') {
-                            format!("{indent}{k}:\n{child}")
+                            format!("{}{}:\n{}", indent, k, child)
                         } else {
-                            format!("{indent}{k}: {child}")
+                            format!("{}{}: {}", indent, k, child)
                         }
                     })
                     .collect::<Vec<_>>()
@@ -101,7 +100,7 @@ impl DigestionEngine {
             for (i, field) in fields.iter().enumerate() {
                 if let Some(header) = headers.get(i) {
                     if !field.is_empty() {
-                        parts.push(format!("{header}: {field}"));
+                        parts.push(format!("{}: {}", header, field));
                     }
                 }
             }
@@ -143,24 +142,64 @@ impl DigestionEngine {
         let mut labels_map = Vec::new();
         let mut skipped = 0usize;
 
-        for chunk in &chunks {
-            let text = chunk.content.trim().to_string();
-            if text.is_empty() {
-                skipped += 1;
-                continue;
-            }
+        // 突破2：并发预分类 + 串行创建。
+        // 瓶颈是 classify_chunk（LLM 调用 1-3s/chunk）。预分类可并发（无状态 HTTP），
+        // create_memory 必须串行（持 Space 写锁）。并发度限制为 4 避免压垮 LLM API。
+        let prepared: Vec<(usize, String, Vec<String>)> = {
+            let texts: Vec<(usize, String)> = chunks
+                .iter()
+                .map(|c| (c.index, c.content.trim().to_string()))
+                .filter(|(_, t)| !t.is_empty())
+                .collect();
+            let cognitive = &self.cognitive;
+            // 用 thread::scope 并发分类（cognitive 是 Arc，线程安全）
+            std::thread::scope(|s| {
+                let handles: Vec<_> = texts
+                    .chunks(4)
+                    .map(|batch| {
+                        s.spawn(move || {
+                            batch
+                                .iter()
+                                .map(|(idx, text)| {
+                                    let labels = cognitive
+                                        .classify_content(text)
+                                        .unwrap_or_else(|_| vec!["general".to_string()]);
+                                    (*idx, text.clone(), labels)
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .flat_map(|h| h.join().unwrap_or_default())
+                    .collect()
+            })
+        };
+        let prep_count = prepared.len();
+        tracing::info!(
+            "[Digestion] parallel classify done: {} chunks classified",
+            prep_count
+        );
 
-            let labels = self.classify_chunk(&text);
-
+        for (idx, text, labels) in &prepared {
             let enriched = if !source.is_empty() {
-                format!("{text}\n[source: {source}]")
+                format!("{}\n[source: {}]", text, source)
             } else {
                 text.clone()
             };
 
-            match self.scheduler.api_remember(&enriched) {
+            // M1修复: 用预分类标签直接创建，避免 api_remember 内部再次调 LLM classify。
+            let mut pre_labels = labels.clone();
+            if !pre_labels.iter().any(|l| l == "digested") {
+                pre_labels.push("digested".to_string());
+            }
+            match self
+                .scheduler
+                .api_remember_with_labels(&enriched, pre_labels.clone())
+            {
                 Ok((id, auto_labels)) => {
-                    let mut final_labels = labels;
+                    let mut final_labels = pre_labels;
                     for l in &auto_labels {
                         if !final_labels.contains(l) {
                             final_labels.push(l.clone());
@@ -180,7 +219,7 @@ impl DigestionEngine {
                     ids.push(id);
                 }
                 Err(e) => {
-                    tracing::warn!("[Digestion] chunk {} failed: {}", chunk.index, e);
+                    tracing::warn!("[Digestion] chunk {} failed: {}", idx, e);
                     skipped += 1;
                 }
             }
@@ -280,6 +319,7 @@ impl DigestionEngine {
         result
     }
 
+    #[allow(dead_code)] // 集成清偿
     fn classify_chunk(&self, text: &str) -> Vec<String> {
         if self.cognitive.enabled() {
             match self.cognitive.classify_content(text) {
@@ -295,6 +335,7 @@ impl DigestionEngine {
         self.heuristic_classify(text)
     }
 
+    #[allow(dead_code)] // 集成清偿
     fn heuristic_classify(&self, text: &str) -> Vec<String> {
         let lower = text.to_lowercase();
         let mut labels = Vec::new();
