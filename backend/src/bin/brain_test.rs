@@ -139,6 +139,9 @@ fn main() {
                     epicode::engine::cognitive::SchedulerAction::Reflect { observation, insight } => {
                         println!("    {}. reflect: {} | {}", i+1, observation, insight);
                     }
+                    epicode::engine::cognitive::SchedulerAction::ActOutward { intent, description, evidence } => {
+                        println!("    {}. act_outward({}): {} | evidence={:?}", i+1, intent, description, evidence);
+                    }
                 }
             }
 
