@@ -312,17 +312,6 @@ impl RetrievalEngine {
         intent: &SearchIntent,
         max_results: usize,
     ) {
-        let now = chrono::Utc::now().timestamp();
-
-        // Filter out expired or not-yet-valid memories
-        results.retain(|(id, _, _, payload)| {
-            let valid = payload.is_valid_at(now);
-            if !valid {
-                tracing::debug!("[Retrieval] excluded expired memory id={id}");
-            }
-            valid
-        });
-
         for (_id, vec_sim, _bm25, payload) in results.iter_mut() {
             let mut bonus = 0.0_f64;
 
@@ -340,16 +329,12 @@ impl RetrievalEngine {
                 }
             }
 
-            // Freshness — replaces the raw temporal-recency heuristic.
-            // Uses MemoryPayload::freshness_score() which accounts for valid_until if set.
-            {
-                let freshness = payload.freshness_score(now);
-                let weight = if intent.temporal_boost > 1.0 {
-                    intent.temporal_boost * 0.15
-                } else {
-                    0.05
-                };
-                bonus += freshness * weight;
+            // Temporal recency — exponential decay
+            if intent.temporal_boost > 1.0 {
+                let age_days =
+                    (chrono::Utc::now().timestamp() - payload.timestamp) as f64 / 86400.0;
+                let recency = (-age_days * 0.1).exp();
+                bonus += recency * intent.temporal_boost * 0.15;
             }
 
             // Access frequency — logarithmic, capped contribution
@@ -399,6 +384,41 @@ impl RetrievalEngine {
         results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         results.truncate(max_results);
     }
+
+    /// Phase 1 检索可信度重建: Exact 模式专用 — 只做 exclude 负过滤, 不做 boost/重排
+    ///
+    /// 设计: exact 模式短路了语义 rerank(会覆盖精确 BM25 分), 但 exclude_terms
+    /// (查询里的"排除"语义)是有用的负过滤, 即使 exact 模式也应生效。
+    /// 此函数只对含 exclude term 的结果施加惩罚, 保持 search() 返回的精确顺序。
+    pub fn apply_exclude_only(
+        results: &mut Vec<(u64, f64, f64, MemoryPayload)>,
+        intent: &SearchIntent,
+    ) {
+        if intent.exclude_terms.is_empty() {
+            return;
+        }
+        for (_id, score, _bm25, payload) in results.iter_mut() {
+            let content_lower = payload.content.to_lowercase();
+            let exclude_hits = intent
+                .exclude_terms
+                .iter()
+                .filter(|t| content_lower.contains(t.as_str()))
+                .count();
+            if exclude_hits > 0 {
+                *score -= 0.5 * exclude_hits as f64;
+                tracing::info!(
+                    "[Retrieval] exact-mode exclude filter: id={} penalized -{:.2} (hits={})",
+                    _id,
+                    0.5 * exclude_hits as f64,
+                    exclude_hits
+                );
+            }
+        }
+        // 重排一次(exclude 惩罚可能改变顺序), 但不加任何 boost
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // 过滤掉被 exclude 压到 0 以下的结果
+        results.retain(|(_, score, _, _)| *score > 0.0);
+    }
 }
 
 #[cfg(test)]
@@ -418,10 +438,15 @@ mod tests {
             enforced: false,
             rationale: None,
             access_count: 0,
-            quality_score: 1.0,
             memory_type: memory_type.map(|s| s.to_string()),
-            valid_from: None,
-            valid_until: None,
+            identity_stamp: None,
+            source_agent: None,
+            valid_from: 0,
+            valid_to: None,
+            last_reviewed_ts: None,
+            expired_at: None,
+            invalidated_at: None,
+            memory_class: None,
         }
     }
 

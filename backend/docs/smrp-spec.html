@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMRP — Structured Memory Response Protocol</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Source Serif Pro', 'Noto Serif SC', Georgia, 'Times New Roman', serif;
+    max-width: 760px; margin: 0 auto; padding: 2.5em 1.3em 5em;
+    color: #1a1a1a; line-height: 1.68; background: #ffffff; font-size: 16px;
+  }
+  header { border-bottom: 2px solid #222; padding-bottom: 1.1em; margin-bottom: 2em; }
+  h1 {
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 2em; margin: 0 0 .15em; letter-spacing: -.01em; color: #111;
+  }
+  .subtitle { font-size: 1.12em; color: #333; margin: 0 0 .6em; font-weight: 500; }
+  .meta {
+    font-size: .87em; color: #666; margin-top: .6em;
+    font-family: -apple-system, sans-serif; line-height: 1.7;
+  }
+  .meta span { margin-right: 1em; }
+  h2 {
+    font-family: -apple-system, sans-serif; font-size: 1.32em; color: #111;
+    border-bottom: 1px solid #d4d4d4; padding-bottom: .25em; margin: 2.4em 0 .7em;
+  }
+  h3 { font-family: -apple-system, sans-serif; font-size: 1.08em; color: #222; margin: 1.7em 0 .5em; }
+  h4 { font-family: -apple-system, sans-serif; font-size: .98em; color: #333; margin: 1.3em 0 .4em; }
+  p { margin: .6em 0; }
+  .toc {
+    background: #f7f7f7; border: 1px solid #e6e6e6; padding: .9em 1.4em;
+    font-size: .92em; font-family: -apple-system, sans-serif; line-height: 1.9;
+    margin: 1.5em 0 2em;
+  }
+  .toc h2 { border: none; margin: 0 0 .3em; font-size: 1em; }
+  .toc ul { margin: 0; padding-left: 1.2em; }
+  .toc li { list-style: none; }
+  dl { margin: .8em 0; }
+  dt { font-weight: 700; font-family: -apple-system, sans-serif; margin-top: .9em; color: #111; }
+  dd { margin: .25em 0 .5em 1.6em; }
+  pre {
+    background: #f6f6f6; border: 1px solid #e2e2e2; padding: 1em 1.1em;
+    overflow-x: auto; font-size: .86em; border-radius: 3px; line-height: 1.55;
+  }
+  code {
+    font-family: 'SF Mono', Menlo, Consolas, monospace; background: #f0f0f0;
+    padding: .08em .35em; font-size: .9em; border-radius: 2px;
+  }
+  pre code { background: none; padding: 0; }
+  .rfc2119 {
+    font-weight: 700; text-transform: uppercase; font-size: .8em; color: #a00000;
+    font-family: -apple-system, sans-serif; letter-spacing: .03em; white-space: nowrap;
+  }
+  ol, ul { padding-left: 1.6em; }
+  li { margin: .3em 0; }
+  a { color: #1955a6; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 2.5em 0; }
+  .note { font-size: .9em; color: #555; border-left: 3px solid #cfcfcf; padding-left: 1em; margin: 1em 0; }
+  footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd; font-size: .85em; color: #777; font-family: -apple-system, sans-serif; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>SMRP</h1>
+  <p class="subtitle">Structured Memory Response Protocol</p>
+  <div class="meta">
+    <div><span>版本: 1.0 (Final)</span><span>状态: 已实现</span><span>分类: 记忆系统响应协议（实现无关）</span></div>
+    <div><span>规范者: Epicode</span><span>本版本日期: 2026-06-19</span></div>
+    <div>本页: <a href="https://epicode.cn/api/v1/smrp">https://epicode.cn/api/v1/smrp</a></div>
+  </div>
+</header>
+
+<p>
+本规范定义 <strong>SMRP</strong>（Structured Memory Response Protocol，结构化记忆响应协议），
+一种用于智能体记忆系统的响应结构契约。SMRP 要求实现者返回的记忆单元携带三种类元信息：
+<strong>角色</strong>（role）、<strong>来路</strong>（provenance）与
+<strong>拓扑位置</strong>（topology），使得消费者能够区分结果的主次、解释结果的相关性来源，
+并感知记忆在其所属结构中的位置。
+</p>
+
+<div class="toc">
+  <h2>目录</h2>
+  <ul>
+    <li>1. 概述（含动机、范围、与其他规范的关系）</li>
+    <li>2. 一致性（Conformance）</li>
+    <li>3. 术语</li>
+    <li>4. 响应信封</li>
+    <li>5. MemoryItem 结构</li>
+    <li>6. 分数可解释性</li>
+    <li>7. 工具契约</li>
+    <li>8. 版本与治理</li>
+    <li>9. 一致性等级</li>
+    <li>10. 设计依据</li>
+    <li>11. 安全考量</li>
+    <li>12. 参考文献</li>
+    <li>附录 A. 示例</li>
+    <li>附录 B. 决议记录</li>
+  </ul>
+</div>
+
+<h2>1. 概述</h2>
+
+<h3>1.1 动机</h3>
+<p>
+当前的向量数据库与检索增强生成（RAG）系统普遍以扁平、同质的 top-k 列表作为响应：
+形如 <code>[{id, content, score}, …]</code>，其中每个结果地位相等、来源不明、结构无差别。
+该约定存在三方面局限：</p>
+<ol>
+  <li>消费者无法区分结果的主次——无法判断哪些结果直接命中查询意图，哪些仅为关联扩展。</li>
+  <li>结果的相关性来源不透明——分数是纯向量相似度，还是经重要性、簇归属、时效等因素加权后的综合分，消费者无从得知。</li>
+  <li>记忆的结构性信息（所属簇、枢纽程度、几何位置）在响应阶段被丢弃。</li>
+</ol>
+<p>
+SMRP 针对上述局限定义响应语义。其依据是一个事实：记忆系统在服务一次请求的过程中，
+通常已经计算出关于"该结果为何相关"的若干副产物（by-product）——检索分数的组成、
+关联扩展的来源、记忆在其簇中的位置。SMRP 要求实现者将这些副产物以结构化方式随响应返回，
+而非在序列化阶段丢弃。
+</p>
+
+<h3>1.2 范围</h3>
+<p>本规范规定响应的<strong>结构</strong>，不规定以下内容：</p>
+<ul>
+  <li>存储模型（图、文档块、向量等均可）；</li>
+  <li>检索与排序算法；</li>
+  <li>传输协议（见 1.3）；</li>
+  <li>实现的具体内部表示。</li>
+</ul>
+
+<h3>1.3 与其他规范的关系</h3>
+<p>
+SMRP 是响应语义层协议，与传输层正交。它可承载于 JSON-RPC（例如 <a href="https://modelcontextprotocol.io">MCP</a>）、
+REST 或 gRPC 之上。本规范不规定传输方式，仅规定返回的记忆单元必须具备的结构。
+</p>
+
+<h2>2. 一致性</h2>
+<p>本规范中的关键词 <em class="rfc2119">MUST</em>、<em class="rfc2119">MUST NOT</em>、
+<em class="rfc2119">SHOULD</em>、<em class="rfc2119">SHOULD NOT</em>、<em class="rfc2119">MAY</em>
+按 <a href="https://www.rfc-editor.org/rfc/rfc2119">RFC 2119</a> 解释。</p>
+<p>
+"实现者"（Implementer）指提供 SMRP 兼容记忆后端的系统；"消费者"（Consumer）指解析 SMRP 响应的智能体或应用。
+满足第 9 节所定义的某一一致性等级的实现，<em class="rfc2119">MAY</em> 声称该等级的兼容性。
+</p>
+
+<h2>3. 术语</h2>
+<dl>
+  <dt>实现者（Implementer）</dt>
+  <dd>提供 SMRP 兼容记忆后端的系统。</dd>
+  <dt>消费者（Consumer）</dt>
+  <dd>解析并消费 SMRP 响应的智能体或应用程序。</dd>
+  <dt>MemoryItem</dt>
+  <dd>响应中一条记忆的标准化结构（见第 5 节）。</dd>
+  <dt>tier</dt>
+  <dd>记忆在本次响应中所扮演的角色（见 5.1）。</dd>
+  <dt>source</dt>
+  <dd>记忆被纳入响应的检索来源，即来路或 provenance（见 5.2）。</dd>
+  <dt>topology</dt>
+  <dd>记忆在后端结构中的位置信息，如所属簇与枢纽程度（见 5.3）。</dd>
+  <dt>Envelope（信封）</dt>
+  <dd>响应外层的 <code>protocol</code>、<code>data</code>、<code>status</code> 三段结构（见第 4 节）。</dd>
+  <dt>副产物（by-product）</dt>
+  <dd>实现者在服务一次请求时已计算、且本规范要求其随响应返回的信息。</dd>
+</dl>
+
+<h2>4. 响应信封</h2>
+<p>每个 SMRP 响应 <em class="rfc2119">MUST</em> 是一个信封对象，包含三段：</p>
+<pre><code>{
+  "protocol": { "schema_version": "1.0", "tool": "&lt;工具名&gt;", "ok": &lt;bool&gt;, "error": &lt;object|null&gt; },
+  "data":     { /* 工具特定负载，见第 7 节 */ },
+  "status":   { "identity": {…}, "space": { "memories": &lt;int&gt;, "energy": &lt;number&gt; } }
+}</code></pre>
+
+<h3>4.1 protocol 段</h3>
+<p><em class="rfc2119">MUST</em> 包含 <code>schema_version</code>（语义化版本字符串）、<code>tool</code>
+（产生该响应的工具名）、<code>ok</code>（布尔值）、<code>error</code>（失败时为 <code>{code, message}</code>，
+成功时为 null）。消费者 <em class="rfc2119">SHOULD</em> 首先读取 <code>ok</code> 字段。</p>
+
+<h3>4.2 data 段</h3>
+<p><em class="rfc2119">MUST</em> 至少包含一个结果集合或状态字段。结构由第 7 节各工具契约规定。</p>
+
+<h3>4.3 status 段</h3>
+<p><em class="rfc2119">SHOULD</em> 包含 <code>identity</code>（后端身份胶囊）与 <code>space</code>
+（轻量空间状态，如记忆总数与可用能量）。<code>status</code> 为 <em class="rfc2119">SHOULD</em> 而非
+<em class="rfc2119">MUST</em>：高频检索路径可省略以减小响应体积；变更与管理类工具 <em class="rfc2119">SHOULD</em> 附带。</p>
+
+<h2>5. MemoryItem 结构</h2>
+<p>凡返回记忆条目之处，<em class="rfc2119">MUST</em> 使用 MemoryItem 结构（可按工具语义取字段子集，
+但字段名与语义 <em class="rfc2119">MUST</em> 一致）：</p>
+<pre><code>{
+  "id": "714",
+  "content": "…",
+  "labels": ["documentation", "architecture"],
+  "timestamp": 1781840244,
+  "tier": "primary",
+  "source": ["vector", "kg"],
+  "similarity": 0.87,
+  "metrics":   { "importance": 1.9, "mass": 1.05, "memory_type": "security", "valid": true },
+  "topology":  { "cluster_id": 12, "cluster_size": 68, "is_hub": false }
+}</code></pre>
+
+<h3>5.1 tier（角色）</h3>
+<p>每个 MemoryItem <em class="rfc2119">MUST</em> 标注 tier。tier 的取值来自实现者已计算的检索信号，
+其赋值过程 <em class="rfc2119">MUST NOT</em> 引入新的运行时推理。取值定义如下：</p>
+<dl>
+  <dt>primary</dt>
+  <dd>直接命中查询意图的高置信结果（如向量相似度直接命中）。</dd>
+  <dt>contextual</dt>
+  <dd>经关联扩展（知识图谱、共现、结构）纳入，语义相关但非直接命中。</dd>
+  <dt>experiential</dt>
+  <dd>由调用方历史交互产生、且语义关联较弱的记录（运维日志、反馈、曾发生的事件）。
+  其判定采用启发式：弱语义关联且来源为历史交互类标签。</dd>
+  <dt>hub</dt>
+  <dd>同时被直接命中与关联扩展命中的记忆，通常为知识结构的承重节点。</dd>
+</dl>
+<div class="note">
+  注：实现可将已有的检索信号映射为 tier。例如 Epicode 将召回阶段的二元组
+  <code>[direct_similarity, association_similarity]</code> 映射为：
+  direct &gt; 0 且 association = 0 → primary；association &gt; 0 且 direct = 0 → contextual；
+  二者均 &gt; 0 → hub；满足 experiential 启发式者 → experiential。
+</div>
+
+<h3>5.2 source（来路 / Provenance）</h3>
+<p>source <em class="rfc2119">MUST</em> 为数组，标注该记忆被纳入响应的来源；多来源时取多值。
+允许的取值：</p>
+<dl>
+  <dt>vector</dt><dd>向量相似度检索命中。</dd>
+  <dt>kg</dt><dd>知识图谱关联扩展命中。</dd>
+  <dt>label</dt><dd>标签精确匹配。</dd>
+  <dt>temporal</dt><dd>时间近邻或时序命中。</dd>
+  <dt>rerank</dt><dd>重排模型调整后的命中。</dd>
+  <dt>reasoning</dt><dd>推理或类比引擎产出的命中。</dd>
+  <dt>hybrid</dt><dd>多信号融合，无法归入单一来源。</dd>
+</dl>
+
+<h3>5.3 topology（拓扑位置）</h3>
+<p>topology 为扩展点。<em class="rfc2119">SHOULD</em> 提供 <code>cluster_id</code>、
+<code>cluster_size</code> 与 <code>is_hub</code>。实现特有信息（如几何层、坐标）<em class="rfc2119">MAY</em>
+作为额外子字段加入，但不得替换上述标准字段。</p>
+
+<h3>5.4 metrics（记忆自身指标）</h3>
+<p><em class="rfc2119">SHOULD</em> 提供 <code>importance</code>、<code>mass</code>、
+<code>memory_type</code>、<code>valid</code>。字段名固定；不具备相应概念的实现可省略，
+但 <em class="rfc2119">MUST NOT</em> 改用别名。</p>
+
+<h2>6. 分数可解释性</h2>
+<p>当响应包含排序分数时，实现 <em class="rfc2119">SHOULD</em> 提供分数组成，使消费者能够解释分数的来源：</p>
+<pre><code>"score_notes": {
+  "base": "vector_similarity",
+  "adjustments": [
+    { "kind": "cluster_boost",      "delta": 0.08 },
+    { "kind": "importance_boost",   "delta": 0.06 },
+    { "kind": "outdated_penalty",   "delta": -0.30 }
+  ]
+}</code></pre>
+
+<h2>7. 工具契约</h2>
+<p>本节规定各工具 <code>data</code> 段的结构。下列工具为典型分类；实现可按需要提供等价工具。</p>
+
+<h3>7.1 检索类工具</h3>
+<p>检索类工具 <em class="rfc2119">MUST</em> 返回分层视图 <code>tiers</code>（按 tier 分桶的 MemoryItem 集合），
+<em class="rfc2119">SHOULD</em> 同时保留扁平的 <code>results</code> 以兼容既有消费者。</p>
+<p>示例（<code>memory_search</code>）：</p>
+<pre><code>"data": {
+  "query": "…",
+  "tiers":  { "primary": [MemoryItem], "contextual": [], "experiential": [], "hub": [] },
+  "results": [MemoryItem],
+  "count": 2, "total_found": 2, "offset": 0
+}</code></pre>
+
+<h3>7.2 变更类工具</h3>
+<p>变更类工具（创建、更新、删除）<em class="rfc2119">MUST</em> 在响应中返回所产生或受影响的副产物。
+对创建操作，<em class="rfc2119">SHOULD</em> 返回 <code>placement</code>，使消费者获知新记忆的结构位置：</p>
+<pre><code>"data": {
+  "status": "created",
+  "id": 715,
+  "intake":        { "importance": 1.9, "memory_type": "security" },
+  "classification":{ "auto_labels": ["ops"], "classified": true },
+  "placement": {
+    "layer": "service", "core": [1.5, 0.0, 6.8],
+    "joined_cluster": { "id": 0, "size": 1 },
+    "vertices_shared": 1, "is_seed": true, "has_port": true
+  },
+  "dedup":             { "checked": true, "matched_existing": null, "conflicts_marked": [] },
+  "relations_formed":  22
+}</code></pre>
+<p>更新与删除操作 <em class="rfc2119">SHOULD</em> 返回 <code>side_effects</code>，描述对结构的影响
+（如受影响的簇、释放的资源、移除的关系数）。</p>
+
+<h3>7.3 状态类工具</h3>
+<p>状态类工具（如 <code>space_stats</code>）<em class="rfc2119">SHOULD</em> 返回
+<code>capacity</code>（资源占用）与 <code>cluster_distribution</code>（簇规模分布）等可观测指标。
+<code>capacity</code> 为扩展点：不同后端填入各自有意义的资源（如 Epicode 填入 Port 占用）。</p>
+
+<h2>8. 版本与治理</h2>
+<h3>8.1 版本号</h3>
+<p><code>schema_version</code> 采用 <code>MAJOR.MINOR</code>：</p>
+<ul>
+  <li>MAJOR：破坏性变更（移除字段、改变语义）。消费者 <em class="rfc2119">MUST</em> 校验。</li>
+  <li>MINOR：附加性变更（新增字段、新增 tier/source 取值）。消费者 <em class="rfc2119">MUST</em> 忽略未知字段。</li>
+</ul>
+
+<h3>8.2 弃用</h3>
+<p>字段弃用流程：标记 <code>deprecated</code> → 保留至少一个 MAJOR 周期 → 在下一 MAJOR 版本移除。</p>
+
+<h3>8.3 性能约束（规范性）</h3>
+<p>实现 <em class="rfc2119">MUST</em> 保证：满足本规范所需的全部信息，要么是请求处理流水线的既有副产物，
+要么是进程内的内存查询；<em class="rfc2119">MUST NOT</em> 为产生协议字段而引入新的锁获取或同步磁盘 I/O。
+若某副产物无法以零额外开销提供，实现 <em class="rfc2119">MAY</em> 省略对应字段，
+但 <em class="rfc2119">MUST NOT</em> 编造其值。</p>
+
+<h2>9. 一致性等级</h2>
+<dl>
+  <dt>SMRP-Core</dt>
+  <dd>满足：信封（第 4 节）、MemoryItem.tier（5.1）、source（5.2）、创建操作的安置副产物（7.2）。
+  所有 <em class="rfc2119">MUST</em> 字段为硬性要求。</dd>
+  <dt>SMRP-Full</dt>
+  <dd>在 Core 之上，额外提供 topology、metrics、score_notes 及全部 <em class="rfc2119">SHOULD</em> 字段。</dd>
+</dl>
+<p>消费者可声明所需等级；实现据此提供保证。</p>
+
+<h2>10. 设计依据</h2>
+<p>本规范之所以采用固定的结构契约，而非由调度器在运行时逐条"解释"每条结果的来路，基于并发方面的考虑。
+逐条解释要求为每条记忆进行来源判定；若该判定触及共享状态（知识图谱、空间索引或推理模型），
+在高并发下将引入锁竞争，其代价随并发度与结果数量之积增长。</p>
+<p>分层分桶则不同：检索信号在请求处理流水线中已经产生，将其映射为 tier 属于进程内的确定映射，
+复杂度与每条记忆成正比且无锁。固定结构契约因此能够同时满足"可解释"与"高并发"两项要求，
+而运行时解释通常只能满足其一。</p>
+
+<h2>11. 安全考量</h2>
+<ul>
+  <li>响应 <em class="rfc2119">MUST NOT</em> 包含凭证或密钥。</li>
+  <li><code>topology</code> 字段 <em class="rfc2119">SHOULD NOT</em> 暴露可被用于侧信道攻击的内部物理地址或实现细节。</li>
+  <li>实现 <em class="rfc2119">SHOULD</em> 对消费者可见的字段进行最小化裁剪。</li>
+</ul>
+
+<h2>12. 参考文献</h2>
+<ul>
+  <li>RFC 2119 — Key words for use in RFCs to Indicate Requirement Levels.
+    <a href="https://www.rfc-editor.org/rfc/rfc2119">https://www.rfc-editor.org/rfc/rfc2119</a></li>
+  <li>Model Context Protocol (MCP). <a href="https://modelcontextprotocol.io">https://modelcontextprotocol.io</a></li>
+  <li>JSON-RPC 2.0 Specification. <a href="https://www.jsonrpc.org/specification">https://www.jsonrpc.org/specification</a></li>
+</ul>
+
+<hr>
+
+<h2>附录 A. 示例</h2>
+
+<h3>A.1 memory_search 响应</h3>
+<pre><code>{
+  "protocol": { "schema_version": "1.0", "tool": "memory_search", "ok": true, "error": null },
+  "data": {
+    "query": "tetrahedron cluster",
+    "tiers": {
+      "primary":     [{ "id": "714", "tier": "primary", "source": ["vector"], "similarity": 0.91,
+                        "topology": { "cluster_id": 12, "is_hub": true } }],
+      "contextual":  [{ "id": "638", "tier": "contextual", "source": ["kg"], "similarity": 0.0 }],
+      "experiential": [],
+      "hub":          []
+    },
+    "results": [{ "id": "714", "similarity": 0.91 }, { "id": "638", "similarity": 0.0 }],
+    "count": 2, "total_found": 2, "offset": 0
+  },
+  "status": { "identity": { "name": "…" }, "space": { "memories": 521, "energy": 10000 } }
+}</code></pre>
+
+<h3>A.2 memory_create 响应</h3>
+<pre><code>{
+  "protocol": { "schema_version": "1.0", "tool": "memory_create", "ok": true, "error": null },
+  "data": {
+    "status": "created", "id": 715,
+    "intake": { "importance": 1.9, "memory_type": "security" },
+    "placement": { "layer": "service", "joined_cluster": { "id": 0, "size": 1 },
+                   "vertices_shared": 1, "is_seed": true, "has_port": true },
+    "relations_formed": 22
+  },
+  "status": { "space": { "memories": 522, "energy": 10000 } }
+}</code></pre>
+
+<h2>附录 B. 决议记录</h2>
+<p>本版本（1.0 Final）就以下问题作出决议：</p>
+<dl>
+  <dt>experiential 是否独立</dt>
+  <dd>独立，采用启发式判定。理由：须区分"所知"与"所经历"，后者与身份相关。</dd>
+  <dt>source 取值集合</dt>
+  <dd>纳入 <code>rerank</code> 与 <code>reasoning</code>，因其可信度性质与直接检索不同。</dd>
+  <dt>安置字段命名</dt>
+  <dd>创建操作使用 <code>placement</code>，更新与删除使用 <code>side_effects</code>，因语义不同。</dd>
+  <dt>流式响应</dt>
+  <dd>1.0 版本不纳入，留待后续版本。</dd>
+</dl>
+
+<footer>
+  SMRP 1.0 Final · Epicode · 2026-06-19<br>
+  反馈：通过 epicode.cn 提交。后续修订遵循第 8 节的版本治理流程。
+</footer>
+
+</body>
+</html>

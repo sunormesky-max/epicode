@@ -110,4 +110,31 @@ impl OutcomeTracker {
             self.history.pop_front();
         }
     }
+
+    /// 获取某 action 类型的滚动平均有效性
+    pub fn avg_effectiveness(&self, action: ActionType) -> f64 {
+        self.avg_effectiveness.get(&action).copied().unwrap_or(0.5)
+    }
+
+    /// 获取所有 action 类型的有效性摘要（按效果降序）
+    pub fn effectiveness_summary(&self) -> Vec<(ActionType, f64)> {
+        let mut summary: Vec<(ActionType, f64)> = [
+            ActionType::Pulse,
+            ActionType::Fission,
+            ActionType::Merge,
+            ActionType::Dream,
+            ActionType::Link,
+            ActionType::Evict,
+        ]
+        .iter()
+        .map(|a| (*a, self.avg_effectiveness(*a)))
+        .collect();
+        summary.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        summary
+    }
+
+    /// 最近 N 条历史记录
+    pub fn recent_outcomes(&self, limit: usize) -> Vec<&ActionOutcome> {
+        self.history.iter().rev().take(limit).collect()
+    }
 }
