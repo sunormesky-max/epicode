@@ -1,6 +1,6 @@
 # Epicode SDK — TypeScript
 
-Zero-dependency TypeScript SDK for the Epicode API.
+Zero-dependency TypeScript SDK for the Epicode API (v1.0.2).
 
 ## Install
 
@@ -14,6 +14,18 @@ npm install epicode-sdk
 import { EpicodeClient, EpicodeAdmin } from "epicode-sdk";
 
 const client = new EpicodeClient("your-api-key");
+
+// A confirmed identity is required before working with memories.
+for (const [index, value] of [
+  "MyAssistant",
+  "Help users",
+  "Example author",
+  "Helpful",
+  "English",
+].entries()) {
+  await client.identityStep(index + 1, value);
+}
+await client.identityFinalize();
 
 // Store a memory
 const mem = await client.remember("Deployed v2.3 to production");
@@ -56,7 +68,7 @@ console.log(tl.total, "events");
 ```ts
 const admin = new EpicodeAdmin("your-admin-key");
 
-const user = await admin.register("alice", "pro");
+const user = await admin.register("alice", "a-secure-password", "pro");
 console.log(user.api_key);
 
 const users = await admin.users();
@@ -106,9 +118,12 @@ const client = new EpicodeClient("key", "http://localhost:9111/v1");
 | POST | `/nodes` | `client.createNode(content, labels?, timestamp?)` |
 | GET | `/nodes/:id` | `client.getNode(id)` |
 | POST | `/knowledge` | `client.knowledge(id)` |
+| POST | `/identity/step` | `client.identityStep(step, value)` |
+| POST | `/identity/finalize` | `client.identityFinalize()` |
+| POST | `/mcp` | `client.callMcpTool(name, args?)` / `client.dreamCycle()` |
 | GET | `/stats` | `client.stats()` |
 | GET | `/timeline` | `client.timeline()` |
-| POST | `/register` | `admin.register(userId, plan?)` |
+| POST | `/register` | `admin.register(userId, password, plan?)` |
 | GET | `/admin/users` | `admin.users()` |
 | GET | `/admin/stats` | `admin.stats()` |
 

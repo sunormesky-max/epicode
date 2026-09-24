@@ -18,22 +18,18 @@ from epicode.exceptions import (
 from epicode.models import (
     AskResponse,
     CreateNodeResponse,
-    DreamCycleResponse,
     Emotion,
     HealthResponse,
+    IdentityFinalizeResponse,
     IdentityStepResponse,
-    KnowledgeGraphEdge,
-    KnowledgeGraphNode,
-    KnowledgeGraphResponse,
     KnowledgeResponse,
+    McpToolResponse,
     NodeResponse,
     RecallResponse,
-    RecallWithTiersResponse,
     RememberResponse,
     SearchResult,
     SearchResponse,
     StatsResponse,
-    TieredMemoryResult,
     TimelineResponse,
 )
 
@@ -63,7 +59,9 @@ class EpicodeClient:
         self._base_url = (base_url or self.DEFAULT_BASE_URL).rstrip("/")
         self._timeout = timeout or self.DEFAULT_TIMEOUT
         self._session = session or requests.Session()
-        self._session.headers.update({"X-API-Key": self._api_key, "Content-Type": "application/json"})
+        self._session.headers.update(
+            {"X-API-Key": self._api_key, "Content-Type": "application/json"}
+        )
 
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         url = f"{self._base_url}{path}"
@@ -82,7 +80,9 @@ class EpicodeClient:
         if 200 <= code < 300:
             return body
 
-        message = body.get("error") or body.get("message") or resp.text or f"HTTP {code}"
+        message = (
+            body.get("error") or body.get("message") or resp.text or f"HTTP {code}"
+        )
 
         if code in (401, 403):
             raise AuthenticationError(message, status_code=code, response_body=body)
@@ -118,7 +118,7 @@ class EpicodeClient:
         data = self._request("POST", "/remember", json={"content": content})
         return RememberResponse(
             success=data.get("success", False),
-            id=data.get("id", ""),
+            id=data.get("id", 0),
             labels=data.get("labels", []),
         )
 
@@ -130,7 +130,7 @@ class EpicodeClient:
         data = self._request("POST", "/search", json=payload)
         results = [
             SearchResult(
-                id=r.get("id", ""),
+                id=r.get("id", 0),
                 content=r.get("content", ""),
                 labels=r.get("labels", []),
                 similarity=r.get("similarity", 0.0),
@@ -167,7 +167,7 @@ class EpicodeClient:
             total_fragments=data.get("total_fragments", 0),
             associated_count=data.get("associated_count", 0),
             emotion=emotion,
-            memory_file=data.get("memory_file", ""),
+            memory_file=data.get("memory_file"),
         )
 
     def ask(self, question: str, *, depth: int | None = None) -> AskResponse:
@@ -189,7 +189,7 @@ class EpicodeClient:
         content: str,
         *,
         labels: list[str] | None = None,
-        timestamp: str | None = None,
+        timestamp: int | None = None,
     ) -> CreateNodeResponse:
         """Create a knowledge graph node."""
         payload: dict[str, Any] = {"content": content}
@@ -200,27 +200,27 @@ class EpicodeClient:
         data = self._request("POST", "/nodes", json=payload)
         return CreateNodeResponse(
             success=data.get("success", False),
-            id=data.get("id", ""),
+            id=data.get("id", 0),
         )
 
-    def get_node(self, node_id: str) -> NodeResponse:
+    def get_node(self, node_id: int) -> NodeResponse:
         """Retrieve a knowledge graph node by ID."""
         data = self._request("GET", f"/nodes/{node_id}")
         return NodeResponse(
             success=data.get("success", False),
-            id=data.get("id", ""),
+            id=data.get("id", 0),
             content=data.get("content", ""),
             labels=data.get("labels", []),
         )
 
-    def knowledge(self, id: str) -> KnowledgeResponse:
+    def knowledge(self, id: int) -> KnowledgeResponse:
         """Expand a memory node into related knowledge."""
         data = self._request("POST", "/knowledge", json={"id": id})
         return KnowledgeResponse(
             success=data.get("success", False),
-            id=data.get("id", ""),
-            relations=data.get("relations", []),
-            details=data.get("details", {}),
+            id=data.get("id", 0),
+            relations=data.get("relations", 0),
+            details=data.get("details", []),
         )
 
     def stats(self) -> StatsResponse:
@@ -246,59 +246,7 @@ class EpicodeClient:
             total=data.get("total", 0),
         )
 
-    def recall_with_tiers(self, query: str, depth: int = 2) -> RecallWithTiersResponse:
-        """Return tiered memory results with knowledge graph associations.
-
-        This is Epicode's key differentiator — not just flat vector search,
-        but structured memory with tiers and KG relationships. SMRP (Structured
-        Memory Response Protocol) returns tiered, contextual memories with
-        emotional valence and spatial placement.
-
-        Args:
-            query: The search query.
-            depth: How many tiers to traverse in the knowledge graph.
-
-        Returns:
-            A ``RecallWithTiersResponse`` containing tiered results and KG edges.
-        """
-        payload: dict[str, Any] = {"query": query, "depth": depth}
-        data = self._request("POST", "/recall/tiers", json=payload)
-
-        tiers: list[list[TieredMemoryResult]] = []
-        for tier_list in data.get("tiers", []):
-            tier_results: list[TieredMemoryResult] = []
-            for r in tier_list:
-                raw_emotion = r.get("emotional_valence", {})
-                emotion = Emotion(
-                    pleasure=raw_emotion.get("pleasure", 0.0),
-                    arousal=raw_emotion.get("arousal", 0.0),
-                    dominance=raw_emotion.get("dominance", 0.0),
-                )
-                coords = r.get("spatial_coords", [0.0, 0.0, 0.0])
-                if len(coords) < 3:
-                    coords = [0.0, 0.0, 0.0]
-                tier_results.append(
-                    TieredMemoryResult(
-                        id=r.get("id", ""),
-                        content=r.get("content", ""),
-                        tier=r.get("tier", 1),
-                        similarity=r.get("similarity", 0.0),
-                        kg_associations=r.get("kg_associations", []),
-                        emotional_valence=emotion,
-                        spatial_coords=(coords[0], coords[1], coords[2]),
-                    )
-                )
-            tiers.append(tier_results)
-
-        return RecallWithTiersResponse(
-            success=data.get("success", False),
-            query=data.get("query", ""),
-            tiers=tiers,
-            total_results=data.get("total_results", 0),
-            knowledge_graph_edges=data.get("knowledge_graph_edges", []),
-        )
-
-    def identity_step(self, step: int, agent_name: str) -> IdentityStepResponse:
+    def identity_step(self, step: int, value: str) -> IdentityStepResponse:
         """Perform the identity ritual step.
 
         Identity rituals give AI agents persistent personality across sessions.
@@ -306,84 +254,56 @@ class EpicodeClient:
         storage, allowing agents to build and maintain a sense of self over time.
 
         Args:
-            step: The ritual step number (1-7).
-            agent_name: The name of the agent performing the ritual.
+            step: The ritual step number (1-5).
+            value: The answer for this ritual step.
 
         Returns:
-            An ``IdentityStepResponse`` with the updated ritual state.
+            An ``IdentityStepResponse`` with the current ceremony progress.
         """
-        payload = {"step": step, "agent_name": agent_name}
+        payload = {"step": step, "value": value}
         data = self._request("POST", "/identity/step", json=payload)
         return IdentityStepResponse(
             success=data.get("success", False),
             step=data.get("step", 0),
-            agent_name=data.get("agent_name", ""),
-            ritual_state=data.get("ritual_state", ""),
-            personality_signature=data.get("personality_signature", {}),
+            progress=data.get("progress", {}),
+            next_prompt=data.get("next_prompt", ""),
+            pending=data.get("pending", {}),
         )
 
-    def dream_cycle(self) -> DreamCycleResponse:
-        """Trigger background memory consolidation.
-
-        The "living memory system" aspect of Epicode. Dream cycles run in the
-        background to consolidate memories, form new associations, and prune weak
-        connections — mimicking how biological brains strengthen memories during
-        sleep. This is not something flat vector databases can do.
-
-        Returns:
-            A ``DreamCycleResponse`` with consolidation metrics.
-        """
-        data = self._request("POST", "/dream/cycle")
-        return DreamCycleResponse(
+    def identity_finalize(self) -> IdentityFinalizeResponse:
+        """Complete the identity ritual after all five steps."""
+        data = self._request("POST", "/identity/finalize")
+        return IdentityFinalizeResponse(
             success=data.get("success", False),
-            cycles_completed=data.get("cycles_completed", 0),
-            memories_consolidated=data.get("memories_consolidated", 0),
-            new_associations=data.get("new_associations", 0),
-            energy_delta=data.get("energy_delta", 0.0),
+            awakened=data.get("awakened", False),
+            identity=data.get("identity", {}),
+            message=data.get("message", ""),
         )
 
-    def knowledge_graph(self, node_id: str) -> KnowledgeGraphResponse:
-        """Return knowledge graph visualization data for a node.
-
-        Epicode automatically extracts knowledge graph relationships from
-        memories stored as tetrahedrons in 3D space. This method returns the
-        nodes, edges, and clusters that make up the graph around a given memory.
-
-        Args:
-            node_id: The ID of the central node to visualize.
-
-        Returns:
-            A ``KnowledgeGraphResponse`` with nodes, edges, and cluster data.
-        """
-        data = self._request("GET", f"/knowledge-graph/{node_id}")
-        nodes = [
-            KnowledgeGraphNode(
-                id=n.get("id", ""),
-                label=n.get("label", ""),
-                content=n.get("content", ""),
-                x=n.get("x", 0.0),
-                y=n.get("y", 0.0),
-                z=n.get("z", 0.0),
-                tier=n.get("tier", 1),
-            )
-            for n in data.get("nodes", [])
-        ]
-        edges = [
-            KnowledgeGraphEdge(
-                source=e.get("source", ""),
-                target=e.get("target", ""),
-                relation=e.get("relation", ""),
-                strength=e.get("strength", 0.5),
-            )
-            for e in data.get("edges", [])
-        ]
-        return KnowledgeGraphResponse(
-            success=data.get("success", False),
-            node_id=data.get("node_id", ""),
-            nodes=nodes,
-            edges=edges,
-            clusters=data.get("clusters", []),
+    def call_mcp_tool(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> McpToolResponse:
+        """Call a supported MCP tool through the Cloud JSON-RPC endpoint."""
+        data = self._request(
+            "POST",
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments or {}},
+            },
         )
+        return McpToolResponse(
+            jsonrpc=data.get("jsonrpc", ""),
+            id=data.get("id"),
+            result=data.get("result"),
+            error=data.get("error"),
+        )
+
+    def dream_cycle(self) -> McpToolResponse:
+        """Run the supported ``dream_cycle`` MCP tool."""
+        return self.call_mcp_tool("dream_cycle")
 
     def close(self) -> None:
         """Close the underlying HTTP session."""

@@ -23,12 +23,12 @@ export interface RememberRequest {
 
 export interface RememberResponse {
   success: boolean;
-  id: string;
+  id: number;
   labels: string[];
 }
 
 export interface SearchResult {
-  id: string;
+  id: number;
   content: string;
   labels: string[];
   similarity: number;
@@ -63,7 +63,7 @@ export interface RecallResponse {
   total_fragments: number;
   associated_count: number;
   emotion: Emotion;
-  memory_file: string;
+  memory_file: Record<string, unknown[]> | null;
 }
 
 export interface AskRequest {
@@ -82,30 +82,30 @@ export interface AskResponse {
 export interface CreateNodeRequest {
   content: string;
   labels?: string[];
-  timestamp?: string;
+  timestamp?: number;
 }
 
 export interface CreateNodeResponse {
   success: boolean;
-  id: string;
+  id: number;
 }
 
 export interface GetNodeResponse {
   success: boolean;
-  id: string;
+  id: number;
   content: string;
   labels: string[];
 }
 
 export interface KnowledgeRequest {
-  id: string;
+  id: number;
 }
 
 export interface KnowledgeResponse {
   success: boolean;
-  id: string;
-  relations: unknown[];
-  details: unknown;
+  id: number;
+  relations: number;
+  details: unknown[];
 }
 
 export interface StatsResponse {
@@ -128,68 +128,53 @@ export interface TimelineResponse {
   events: TimelineEvent[];
   total: number;
 }
-export interface TieredMemoryResult {
-  id: string;
-  content: string;
-  tier: number;
-  similarity: number;
-  kg_associations: unknown[];
-  emotional_valence: Emotion;
-  spatial_coords: [number, number, number];
-}
-
-export interface RecallWithTiersResponse {
-  success: boolean;
-  query: string;
-  tiers: TieredMemoryResult[][];
-  total_results: number;
-  knowledge_graph_edges: unknown[];
-}
-
 export interface IdentityStepResponse {
   success: boolean;
   step: number;
-  agent_name: string;
-  ritual_state: string;
-  personality_signature: Record<string, unknown>;
+  progress: {
+    completed: number;
+    total: number;
+    current_step: number;
+  };
+  next_prompt: string;
+  pending: {
+    has_name: boolean;
+    has_mission: boolean;
+    has_author: boolean;
+    has_personality: boolean;
+    has_language: boolean;
+  };
 }
 
-export interface DreamCycleResponse {
+export interface IdentityFinalizeResponse {
   success: boolean;
-  cycles_completed: number;
-  memories_consolidated: number;
-  new_associations: number;
-  energy_delta: number;
+  awakened: boolean;
+  identity: {
+    name: string;
+    mission: string;
+    author: string;
+    personality: string;
+    language: string;
+    confirmed: boolean;
+  };
+  message: string;
 }
 
-export interface KnowledgeGraphNode {
-  id: string;
-  label: string;
-  content: string;
-  x: number;
-  y: number;
-  z: number;
-  tier: number;
-}
-
-export interface KnowledgeGraphEdge {
-  source: string;
-  target: string;
-  relation: string;
-  strength: number;
-}
-
-export interface KnowledgeGraphResponse {
-  success: boolean;
-  node_id: string;
-  nodes: KnowledgeGraphNode[];
-  edges: KnowledgeGraphEdge[];
-  clusters: unknown[];
+export interface McpToolResponse<T = unknown> {
+  jsonrpc: "2.0";
+  id: number | string | null;
+  result?: T;
+  error?: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
 }
 
 
 export interface RegisterRequest {
   user_id: string;
+  password: string;
   plan?: string;
 }
 
@@ -319,7 +304,7 @@ export class EpicodeClient {
   createNode(
     content: string,
     labels?: string[],
-    timestamp?: string
+    timestamp?: number
   ): Promise<CreateNodeResponse> {
     return request<CreateNodeResponse>(
       this.baseUrl,
@@ -330,7 +315,7 @@ export class EpicodeClient {
     );
   }
 
-  getNode(id: string): Promise<GetNodeResponse> {
+  getNode(id: number): Promise<GetNodeResponse> {
     return request<GetNodeResponse>(
       this.baseUrl,
       `/nodes/${encodeURIComponent(id)}`,
@@ -340,7 +325,7 @@ export class EpicodeClient {
     );
   }
 
-  knowledge(id: string): Promise<KnowledgeResponse> {
+  knowledge(id: number): Promise<KnowledgeResponse> {
     return request<KnowledgeResponse>(
       this.baseUrl,
       "/knowledge",
@@ -370,77 +355,46 @@ export class EpicodeClient {
     );
   }
 
-  /**
-   * Recall associative memories with tiered results via SMRP.
-   *
-   * SMRP (Structured Memory Response Protocol) returns tiered, contextual
-   * memories with emotional valence and spatial placement. Unlike flat
-   * vector databases, Epicode returns memories organized by relevance tiers
-   * with knowledge graph associations.
-   */
-  recallWithTiers(
-    query: string,
-    depth?: number
-  ): Promise<RecallWithTiersResponse> {
-    return request<RecallWithTiersResponse>(
-      this.baseUrl,
-      "/recall/tiers",
-      "POST",
-      { query, depth },
-      this.authHeaders()
-    );
-  }
-
-  /**
-   * Perform an identity ritual step.
-   *
-   * Identity rituals give AI agents persistent personality across sessions.
-   * This is a unique Epicode feature that goes far beyond simple vector
-   * storage, allowing agents to build and maintain a sense of self over time.
-   */
-  identityStep(step: number, agentName: string): Promise<IdentityStepResponse> {
+  identityStep(step: number, value: string): Promise<IdentityStepResponse> {
     return request<IdentityStepResponse>(
       this.baseUrl,
       "/identity/step",
       "POST",
-      { step, agent_name: agentName },
+      { step, value },
       this.authHeaders()
     );
   }
 
-  /**
-   * Trigger background memory consolidation (dream cycle).
-   *
-   * The "living memory system" aspect of Epicode. Dream cycles run in the
-   * background to consolidate memories, form new associations, and prune weak
-   * connections — mimicking how biological brains strengthen memories during
-   * sleep. This is not something flat vector databases can do.
-   */
-  dreamCycle(): Promise<DreamCycleResponse> {
-    return request<DreamCycleResponse>(
+  identityFinalize(): Promise<IdentityFinalizeResponse> {
+    return request<IdentityFinalizeResponse>(
       this.baseUrl,
-      "/dream/cycle",
+      "/identity/finalize",
       "POST",
       undefined,
       this.authHeaders()
     );
   }
 
-  /**
-   * Return knowledge graph visualization data for a node.
-   *
-   * Epicode automatically extracts knowledge graph relationships from
-   * memories stored as tetrahedrons in 3D space. This method returns the
-   * nodes, edges, and clusters that make up the graph around a given memory.
-   */
-  knowledgeGraph(nodeId: string): Promise<KnowledgeGraphResponse> {
-    return request<KnowledgeGraphResponse>(
+  callMcpTool<T = unknown>(
+    name: string,
+    args: Record<string, unknown> = {}
+  ): Promise<McpToolResponse<T>> {
+    return request<McpToolResponse<T>>(
       this.baseUrl,
-      `/knowledge-graph/${encodeURIComponent(nodeId)}`,
-      "GET",
-      undefined,
+      "/mcp",
+      "POST",
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: args },
+      },
       this.authHeaders()
     );
+  }
+
+  dreamCycle(): Promise<McpToolResponse> {
+    return this.callMcpTool("dream_cycle");
   }
 }
 
@@ -457,12 +411,16 @@ export class EpicodeAdmin {
     return { "X-Admin-Key": this.adminKey };
   }
 
-  register(userId: string, plan?: string): Promise<RegisterResponse> {
+  register(
+    userId: string,
+    password: string,
+    plan?: string
+  ): Promise<RegisterResponse> {
     return request<RegisterResponse>(
       this.baseUrl,
       "/register",
       "POST",
-      { user_id: userId, plan },
+      { user_id: userId, password, plan },
       this.authHeaders()
     );
   }

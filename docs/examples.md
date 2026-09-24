@@ -27,28 +27,28 @@ python ai_agent_memory.py
 | `examples/node/basic-memory.mjs` | Node.js 18+ | minimal memory workflow with built-in `fetch` |
 | `examples/python/basic_memory.py` | Python 3 | minimal memory workflow with stdlib `urllib` |
 
-## SDK Differentiation
+## SDK Usage
 
-The official SDKs showcase Epicode's unique capabilities beyond remember/search:
+The official SDKs expose the Cloud HTTP and MCP contracts:
 
 ```python
 from epicode import EpicodeClient
 
 client = EpicodeClient("your-api-key")
 
-# Tiered recall with SMRP — not just similar vectors
-result = client.recall_with_tiers("project context", depth=2)
-# Returns: Tier 1 (direct) → Tier 2 (contextual) → Tier 3 (KG relationships)
-# Plus emotional valence and spatial placement metadata
+# Associative recall returns grouped memory fragments and emotional context.
+result = client.recall("project context", depth=2)
 
-# Identity ritual — persistent agent personality
-client.identity_step(1, agent_name="MyAssistant")
+# Identity ritual: complete all five steps before writing memories.
+client.identity_step(1, "MyAssistant")
+# ... submit steps 2 through 5 ...
+client.identity_finalize()
 
-# Dream cycle — background memory consolidation
-client.dream_cycle()
+# Dream cycle is a supported MCP tool.
+dream = client.dream_cycle()
 
-# Knowledge graph visualization
-kg = client.knowledge_graph(node_id="abc123")
+# Knowledge graph relations for one memory.
+relations = client.knowledge(123)
 ```
 
 ## Why Epicode vs. Pinecone?
@@ -72,7 +72,7 @@ All examples use the same public API shape:
 
 ## Official SDKs
 
-- `backend/sdk/python` — Python SDK with SMRP tier support
+- `backend/sdk/python` — Python SDK with Cloud REST and MCP support
 - `backend/sdk/typescript` — TypeScript SDK
 
 Those SDKs are best when you want a reusable client library instead of a single script.
