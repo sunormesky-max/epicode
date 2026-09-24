@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>大卫 · TetraMem V14</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#07090e;--surface:#0b0e16;--card:#0f1320;--card2:#151a2a;
+  --border:#1c2340;--border2:#2a3460;
+  --text:#c8d0e4;--dim:#546080;--bright:#eef2ff;
+  --accent:#6366f1;--accent2:#818cf8;
+  --green:#34d399;--red:#f87171;--orange:#fbbf24;--purple:#a78bfa;--cyan:#22d3ee;--pink:#f472b6;
+  --glow:rgba(99,102,241,.15);
+}
+html,body{height:100%;overflow:hidden}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column}
+
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:0 28px;height:52px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--surface)}
+.hdr-left{display:flex;align-items:center;gap:14px}
+.logo-icon{width:28px;height:28px;position:relative}
+.logo-icon svg{width:100%;height:100%}
+.logo{font-size:16px;font-weight:700;letter-spacing:-.3px;color:var(--bright)}
+.logo span{font-weight:300;color:var(--dim);margin-left:6px;font-size:14px}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px;flex-shrink:0}
+.dot-on{background:var(--green);box-shadow:0 0 8px var(--green)}
+.dot-off{background:var(--red);box-shadow:0 0 6px var(--red)}
+.hdr-right{display:flex;align-items:center;gap:18px;font-size:12px;color:var(--dim)}
+
+.tabs{display:flex;gap:0;padding:0 28px;height:44px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
+.tab{padding:0 20px;display:flex;align-items:center;cursor:pointer;font-size:13px;font-weight:500;color:var(--dim);border-bottom:2px solid transparent;transition:all .2s;user-select:none;gap:6px}
+.tab:hover{color:var(--text)}
+.tab.on{color:var(--accent2);border-bottom-color:var(--accent)}
+
+.wrap{flex:1;overflow:hidden;position:relative}
+.pane{display:none;position:absolute;inset:0;overflow-y:auto;padding:24px 28px 48px}
+.pane.on{display:block}
+.pane::-webkit-scrollbar{width:4px}
+.pane::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.pane::-webkit-scrollbar-track{background:transparent}
+
+.row{display:flex;gap:14px;margin-bottom:14px}
+.col{flex:1}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;transition:border-color .3s,box-shadow .3s}
+.card:hover{border-color:var(--border2);box-shadow:0 0 20px rgba(99,102,241,.04)}
+.card-sm{padding:16px}
+.label{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;font-weight:600}
+.val{font-size:30px;font-weight:800;color:var(--bright);line-height:1;letter-spacing:-.5px}
+.sub{font-size:11px;color:var(--dim);margin-top:8px}
+
+.ebar{height:4px;background:var(--border);border-radius:2px;margin-top:12px;overflow:hidden}
+.efill{height:100%;border-radius:2px;transition:width .8s ease,background .5s}
+
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
+@media(max-width:900px){.stat-grid{grid-template-columns:repeat(2,1fr)}}
+
+.vis-row{display:flex;gap:14px;margin-bottom:14px}
+.vis-main{flex:1.5}
+.vis-side{flex:1}
+
+.bubbles{position:relative;width:100%;height:280px;border-radius:12px;overflow:hidden;background:linear-gradient(135deg,#0a0d18,#0f1326);border:1px solid var(--border)}
+
+.search-box{display:flex;gap:8px;margin-bottom:16px;align-items:center}
+.search-box input{flex:1;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:10px 16px;font-size:13px;outline:none;transition:border-color .2s,box-shadow .2s}
+.search-box input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--glow)}
+.search-box input::placeholder{color:var(--dim)}
+.btn{border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
+.btn:hover{transform:translateY(-1px)}
+.btn:active{transform:translateY(0);opacity:.8}
+.btn-accent{background:var(--accent);color:#fff;box-shadow:0 2px 8px rgba(99,102,241,.3)}
+.btn-green{background:var(--green);color:#070e07;box-shadow:0 2px 8px rgba(52,211,153,.2)}
+.btn-dim{background:var(--card2);color:var(--dim);border:1px solid var(--border)}
+.btn-sm{padding:7px 12px;font-size:12px;border-radius:8px}
+
+.mem-row{display:flex;gap:8px;margin-bottom:12px}
+.create-wrap{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px}
+.create-wrap .label{margin-bottom:10px}
+
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{text-align:left;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;padding:10px 12px;border-bottom:1px solid var(--border);font-weight:600}
+.tbl td{padding:10px 12px;border-bottom:1px solid rgba(28,35,64,.5);font-size:13px;vertical-align:middle}
+.tbl tr{transition:background .15s}
+.tbl tr:hover td{background:rgba(99,102,241,.03)}
+.badge{display:inline-block;padding:3px 8px;border-radius:6px;font-size:10px;font-weight:600;margin-right:3px;vertical-align:middle}
+.b-accent{background:rgba(99,102,241,.12);color:var(--accent2)}
+.b-green{background:rgba(52,211,153,.1);color:var(--green)}
+.b-orange{background:rgba(251,191,36,.1);color:var(--orange)}
+.b-purple{background:rgba(167,139,250,.1);color:var(--purple)}
+.b-cyan{background:rgba(34,211,238,.1);color:var(--cyan)}
+.ellip{max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.cfg-sec{margin-bottom:24px}
+.cfg-sec h3{font-size:13px;font-weight:600;color:var(--accent2);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.cfg-sec h3::before{content:'';display:block;width:3px;height:14px;border-radius:2px;background:var(--accent)}
+.cfg-row{display:flex;gap:14px;margin-bottom:12px}
+.cfg-grp{flex:1}
+.cfg-grp label{display:block;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;font-weight:600}
+.cfg-grp input,.cfg-grp select{width:100%;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:9px 14px;font-size:13px;outline:none;font-family:inherit;transition:border-color .2s,box-shadow .2s}
+.cfg-grp input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--glow)}
+.cfg-grp input::placeholder{color:var(--dim)}
+.constitution{max-height:360px;overflow-y:auto;font-size:12px;line-height:2;color:var(--dim);white-space:pre-wrap;padding:16px;background:var(--card);border-radius:12px;border:1px solid var(--border)}
+
+.cluster-item{padding:10px 0;border-bottom:1px solid rgba(28,35,64,.5)}
+.cluster-item:last-child{border-bottom:none}
+.cluster-head{display:flex;justify-content:space-between;align-items:center}
+.cluster-name{font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px}
+.cluster-size{font-size:12px;color:var(--dim)}
+.cluster-tags{margin-top:6px;display:flex;flex-wrap:wrap;gap:3px}
+
+.layer-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.layer-instinct{background:var(--red);box-shadow:0 0 4px var(--red)}
+.layer-cognitive{background:var(--orange);box-shadow:0 0 4px var(--orange)}
+.layer-service{background:var(--accent);box-shadow:0 0 4px var(--accent)}
+
+.bottom-row{display:flex;gap:14px}
+.bottom-row .col{display:flex;gap:14px}
+.bottom-row .card{flex:1}
+
+.mem-result-count{font-size:12px;color:var(--dim);margin-bottom:12px;padding:0 2px}
+
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.pane.on{animation:fadeIn .25s ease}
+
+@media(max-width:900px){.row{flex-direction:column}.col{flex:none}.vis-row{flex-direction:column}.stat-grid{grid-template-columns:repeat(2,1fr)}.bottom-row .col{flex-direction:column}}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-left">
+    <div class="logo-icon">
+      <svg viewBox="0 0 32 32" fill="none">
+        <path d="M16 3L28 10V22L16 29L4 22V10L16 3Z" stroke="var(--accent2)" stroke-width="1.5" fill="rgba(99,102,241,.08)"/>
+        <path d="M16 3L16 29" stroke="var(--accent)" stroke-width=".5" opacity=".4"/>
+        <path d="M4 10L28 22" stroke="var(--accent)" stroke-width=".5" opacity=".4"/>
+        <path d="M28 10L4 22" stroke="var(--accent)" stroke-width=".5" opacity=".4"/>
+        <circle cx="16" cy="16" r="2.5" fill="var(--accent)" opacity=".6"/>
+      </svg>
+    </div>
+    <div class="logo">大卫 <span>TetraMem V14</span></div>
+  </div>
+  <div class="hdr-right">
+    <span id="status"><span class="dot dot-off"></span>未连接</span>
+    <span id="clock" style="opacity:.5"></span>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab on" data-t="monitor" onclick="tab('monitor')">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+    系统监控
+  </div>
+  <div class="tab" data-t="memory" onclick="tab('memory')">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+    记忆浏览
+  </div>
+  <div class="tab" data-t="config" onclick="tab('config')">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    调度器配置
+  </div>
+</div>
+
+<div class="wrap">
+
+<div class="pane on" id="p-monitor">
+  <div class="stat-grid">
+    <div class="card card-sm">
+      <div class="label">记忆体</div>
+      <div class="val" id="v-tetras">0</div>
+      <div class="sub">DB <span id="v-db">0</span></div>
+    </div>
+    <div class="card card-sm">
+      <div class="label">顶点</div>
+      <div class="val" id="v-verts">0</div>
+    </div>
+    <div class="card card-sm">
+      <div class="label">簇 · 关系</div>
+      <div class="val"><span id="v-clust">0</span><span style="color:var(--dim);font-size:16px;font-weight:400;margin:0 8px">/</span><span id="v-rels">0</span></div>
+    </div>
+    <div class="card card-sm">
+      <div class="label">能量</div>
+      <div class="val" id="v-energy">1000</div>
+      <div class="ebar"><div class="efill" id="v-ebar" style="width:100%;background:var(--green)"></div></div>
+    </div>
+  </div>
+
+  <div class="vis-row">
+    <div class="vis-main">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="padding:14px 18px 0;display:flex;justify-content:space-between;align-items:center">
+          <div class="label" style="margin-bottom:0">空间可视化</div>
+          <div style="font-size:10px;color:var(--dim)">
+            <span class="layer-dot layer-instinct"></span> 本能
+            <span class="layer-dot layer-cognitive" style="margin-left:8px"></span> 认知
+            <span class="layer-dot layer-service" style="margin-left:8px"></span> 服务
+          </div>
+        </div>
+        <div class="bubbles"><canvas id="cv"></canvas></div>
+      </div>
+    </div>
+    <div class="vis-side">
+      <div class="card" style="min-height:100%">
+        <div class="label">簇详情</div>
+        <div id="cluster-list" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom-row">
+    <div class="col">
+      <div class="card card-sm">
+        <div class="label">安全</div>
+        <div style="display:flex;gap:28px;margin-top:8px">
+          <div><div style="font-size:20px;font-weight:700" id="v-reqs">0</div><div style="font-size:10px;color:var(--dim);margin-top:2px">请求</div></div>
+          <div><div style="font-size:20px;font-weight:700;color:var(--red)" id="v-denied">0</div><div style="font-size:10px;color:var(--dim);margin-top:2px">拒绝</div></div>
+          <div><div style="font-size:20px;font-weight:700;color:var(--green)" id="v-allowed">0</div><div style="font-size:10px;color:var(--dim);margin-top:2px">通过</div></div>
+        </div>
+      </div>
+      <div class="card card-sm">
+        <div class="label">认知引擎</div>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:10px">
+          <span class="badge b-green" id="v-llm">LLM</span>
+          <span style="font-size:12px;color:var(--dim)" id="v-llm-st">已连接</span>
+        </div>
+      </div>
+      <div class="card card-sm">
+        <div class="label">运行时间</div>
+        <div style="font-size:20px;font-weight:700;margin-top:6px" id="v-uptime">0s</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="pane" id="p-memory">
+  <div class="create-wrap">
+    <div class="label">写入新记忆</div>
+    <div class="mem-row">
+      <input type="text" id="inp-mem" placeholder="输入记忆内容，按 Enter 写入..." style="flex:1;background:var(--card2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:10px 16px;font-size:13px;outline:none;transition:border-color .2s,box-shadow .2s" onkeydown="if(event.key==='Enter')doCreate()" onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 0 3px var(--glow)'" onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
+      <button class="btn btn-accent" onclick="doCreate()">写入</button>
+    </div>
+  </div>
+  <div class="search-box">
+    <input type="text" id="inp-q" placeholder="搜索记忆..." onkeydown="if(event.key==='Enter')doSearch()">
+    <button class="btn btn-accent" onclick="doSearch()">搜索</button>
+    <button class="btn btn-dim" onclick="doLoadAll()">全部</button>
+    <button class="btn btn-dim btn-sm" onclick="doRecall()">Recall</button>
+  </div>
+  <div class="mem-result-count" id="mem-info"></div>
+  <table class="tbl">
+    <thead><tr><th style="width:50px">ID</th><th>内容</th><th>标签</th><th style="width:60px">质量</th><th style="width:70px">相似度</th><th style="width:70px">时间</th></tr></thead>
+    <tbody id="mem-tb"></tbody>
+  </table>
+</div>
+
+<div class="pane" id="p-config">
+  <div class="cfg-sec">
+    <h3>认知引擎 (LLM)</h3>
+    <div class="cfg-row">
+      <div class="cfg-grp"><label>模型</label><input id="c-model" placeholder="deepseek-chat"></div>
+      <div class="cfg-grp"><label>API Key</label><input type="password" id="c-key" placeholder="sk-..."></div>
+    </div>
+    <div style="font-size:12px;margin-top:6px">状态 <span class="badge b-green" id="c-st">-</span></div>
+  </div>
+  <div class="cfg-sec">
+    <h3>调度器</h3>
+    <div class="cfg-row">
+      <div class="cfg-grp"><label>Tick 间隔 (ms)</label><input type="number" id="c-tick" value="1000" min="100" max="30000"></div>
+    </div>
+  </div>
+  <div class="cfg-sec">
+    <h3>安全</h3>
+    <div class="cfg-row">
+      <div class="cfg-grp"><label>开关</label><input id="c-sec-on" disabled></div>
+      <div class="cfg-grp"><label>速率限制/分</label><input id="c-sec-rate" disabled></div>
+      <div class="cfg-grp"><label>最大内容长度</label><input id="c-sec-len" disabled></div>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;margin-top:8px">
+    <button class="btn btn-accent" onclick="doSaveCfg()">保存配置</button>
+    <button class="btn btn-dim" onclick="doLoadCfg()">刷新</button>
+  </div>
+  <div class="cfg-sec" style="margin-top:28px">
+    <h3>宪法 v1.0</h3>
+    <div class="constitution" id="c-const"></div>
+  </div>
+</div>
+
+</div>
+
+<script>
+const O=location.origin;
+let key='',startTime=Date.now();
+
+function h(){return key?{'X-API-Key':key}:{}}
+async function api(p,o={}){
+  const r=await fetch(O+p,{...o,headers:{...h(),'Content-Type':'application/json',...o.headers}});
+  if(r.status===401){key=prompt('API Key:');localStorage.setItem('tk14',key);return api(p,o)}
+  return r.json();
+}
+
+function tab(n){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.t===n));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id==='p-'+n));
+  if(n==='memory')doLoadAll();
+  if(n==='config')doLoadCfg();
+}
+
+let es=null;
+function sse(){
+  if(es)es.close();
+  es=new EventSource(O+'/sse');
+  es.onopen=()=>{document.getElementById('status').innerHTML='<span class="dot dot-on"></span>已连接'};
+  es.onerror=()=>{document.getElementById('status').innerHTML='<span class="dot dot-off"></span>重连...';setTimeout(sse,4000)};
+  es.onmessage=e=>{
+    const d=JSON.parse(e.data);
+    document.getElementById('v-tetras').textContent=d.tetras;
+    document.getElementById('v-verts').textContent=d.vertices;
+    document.getElementById('v-clust').textContent=d.clusters;
+    document.getElementById('v-rels').textContent=d.db_relation_count;
+    document.getElementById('v-db').textContent=d.db_tetra_count;
+    document.getElementById('v-energy').textContent=Math.round(d.energy);
+    const pct=Math.min(100,d.energy/10);
+    const bar=document.getElementById('v-ebar');
+    bar.style.width=pct+'%';
+    bar.style.background=pct>50?'var(--green)':pct>20?'var(--orange)':'var(--red)';
+    document.getElementById('v-reqs').textContent=d.security_requests;
+    document.getElementById('v-denied').textContent=d.security_denied;
+    document.getElementById('v-allowed').textContent=Math.max(0,d.security_requests-d.security_denied);
+    const llm=document.getElementById('v-llm');
+    const lst=document.getElementById('v-llm-st');
+    if(d.cognitive){llm.className='badge b-green';llm.textContent='LLM';lst.textContent='已连接'}
+    else{llm.className='badge b-orange';llm.textContent='LLM';lst.textContent='未连接'}
+    drawClusters(d.cluster_details||[]);
+    listClusters(d.cluster_details||[]);
+    document.getElementById('v-uptime').textContent=fmtSec(Math.floor((Date.now()-startTime)/1000));
+  };
+}
+
+function drawClusters(cs){
+  const c=document.getElementById('cv');
+  const box=c.parentElement;
+  const w=box.clientWidth,h=box.clientHeight;
+  const dpr=window.devicePixelRatio||1;
+  c.width=w*dpr;c.height=h*dpr;
+  c.style.width=w+'px';c.style.height=h+'px';
+  const ctx=c.getContext('2d');
+  ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,h);
+
+  if(!cs.length){
+    ctx.fillStyle='#3a4a6a';ctx.font='13px Inter,system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('等待数据...',w/2,h/2);return;
+  }
+
+  const colors=['#6366f1','#34d399','#fbbf24','#a78bfa','#f87171','#22d3ee','#f472b6','#7dd3fc'];
+  const maxS=Math.max(...cs.map(c=>c.size),1);
+  const cx0=w/2,cy0=h/2;
+
+  ctx.save();
+  ctx.globalAlpha=.04;
+  for(let r=0;r<3;r++){
+    const rad=[30,70,120][r];
+    ctx.beginPath();ctx.arc(cx0,cy0,rad,0,Math.PI*2);
+    ctx.strokeStyle='#6366f1';ctx.lineWidth=1;ctx.stroke();
+  }
+  ctx.restore();
+
+  const angleStep=cs.length>1?Math.PI*2/cs.length:0;
+  const baseR=Math.min(w,h)*0.32;
+
+  cs.forEach((cl,i)=>{
+    const angle=i*angleStep-Math.PI/2;
+    const cx=cs.length===1?cx0:cx0+Math.cos(angle)*baseR;
+    const cy=cs.length===1?cy0:cy0+Math.sin(angle)*baseR;
+    const maxR=Math.min(w,h)*0.18;
+    const minR=14;
+    const r=Math.max(minR,minR+(cl.size/maxS)*(maxR-minR));
+    const clr=colors[i%colors.length];
+
+    const g=ctx.createRadialGradient(cx,cy,0,cx,cy,r*1.8);
+    g.addColorStop(0,clr+'20');g.addColorStop(.6,clr+'08');g.addColorStop(1,clr+'00');
+    ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,r*1.8,0,Math.PI*2);ctx.fill();
+
+    ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);
+    const grd=ctx.createRadialGradient(cx-r*0.3,cy-r*0.3,0,cx,cy,r);
+    grd.addColorStop(0,clr+'30');grd.addColorStop(1,clr+'10');
+    ctx.fillStyle=grd;ctx.fill();
+    ctx.strokeStyle=clr+'70';ctx.lineWidth=1.5;ctx.stroke();
+
+    ctx.fillStyle='#f0f4ff';ctx.font='bold 14px Inter,system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(cl.size,cx,cy);
+    ctx.fillStyle='#546080';ctx.font='500 10px Inter,system-ui';
+    ctx.fillText('C'+cl.id,cx,cy+r+14);
+  });
+
+  if(cs.length>1){
+    ctx.save();ctx.globalAlpha=.08;ctx.strokeStyle='#6366f1';ctx.lineWidth=.5;
+    for(let i=0;i<cs.length;i++){
+      for(let j=i+1;j<cs.length;j++){
+        const a1=i*angleStep-Math.PI/2,a2=j*angleStep-Math.PI/2;
+        ctx.beginPath();
+        ctx.moveTo(cx0+Math.cos(a1)*baseR,cy0+Math.sin(a1)*baseR);
+        ctx.lineTo(cx0+Math.cos(a2)*baseR,cy0+Math.sin(a2)*baseR);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+}
+
+function listClusters(cs){
+  const el=document.getElementById('cluster-list');
+  if(!cs.length){el.innerHTML='<div style="color:var(--dim);font-size:12px;padding:20px;text-align:center">暂无簇</div>';return}
+  el.innerHTML=cs.map(c=>{
+    const lbs=[...new Set(c.labels||[])].slice(0,5).map(l=>'<span class="badge b-accent">'+esc(l)+'</span>').join('');
+    return '<div class="cluster-item"><div class="cluster-head"><span class="cluster-name"><span class="layer-dot layer-service"></span>C'+c.id+'</span><span class="cluster-size">'+c.size+' 个记忆</span></div><div class="cluster-tags">'+lbs+'</div></div>';
+  }).join('');
+}
+
+async function doCreate(){
+  const inp=document.getElementById('inp-mem');
+  const c=inp.value.trim();if(!c)return;
+  const r=await api('/remember',{method:'POST',body:JSON.stringify({content:c})});
+  if(r.success){inp.value='';doLoadAll()}else alert(r.error||'失败');
+}
+async function doSearch(){
+  const q=document.getElementById('inp-q').value.trim();
+  if(!q)return doLoadAll();
+  const r=await api('/search',{method:'POST',body:JSON.stringify({query:q,limit:50})});
+  document.getElementById('mem-info').textContent='搜索 "'+q+'": '+(r.total||0)+' 条结果';
+  renderMem(r.results||[],true);
+}
+async function doRecall(){
+  const q=document.getElementById('inp-q').value.trim();if(!q){alert('请输入搜索内容后点 Recall');return}
+  const r=await api('/recall',{method:'POST',body:JSON.stringify({query:q,depth:2})});
+  const items=(r.memory_file&&r.memory_file.general)||[];
+  document.getElementById('mem-info').textContent='Recall "'+q+'": '+items.length+' 条关联记忆';
+  renderMem(items.map(m=>({id:m.id,content:m.content,labels:m.labels,mass:m.relevance?m.relevance[0]:0,sim:m.relevance?m.relevance[1]:0,time_ago_secs:null})),true);
+}
+async function doLoadAll(){
+  const r=await api('/nodes');
+  document.getElementById('mem-info').textContent='全部记忆: '+(r.total||0)+' 条';
+  renderMem(r.nodes||[],false);
+}
+function renderMem(ns,showSim){
+  document.getElementById('mem-tb').innerHTML=ns.map(n=>{
+    const lbs=(n.labels||[]).filter(l=>!l.startsWith('meta-')).map(l=>{
+      const cls=['b-accent','b-green','b-cyan','b-purple','b-orange'][Math.abs(hashStr(l))%5];
+      return '<span class="badge '+cls+'">'+esc(l)+'</span>';
+    }).join('');
+    const m=typeof n.mass==='number'?n.mass.toFixed(2):'-';
+    const sim=showSim&&typeof n.sim==='number'?(n.sim*100).toFixed(0)+'%':'';
+    const t=n.time_ago_secs!=null?fmtSec(n.time_ago_secs):'-';
+    return '<tr><td style="color:var(--dim)">'+n.id+'</td><td class="ellip" title="'+esc(n.content)+'">'+esc(n.content)+'</td><td>'+lbs+'</td><td style="color:var(--dim)">'+m+'</td>'+(showSim?'<td style="color:var(--accent2)">'+sim+'</td>':'')+'<td style="color:var(--dim);font-size:11px">'+t+'</td></tr>';
+  }).join('');
+}
+
+async function doLoadCfg(){
+  const r=await api('/config');if(!r.success)return;
+  document.getElementById('c-model').value=r.cognitive?.model||'';
+  document.getElementById('c-tick').value=r.tick_interval_ms||'1000';
+  document.getElementById('c-st').textContent=r.cognitive?.enabled?'已启用':'未启用';
+  document.getElementById('c-st').className='badge '+(r.cognitive?.enabled?'b-green':'b-orange');
+  document.getElementById('c-sec-on').value=r.security?.enabled?'启用':'关闭';
+  document.getElementById('c-sec-rate').value=r.security?.rate_limit||'-';
+  document.getElementById('c-sec-len').value=r.security?.max_content_length||'-';
+  const c=await api('/constitution');
+  if(c.full_text)document.getElementById('c-const').textContent=c.full_text;
+}
+async function doSaveCfg(){
+  const model=document.getElementById('c-model').value.trim();
+  const tick=parseInt(document.getElementById('c-tick').value)||1000;
+  const k=document.getElementById('c-key').value.trim();
+  const body={model:model||undefined,tick_interval_ms:tick};
+  if(k)body.api_key=k;
+  const r=await api('/config',{method:'POST',body:JSON.stringify(body)});
+  alert(r.success?'已保存（部分配置需重启生效）':'失败: '+r.error);
+}
+
+function fmtSec(s){if(s<60)return s+'秒';if(s<3600)return Math.floor(s/60)+'分';if(s<86400)return Math.floor(s/3600)+'时';return Math.floor(s/86400)+'天'}
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function hashStr(s){let h=0;for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0}return h}
+function tick(){document.getElementById('clock').textContent=new Date().toLocaleTimeString('zh-CN')}
+
+window.onload=()=>{
+  key=localStorage.getItem('tk14')||'';
+  sse();doLoadAll();doLoadCfg();
+  setInterval(tick,1000);tick();
+};
+</script>
+</body>
+</html>
