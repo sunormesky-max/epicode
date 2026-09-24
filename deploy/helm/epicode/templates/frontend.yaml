@@ -28,6 +28,47 @@ spec:
             - name: http
               containerPort: 3000
               protocol: TCP
+          env:
+            - name: PORT
+              value: "3000"
+            - name: APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: APP_ID
+            - name: APP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: APP_SECRET
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: DATABASE_URL
+            - name: KIMI_AUTH_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: KIMI_AUTH_URL
+            - name: KIMI_OPEN_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: KIMI_OPEN_URL
+            {{- if .Values.env.OWNER_UNION_ID }}
+            - name: OWNER_UNION_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: OWNER_UNION_ID
+            {{- end }}
+          {{- with .Values.probes.frontend }}
+          livenessProbe:
+            {{- toYaml .liveness | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .readiness | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.resources.frontend | nindent 12 }}
 ---

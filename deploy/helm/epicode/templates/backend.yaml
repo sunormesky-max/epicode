@@ -28,14 +28,50 @@ spec:
             - name: http
               containerPort: 9111
               protocol: TCP
-          envFrom:
-            - secretRef:
-                name: {{ .Release.Name }}-secrets
           env:
             - name: RUST_LOG
               value: {{ .Values.env.RUST_LOG | quote }}
             - name: EPICODE_LISTEN_ADDR
               value: {{ .Values.env.EPICODE_LISTEN_ADDR | quote }}
+            - name: EPICODE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: EPICODE_API_KEY
+            - name: EPICODE_ADMIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: EPICODE_ADMIN_KEY
+            - name: EPICODE_CORS_ORIGIN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: EPICODE_CORS_ORIGIN
+            {{- if .Values.env.EPICODE_MASTER_KEY }}
+            - name: EPICODE_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: EPICODE_MASTER_KEY
+            {{- end }}
+            {{- if .Values.env.DEEPSEEK_API_KEY }}
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: DEEPSEEK_API_KEY
+            {{- end }}
+            {{- if .Values.env.REDIS_URL }}
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: REDIS_URL
+            {{- else if .Values.redis.enabled }}
+            - name: REDIS_URL
+              value: "redis://{{ .Release.Name }}-redis:6379"
+            {{- end }}
           {{- with .Values.probes.backend }}
           livenessProbe:
             {{- toYaml .liveness | nindent 12 }}

@@ -217,13 +217,15 @@ async fn main() {
                            mut request: axum::extract::Request,
                            next: middleware::Next| async move {
         let path = request.uri().path().to_string();
-        if path.starts_with("/health")
+        if path == "/health"
+            || path == "/v1/health"
             || path == "/"
             || path == "/docs"
             || path == "/openapi.yaml"
             || path == "/v1/login"
             || path == "/v1/skills/explore"
             || path == "/stats/public"
+            || path == "/v1/stats/public"
             || path == "/v1/agent-guide"
         {
             return next.run(request).await;
@@ -266,7 +268,7 @@ async fn main() {
             return next.run(request).await;
         }
 
-        if path == "/register" {
+        if path == "/register" || path == "/v1/register" {
             return next.run(request).await;
         }
 
@@ -298,11 +300,14 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/v1/health", get(health))
         .route("/v1/agent-guide", get(agent_guide))
         .route("/stats/public", get(public_stats))
+        .route("/v1/stats/public", get(public_stats))
         .route("/docs", get(swagger_ui))
         .route("/openapi.yaml", get(openapi_spec))
         .route("/register", post(register_user))
+        .route("/v1/register", post(register_user))
         .route("/v1/login", post(login_user))
         .route("/v1/digest", post(digest_content))
         .route("/v1/remember", post(remember))
