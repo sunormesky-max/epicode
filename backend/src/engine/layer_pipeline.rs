@@ -237,7 +237,7 @@ impl LayerPipeline {
     pub fn identity_short_hash(space: &Space) -> Option<String> {
         space.identity_info().map(|info| {
             let h = Self::compute_identity_hash(&info.system_name, &info.mission, &info.author);
-            format!("{}:{}", &info.system_name, &h[..8.min(h.len())])
+            format!("{}:{}", info.system_name, &h[..8.min(h.len())])
         })
     }
 }

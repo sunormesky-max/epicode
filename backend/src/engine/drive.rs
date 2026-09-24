@@ -41,6 +41,7 @@ impl std::str::FromStr for Drive {
 }
 
 /// Drive Engine — tracks the dominant drive and adapts based on outcomes.
+#[allow(dead_code)] // 字段为下游分析保留
 pub struct DriveEngine {
     dominant: Drive,
     curiosity_score: f64,
@@ -54,6 +55,7 @@ pub struct DriveEngine {
 }
 
 #[derive(Clone, Default)]
+#[allow(dead_code)] // 观察快照字段, 部分暂未被读
 struct ObserveState {
     tetra_count: usize,
     cluster_count: usize,
@@ -61,6 +63,12 @@ struct ObserveState {
     energy_ratio: f64,
     unexplored_ratio: f64,
     redundancy_ratio: f64,
+}
+
+impl Default for DriveEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DriveEngine {
@@ -275,17 +283,13 @@ pub enum DriveIntent {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum DriveUrgency {
     Low,
+    #[default]
     Medium,
     High,
     Critical,
-}
-
-impl Default for DriveUrgency {
-    fn default() -> Self {
-        DriveUrgency::Medium
-    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -453,6 +457,12 @@ pub struct DriveQueue {
     ingested: Mutex<HashSet<u64>>,
     policy: Mutex<HashMap<String, (u32, u32)>>,
     policy_version: AtomicU64,
+}
+
+impl Default for DriveQueue {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DriveQueue {
@@ -710,7 +720,7 @@ impl DriveQueue {
             .filter(|s| {
                 matches!(s.status, DriveStatus::Rejected)
                     || (matches!(s.status, DriveStatus::Expired)
-                        && s.retry_count > Self::MAX_RETRIES as u32)
+                        && s.retry_count > Self::MAX_RETRIES)
             })
             .count();
         let ttl_expired_count = signals

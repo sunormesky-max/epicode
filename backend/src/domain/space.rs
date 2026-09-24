@@ -689,7 +689,7 @@ impl Space {
             };
             // 用第一个 tetra 的 core.z 判断层
             let layer = crate::domain::cylinder::CylinderLayer::from_index(
-                (first_tetra.core.z / 2.0).round().max(0.0).min(5.0) as usize,
+                (first_tetra.core.z / 2.0).round().clamp(0.0, 5.0) as usize,
             )
             .unwrap_or(crate::domain::cylinder::CylinderLayer::Instinct);
 

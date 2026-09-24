@@ -184,7 +184,7 @@ pub async fn ingest_batch(
     for _ in 0..n {
         if let Err(e) = st.user_mgr.check_and_increment_memory(&engine.user_id) {
             for _ in 0..reserved {
-                let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+                st.user_mgr.decrement_memory_count(&engine.user_id, 1);
             }
             return error_response(StatusCode::FORBIDDEN, &e);
         }
@@ -193,7 +193,7 @@ pub async fn ingest_batch(
     for it in &req.items {
         if let Err(e) = validate_content(&it.content) {
             for _ in 0..reserved {
-                let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+                st.user_mgr.decrement_memory_count(&engine.user_id, 1);
             }
             return error_response(StatusCode::BAD_REQUEST, &e);
         }
@@ -235,7 +235,7 @@ pub async fn ingest_batch(
                 }
             }
             for _ in 0..refund {
-                let _ = st.user_mgr.decrement_memory_count(&user_id, 1);
+                st.user_mgr.decrement_memory_count(&user_id, 1);
             }
             let created = items_out
                 .iter()
@@ -288,7 +288,7 @@ pub async fn remember(
         return match result {
             Ok(Ok((id, is_new))) => {
                 if !is_new {
-                    let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+                    st.user_mgr.decrement_memory_count(&engine.user_id, 1);
                 }
                 let preview: String = clean_content.chars().take(200).collect();
                 let data = serde_json::json!({
@@ -321,7 +321,7 @@ pub async fn remember(
     match result {
         Ok(Ok(r)) => {
             if !r.is_new {
-                let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+                st.user_mgr.decrement_memory_count(&engine.user_id, 1);
             } // dedup 回滚配额（kimi #3）
             let preview: String = clean_content.chars().take(200).collect();
             let data = epicode::engine::smrp::create_data(&engine_for_cb, &r, &preview);
@@ -468,6 +468,7 @@ pub async fn search(
     }
 }
 
+#[allow(clippy::field_reassign_with_default)] // 集成清偿: 字面量重构另立
 fn build_rest_search_filters(req: &SearchRequest) -> Option<SearchFilters> {
     let has_labels = req.labels.is_some();
     let has_min_imp = req.min_importance.is_some();
@@ -663,7 +664,7 @@ pub async fn create_node(
     match result {
         Ok(Ok((id, is_new))) => {
             if !is_new {
-                let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+                st.user_mgr.decrement_memory_count(&engine.user_id, 1);
             } // dedup 回滚配额（kimi #3）
             (
                 StatusCode::OK,
@@ -839,7 +840,7 @@ pub async fn graph_analysis(
                 .flat_map(|t| t.data.labels.clone())
                 .fold(std::collections::HashMap::new(), |mut acc, l| { *acc.entry(l).or_insert(0) += 1; acc });
             let mut sorted: Vec<(String, usize)> = labels.into_iter().collect();
-            sorted.sort_by(|a, b| b.1.cmp(&a.1));
+            sorted.sort_by_key(|a| std::cmp::Reverse(a.1));
             serde_json::json!({
                 "size": c.tetra_ids.len(),
                 "top_labels": sorted.iter().take(3).map(|(l, c)| serde_json::json!({"label": l, "count": c})).collect::<Vec<_>>(),
@@ -1514,7 +1515,7 @@ pub async fn import_doc(
     match result {
         Ok(Ok((id, is_new))) => {
             if !is_new {
-                let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+                st.user_mgr.decrement_memory_count(&engine.user_id, 1);
             } // dedup 回滚配额（kimi #3）
             tracing::info!(
                 "[DocImport] '{}' — {} chars, id={}, new={}",
@@ -1734,7 +1735,7 @@ pub struct BulkQuarantineRequest {
 /// 批量给记忆加 quarantine 标签 + 降 importance=0.1 + mass=0.05
 /// 不删除记忆，只隔离使其在正常搜索中不可见
 pub async fn bulk_quarantine(
-    State(st): State<CloudState>,
+    State(_st): State<CloudState>,
     AuthedEngine(engine): AuthedEngine,
     Json(body): Json<BulkQuarantineRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -1891,7 +1892,7 @@ pub async fn bulk_quarantine(
 /// POST /v1/memories/bulk-restore
 /// 批量移除 quarantine 标签 + 恢复 importance 到合理值
 pub async fn bulk_restore(
-    State(st): State<CloudState>,
+    State(_st): State<CloudState>,
     AuthedEngine(engine): AuthedEngine,
     Json(body): Json<BulkQuarantineRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -2273,11 +2274,11 @@ pub async fn noise_candidates(
         let space = engine_inner.space();
         let all_tetras = space.all_tetrahedrons();
 
-        let mut quarantined = 0u64;
-        let mut junk = 0u64;
-        let mut superseded = 0u64;
-        let mut low_importance = 0u64;
-        let mut total = 0u64;
+        let _quarantined = 0u64;
+        let _junk = 0u64;
+        let _superseded = 0u64;
+        let _low_importance = 0u64;
+        let _total = 0u64;
         let mut candidates: Vec<serde_json::Value> = Vec::new();
         let mut total_matching = 0u64;
 
@@ -2527,8 +2528,8 @@ pub async fn resolve_contradiction(
                 applied1,
                 applied2
             );
-            if err1.is_some() && err2.is_some() {
-                let msg = format!("both failed: {} | {}", err1.unwrap(), err2.unwrap());
+            if let (Some(e1), Some(e2)) = (err1.as_ref(), err2.as_ref()) {
+                let msg = format!("both failed: {} | {}", e1, e2);
                 return (
                     StatusCode::NOT_FOUND,
                     Json(epicode::engine::smrp::envelope_err(
@@ -2601,8 +2602,8 @@ pub async fn archive_contradiction(
                 applied1,
                 applied2
             );
-            if err1.is_some() && err2.is_some() {
-                let msg = format!("both failed: {} | {}", err1.unwrap(), err2.unwrap());
+            if let (Some(e1), Some(e2)) = (err1.as_ref(), err2.as_ref()) {
+                let msg = format!("both failed: {} | {}", e1, e2);
                 return (
                     StatusCode::NOT_FOUND,
                     Json(epicode::engine::smrp::envelope_err(
@@ -2673,7 +2674,7 @@ pub async fn list_projects(
                     *project_counts.entry(proj.to_string()).or_insert(0) += 1;
                     memory_counts
                         .entry(proj.to_string())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(tetra.id);
                 }
             }
@@ -2817,6 +2818,7 @@ fn default_rule_strength() -> f64 {
 /// - content: 规则内容
 /// - labels: 额外标签（可选）
 /// - project: 关联项目（可选，会自动加 "project:<name>" 标签）
+///
 /// 返回新记忆 id。同时追加一条 "rule_audit" 审计记忆。
 pub async fn learn_rule(
     State(st): State<CloudState>,
@@ -2876,7 +2878,7 @@ pub async fn learn_rule(
     match result {
         Ok(Ok(report)) => {
             if !report.is_new {
-                let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+                st.user_mgr.decrement_memory_count(&engine.user_id, 1);
             }
             // 将新规则标记为 enforced（hard constraint）
             let rule_id = report.id;
@@ -2920,7 +2922,7 @@ pub async fn learn_rule(
         }
         Ok(Err(e)) => {
             tracing::error!("[P4-4] learn_rule error: {}", e);
-            let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+            st.user_mgr.decrement_memory_count(&engine.user_id, 1);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(epicode::engine::smrp::envelope_err(
@@ -2933,7 +2935,7 @@ pub async fn learn_rule(
         }
         Err(e) => {
             tracing::error!("[P4-4] learn_rule spawn error: {}", e);
-            let _ = st.user_mgr.decrement_memory_count(&engine.user_id, 1);
+            st.user_mgr.decrement_memory_count(&engine.user_id, 1);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(epicode::engine::smrp::envelope_err(
@@ -3083,7 +3085,7 @@ pub async fn audit_rules(
         let mut entries = engine_inner
             .scheduler
             .api_list_by_labels(&["rule_audit"], 500);
-        entries.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.1.timestamp));
         let log: Vec<serde_json::Value> = entries
             .iter()
             .map(|(id, p)| {
@@ -3582,7 +3584,7 @@ pub async fn operations_dry_run(
     // Generate confirmation token.
     let now = chrono::Utc::now().timestamp();
     gc_pending_ops(now);
-    let token = format!("tok_{}_{}_{}", now, &op, requested_count);
+    let token = format!("tok_{}_{}_{}", now, op, requested_count);
 
     pending_ops().lock().insert(
         token.clone(),
@@ -3819,7 +3821,7 @@ pub async fn operations_audit_log(
         let mut entries = engine_inner
             .scheduler
             .api_list_by_labels(&["op_audit"], 500);
-        entries.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.1.timestamp));
         let log: Vec<serde_json::Value> = entries
             .iter()
             .map(|(id, p)| {

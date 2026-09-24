@@ -80,7 +80,7 @@ pub async fn think(
                         .map(|(r, _)| r).unwrap_or_default();
                     results.iter().take(5)
                         .map(|(id, sim, _, p)| format!("#{} (相似度{:.2}) {}\n标签:{}", id, sim,
-                            &p.content.chars().take(200).collect::<String>(), p.labels.join(",")))
+                            p.content.chars().take(200).collect::<String>(), p.labels.join(",")))
                         .collect::<Vec<_>>().join("\n---\n")
                 }
                 "delegate" => {

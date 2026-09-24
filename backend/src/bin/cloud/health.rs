@@ -164,7 +164,7 @@ pub async fn persona_ready(
     let persona_state = st.user_mgr.get_persona_state(&user_id);
     let loop_started = st.user_mgr.is_loop_started(&user_id);
 
-    let (ready, status_code, persona_phase) = match persona_state {
+    let (ready, status_code, _persona_phase) = match persona_state {
         PersonaState::Ready => {
             let cognitive_enabled = std::env::var("ENABLE_COGNITIVE").as_deref() == Ok("1");
             let phase = if loop_started {
@@ -499,18 +499,20 @@ pub struct LoginRequest {
 
 /// P27 Pulse: 接收守护进程遥测 — 真实活跃时间回流(带身份验证+归属校验)
 #[derive(serde::Deserialize)]
+#[allow(dead_code)] // 运维探针保留
 pub struct PulseHeartbeat {
     pub task_id: String,
     pub real_active_ms: i64,
     pub local_now_ms: i64,
 }
 
+#[allow(dead_code)] // 运维探针保留
 pub async fn pulse_heartbeat(
     State(st): State<CloudState>,
     axum::extract::Extension(user): axum::extract::Extension<UserInfo>,
     axum::Json(req): axum::Json<PulseHeartbeat>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if req.real_active_ms < 0 || req.real_active_ms > 86400_000 {
+    if req.real_active_ms < 0 || req.real_active_ms > 86_400_000 {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "real_active_ms out of range"})),
@@ -544,6 +546,7 @@ pub async fn pulse_heartbeat(
 }
 
 /// P27c: Pulse 脚本分发(带API Key验证)
+#[allow(dead_code)] // 运维探针保留
 pub async fn pulse_script(
     _user: axum::extract::Extension<UserInfo>,
 ) -> impl axum::response::IntoResponse {
@@ -736,7 +739,6 @@ pub async fn sse_stream(
 ) -> impl axum::response::IntoResponse {
     use axum::response::sse::{Event, Sse};
     use tokio_stream::wrappers::ReceiverStream;
-    use tokio_stream::StreamExt;
 
     let user_id = user.user_id.clone();
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(32);

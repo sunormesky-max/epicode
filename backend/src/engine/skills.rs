@@ -325,7 +325,7 @@ impl SkillEngine {
                 if skill
                     .description
                     .as_deref()
-                    .map_or(false, |d| d.starts_with("已废止"))
+                    .is_some_and(|d| d.starts_with("已废止"))
                 {
                     continue;
                 }
@@ -763,7 +763,7 @@ impl SkillEngine {
                 if skill
                     .description
                     .as_deref()
-                    .map_or(false, |d| d.starts_with("已废止"))
+                    .is_some_and(|d| d.starts_with("已废止"))
                 {
                     continue;
                 }

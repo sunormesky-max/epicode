@@ -537,7 +537,7 @@ pub async fn sse_stream(
         let cognitive_enabled = engine.cognitive.enabled();
         let sec = engine.guard.stats();
 
-        let cluster_data: Vec<serde_json::Value> = if tick % 5 == 0 {
+        let cluster_data: Vec<serde_json::Value> = if tick.is_multiple_of(5) {
             let clusters = engine.space().find_clusters();
             clusters
                 .iter()

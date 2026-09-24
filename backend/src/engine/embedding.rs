@@ -193,6 +193,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)] // 测试夹具值
     fn blob_roundtrip() {
         let original: Vec<f64> = vec![1.0, -2.5, 3.14, 0.0, 1e-10];
         let blob = super::super::vector::VectorLayer::embedding_to_blob(&original);

@@ -715,7 +715,7 @@ impl KnowledgeGraph {
                 }
             }
             let mut pairs: Vec<_> = pair_count.into_iter().collect();
-            pairs.sort_by(|a, b| b.1.cmp(&a.1));
+            pairs.sort_by_key(|p| std::cmp::Reverse(p.1));
             for ((i, j), count) in pairs.into_iter().take(200) {
                 inter_cluster_edges.push(GraphEdgeExport {
                     source: clusters[i].tetra_ids.first().copied().unwrap_or(0),

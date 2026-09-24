@@ -469,7 +469,7 @@ impl LibraryStore {
     pub fn list_requests(&self, status: Option<&str>) -> Vec<serde_json::Value> {
         let conn = self.conn.lock();
         let sql = match status {
-            Some(s) => "SELECT id, user_id, title, url, note, status, created_at, handled_at, handler_note FROM library_requests WHERE status=?1 ORDER BY id DESC LIMIT 100",
+            Some(_s) => "SELECT id, user_id, title, url, note, status, created_at, handled_at, handler_note FROM library_requests WHERE status=?1 ORDER BY id DESC LIMIT 100",
             None => "SELECT id, user_id, title, url, note, status, created_at, handled_at, handler_note FROM library_requests ORDER BY id DESC LIMIT 100",
         };
         let mut stmt = match conn.prepare(sql) {

@@ -319,6 +319,7 @@ impl DigestionEngine {
         result
     }
 
+    #[allow(dead_code)] // 集成清偿
     fn classify_chunk(&self, text: &str) -> Vec<String> {
         if self.cognitive.enabled() {
             match self.cognitive.classify_content(text) {
@@ -334,6 +335,7 @@ impl DigestionEngine {
         self.heuristic_classify(text)
     }
 
+    #[allow(dead_code)] // 集成清偿
     fn heuristic_classify(&self, text: &str) -> Vec<String> {
         let lower = text.to_lowercase();
         let mut labels = Vec::new();

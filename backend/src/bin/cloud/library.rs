@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 
-use epicode::engine::library::{LibraryItemIn, LibraryStore};
+use epicode::engine::library::LibraryItemIn;
 use epicode::engine::user_manager::{UserInfo, UserPlan};
 
 use super::state::CloudState;
@@ -281,6 +281,7 @@ pub async fn submit_request(
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)] // 手写查询保留
 pub struct ListRequestsQuery {
     #[serde(default)]
     pub status: Option<String>,

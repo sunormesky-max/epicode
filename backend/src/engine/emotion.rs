@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct EmotionState {
     pub pleasure: f64,

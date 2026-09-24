@@ -282,7 +282,7 @@ mod tests {
         let r =
             PulseEngine::send(&space, &kg, PulseType::Neural { temperature: 0.8 }, 0, 5).unwrap();
         assert!(
-            r.data.visited_tetras.len() >= 1,
+            !r.data.visited_tetras.is_empty(),
             "pulse should visit at least origin"
         );
     }

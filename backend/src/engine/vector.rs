@@ -106,7 +106,7 @@ impl VectorLayer {
             onnx_disabled_until: std::sync::atomic::AtomicU64::new(0),
             active_inference_threads: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             tokenizer,
-            first_output: first_output,
+            first_output,
             input_names: input_names.clone(),
             has_token_type_ids,
             dim,
@@ -193,7 +193,7 @@ impl VectorLayer {
             self.active_inference_threads
                 .store(0, std::sync::atomic::Ordering::Relaxed);
         }
-        let mut warmed = 0usize;
+        let mut _warmed = 0usize; // 计数保留诊断用途
         let mut result: Vec<Option<Vec<f64>>> = vec![None; texts.len()];
         for chunk_start in (0..need.len()).step_by(8) {
             let idxs: Vec<usize> = need[chunk_start..(chunk_start + 16).min(need.len())].to_vec();
@@ -293,7 +293,7 @@ impl VectorLayer {
                         break;
                     }
                 }
-                warmed += 1;
+                _warmed += 1;
                 result[i] = Some(emb);
             }
         }
@@ -489,10 +489,12 @@ impl VectorLayer {
     }
 
     pub fn blob_to_embedding(blob: &[u8]) -> Vec<f64> {
-        if blob.is_empty() || blob.len() % 8 != 0 {
+        if blob.is_empty() || !blob.len().is_multiple_of(8) {
             return Vec::new();
         }
-        blob.chunks_exact(8)
+        blob.as_chunks::<8>()
+            .0
+            .iter()
             .map(|chunk| {
                 f64::from_le_bytes([
                     chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
@@ -592,6 +594,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)] // 测试夹具值
     fn blob_roundtrip() {
         let original: Vec<f64> = vec![1.0, -2.5, 3.14, 0.0, 1e-10];
         let blob = VectorLayer::embedding_to_blob(&original);

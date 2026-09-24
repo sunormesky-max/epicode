@@ -9,8 +9,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 use epicode::engine::user_manager::UserInfo;
-/// P0 隔离修复: runtime 控制面必须用【当前用户】的 engine 填 envelope,
-/// 之前误用 first_engine(任意用户) 导致 status.identity 显示别人的身份
+// P0 隔离修复: runtime 控制面必须用【当前用户】的 engine 填 envelope,
+// 之前误用 first_engine(任意用户) 导致 status.identity 显示别人的身份
 
 /// ── α1fix: primary binding 持久化 (重启不丢绑定关系; 激活仍靠心跳) ──
 const BINDINGS_FILE: &str = "/var/lib/tetramem/runtime_bindings.json";
@@ -206,7 +206,7 @@ pub async fn status(
     Extension(user): Extension<UserInfo>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let binding = {
-        let mut executors = st.primary_executors.write();
+        let executors = st.primary_executors.write();
         executors.get(&user.user_id).cloned()
     };
     let body = match binding {

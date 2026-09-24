@@ -306,10 +306,10 @@ pub async fn update_identity_http(
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
     };
     // 身份不可变：已确认后核心字段（name/mission/author）不可改，只允许 personality/language recalibrate（kimi #10）
-    if engine.space.identity_info().is_some() {
-        if req.name.is_some() || req.mission.is_some() || req.author.is_some() {
-            return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err(&engine, "identity_update", 403, "Core identity (name/mission/author) is immutable after confirmation. Only personality/language may be recalibrated.")));
-        }
+    if engine.space.identity_info().is_some()
+        && (req.name.is_some() || req.mission.is_some() || req.author.is_some())
+    {
+        return (StatusCode::FORBIDDEN, Json(epicode::engine::smrp::envelope_err(&engine, "identity_update", 403, "Core identity (name/mission/author) is immutable after confirmation. Only personality/language may be recalibrated.")));
     }
     let mut extra = None;
     if req.personality.is_some() || req.language.is_some() {

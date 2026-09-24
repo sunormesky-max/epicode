@@ -12,8 +12,6 @@
 //! 行动白名单: search / remember / notify / delegate.run / delegate.read / delegate.apply / none
 //! 高危红线: identity_touch 类意志只 notify 不执行(与 SDK 身份门一致)
 
-use crate::domain::tetra::MemoryPayload;
-
 pub struct WakeContext {
     pub identity: serde_json::Value,
     pub signal: serde_json::Value,
@@ -82,6 +80,7 @@ fn llm_chat(system: &str, user: &str, max_tokens: u64) -> Result<String, String>
     Ok(cleaned)
 }
 
+#[allow(dead_code)] // 集成清偿
 const IDENTITY_TOUCH: &str = "identity|身份|宪法|constitution|finalize";
 
 /// 自我优化工具白名单说明 (注入主意识 prompt)

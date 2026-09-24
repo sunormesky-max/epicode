@@ -214,8 +214,7 @@ impl DreamEngine {
                 if merged_ids.contains(&tetras[i].id) {
                     continue;
                 }
-                for wj in (wi + 1)..non_meta.len() {
-                    let j = non_meta[wj];
+                for &j in non_meta.iter().skip(wi + 1) {
                     if merged_ids.contains(&tetras[j].id) {
                         continue;
                     }

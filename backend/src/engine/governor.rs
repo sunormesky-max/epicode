@@ -29,6 +29,7 @@ impl LifecycleGovernor {
     const MIN_IMPORTANCE: f64 = 0.3;
     /// D5: 热标签保护 — 被高频检索的标签类记忆衰减率打折(0.995 vs 0.98)
     /// 遗忘个体化: 不是所有记忆统一衰减, 被反复需要的知识遗忘更慢
+    #[allow(dead_code)] // 集成清偿
     const HOT_LABEL_DECAY_RATE: f64 = 0.995;
     const HOT_LABEL_THRESHOLD: u32 = 10; // 被检索>=10次的标签视为热
     const CONTRADICTION_SIM_THRESHOLD: f64 = 0.08; // minimum topic-overlap to consider two memories a contradiction pair (tuned)
@@ -264,7 +265,7 @@ impl LifecycleGovernor {
         // last_reviewed_ts None 时 fallback 到 timestamp（旧记忆兼容）。
         let review_days = {
             let review_ts = payload.last_reviewed_ts.unwrap_or(payload.timestamp);
-            ((chrono::Utc::now().timestamp() - review_ts) / 86400).max(0) as i64
+            ((chrono::Utc::now().timestamp() - review_ts) / 86400).max(0)
         };
         let recency_factor = if review_days > 0 {
             Self::IMPORTANCE_DECAY_RATE.powi(review_days as i32)

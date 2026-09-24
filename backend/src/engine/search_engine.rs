@@ -60,6 +60,7 @@ struct DfCache {
 }
 
 impl SearchEngineState {
+    #[allow(clippy::type_complexity)] // 集成清偿: 类型别名重构另立
     pub fn new(hnsw: HnswIndex) -> Self {
         Self {
             hnsw: RwLock::new(hnsw),
@@ -157,9 +158,10 @@ pub struct SearchCtx<'a> {
 }
 
 /// Phase 1 检索可信度重建:搜索模式控制评分通道
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SearchMode {
     /// 默认: 向量 + BM25 混合(现有行为, 向后兼容)
+    #[default]
     Hybrid,
     /// 纯 BM25×10, alias 置顶, 不向量回填, 短路语义展开与 rerank
     /// 用于精确 token 检索: 搜索结构化标识符/自身内容/已知短语
@@ -173,12 +175,6 @@ pub enum SearchMode {
     /// D2.2b RRF融合: semantic+graph双跑, 排序倒数融合(Reciprocal Rank Fusion, k=60)
     /// 规则路由失败(55.0%)后的正确答案——不预测类型, 直接取两模式之长
     Fusion,
-}
-
-impl Default for SearchMode {
-    fn default() -> Self {
-        SearchMode::Hybrid
-    }
 }
 
 impl SearchMode {
@@ -670,7 +666,7 @@ pub fn search_with_mode(
                 u64,
                 (f64, crate::domain::tetra::MemoryPayload, Vec<&'static str>),
             > = std::collections::HashMap::new();
-            for (rank, (id, _sim, mass, payload, mut src)) in sem.into_iter().enumerate() {
+            for (rank, (id, _sim, mass, payload, src)) in sem.into_iter().enumerate() {
                 let e = rrf.entry(id).or_insert((0.0, rank, usize::MAX));
                 e.0 += 1.0 / (60.0 + rank as f64);
                 if rank < e.1 {
@@ -692,6 +688,7 @@ pub fn search_with_mode(
                     p.2.extend(src);
                 }
             }
+            #[allow(clippy::type_complexity)] // 集成清偿: 类型别名重构另立
             let mut fused: Vec<(
                 u64,
                 f64,
@@ -926,7 +923,7 @@ fn search_exact(
     let (df_map, doc_count, avg_dl) = ctx.state.get_or_build_df(&all_tetras);
     let df_map_ref = &df_map;
     let state_ref = &ctx.state;
-    let access_counts_snapshot = ctx.state.access_counts.lock().clone();
+    let _access_counts_snapshot = ctx.state.access_counts.lock().clone();
 
     // 候选集: label_index 倒排(精确 token 命中的记忆) + label 子串匹配
     let label_idx = ctx.label_index.lock();
@@ -1013,7 +1010,7 @@ fn search_exact(
                 }
                 if top_labels.len() > 200 {
                     let mut s: Vec<_> = top_labels.iter().map(|(k, v)| (k.clone(), *v)).collect();
-                    s.sort_by(|a, b| b.1.cmp(&a.1));
+                    s.sort_by_key(|a| std::cmp::Reverse(a.1));
                     s.truncate(150);
                     top_labels.clear();
                     for (k, v) in s {
@@ -1237,7 +1234,7 @@ pub fn search(
                     // 保留 top 150 by count
                     let mut sorted: Vec<_> =
                         top_labels.iter().map(|(k, v)| (k.clone(), *v)).collect();
-                    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+                    sorted.sort_by_key(|a| std::cmp::Reverse(a.1));
                     sorted.truncate(150);
                     top_labels.clear();
                     for (k, v) in sorted {
@@ -1545,7 +1542,7 @@ fn score_tetra(
     df_map: &HashMap<String, usize>,
     keyword_fallback: bool,
     access_counts: &HashMap<TetraId, u32>,
-    gibberish_query: bool,
+    _gibberish_query: bool,
     doc_tokens: &[String],
     now_ts: f64,
 ) -> (TetraId, f64, f64, MemoryPayload) {
@@ -1648,8 +1645,8 @@ fn score_tetra(
         0.0
     };
     let validity_penalty = if t.data.valid_to.is_some() { 0.3 } else { 0.0 };
-    score -= (penalty + noise_penalty + auto_penalty + validity_penalty);
-    score = score.max(0.0).min(1.0);
+    score -= penalty + noise_penalty + auto_penalty + validity_penalty;
+    score = score.clamp(0.0, 1.0);
 
     (t.id, score, t.mass, t.data.clone())
 }
@@ -1804,8 +1801,8 @@ fn score_tetra_exact(
         0.0
     };
     let validity_penalty = if t.data.valid_to.is_some() { 0.3 } else { 0.0 };
-    score -= (noise_penalty + validity_penalty);
-    score = score.max(0.0).min(1.0);
+    score -= noise_penalty + validity_penalty;
+    score = score.clamp(0.0, 1.0);
 
     let matched_by = compute_matched_by(query_tokens, &t.data, doc_tokens);
     (t.id, score, t.mass, t.data.clone(), matched_by)

@@ -7,7 +7,6 @@ use serde::Deserialize;
 
 use epicode::engine::user_manager::UserInfo;
 
-use super::helpers::AuthedEngine;
 use super::state::CloudState;
 
 #[derive(Deserialize)]
@@ -70,7 +69,7 @@ pub async fn create_subaccount(
             )),
         );
     }
-    if req.user_id.len() < 1 || req.user_id.len() > 64 {
+    if req.user_id.is_empty() || req.user_id.len() > 64 {
         return (
             StatusCode::BAD_REQUEST,
             Json(epicode::engine::smrp::envelope_err_plain(

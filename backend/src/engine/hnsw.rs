@@ -142,7 +142,7 @@ impl HnswIndex {
         let mut current_dist = distance(&self.nodes[&ep].embedding, query);
         if self.nodes.len() > 3 {
             let extra: Vec<u64> = {
-                let mut v: Vec<u64> = self.nodes.keys().copied().collect();
+                let v: Vec<u64> = self.nodes.keys().copied().collect();
                 // 简单多样本: 取头尾+中间 (确定性, 免RNG依赖)
                 let n = v.len();
                 vec![v[0], v[n / 2], v[n - 1]]

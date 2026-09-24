@@ -138,16 +138,16 @@ impl McpHandler {
             return err_resp;
         }
         // P1记忆分层：根据 tool 名和 labels 自动设置 memory_class
-        let auto_class =
-            if tool == "session_summary" || tool == "ctx_save" || tool == "context_observe" {
-                Some("session".to_string())
-            } else if labels.iter().any(|l| {
+        let auto_class = if tool == "session_summary"
+            || tool == "ctx_save"
+            || tool == "context_observe"
+            || labels.iter().any(|l| {
                 l == "session-summary" || l == "ctx-session-summary" || l == "system-observation"
             }) {
-                Some("session".to_string())
-            } else {
-                None
-            };
+            Some("session".to_string())
+        } else {
+            None
+        };
 
         match self
             .engine
@@ -1524,7 +1524,7 @@ impl McpHandler {
             .engine
             .storage
             .get_meta(&seen_key)
-            .map_or(true, |v| v != skills_ver);
+            .is_none_or(|v| v != skills_ver);
         let _ = self.engine.storage.set_meta(&seen_key, &skills_ver);
         let contract: Vec<serde_json::Value> = self
             .engine
@@ -1573,8 +1573,7 @@ impl McpHandler {
             .unwrap_or("")
             .to_string();
         if !parent_task_id.is_empty() {
-            let _ = self
-                .engine
+            self.engine
                 .storage
                 .attach_task_parent(&task_id, &parent_task_id);
         }
@@ -1660,8 +1659,7 @@ impl McpHandler {
             .to_string();
         if est_ms.is_some() || !task_class.is_empty() {
             let conn_est = est_ms.unwrap_or(0);
-            let _ = self
-                .engine
+            self.engine
                 .storage
                 .set_task_est_class(&task_id, conn_est, &task_class);
         }
@@ -1827,7 +1825,7 @@ impl McpHandler {
                     })
                 })
                 .collect();
-            matched.sort_by(|a, b| b.usage_count.cmp(&a.usage_count));
+            matched.sort_by_key(|s| std::cmp::Reverse(s.usage_count));
             surfaced_ids = matched.iter().take(3).map(|s| s.id).collect();
             rec = matched
                 .iter()
@@ -1859,7 +1857,7 @@ impl McpHandler {
                 .map(|(q, note)| serde_json::json!({"quality": q, "note": note.chars().take(150).collect::<String>()})),
             "coach_note": "last_judgment 是你上次交付的评审判词 — 开工前读它, 本轮别再犯",
             "knowledge_cards": mc, "similar_experiences": similar,
-            "sub_task_hint": format!("Suggest {} sub-tasks of ~{}min each", (budget_min / 25).max(3).min(8), budget_min / (budget_min / 25).max(3)),
+            "sub_task_hint": format!("Suggest {} sub-tasks of ~{}min each", (budget_min / 25).clamp(3, 8), budget_min / (budget_min / 25).max(3)),
             "strong_reminder": "CRITICAL: You MUST call task_check after completing EACH sub-task. Failure to do so will result in temporal blindness.",
             "stop_negotiation_hint": "交付即谈判: 改进菜单非空会被WAIT — 先清证据债(检索/备选/修正/反思/自评); 菜单清零+saturation_note过审=挣取停止; 85%预算后直通",
             "goal_contract": goal_contract,
@@ -1938,8 +1936,7 @@ impl McpHandler {
                 let gate_build = alts >= 2;
                 let gate_verify = revs >= 1;
                 // P11 反思驱动信号: 校验相无修正时注入一次 — 意志外借(L0), agent自己点的需求
-                if elapsed_pct >= 70.0
-                    && elapsed_pct < 90.0
+                if (70.0..90.0).contains(&elapsed_pct)
                     && revs < 1
                     && self.engine.storage.try_mark_reflection_pushed(task_id)
                 {
@@ -2453,7 +2450,7 @@ impl McpHandler {
                                     let cts = c.get("ts").and_then(|v| v.as_i64())?;
                                     let cnote =
                                         c.get("note").and_then(|v| v.as_str()).unwrap_or("");
-                                    let mark = if wait_ts.map_or(false, |w| cts >= w) {
+                                    let mark = if wait_ts.is_some_and(|w| cts >= w) {
                                         "*"
                                     } else {
                                         ""
@@ -2489,7 +2486,7 @@ impl McpHandler {
                     // 其余场景结果注入评审材料作参考信号(LLM仍独立裁决); 失败fail-open原路径
                     let laya = self.laya_prescreen(
                         &desc_str,
-                        &result_text,
+                        result_text,
                         actual / 60000,
                         remaining_ms / 60000,
                     );
@@ -2519,7 +2516,7 @@ impl McpHandler {
                     };
                     match judged {
                         Some((jq, note, verdict)) => {
-                            let _ = self.engine.storage.set_task_judge(task_id, jq, &note);
+                            self.engine.storage.set_task_judge(task_id, jq, &note);
                             final_q = if rubric_used { (qs + jq) / 2.0 } else { jq };
                             sat_verdict = verdict.clone();
                             judge_info = serde_json::json!({"score": (jq * 100.0).round() / 100.0, "note": note, "blended_with_self": rubric_used, "saturation_verdict": verdict});
@@ -2597,8 +2594,7 @@ impl McpHandler {
                     return self.smrp_ok_nn("task_complete", wr);
                 }
                 let low_utilization = util < 0.30;
-                let _ = self
-                    .engine
+                self.engine
                     .storage
                     .set_task_iteration_log(task_id, &iterations);
                 let _ = self.engine.storage.complete_task_v2(
@@ -2612,8 +2608,7 @@ impl McpHandler {
                     low_utilization,
                     saturation_note,
                 );
-                let _ = self
-                    .engine
+                self.engine
                     .storage
                     .set_task_stop_reason(task_id, stop_reason);
                 let exp = format!("[task] {} budget={}m actual={}m util={}% dev={:.2} q={:.1} stop={} waits={} goal={}/{}dw {}{}{}{} | {}",
@@ -2643,19 +2638,19 @@ impl McpHandler {
                     } else {
                         0.0
                     }
-                } else if util >= 0.85 && util <= 1.10 {
+                } else if (0.85..=1.10).contains(&util) {
                     if final_q >= 3.0 {
                         3.0
                     } else {
                         0.0
                     } // 撞线+质量
-                } else if util >= 0.60 && util < 0.85 {
+                } else if (0.60..0.85).contains(&util) {
                     if final_q >= 3.0 {
                         2.0
                     } else {
                         0.0
                     }
-                } else if util >= 0.40 && util < 0.60 {
+                } else if (0.40..0.60).contains(&util) {
                     if final_q >= 3.0 {
                         1.0
                     } else {
@@ -3198,7 +3193,7 @@ impl McpHandler {
                     .scheduler
                     .library_search_public(query, 3)
                     .unwrap_or_default();
-                let lib_items: Vec<serde_json::Value> = lib_hits.iter().map(|h| serde_json::json!({
+                let _lib_items: Vec<serde_json::Value> = lib_hits.iter().map(|h| serde_json::json!({
                     "content": h.content,
                     "labels": ["library", "knowledge-asset"],
                     "similarity": h.score,
@@ -4964,8 +4959,7 @@ impl McpHandler {
         // 统一系统手册: 从文件动态注入(单一事实源), 不落各空间存储 —
         // 保证 skills_sync 是完整目录, 错过握手的智能体也能经库路径取到。
         let mut skills_data: Vec<serde_json::Value> = Vec::new();
-        if let Some(md) =
-            std::fs::read_to_string("/opt/tetramem/system_skills/00_epicode_system.md").ok()
+        if let Ok(md) = std::fs::read_to_string("/opt/tetramem/system_skills/00_epicode_system.md")
         {
             if format == "manifest" {
                 skills_data.push(serde_json::json!({
@@ -5850,7 +5844,7 @@ impl McpHandler {
 
     fn tool_memory_forget(&self, args: &serde_json::Value) -> serde_json::Value {
         let id = match args.get("id").and_then(|v| v.as_u64()) {
-            Some(id) if id > 0 => id as u64,
+            Some(id) if id > 0 => id,
             _ => {
                 return self.smrp_err(
                     "memory_forget",

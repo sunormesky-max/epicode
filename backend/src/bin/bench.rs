@@ -30,6 +30,7 @@ async fn main() {
 
     // Phase 2: Search latency
     println!("\n--- Phase 2: Search Latency ---");
+    #[allow(clippy::useless_vec)] // 语义为集合
     let queries = vec![
         "Rust向量搜索",
         "performance optimization",
@@ -67,6 +68,7 @@ async fn main() {
     // Phase 4: Recall latency
     println!("\n--- Phase 4: Recall Latency ---");
     let mut recall_times = Vec::new();
+    #[allow(clippy::useless_vec)] // 语义为集合
     let recall_queries = vec!["架构设计", "security", "性能", "cloud", "记忆"];
     for (round, q) in recall_queries.iter().cycle().take(20).enumerate() {
         let start = Instant::now();

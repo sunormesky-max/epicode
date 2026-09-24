@@ -167,7 +167,7 @@ pub fn force_sync_system_skills(engine: &SkillEngine) {
                 ) {
                     Ok(_) => {
                         let _ = engine.set_description(existing_skill.id, desc.to_string());
-                        let _ = engine.set_system_review_note(
+                        engine.set_system_review_note(
                             existing_skill.id,
                             format!("seed:{}", seed_hash),
                         );

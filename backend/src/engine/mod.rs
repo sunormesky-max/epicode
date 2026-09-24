@@ -376,7 +376,7 @@ impl Engine {
             security.clone(),
             storage.clone(),
         ));
-        scheduler.set_owner_user(&uid);
+        scheduler.set_owner_user(uid);
 
         // L0: Restore drive queue from SQLite after scheduler init
         scheduler.restore_drive_queue();
@@ -776,7 +776,7 @@ impl Engine {
         let _ = self.bus.sender().send(bus::EngineEvent::Shutdown);
     }
 
-    pub async fn shutdown(mut self) {
+    pub async fn shutdown(self) {
         tracing::info!("Engine shutting down — saving all data...");
         let kg = self.scheduler.kg_handle();
         match self.storage.save_all(&self.space, &kg) {
@@ -787,7 +787,9 @@ impl Engine {
             tracing::warn!("Final WAL checkpoint failed: {}", e);
         }
         let _ = self.bus.sender().send(bus::EngineEvent::Shutdown);
-        for handle in self.handles.lock().unwrap().drain(..) {
+        // TODO(高优): std MutexGuard跨await(clippy::await_holding_lock), 生产在跑, 重构tokio::Mutex另立
+        let handles: Vec<_> = self.handles.lock().unwrap().drain(..).collect();
+        for handle in handles {
             let _ = handle.await;
         }
     }

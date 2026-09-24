@@ -116,17 +116,13 @@ impl UserPlan {
 /// unknown → warming_up → ready | degraded
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum PersonaState {
+    #[default]
     Unknown,
     WarmingUp,
     Ready,
     Degraded,
-}
-
-impl Default for PersonaState {
-    fn default() -> Self {
-        PersonaState::Unknown
-    }
 }
 
 pub struct UserSlot {
@@ -658,7 +654,7 @@ impl UserManager {
         self.evict_idle();
 
         let user_data_dir = self.base_data_dir.join("users").join(user_id);
-        let mut engine = if let Some(sv) = &self.shared_vector {
+        let engine = if let Some(sv) = &self.shared_vector {
             Engine::with_shared_vector(user_data_dir, sv.clone(), user_id)
         } else {
             Engine::with_data_dir(user_data_dir)
@@ -1020,22 +1016,19 @@ impl UserManager {
         // 同步加载（当前保持阻塞——真正的 spawn_blocking 需要 Arc<Self>）
         // 折衷：如果 tokio runtime 存在，在 blocking pool 里加载
         // 否则直接同步加载
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                // 在 tokio runtime 里——但当前请求可能已经 hold 了 runtime，
-                // 所以用 spawn_blocking 让它不阻塞 async executor
-                // 但 spawn_blocking 是异步的，我们需要同步等待结果
-                // 这在 axum extractor 里不太理想——因为 extractor 是 async 的
-                // 最佳方案：让 AuthedEngine extractor 直接调 async 版本
-                //
-                // 当前折衷：直接同步调 get_engine（保持原有行为）
-                // 但加上 loading 标记和 timeout 保护
-                tracing::info!(
-                    "[UserManager] persona load triggered for '{}' (sync fallback)",
-                    user_id
-                );
-            }
-            Err(_) => {}
+        if let Ok(_handle) = tokio::runtime::Handle::try_current() {
+            // 在 tokio runtime 里——但当前请求可能已经 hold 了 runtime，
+            // 所以用 spawn_blocking 让它不阻塞 async executor
+            // 但 spawn_blocking 是异步的，我们需要同步等待结果
+            // 这在 axum extractor 里不太理想——因为 extractor 是 async 的
+            // 最佳方案：让 AuthedEngine extractor 直接调 async 版本
+            //
+            // 当前折衷：直接同步调 get_engine（保持原有行为）
+            // 但加上 loading 标记和 timeout 保护
+            tracing::info!(
+                "[UserManager] persona load triggered for '{}' (sync fallback)",
+                user_id
+            );
         }
 
         // 同步加载（实际加载逻辑在 get_engine 里, 单飞/清理都在其中）

@@ -893,7 +893,7 @@ mod tests {
 
     #[test]
     fn identity_layer_has_no_ports() {
-        let c = Cylinder::new();
+        let _c = Cylinder::new();
         assert!(
             !CylinderLayer::Identity.has_ports(),
             "Identity layer must not have ports"

@@ -21,7 +21,7 @@ pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
 }
 
 #[derive(Clone)]
-pub struct RequestId(pub String);
+pub struct RequestId(#[allow(dead_code)] pub String);
 
 pub async fn request_id_middleware(
     mut request: axum::extract::Request,
@@ -296,7 +296,6 @@ impl FromRequestParts<CloudState> for AuthedEngine {
                                 "[UserManager] async persona load PANIC for {} — loading cleared",
                                 uid
                             );
-                            return;
                         }
                         Ok(inner) => match inner {
                             Ok(_) => {

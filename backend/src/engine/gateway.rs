@@ -294,7 +294,7 @@ impl GatewayCenter {
                         old_tetra.data.valid_to = Some(ts);
                         // 能力B：双时序——记录失效得知时间
                         old_tetra.data.invalidated_at = Some(ts);
-                        self.space.update_payload(*dup_id, old_tetra.data);
+                        let _ = self.space.update_payload(*dup_id, old_tetra.data);
                         // S2修复: Mem0 调和的旧记忆进脏集, auto_save 持久化 (重启不回滚)
                         self.mark_dirty(*dup_id);
                     }
@@ -313,7 +313,7 @@ impl GatewayCenter {
                         }
                         if !added.is_empty() {
                             tracing::info!("[Gateway] Mem0 UPDATE: tetra {} enriched with labels {:?} (sim={:.3})", dup_id, added, sim);
-                            self.space.update_payload(*dup_id, old_tetra.data);
+                            let _ = self.space.update_payload(*dup_id, old_tetra.data);
                             // S2修复: 标签富集同样持久化
                             self.mark_dirty(*dup_id);
                         }
@@ -776,7 +776,7 @@ impl GatewayCenter {
         let mut out = Vec::with_capacity(knn.len());
         for (id, sim) in knn {
             if let Some(t) = self.space.get_tetrahedron(id) {
-                let expired = t.data.valid_to.map_or(false, |v| v <= now);
+                let expired = t.data.valid_to.is_some_and(|v| v <= now);
                 let superseded = t.data.labels.iter().any(|l| l == "superseded");
                 if !expired && !superseded {
                     out.push((id, sim, 0.0, t.data));

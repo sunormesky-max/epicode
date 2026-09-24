@@ -398,15 +398,14 @@ pub async fn admin_backup_all(
     let users = st.user_mgr.list_users();
     let mut results = Vec::new();
     for u in &users {
-        match st.user_mgr.get_engine(&u.user_id) {
-            Ok(engine) => match engine.backup() {
+        if let Ok(engine) = st.user_mgr.get_engine(&u.user_id) {
+            match engine.backup() {
                 Ok(ts) => results
                     .push(serde_json::json!({"user_id": u.user_id, "timestamp": ts, "ok": true})),
                 Err(e) => {
                     results.push(serde_json::json!({"user_id": u.user_id, "error": e, "ok": false}))
                 }
-            },
-            Err(_) => {}
+            }
         }
     }
     let engine = first_engine(&st);

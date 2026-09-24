@@ -140,7 +140,9 @@ impl CryptoEngine {
             return Err("invalid embedding length".to_string());
         }
         let result = Ok(bytes
-            .chunks_exact(8)
+            .as_chunks::<8>()
+            .0
+            .iter()
             .map(|chunk| {
                 f64::from_le_bytes([
                     chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],

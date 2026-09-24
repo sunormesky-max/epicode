@@ -181,7 +181,7 @@ async fn main() {
         tokio::sync::broadcast::channel::<epicode::engine::insight::InsightEvent>(256);
     // 把 insight_tx 注入所有用户的引擎，让认知引擎能 emit 洞察事件
     {
-        let tx_clone = insight_tx.clone();
+        let _tx_clone = insight_tx.clone();
         // 为当前和未来的用户引擎设置 insight channel
         // UserManager 在 get_engine 时创建引擎，我们需要在引擎创建后注入
         // 最简方案：存到 CloudState，SSE 直接订阅
@@ -608,7 +608,7 @@ async fn main() {
                     let mut m = cc.lock();
                     if m.len() > 5000 {
                         let mut sorted: Vec<_> = m.iter().map(|(k, v)| (k.clone(), *v)).collect();
-                        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+                        sorted.sort_by_key(|a| std::cmp::Reverse(a.1));
                         sorted.truncate(5000);
                         m.clear();
                         for (k, v) in sorted {

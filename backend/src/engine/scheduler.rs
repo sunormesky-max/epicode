@@ -1787,11 +1787,8 @@ impl SchedulerCenter {
             .lines()
             .find_map(|l| {
                 let l = l.trim();
-                if l.starts_with("name:") {
-                    Some(l[5..].trim().trim_matches('"').to_string())
-                } else {
-                    None
-                }
+                l.strip_prefix("name:")
+                    .map(|rest| rest.trim().trim_matches('"').to_string())
             })
             .unwrap_or_else(|| format!("auto-skill-{}", chrono::Utc::now().timestamp() % 100000));
 
@@ -1814,26 +1811,25 @@ impl SchedulerCenter {
             }
         };
         drop(skills_lock);
-        match skills_engine.create(skill_name.clone(), skill_md.clone(), owner) {
-            skill => {
-                tracing::info!(
-                    "[L3] auto-extracted skill #{} '{}' from {} effective patterns (history={})",
-                    skill.id,
-                    skill.name,
-                    good_patterns.len(),
-                    history.len()
-                );
-                serde_json::json!({
-                    "extracted": 1,
-                    "skill_id": skill.id,
-                    "skill_name": skill.name,
-                    "patterns_analyzed": good_patterns.len(),
-                    "history_size": history.len(),
-                    "patterns": good_patterns.iter().map(|(a, e, n, r)| serde_json::json!({
-                        "action": a, "effective": e, "total": e + n, "success_rate": r
-                    })).collect::<Vec<_>>(),
-                })
-            }
+        let skill = skills_engine.create(skill_name.clone(), skill_md.clone(), owner);
+        {
+            tracing::info!(
+                "[L3] auto-extracted skill #{} '{}' from {} effective patterns (history={})",
+                skill.id,
+                skill.name,
+                good_patterns.len(),
+                history.len()
+            );
+            serde_json::json!({
+                "extracted": 1,
+                "skill_id": skill.id,
+                "skill_name": skill.name,
+                "patterns_analyzed": good_patterns.len(),
+                "history_size": history.len(),
+                "patterns": good_patterns.iter().map(|(a, e, n, r)| serde_json::json!({
+                    "action": a, "effective": e, "total": e + n, "success_rate": r
+                })).collect::<Vec<_>>(),
+            })
         }
     }
 
@@ -2824,8 +2820,8 @@ impl SchedulerCenter {
             let rels = self.knowledge.query_relations(t.id);
             if rels.len() > MAX_DEGREE {
                 // 按strength排序, 弱的标记删除
-                let mut sorted: Vec<_> = rels.iter().map(|(tid, rt, s)| (*tid, s)).collect();
-                sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                let mut sorted: Vec<_> = rels.iter().map(|(tid, _rt, s)| (*tid, s)).collect();
+                sorted.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
                 for (tid, _) in sorted.iter().skip(MAX_DEGREE) {
                     self.knowledge.remove_relation(
                         t.id,
@@ -2918,9 +2914,9 @@ impl SchedulerCenter {
         // 恢复驱力权重
         if let Some(weights) = pkg.get("drive_weights").and_then(|w| w.get("weights")) {
             if let Some(obj) = weights.as_object() {
-                let mut de = self.drive.lock();
+                let de = self.drive.lock();
                 // 通过多次reward逼近目标权重(不可直接set——封装)
-                for (drive, target) in obj {
+                for (drive, _target) in obj {
                     let current = match drive.as_str() {
                         "curiosity" => de.evolution_snapshot()["weights"]["curiosity"]
                             .as_f64()
@@ -2985,6 +2981,7 @@ impl SchedulerCenter {
         Ok(restored)
     }
 
+    #[allow(dead_code)] // 集成清偿: 2026-09全量clippy清零, 反向移植期保留
     fn json_val(v: impl serde::Serialize) -> serde_json::Value {
         serde_json::to_value(v).unwrap_or(serde_json::json!(null))
     }
@@ -3546,7 +3543,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                     || d.split_whitespace()
                         .any(|w| w.len() > 3 && q_lower.contains(w))
             });
-        let card_ctx = matched_card
+        let _card_ctx = matched_card
             .map(|(domain, summary, _)| {
                 format!(
                     "
@@ -4267,7 +4264,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                 );
                 // 智能突破断裂点4：Reflect 持久化到 CognitiveEngine（而非只打日志）
                 // 下次 build_decision_prompt 会注入 "## Last Reflection" 段
-                self.cognitive.store_reflection(&observation, &insight);
+                self.cognitive.store_reflection(observation, insight);
                 self.log_event(format!(
                     "reflect({})",
                     observation.chars().take(40).collect::<String>()
@@ -4299,10 +4296,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                     "request" => super::drive::DriveIntent::Request,
                     _ => super::drive::DriveIntent::Share,
                 };
-                if let Err(why) = self
-                    .drive_queue
-                    .should_birth(&itype, &evidence, &description)
-                {
+                if let Err(why) = self.drive_queue.should_birth(&itype, evidence, description) {
                     tracing::info!("[L0] ActOutward valve {}: ev={:?}", why, evidence);
                 } else {
                     let signal = super::drive::DriveSignal {
@@ -4651,7 +4645,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
         {
             // count is the pre-increment value from fetch_add above (0,1,2,3...)
             // Save on tick 0 (first tick) and every 5 ticks after
-            if count == 0 || count % 5 == 0 {
+            if count == 0 || count.is_multiple_of(5) {
                 self.save_drive_queue();
             }
         }
@@ -4721,26 +4715,26 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             self.auto_fission(&snap);
         }
 
-        if count % 20 == 0 && count > 0 {
+        if count.is_multiple_of(20) && count > 0 {
             self.auto_skills(&snap);
         }
 
-        if count % 30 == 0 && count > 0 && self.energy.available() >= 50.0 {
+        if count.is_multiple_of(30) && count > 0 && self.energy.available() >= 50.0 {
             let pre_snap = self.build_snapshot();
             self.auto_dream();
             self.record_outcome(ActionType::Dream, &pre_snap, count);
         }
 
-        if count % 30 == 0 && count > 0 {
+        if count.is_multiple_of(30) && count > 0 {
             self.flush_access_counts();
         }
 
-        if count % 200 == 0 && count > 0 && should_evict {
+        if count.is_multiple_of(200) && count > 0 && should_evict {
             self.evict_low_quality(&snap);
         }
 
         // Phase 5: Emotion
-        if count % 10 == 0 {
+        if count.is_multiple_of(10) {
             let texts: Vec<&str> = snap
                 .tetras
                 .iter()
@@ -4760,14 +4754,14 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
         }
 
         // Phase 6: Think — LLM cognitive decision every 5 ticks (when enabled)
-        if count % 5 == 0 && self.cognitive.enabled() {
-            if count % 15 == 0 && count > 0 {
+        if count.is_multiple_of(5) && self.cognitive.enabled() {
+            if count.is_multiple_of(15) && count > 0 {
                 self.generate_aliases((count / 15) as usize, &snap);
             }
-            if count % 30 == 0 && count > 0 {
+            if count.is_multiple_of(30) && count > 0 {
                 self.reclassify_memories((count / 30) as usize, &snap);
             }
-            if count % 20 == 0 && count > 0 {
+            if count.is_multiple_of(20) && count > 0 {
                 self.extract_entities((count / 20) as usize, &snap);
             }
 
@@ -4827,7 +4821,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             );
             drop(drive);
 
-            if is_healthy && count % 30 != 0 {
+            if is_healthy && !count.is_multiple_of(30) {
                 // 智能突破：健康短路从 15→30 tick，让系统更频繁地"思考"
                 // 每 30 tick（约1小时）即使健康也做一次元认知检查
                 self.auto_save();
@@ -4837,7 +4831,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             let state = self.collect_state_from_snap(&snap);
             Some(CognitiveThought { tick: count, state })
         } else {
-            if count % 10 == 0 {
+            if count.is_multiple_of(10) {
                 self.auto_save();
             }
             None
@@ -5448,8 +5442,6 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                 SchedulerAction::Reflect { .. } => "reflect".to_string(),
                 SchedulerAction::UseTool { tool, .. } => format!("use_tool({})", tool),
                 SchedulerAction::ActOutward { intent, .. } => format!("act_outward({})", intent),
-
-                SchedulerAction::ActOutward { intent, .. } => format!("act_outward({})", intent),
             };
             let action_pre_snap = self.build_snapshot();
             self.execute_action(action);
@@ -5517,7 +5509,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             action_names
         );
 
-        if tick % 10 == 0 {
+        if tick.is_multiple_of(10) {
             self.auto_save();
         }
     }
@@ -5598,8 +5590,8 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                                 }
                             } else {
                                 let count = me.tick_count.load(Ordering::SeqCst);
-                                if count % 3 == 0 { me.auto_save(); } // P0: flush every 3 ticks
-                                if count % 5 == 0 { me.flush_access_counts(); }
+                                if count.is_multiple_of(3) { me.auto_save(); } // P0: flush every 3 ticks
+                                if count.is_multiple_of(5) { me.flush_access_counts(); }
                             }
                         });
                         // tick panic 恢复：监控线程存活，panic 后下一 tick 自动重试
@@ -5613,16 +5605,16 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         self.energy.replenish(12.0);
                         let tasks: Vec<ScheduledTask> = self.queue.lock().drain(..).collect();
                         for task in &tasks { self.execute_task(task); }
-                        if count % 5 == 0 {
+                        if count.is_multiple_of(5) {
                             let snap = self.build_snapshot();
                             self.auto_fission(&snap);
                             self.auto_save();
                             self.flush_access_counts();
                         }
-                        if count % 50 == 0 && count > 0 && self.energy.available() >= 50.0 {
+                        if count.is_multiple_of(50) && count > 0 && self.energy.available() >= 50.0 {
                             self.auto_dream();
                         }
-                        if count % 200 == 0 && count > 0 {
+                        if count.is_multiple_of(200) && count > 0 {
                             let snap = self.build_snapshot();
                             self.evict_low_quality(&snap);
                         }
@@ -5637,7 +5629,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         }
                         Ok(EngineEvent::TetrahedronCreated(id)) => {
                             self.log_event(format!("created({})", id));
-                            if self.tick_count.load(Ordering::SeqCst) % 3 == 0 { self.auto_save(); }
+                            if self.tick_count.load(Ordering::SeqCst).is_multiple_of(3) { self.auto_save(); }
                         }
                         Ok(EngineEvent::TetrahedronRemoved(id)) => {
                             self.log_event(format!("purged({})", id));

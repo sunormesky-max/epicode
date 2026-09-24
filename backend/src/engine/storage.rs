@@ -736,6 +736,7 @@ impl StorageManager {
             params![user_id], |r| r.get::<_, String>(0)).ok()
     }
 
+    #[allow(clippy::too_many_arguments)] // 集成清偿: 历史签名, 拆参另立
     pub fn complete_task_v2(
         &self,
         task_id: &str,
@@ -1119,7 +1120,7 @@ impl StorageManager {
         let mut sorted_actuals = actuals.clone();
         sorted_actuals.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let your_median = sorted_actuals[sorted_actuals.len() / 2];
-        let human_typical: f64 = ests.iter().sum::<f64>() / ests.len() as f64;
+        let _human_typical: f64 = ests.iter().sum::<f64>() / ests.len() as f64;
         let proficient = rows.len() >= 3 && cv < 0.15;
         let mut cal = serde_json::json!({
             "samples": rows.len(),
@@ -2402,6 +2403,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)] // 测试夹具值
     fn update_mass_and_aliases() {
         let dir = tmp_dir("updates");
         let storage = StorageManager::new(&dir).unwrap();
