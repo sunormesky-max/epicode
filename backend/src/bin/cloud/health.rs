@@ -452,15 +452,14 @@ pub async fn register_user(
         }
         via_admin = true;
     } else {
+        // 保留名检查必须在消耗邀请码之前 — 否则用保留名注册的失败尝试
+        // 也会白烧一个名额 (审计二轮)
+        if epicode::engine::user_manager::UserManager::is_reserved_id(&req.user_id) {
+            return error_response(StatusCode::FORBIDDEN, "this username is reserved");
+        }
         if let Err(e) = st.user_mgr.use_invite_code(invite_code) {
             return error_response(StatusCode::FORBIDDEN, &e);
         }
-    }
-
-    // 特权名抢注防护: 邀请码自助注册不可占用保留用户名(owner/admin),
-    // 否则 owner 账号创建前持码者可抢注获得库审批权 (审计 2026-09 中优 #9)
-    if !via_admin && UserManager::is_reserved_id(&req.user_id) {
-        return error_response(StatusCode::FORBIDDEN, "this username is reserved");
     }
 
     // P17 越权修复: 套餐只能由admin路径授予 — 邀请码注册一律Free

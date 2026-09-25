@@ -30,6 +30,7 @@ const {
   invalidateCache,
   clearCache,
   request,
+  logout,
 } = await import('../api');
 
 describe('auth utilities', () => {
@@ -122,14 +123,65 @@ describe('cache invalidation', () => {
     clearCache();
   });
 
-  it('invalidateCache removes entries matching prefix', async () => {
+  const okJson = (v: unknown) => ({
+    ok: true,
+    status: 200,
+    json: async () => v,
+    text: async () => '',
+  });
+
+  it('invalidateCache really drops the entry (uid-prefixed key, 审计二轮回归)', async () => {
+    setAuth('user-A');
+    // 写入缓存
+    fetchMock.mockResolvedValueOnce(okJson({ value: 1 }));
+    await request<{ value: number }>('/v1/stats');
+    // 失效后必须重新走网络(而非命中旧缓存)
+    invalidateCache('/v1/stats');
+    fetchMock.mockResolvedValueOnce(okJson({ value: 2 }));
+    const r = await request<{ value: number }>('/v1/stats');
+    expect(r.value).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidateCache only drops matching prefixes', async () => {
+    setAuth('user-A');
+    fetchMock.mockResolvedValueOnce(okJson({ v: 'stats' }));
+    await request('/v1/stats');
+    invalidateCache('/v1/timeline');
+    // /v1/stats 未失效: 仍命中缓存, 不发新请求
+    const r = await request<{ v: string }>('/v1/stats');
+    expect(r.v).toBe('stats');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('logout closure (审计二轮: 必须服务端失效 cookie)', () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+    fetchMock.mockReset();
+    clearCache();
+  });
+
+  it('logout calls backend /v1/logout then clears local state', async () => {
+    setAuth('user-A');
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
-      json: async () => ({ value: 1 }),
+      json: async () => ({ success: true }),
       text: async () => '',
     });
-    // We at least confirm invalidateCache is callable without throwing.
-    expect(() => invalidateCache('/v1/stats')).not.toThrow();
+    await logout();
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/v1/logout');
+    expect((init as RequestInit).method).toBe('POST');
+    expect(getUserId()).toBeNull();
+    expect(getApiKey()).toBeNull();
+  });
+
+  it('logout still clears local state when backend unreachable', async () => {
+    setAuth('user-A');
+    fetchMock.mockRejectedValueOnce(new Error('network down'));
+    await logout();
+    expect(getUserId()).toBeNull();
   });
 });

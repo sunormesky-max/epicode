@@ -32,44 +32,22 @@ pub async fn auth_middleware(
     let client_id = if path == "/v1/login" || path == "/register" {
         format!("ip:{}", addr.ip())
     } else {
-        headers
-            .get("X-API-Key")
-            .or_else(|| headers.get("X-Admin-Key"))
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("anonymous")
-            .to_string()
+        "anonymous".to_string()
     };
 
-    // Rate limit: 按套餐分级（Free=60 / Pro=300 / Enterprise=1000 per minute）
-    {
-        let mut limits = st.rate_limits.lock();
-        let now = Instant::now();
-        let bucket = limits
-            .entry(client_id.clone())
-            .or_insert_with(|| RateBucket {
-                count: 0,
-                window_start: now,
-            });
-        if now.duration_since(bucket.window_start).as_secs() > RATE_LIMIT_WINDOW_SECS {
-            bucket.count = 0;
-            bucket.window_start = now;
-        }
-        bucket.count += 1;
-        // 从 user_mgr 获取用户套餐决定限流上限
-        let plan_limit = st
-            .user_mgr
-            .authenticate(&client_id)
-            .map(|info| match info.plan {
-                UserPlan::Free => 60,
-                UserPlan::Pro => 300,
-                UserPlan::Enterprise => 1000,
-            })
-            .unwrap_or(RATE_LIMIT_MAX);
-        if bucket.count > plan_limit {
-            return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({
-                "success": false,
-                "error": format!("rate limit exceeded ({} requests/min for your plan)", plan_limit)
-            }))).into_response();
+    // 预认证粗限流(审计二轮): 仅无凭据流量与登录/注册走这里;
+    // 带凭据(cookie/header/ticket)的请求在认证成功后按 user_id 精细分桶 —
+    // 此前 cookie 登录的网页请求共用 anonymous 桶, 单键被限会误伤所有会话
+    let has_credential = headers.contains_key("X-API-Key")
+        || headers.contains_key("X-Admin-Key")
+        || headers.get_all("cookie").iter().any(|v| {
+            v.to_str()
+                .map(|s| s.contains("epicode_session="))
+                .unwrap_or(false)
+        });
+    if !has_credential {
+        if let Some(resp) = check_rate_limit(st, &client_id, RATE_LIMIT_MAX) {
+            return resp;
         }
     }
 
@@ -184,6 +162,57 @@ pub async fn auth_middleware(
     };
 
     st.user_mgr.touch(&user_info.user_id);
+    // 认证后限流: 统一按真实用户身份键(套餐分级 Free=60/Pro=300/Ent=1000 每分钟)
+    let plan_limit = match user_info.plan {
+        UserPlan::Free => 60,
+        UserPlan::Pro => 300,
+        UserPlan::Enterprise => 1000,
+    };
+    if let Some(resp) = check_rate_limit(st, &format!("user:{}", user_info.user_id), plan_limit) {
+        return resp;
+    }
     request.extensions_mut().insert(user_info);
     next.run(request).await
+}
+
+/// 限流检查, 返回 Some(429响应) 表示超限拒绝
+fn check_rate_limit(
+    st: &CloudState,
+    key: &str,
+    limit: usize,
+) -> Option<axum::response::Response> {
+    use std::time::Duration;
+    const RATE_BUCKET_SOFT_CAP: usize = 100_000;
+    let mut limits = st.rate_limits.lock();
+    let now = Instant::now();
+    // 插入路径突发防护: 接近容量先就地淘汰过期窗口, 不再单靠 5 分钟周期清理
+    // (审计二轮: 周期间隙伪造键仍可短时堆积)
+    if limits.len() > RATE_BUCKET_SOFT_CAP {
+        let cutoff = now - Duration::from_secs(RATE_LIMIT_WINDOW_SECS * 2);
+        limits.retain(|_, b| b.window_start > cutoff);
+    }
+    let bucket = limits
+        .entry(key.to_string())
+        .or_insert_with(|| RateBucket {
+            count: 0,
+            window_start: now,
+        });
+    if now.duration_since(bucket.window_start).as_secs() > RATE_LIMIT_WINDOW_SECS {
+        bucket.count = 0;
+        bucket.window_start = now;
+    }
+    bucket.count += 1;
+    if bucket.count > limit {
+        return Some(
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": format!("rate limit exceeded ({} requests/min)", limit)
+                })),
+            )
+                .into_response(),
+        );
+    }
+    None
 }

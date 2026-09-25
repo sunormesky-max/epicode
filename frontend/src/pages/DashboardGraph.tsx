@@ -339,10 +339,10 @@ export default function DashboardGraph() {
               <input type="text" value={searchQ} onChange={e => { searchQRef.current = e.target.value; setSearchQ(e.target.value); needsRedraw.current = true; }} placeholder="Filter nodes..."
                 style={{ width: '100%', background: 'rgba(255,255,255,0.04)', color: '#f0f0f5', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '7px 10px 7px 34px', fontSize: 13, boxSizing: 'border-box' }} />
             </div>
-            <button onClick={() => setZoom(z => z * 1.2)} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#9ca3af', padding: 7, borderRadius: 8, cursor: 'pointer' }}><ZoomIn size={16} /></button>
-            <button onClick={() => setZoom(z => z * 0.8)} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#9ca3af', padding: 7, borderRadius: 8, cursor: 'pointer' }}><ZoomOut size={16} /></button>
-            <button onClick={resetView} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#9ca3af', padding: 7, borderRadius: 8, cursor: 'pointer' }}><RotateCcw size={16} /></button>
-            <button onClick={() => { selectedClusterRef.current = null; setSelectedCluster(null); setSelectedNode(null); needsRedraw.current = true; }}
+            <button aria-label="放大" title="放大" onClick={() => { zoomRef.current = Math.min(4, zoomRef.current * 1.2); setZoom(zoomRef.current); needsRedraw.current = true; if (rafRef.current === 0) rafRef.current = requestAnimationFrame(() => loopRef.current()); }} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#9ca3af', padding: 7, borderRadius: 8, cursor: 'pointer' }}><ZoomIn size={16} /></button>
+            <button aria-label="缩小" title="缩小" onClick={() => { zoomRef.current = Math.max(0.2, zoomRef.current * 0.8); setZoom(zoomRef.current); needsRedraw.current = true; if (rafRef.current === 0) rafRef.current = requestAnimationFrame(() => loopRef.current()); }} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#9ca3af', padding: 7, borderRadius: 8, cursor: 'pointer' }}><ZoomOut size={16} /></button>
+            <button aria-label="重置视图" title="重置视图" onClick={resetView} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#9ca3af', padding: 7, borderRadius: 8, cursor: 'pointer' }}><RotateCcw size={16} /></button>
+            <button onClick={() => { selectedClusterRef.current = null; setSelectedCluster(null); setSelectedNode(null); needsRedraw.current = true; if (rafRef.current === 0) rafRef.current = requestAnimationFrame(() => loopRef.current()); }}
               style={{ background: selectedCluster !== null ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.04)', border: `1px solid ${selectedCluster !== null ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.08)'}`, color: selectedCluster !== null ? '#a855f7' : '#9ca3af', padding: '7px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 12 }}>
               {selectedCluster !== null ? `聚类 ${selectedCluster + 1}` : '所有聚类'}
             </button>
@@ -361,7 +361,7 @@ export default function DashboardGraph() {
               <div style={{ position: 'absolute', bottom: 12, left: 12, background: 'rgba(10,10,15,0.92)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '8px 12px' }}>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {Array.from({ length: Math.min(stats.clusters, 12) }, (_, i) => (
-                    <button key={i} onClick={() => { const v = selectedCluster === i ? null : i; selectedClusterRef.current = v; setSelectedCluster(v); needsRedraw.current = true; }}
+                    <button key={i} onClick={() => { const v = selectedCluster === i ? null : i; selectedClusterRef.current = v; setSelectedCluster(v); needsRedraw.current = true; if (rafRef.current === 0) rafRef.current = requestAnimationFrame(() => loopRef.current()); }}
                       style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', background: 'none', border: 'none', padding: 0,
                         opacity: selectedCluster !== null && selectedCluster !== i ? 0.4 : 1 }}>
                       <div style={{ width: 8, height: 8, borderRadius: 2, background: COLORS[i % COLORS.length] }} />
@@ -436,7 +436,7 @@ export default function DashboardGraph() {
           <h3 style={{ color: '#f0f0f5', fontSize: 14, fontWeight: 600, marginBottom: 12 }}>聚类 Details</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
             {clusterInfo.slice(0, 12).map((c, i) => (
-              <button key={i} onClick={() => { const v = selectedCluster === i ? null : i; selectedClusterRef.current = v; setSelectedCluster(v); setSelectedNode(null); needsRedraw.current = true; }}
+              <button key={i} onClick={() => { const v = selectedCluster === i ? null : i; selectedClusterRef.current = v; setSelectedCluster(v); setSelectedNode(null); needsRedraw.current = true; if (rafRef.current === 0) rafRef.current = requestAnimationFrame(() => loopRef.current()); }}
                 style={{ background: selectedCluster === i ? `${COLORS[i % COLORS.length]}12` : 'rgba(255,255,255,0.02)',
                   border: `1px solid ${selectedCluster === i ? `${COLORS[i % COLORS.length]}30` : 'rgba(255,255,255,0.04)'}`,
                   borderRadius: 10, padding: 12, cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>

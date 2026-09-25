@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router';
-import { clearAuth, getStats, request } from '@/lib/api';
+import { getStats, logout, request } from '@/lib/api';
 import PageBackground from './PageBackground';
 import {
   LayoutDashboard, Brain, GitBranch, Wrench, Users,
@@ -45,7 +45,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     } catch { /* reveal 失败静默: 掩码仍可见 */ }
   }
 
-  function handleLogout() { clearAuth(); window.location.hash = '#/'; }
+  async function handleLogout() {
+    // 先服务端失效 cookie 再清本地(审计二轮登出闭环)
+    await logout();
+    window.location.hash = '#/';
+  }
 
   return (
     <div className="relative min-h-screen" style={{ background: '#030305' }}>
