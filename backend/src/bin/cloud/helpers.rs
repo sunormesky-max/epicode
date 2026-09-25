@@ -50,7 +50,8 @@ pub async fn strip_api_prefix_middleware(
         Ok(new_uri) => {
             let (mut parts, body) = request.into_parts();
             parts.uri = new_uri;
-            next.run(axum::extract::Request::from_parts(parts, body)).await
+            next.run(axum::extract::Request::from_parts(parts, body))
+                .await
         }
         Err(_) => next.run(request).await,
     }

@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 
-use epicode::engine::user_manager::{UserInfo, UserPlan, UserManager};
+use epicode::engine::user_manager::{UserInfo, UserManager, UserPlan};
 
 use super::helpers::{disk_free_gb, error_response, require_admin, validate_user_id};
 use super::state::CloudState;
