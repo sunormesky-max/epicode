@@ -8,13 +8,13 @@ replicaCount:
 image:
   backend:
     repository: ghcr.io/sunormesky-max/epicode-backend
-    tag: "1.0.1"
+    tag: "1.0.2"
     # 生产建议固定 SHA-256 digest(不可变引用, 免受 tag 漂移) — 设置后忽略 tag
     digest: ""            # e.g. "sha256:..."
     pullPolicy: IfNotPresent
   frontend:
     repository: ghcr.io/sunormesky-max/epicode-frontend
-    tag: "1.0.1"
+    tag: "1.0.2"
     digest: ""
     pullPolicy: IfNotPresent
 
