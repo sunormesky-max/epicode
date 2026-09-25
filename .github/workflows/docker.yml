@@ -117,6 +117,7 @@ jobs:
           context: ./backend
           file: ./backend/Dockerfile.cloud
           push: false
+          load: true
           tags: epicode-smoke:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
