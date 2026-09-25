@@ -328,6 +328,23 @@ impl UserManager {
         Ok(())
     }
 
+    /// 注册失败回补邀请码: 邀请码在注册前被消耗, 若账户创建失败(重名/超限)
+    /// 应恢复, 否则持码者白白损失一个名额 (审计 2026-09 低优 #22)
+    pub fn refund_invite_code(&self, code: &str) {
+        {
+            let mut used = self.used_codes.write();
+            if let Some(pos) = used.iter().position(|c| constant_time_eq(code, c)) {
+                let refunded = used.remove(pos);
+                self.pending_codes.write().push(refunded);
+            }
+        }
+        self.save_invite_state();
+        tracing::info!(
+            "[UserManager] invite code refunded (registration failed), {} pending",
+            self.pending_codes.read().len()
+        );
+    }
+
     pub fn generate_batch_codes(&self, count: usize) -> Vec<String> {
         let mut codes = Vec::with_capacity(count);
         for _ in 0..count {
@@ -337,6 +354,34 @@ impl UserManager {
         self.save_invite_state();
         tracing::info!("[UserManager] generated {} batch invite codes", count);
         codes
+    }
+
+    /// 特权账号名单(库审批等 owner 级判定): 可经 EPICODE_OWNER_IDS/TETRAMEM_OWNER_IDS
+    /// 配置(逗号分隔), 默认 "sunorme". 替代散落的硬编码字符串比较
+    /// (审计 2026-09 中优 #9: 特权绑定用户名, 且该名可被抢注).
+    pub fn is_privileged_id(user_id: &str) -> bool {
+        use std::sync::OnceLock;
+        static OWNERS: OnceLock<Vec<String>> = OnceLock::new();
+        let owners = OWNERS.get_or_init(|| {
+            // cloud 二进制启动时会把 EPICODE_* 别名进 TETRAMEM_*;
+            // 库场景优先读 TETRAMEM_(别名后生效值), 其它二进制回退 EPICODE_
+            std::env::var("TETRAMEM_OWNER_IDS")
+                .or_else(|_| std::env::var("EPICODE_OWNER_IDS"))
+                .unwrap_or_else(|_| "sunorme".into())
+                .split(',')
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        });
+        owners.iter().any(|o| o.eq(&user_id.to_lowercase()))
+    }
+
+    /// 保留用户名: 特权名与 admin 在自助注册(邀请码路径)中不可用 —
+    /// 防止 owner 账号创建前被持码者抢注获得库审批权 (审计 2026-09 中优 #9)
+    pub fn is_reserved_id(user_id: &str) -> bool {
+        Self::is_privileged_id(user_id)
+            || user_id.eq_ignore_ascii_case("admin")
+            || user_id.eq_ignore_ascii_case("root")
     }
 
     pub fn all_invite_codes(&self) -> Vec<String> {

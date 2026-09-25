@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, Seek, SeekFrom, Write};
 use std::net::IpAddr;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
@@ -206,6 +207,7 @@ impl GuardState {
             let path = Path::new(STATE_FILE);
             if let Some(parent) = path.parent() {
                 let _ = fs::create_dir_all(parent);
+                #[cfg(unix)]
                 let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
             }
             let tmp = format!("{STATE_FILE}.tmp");
@@ -216,7 +218,17 @@ impl GuardState {
                     drop(f);
                     fs::rename(&tmp, STATE_FILE)
                 })
-                .and_then(|_| fs::set_permissions(path, fs::Permissions::from_mode(0o600)));
+                // Windows 无 POSIX mode 位; ACL 继承自父目录, 仅 Unix 收紧到 0600
+                .and_then(|_| {
+                    #[cfg(unix)]
+                    {
+                        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        Ok(())
+                    }
+                });
             if let Err(e) = result {
                 log_msg(&format!("state save failed: {e}"));
                 let _ = fs::remove_file(&tmp);

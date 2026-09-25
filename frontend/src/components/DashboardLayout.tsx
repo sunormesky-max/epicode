@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router';
-import { clearAuth, getApiKey, getStats } from '@/lib/api';
+import { clearAuth, getStats, request } from '@/lib/api';
 import PageBackground from './PageBackground';
 import {
   LayoutDashboard, Brain, GitBranch, Wrench, Users,
@@ -16,12 +16,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isMain, setIsMain] = useState(true);
 
+  const [maskedKey, setMaskedKey] = useState('...');
   useEffect(() => {
     getStats().then(s => setIsMain(s.is_main_account !== false)).catch(() => {});
+    // key 不再持久化于 localStorage(审计修复): 展示用掩码从服务端取,
+    // 复制时经 reveal 端点临时获取, 会话本身由 HttpOnly cookie 承载
+    request<{ api_key?: string; masked?: string }>('/v1/api-key')
+      .then((d) => setMaskedKey(d.masked || d.api_key || ''))
+      .catch(() => setMaskedKey(''));
   }, []);
-
-  const apiKey = getApiKey() || '';
-  const maskedKey = apiKey.length > 10 ? apiKey.slice(0, 6) + '...' + apiKey.slice(-4) : apiKey;
 
   const navItems = [
     { href: '#/dashboard', label: '总览', icon: LayoutDashboard },
@@ -31,8 +34,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     ...(isMain ? [{ href: '#/dashboard/accounts', label: '子账户', icon: Users }] : []),
   ];
 
-  function handleCopyKey() {
-    if (apiKey) { navigator.clipboard.writeText(apiKey); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+  async function handleCopyKey() {
+    try {
+      const r = await request<{ api_key?: string }>('/v1/api-key/reveal', { method: 'POST' });
+      if (r.api_key) {
+        await navigator.clipboard.writeText(r.api_key);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    } catch { /* reveal 失败静默: 掩码仍可见 */ }
   }
 
   function handleLogout() { clearAuth(); window.location.hash = '#/'; }
@@ -100,7 +110,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.03)' }}>
             <Zap size={12} style={{ color: 'var(--accent-gold)' }} />
             <span className="text-xs font-mono truncate flex-1" style={{ color: 'var(--text-tertiary)' }}>{maskedKey}</span>
-            <button onClick={handleCopyKey} className="p-1 rounded transition-colors" style={{ color: 'var(--text-tertiary)' }}>
+            <button onClick={handleCopyKey} aria-label="复制 API 密钥" title="复制 API 密钥" className="p-1 rounded transition-colors" style={{ color: 'var(--text-tertiary)' }}>
               {copied ? <Check size={12} style={{ color: 'var(--success-green)' }} /> : <Copy size={12} />}
             </button>
           </div>

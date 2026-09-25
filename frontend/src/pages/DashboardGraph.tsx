@@ -30,6 +30,8 @@ interface GraphEdge {
 export default function DashboardGraph() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
+  // 渲染循环引用: 交互事件在停帧后可重启绘制 (跨 effect 闭包)
+  const loopRef = useRef<() => void>(() => {});
   const [nodes, setNodes] = useState<SimNode[]>([]);
   const [edgePairs, setEdgePairs] = useState<[number, number][]>([]);
   const [clusterColors, setClusterColors] = useState<Map<number, number>>(new Map());
@@ -70,21 +72,29 @@ export default function DashboardGraph() {
           (c.member_ids || []).forEach(id => cMap.set(id, ci));
         });
 
+        // 大图采样: 力导向是 O(n^2) 主线程计算, 不设上限会冻结 UI (审计 2026-09 中优 #17).
+        // 按 mass 降序保留前 SIM_CAP 个节点参与模拟, 其余不进图.
+        const SIM_CAP = 400;
+        const ranked = [...rawNodes].sort((a, b) => (b.mass || 1) - (a.mass || 1));
+        const kept = new Set(ranked.slice(0, SIM_CAP).map((n) => n.id));
+
         const idToIdx = new Map<number, number>();
-        const ns: SimNode[] = rawNodes.map((rn: GraphNode, i) => {
-          idToIdx.set(rn.id, i);
-          return {
-            id: rn.id, idx: i,
-            x: W / 2 + (Math.random() - 0.5) * 400,
-            y: H / 2 + (Math.random() - 0.5) * 300,
-            vx: 0, vy: 0,
-            r: Math.max(3, 3 + Math.min((rn.mass || 1) * 1.5, 12)),
-            mass: rn.mass || 1,
-            labels: rn.labels || [],
-            content: rn.content || '',
-            cluster: cMap.get(rn.id) ?? -1,
-          };
-        });
+        const ns: SimNode[] = ranked
+          .filter((rn) => kept.has(rn.id))
+          .map((rn: GraphNode, i: number) => {
+            idToIdx.set(rn.id, i);
+            return {
+              id: rn.id, idx: i,
+              x: W / 2 + (Math.random() - 0.5) * 400,
+              y: H / 2 + (Math.random() - 0.5) * 300,
+              vx: 0, vy: 0,
+              r: Math.max(3, 3 + Math.min((rn.mass || 1) * 1.5, 12)),
+              mass: rn.mass || 1,
+              labels: rn.labels || [],
+              content: rn.content || '',
+              cluster: cMap.get(rn.id) ?? -1,
+            };
+          });
 
         const es: [number, number][] = [];
         for (const re of rawEdges as GraphEdge[]) {
@@ -232,9 +242,13 @@ export default function DashboardGraph() {
       if (frame < maxFrames || needsRedraw.current) {
         needsRedraw.current = false;
         rafRef.current = requestAnimationFrame(loop);
+      } else {
+        // 归零: 交互事件凭 rafRef===0 判断可否重启渲染循环
+        // (原实现停帧后 rafRef 悬空非零 id, 缩放/拖拽永远无法触发重绘 — 审计 2026-09 中优 #17)
+        rafRef.current = 0;
       }
     }
-    loop();
+    loopRef.current = loop;
 
     return () => cancelAnimationFrame(rafRef.current);
   }, [nodes, edgePairs, clusterColors]);
@@ -273,7 +287,7 @@ export default function DashboardGraph() {
     zoomRef.current = newZ;
     setZoom(newZ);
     needsRedraw.current = true;
-    if (rafRef.current === 0) rafRef.current = requestAnimationFrame(function redraw() { });
+    if (rafRef.current === 0) rafRef.current = requestAnimationFrame(() => loopRef.current());
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -287,6 +301,7 @@ export default function DashboardGraph() {
     offsetRef.current = newO;
     setOffset(newO);
     needsRedraw.current = true;
+    if (rafRef.current === 0) rafRef.current = requestAnimationFrame(() => loopRef.current());
   };
 
   const resetView = () => {
@@ -294,6 +309,7 @@ export default function DashboardGraph() {
     selectedClusterRef.current = null;
     setZoom(1); setOffset({ x: 0, y: 0 }); setSelectedCluster(null); setSelectedNode(null);
     needsRedraw.current = true;
+    if (rafRef.current === 0) rafRef.current = requestAnimationFrame(() => loopRef.current());
   };
 
   if (loading) {

@@ -28,6 +28,8 @@ const {
   clearAuth,
   isAuthenticated,
   invalidateCache,
+  clearCache,
+  request,
 } = await import('../api');
 
 describe('auth utilities', () => {
@@ -36,14 +38,21 @@ describe('auth utilities', () => {
     fetchMock.mockReset();
   });
 
-  it('setAuth stores apiKey and userId', () => {
-    setAuth('key-123', 'user-456');
-    expect(getApiKey()).toBe('key-123');
+  it('setAuth stores only userId (cookie carries the session)', () => {
+    setAuth('user-456');
     expect(getUserId()).toBe('user-456');
+    // api key must NOT be persisted (审计 2026-09 高优 #4)
+    expect(getApiKey()).toBeNull();
   });
 
-  it('clearAuth removes apiKey and userId', () => {
-    setAuth('key-123', 'user-456');
+  it('setAuth purges legacy plaintext key left by older versions', () => {
+    localStorageMock.setItem('epicode_api_key', 'legacy-key');
+    setAuth('user-1');
+    expect(getApiKey()).toBeNull();
+  });
+
+  it('clearAuth removes userId and legacy key', () => {
+    setAuth('user-456');
     clearAuth();
     expect(getApiKey()).toBeNull();
     expect(getUserId()).toBeNull();
@@ -54,8 +63,55 @@ describe('auth utilities', () => {
   });
 
   it('isAuthenticated returns true after setAuth', () => {
-    setAuth('key-123', 'user-456');
+    setAuth('user-456');
     expect(isAuthenticated()).toBe(true);
+  });
+});
+
+describe('cache isolation between accounts (审计 2026-09 高优 #3)', () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+    fetchMock.mockReset();
+    clearCache();
+  });
+
+  const okJson = (v: unknown) => ({
+    ok: true,
+    status: 200,
+    json: async () => v,
+    text: async () => '',
+  });
+
+  it('user B must not see user A cached response after switching', async () => {
+    // 用户 A 登录并请求
+    setAuth('user-A');
+    fetchMock.mockResolvedValueOnce(okJson({ secret: 'A-data' }));
+    const a1 = await request<{ secret: string }>('/v1/stats');
+    expect(a1.secret).toBe('A-data');
+
+    // 同一 endpoint, A 的缓存命中(不再发起请求)
+    const a2 = await request<{ secret: string }>('/v1/stats');
+    expect(a2.secret).toBe('A-data');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // 换号: setAuth 会清缓存; B 的请求必须重新走网络
+    setAuth('user-B');
+    fetchMock.mockResolvedValueOnce(okJson({ secret: 'B-data' }));
+    const b1 = await request<{ secret: string }>('/v1/stats');
+    expect(b1.secret).toBe('B-data');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('clearAuth drops the cache', async () => {
+    setAuth('user-A');
+    fetchMock.mockResolvedValueOnce(okJson({ v: 1 }));
+    await request('/v1/timeline');
+    clearAuth();
+    setAuth('user-B');
+    fetchMock.mockResolvedValueOnce(okJson({ v: 2 }));
+    const r = await request<{ v: number }>('/v1/timeline');
+    expect(r.v).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -63,6 +119,7 @@ describe('cache invalidation', () => {
   beforeEach(() => {
     localStorageMock.clear();
     fetchMock.mockReset();
+    clearCache();
   });
 
   it('invalidateCache removes entries matching prefix', async () => {
@@ -72,8 +129,6 @@ describe('cache invalidation', () => {
       json: async () => ({ value: 1 }),
       text: async () => '',
     });
-    // Dynamic import to access the internal request function.
-    // The function name may differ; fall back to a direct fetch exercise.
     // We at least confirm invalidateCache is callable without throwing.
     expect(() => invalidateCache('/v1/stats')).not.toThrow();
   });

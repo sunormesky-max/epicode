@@ -70,8 +70,25 @@ use helpers::security_headers_middleware;
 use state::{CloudState, RateBucket, RATE_LIMIT_WINDOW_SECS};
 use tcp::run_tcp_server;
 
+/// 环境变量别名: EPICODE_* 优先, 回落 TETRAMEM_* (历史名).
+/// 部署资产(docker-compose/k8s/helm)传 EPICODE_*, 代码内所有
+/// `std::env::var("TETRAMEM_X")` 读取点在启动时一次性对齐, 避免双前缀漂移.
+/// 显式设置的 TETRAMEM_* 永远不会被覆盖.
+fn sync_env_aliases() {
+    let epicode_vars: Vec<(String, String)> = std::env::vars()
+        .filter(|(k, _)| k.starts_with("EPICODE_") && k.len() > "EPICODE_".len())
+        .collect();
+    for (k, v) in epicode_vars {
+        let legacy = format!("TETRAMEM_{}", &k["EPICODE_".len()..]);
+        if std::env::var(&legacy).is_err() {
+            std::env::set_var(&legacy, &v);
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
+    sync_env_aliases();
     tracing_subscriber::fmt()
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()))
         .init();
@@ -79,7 +96,7 @@ async fn main() {
     tracing::info!("Epicode Cloud v1.0.0 — starting...");
 
     let admin_key = std::env::var("TETRAMEM_ADMIN_KEY")
-        .expect("FATAL: TETRAMEM_ADMIN_KEY environment variable must be set");
+        .expect("FATAL: admin key must be set (accepts EPICODE_ADMIN_KEY or TETRAMEM_ADMIN_KEY)");
 
     let listen_addr =
         std::env::var("TETRAMEM_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9111".into());
@@ -123,6 +140,10 @@ async fn main() {
             }
         }
     };
+    // 发布全局库引用: MCP 公共库搜索(library_search)依赖此全局,
+    // 此前未发布导致云模式下公共库搜索恒为空 (审计 2026-09 中优 #12)
+    epicode::engine::library::set_global_library(library_state.clone());
+    tracing::info!("[Library] global handle published for MCP tools");
     let user_mgr = if let Some(ref sv) = shared_vector {
         tracing::info!("Shared VectorLayer loaded for cloud API");
         Arc::new(UserManager::with_shared_vector(&data_dir, sv.clone()))
@@ -441,6 +462,7 @@ async fn main() {
             state.clone(),
             auth::auth_middleware,
         ))
+        .layer(middleware::from_fn(helpers::strip_api_prefix_middleware))
         .layer(middleware::from_fn(security_headers_middleware))
         .layer(middleware::from_fn(helpers::request_id_middleware))
         .layer(tower_http::limit::RequestBodyLimitLayer::new(
@@ -596,12 +618,25 @@ async fn main() {
                 if sf2.load(std::sync::atomic::Ordering::Relaxed) {
                     break;
                 }
-                // rate_limits: 清除窗口过期且计数为0的 bucket
+                // rate_limits: 纯时间淘汰 — 窗口过期即删(与 auth 侧重置语义一致,
+                // 过期窗口被再次命中时会先重置). 原 `|| count > 0` 使伪造 X-API-Key
+                // 的桶(count>=1)永不淘汰, 随机 key 可无限撑大内存 (审计 2026-09 中优 #10)
                 {
                     let mut m = rl.lock();
                     let cutoff = std::time::Instant::now()
                         - std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS * 2);
-                    m.retain(|_, bucket| bucket.window_start > cutoff || bucket.count > 0);
+                    m.retain(|_, bucket| bucket.window_start > cutoff);
+                    // 硬容量上限: 超限按窗口最旧淘汰, 保证有界
+                    const RATE_BUCKET_CAP: usize = 100_000;
+                    if m.len() > RATE_BUCKET_CAP {
+                        let mut windows: Vec<_> =
+                            m.iter().map(|(k, b)| (k.clone(), b.window_start)).collect();
+                        windows.sort_by_key(|(_, t)| *t);
+                        let evict = m.len() - RATE_BUCKET_CAP;
+                        for (k, _) in windows.into_iter().take(evict) {
+                            m.remove(&k);
+                        }
+                    }
                 }
                 // api_call_counts: 保留最近活跃的 client_id（>0 且总量 ≤5000）
                 {

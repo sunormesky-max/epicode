@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
+          image: {{ include "epicode.image" (dict "img" .Values.image.backend) }}
           imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
           ports:
             - name: http
@@ -30,7 +30,7 @@ spec:
               protocol: TCP
           envFrom:
             - secretRef:
-                name: {{ .Release.Name }}-secrets
+                name: {{ include "epicode.secretName" . }}
           env:
             - name: RUST_LOG
               value: {{ .Values.env.RUST_LOG | quote }}

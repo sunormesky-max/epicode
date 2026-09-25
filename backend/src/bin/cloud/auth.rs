@@ -142,21 +142,30 @@ pub async fn auth_middleware(
     // SSE旧路径退役: ?key=裸密钥出URL(审计安全债) — 现支持header→cookie→ticket(短票)三级
     // 半截工程收口(2026-08-30 租户断连根因): 签发端已有, 消费端缺失 — EventSource无法带header,
     // 无cookie租户(无密码账号)此前只能回退已退役的?key= → 401死循环
-    let ticket_key: Option<String> = request.uri().query().and_then(|q| {
-        q.split('&')
-            .find_map(|kv| kv.strip_prefix("ticket="))
-            .and_then(|t| {
-                let mut m = st.stream_tickets.lock();
-                match m.get(t).cloned() {
-                    Some((api_key, exp)) if exp > chrono::Utc::now().timestamp() => Some(api_key),
-                    Some(_) => {
-                        m.remove(t);
-                        None
+    // 2026-09 审计修复: ticket 限定 /v1/stream 路由 + 一次性原子消费(重放窗口=0)
+    let ticket_key: Option<String> = if path == "/v1/stream" {
+        request.uri().query().and_then(|q| {
+            q.split('&')
+                .find_map(|kv| kv.strip_prefix("ticket="))
+                .and_then(|t| {
+                    let mut m = st.stream_tickets.lock();
+                    match m.get(t).cloned() {
+                        Some((api_key, exp)) if exp > chrono::Utc::now().timestamp() => {
+                            // 消费即毁: 验证成功的票当场移除, 杜绝 120s 内跨路由重放
+                            m.remove(t);
+                            Some(api_key)
+                        }
+                        Some(_) => {
+                            m.remove(t);
+                            None
+                        }
+                        None => None,
                     }
-                    None => None,
-                }
-            })
-    });
+                })
+        })
+    } else {
+        None
+    };
     let api_key_owned = header_key.or(cookie_key).or(ticket_key).unwrap_or_default();
     let api_key = api_key_owned.as_str();
 
