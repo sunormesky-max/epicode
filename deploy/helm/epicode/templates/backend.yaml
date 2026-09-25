@@ -20,8 +20,18 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: backend
     spec:
+      # Pod 加固(审计二轮: 与原始 K8s 清单对齐)
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: backend
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           image: {{ include "epicode.image" (dict "img" .Values.image.backend) }}
           imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
           ports:
