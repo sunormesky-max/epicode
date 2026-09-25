@@ -46,7 +46,7 @@ pub async fn auth_middleware(
                 .unwrap_or(false)
         });
     if !has_credential {
-        if let Some(resp) = check_rate_limit(st, &client_id, RATE_LIMIT_MAX) {
+        if let Some(resp) = check_rate_limit(&st, &client_id, RATE_LIMIT_MAX) {
             return resp;
         }
     }
@@ -168,7 +168,7 @@ pub async fn auth_middleware(
         UserPlan::Pro => 300,
         UserPlan::Enterprise => 1000,
     };
-    if let Some(resp) = check_rate_limit(st, &format!("user:{}", user_info.user_id), plan_limit) {
+    if let Some(resp) = check_rate_limit(&st, &format!("user:{}", user_info.user_id), plan_limit) {
         return resp;
     }
     request.extensions_mut().insert(user_info);
