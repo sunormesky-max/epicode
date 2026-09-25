@@ -68,6 +68,46 @@ pub struct LibraryHit {
     pub collection_id: i64,
 }
 
+/// 旧库迁移: client_ref 从全局 UNIQUE 改为 (collection_id, client_ref) 复合唯一.
+/// 检测方式: 读 sqlite_master 的建表 SQL, 若含 "client_ref TEXT UNIQUE"(旧形)
+/// 则整表重建. 旧库中跨 collection 重复的 ref 保留先到者, 后到者置 NULL
+/// (数据不丢, 幂等去重回到 collection 内语义).
+fn migrate_items_unique_scope(conn: &Connection) -> Result<(), String> {
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='library_items'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !sql.to_uppercase().contains("CLIENT_REF TEXT UNIQUE") {
+        return Ok(()); // 已是新 schema(复合唯一)或未来形态
+    }
+    tracing::warn!("[Library] migrating library_items: client_ref UNIQUE(global) -> UNIQUE(collection_id, client_ref)");
+    conn.execute_batch(
+        "BEGIN;
+         CREATE TABLE library_items_new (
+            id INTEGER PRIMARY KEY, client_ref TEXT,
+            collection_id INTEGER NOT NULL REFERENCES library_collections(id),
+            title TEXT NOT NULL, source_meta TEXT,
+            added_by TEXT NOT NULL, created_at INTEGER,
+            UNIQUE(collection_id, client_ref));
+         INSERT INTO library_items_new(id, client_ref, collection_id, title, source_meta, added_by, created_at)
+           SELECT id,
+                  CASE WHEN ROW_NUMBER() OVER (
+                         PARTITION BY collection_id, client_ref ORDER BY id) = 1
+                       THEN client_ref ELSE NULL END,
+                  collection_id, title, source_meta, added_by, created_at
+           FROM library_items;
+         DROP TABLE library_items;
+         ALTER TABLE library_items_new RENAME TO library_items;
+         CREATE INDEX IF NOT EXISTS idx_litems_coll ON library_items(collection_id);
+         COMMIT;",
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 impl LibraryStore {
     pub fn open(
         db_path: &std::path::Path,
@@ -82,10 +122,11 @@ impl LibraryStore {
                 visibility TEXT NOT NULL DEFAULT 'private', plan_gate TEXT,
                 created_at INTEGER);
              CREATE TABLE IF NOT EXISTS library_items (
-                id INTEGER PRIMARY KEY, client_ref TEXT UNIQUE,
+                id INTEGER PRIMARY KEY, client_ref TEXT,
                 collection_id INTEGER NOT NULL REFERENCES library_collections(id),
                 title TEXT NOT NULL, source_meta TEXT,
-                added_by TEXT NOT NULL, created_at INTEGER);
+                added_by TEXT NOT NULL, created_at INTEGER,
+                UNIQUE(collection_id, client_ref));
              CREATE TABLE IF NOT EXISTS library_chunks (
                 id INTEGER PRIMARY KEY,
                 item_id INTEGER NOT NULL REFERENCES library_items(id),
@@ -109,6 +150,11 @@ impl LibraryStore {
                 handler_note TEXT);",
         )
         .map_err(|e| e.to_string())?;
+
+        // 旧库迁移: client_ref 曾为全局 UNIQUE — 已知其他 collection 的 ref 可把
+        // chunks 挂到别人的 item 上(跨租户污染). 重建为 (collection_id, client_ref)
+        // 复合唯一 (审计 2026-09 高优 #1). CREATE TABLE IF NOT EXISTS 不会触碰旧表.
+        migrate_items_unique_scope(&conn)?;
 
         let hnsw = HnswIndex::new(EMBEDDING_DIM, 16, 100);
         // 冷启动索引恢复: 空库为空; 大库后续由相4(索引持久化)接管
@@ -224,9 +270,12 @@ impl LibraryStore {
             let conn = self.conn.lock();
             for it in items {
                 let item_id = if let Some(r) = &it.client_ref {
+                    // 幂等查重必须同时限定 collection — 全局查重会让已知其他
+                    // collection 的 client_ref 把 chunks 挂到别人的 item 上
+                    // (跨租户污染, 审计 2026-09 高优 #1)
                     match conn.query_row(
-                        "SELECT id FROM library_items WHERE client_ref=?1",
-                        params![r],
+                        "SELECT id FROM library_items WHERE client_ref=?1 AND collection_id=?2",
+                        params![r, collection_id],
                         |x| x.get::<_, i64>(0),
                     ) {
                         Ok(id) => id,

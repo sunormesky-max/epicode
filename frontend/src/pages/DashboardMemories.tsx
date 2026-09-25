@@ -11,6 +11,7 @@ const SORT_OPTIONS: Array<{ key: 'newest' | 'oldest'; label: string }> = [
 export default function DashboardMemories() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [hasSearched, setHasSearched] = useState(false);
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [totalEvents, setTotalEvents] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -52,18 +53,22 @@ export default function DashboardMemories() {
     return Array.from(s).sort();
   }, [events]);
 
+  // 搜索态判别: 零结果搜索曾回落显示时间线(误导用户以为有结果),
+  // 以 hasSearched 区分"未搜索"与"搜索且零命中" (审计 2026-09 中优 #18)
   async function handleSearch(e?: React.FormEvent) {
     e?.preventDefault();
-    if (!query.trim()) { setResults([]); return; }
+    if (!query.trim()) { setResults([]); setHasSearched(false); return; }
     setLoading(true);
     setError('');
     try {
       const sinceDaysMap: Record<string, number | undefined> = { all: undefined, today: 1, week: 7, month: 30 };
       const data = await searchMemories(query, { limit: 20, since_days: sinceDaysMap[timeRange] });
       setResults(data.results || []);
+      setHasSearched(true);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Search failed');
       setResults([]);
+      setHasSearched(false);
     }
     setLoading(false);
   }
@@ -74,7 +79,10 @@ export default function DashboardMemories() {
       await deleteMemory(id);
       setResults(prev => prev.filter(r => r.id !== id));
       setEvents(prev => prev.filter(r => r.id !== id));
-    } catch { /* silent */ }
+    } catch (e: unknown) {
+      // 静默吞错会让用户误以为删除成功 (审计 2026-09 中优 #18)
+      setError(e instanceof Error ? e.message : '删除失败，请重试');
+    }
   }
 
   async function handleStore() {
@@ -88,7 +96,10 @@ export default function DashboardMemories() {
       setEvents(data.events || []);
       setTotalEvents(data.total || 0);
       setPage(0);
-    } catch { /* silent */ }
+    } catch (e: unknown) {
+      // 保留输入内容以便重试; storing 状态防重复提交
+      setError(e instanceof Error ? e.message : '保存失败，请重试');
+    }
     setStoring(false);
   }
 
@@ -102,13 +113,13 @@ export default function DashboardMemories() {
     setFilterLabels(prev => prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label]);
   }
 
-  const displayItems = useMemo(() => results.length > 0
+  const displayItems = useMemo(() => hasSearched
     ? results.map(r => ({ id: r.id, content: r.content, labels: r.labels, type: 'search' as const, similarity: r.similarity, timestamp: undefined as number | undefined }))
     : events
         .filter(e => filterLabels.length === 0 || filterLabels.some(l => (e.labels || []).includes(l)))
         .sort((a, b) => sortBy === 'newest' ? b.timestamp - a.timestamp : a.timestamp - b.timestamp)
         .map(e => ({ id: e.id, content: e.content, labels: e.labels, type: 'timeline' as const, similarity: undefined as number | undefined, timestamp: e.timestamp })),
-    [results, events, filterLabels, sortBy]);
+    [hasSearched, results, events, filterLabels, sortBy]);
 
   if (initialLoading) {
     return (

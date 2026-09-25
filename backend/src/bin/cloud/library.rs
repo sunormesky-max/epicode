@@ -307,7 +307,8 @@ pub async fn list_requests(
     .await;
     match res {
         Ok((all, mine, pending)) => {
-            let is_owner = uid == "sunorme";
+            // owner 判定走集中式名单(可配置, 含抢注防护) — 审计 2026-09 中优 #9
+            let is_owner = epicode::engine::user_manager::UserManager::is_privileged_id(&uid);
             (
                 StatusCode::OK,
                 Json(epicode::engine::smrp::envelope_ok_plain(
@@ -344,7 +345,8 @@ pub async fn handle_request(
     axum::extract::Extension(user): axum::extract::Extension<UserInfo>,
     Json(req): Json<HandleRequestIn>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if user.user_id != "sunorme" {
+    // owner 判定走集中式名单(可配置, 含抢注防护) — 审计 2026-09 中优 #9
+    if !epicode::engine::user_manager::UserManager::is_privileged_id(&user.user_id) {
         return (
             StatusCode::FORBIDDEN,
             Json(epicode::engine::smrp::envelope_err_plain(

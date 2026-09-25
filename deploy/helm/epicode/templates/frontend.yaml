@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: "{{ .Values.image.frontend.repository }}:{{ .Values.image.frontend.tag }}"
+          image: {{ include "epicode.image" (dict "img" .Values.image.frontend) }}
           imagePullPolicy: {{ .Values.image.frontend.pullPolicy }}
           ports:
             - name: http

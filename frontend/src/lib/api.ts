@@ -16,18 +16,23 @@ export function getUserId(): string | null {
   return localStorage.getItem(USER_ID_STORAGE);
 }
 
-export function setAuth(apiKey: string, userId: string): void {
-  localStorage.setItem(API_KEY_STORAGE, apiKey);
+// 2026-09 审计修复(高优 #4): API key 不再持久化到 localStorage(XSS 可读).
+// 认证改为登录时后端下发的 HttpOnly; Secure; SameSite=Strict session cookie,
+// fetch 默认 same-origin 凭据即携带; legacy 存量 key 在下次登录时清除.
+export function setAuth(userId: string): void {
+  localStorage.removeItem(API_KEY_STORAGE); // 清除迁移前的明文存量
   localStorage.setItem(USER_ID_STORAGE, userId);
+  clearCache();
 }
 
 export function clearAuth(): void {
   localStorage.removeItem(API_KEY_STORAGE);
   localStorage.removeItem(USER_ID_STORAGE);
+  clearCache();
 }
 
 export function isAuthenticated(): boolean {
-  return !!getApiKey();
+  return !!getUserId();
 }
 
 // ── Cache system ──
@@ -39,8 +44,15 @@ interface CacheEntry<T> {
 const cache = new Map<string, CacheEntry<unknown>>();
 const CACHE_TTL = 30000; // 30 seconds
 
+// 缓存键掺入用户身份: 键只按 URL 时, 同一浏览器换号登录在 TTL 窗口内会
+// 命中前一账号的响应 (审计 2026-09 高优 #3)
 function getCacheKey(endpoint: string, body?: unknown): string {
-  return `${endpoint}:${body ? JSON.stringify(body) : ''}`;
+  const uid = getUserId() ?? 'anon';
+  return `${uid}:${endpoint}:${body ? JSON.stringify(body) : ''}`;
+}
+
+export function clearCache(): void {
+  cache.clear();
 }
 
 function getCached<T>(key: string): T | null {
@@ -66,7 +78,7 @@ export function invalidateCache(...prefixes: string[]): void {
 }
 
 // ── Request helper ──
-async function request<T>(
+export async function request<T>(
   endpoint: string,
   options: {
     method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -263,13 +275,14 @@ interface SubAccountsResponse {
 }
 
 // ── Auth API ──
-export async function loginUser(username: string, password: string): Promise<{ api_key: string; user_id: string }> {
-  const data = await request<{ success: boolean; api_key: string; user_id: string; plan: string }>('/v1/login', {
+// 登录响应不再携带 api_key(后端已改发 HttpOnly cookie); 前端只落 userId
+export async function loginUser(username: string, password: string): Promise<{ user_id: string }> {
+  const data = await request<{ success: boolean; user_id: string; plan: string }>('/v1/login', {
     method: 'POST',
     body: { user_id: username, password },
     public: true,
   });
-  setAuth(data.api_key, data.user_id);
+  setAuth(data.user_id);
   return data;
 }
 
@@ -288,7 +301,8 @@ export async function registerUser(
     public: true,
     extraHeaders,
   });
-  setAuth(data.api_key, data.user_id);
+  // 注册仅此一次回显 key(用户需抄录给 SDK 用), 不持久化 — 会话走 cookie
+  setAuth(data.user_id);
   return data;
 }
 

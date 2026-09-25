@@ -87,8 +87,8 @@ export default function Register() {
               <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
                 {t('register.username')}
               </label>
-              <input type="text" value={username} onChange={(e) => setUsername(e.target.value)}
-                placeholder={t('register.username')} className="dark-input" />
+              <input id="reg-username" name="username" type="text" value={username} onChange={(e) => setUsername(e.target.value)}
+                placeholder={t('register.username')} className="dark-input" autoComplete="username" />
             </div>
 
             <div>
@@ -96,10 +96,10 @@ export default function Register() {
                 {t('register.password')}
               </label>
               <div className="relative">
-                <input type={showPassword ? 'text' : 'password'} value={password}
+                <input id="reg-password" name="new-password" type={showPassword ? 'text' : 'password'} value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder={t('register.password')} className="dark-input pr-12" />
-                <button type="button" onClick={() => setShowPassword(!showPassword)}
+                <button type="button" aria-label={showPassword ? '隐藏密码' : '显示密码'} onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-4 top-1/2 -translate-y-1/2"
                   style={{ color: 'var(--text-tertiary)' }}>
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -124,7 +124,7 @@ export default function Register() {
               <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
                 {t('register.confirmPassword')}
               </label>
-              <input type={showPassword ? 'text' : 'password'} value={confirmPassword}
+              <input id="reg-confirm" name="confirm-password" type={showPassword ? 'text' : 'password'} value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder={t('register.confirmPassword')} className="dark-input"
                 style={{ borderColor: !passwordsMatch ? 'var(--danger-red)' : undefined }} />

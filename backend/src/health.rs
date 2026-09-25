@@ -182,6 +182,12 @@ pub async fn register_user(
         }
     }
 
+    // 特权名抢注防护 + via_admin 语义与本文件 invite/admin 分支一致
+    let via_admin = invite_code.is_empty();
+    if !via_admin && epicode::engine::user_manager::UserManager::is_reserved_id(&req.user_id) {
+        return error_response(StatusCode::FORBIDDEN, "this username is reserved");
+    }
+
     let plan = match req.plan.as_deref().unwrap_or("free") {
         "pro" => UserPlan::Pro,
         "enterprise" => UserPlan::Enterprise,
@@ -200,7 +206,13 @@ pub async fn register_user(
                 "max_memories": info.max_memories,
             })))
         }
-        Err(e) => error_response(StatusCode::BAD_REQUEST, &e),
+        Err(e) => {
+            // 注册失败回补邀请码 (审计 2026-09 低优 #22)
+            if !via_admin {
+                st.user_mgr.refund_invite_code(invite_code);
+            }
+            error_response(StatusCode::BAD_REQUEST, &e)
+        }
     }
 }
 
