@@ -27,34 +27,24 @@ pub struct RequestId(#[allow(dead_code)] pub String);
 /// nginx 网关用 `location /api/` 剥离该前缀, 但经 Ingress/负载均衡直连后端时
 /// 无人剥离 → 后端自行剥 /api, 让 /api/v1/* 在任何代理拓扑下都可达
 /// (修复: K8s/Helm 入口访问 /api/* 返回 404 — 审计 2026-09 高优 #6).
-pub async fn strip_api_prefix_middleware(
-    request: axum::extract::Request,
-    next: middleware::Next,
-) -> axum::response::Response {
+///
+/// 注意: 必须以 MapRequestLayer 在 serve 层包整个 Router —
+/// axum 的 Router::layer 发生在路由匹配之后, 改写 URI 已太晚(仍 404).
+pub fn strip_api_prefix(mut request: axum::extract::Request) -> axum::extract::Request {
     use axum::http::Uri;
 
     let uri = request.uri().clone();
     let Some(stripped) = uri.path().strip_prefix("/api/") else {
-        return next.run(request).await;
+        return request;
     };
-    // "/api" 裸路径 → 与网关行为一致, 送到根
     let pq = match uri.query() {
         Some(q) => format!("/{stripped}?{q}"),
         None => format!("/{stripped}"),
     };
-    let Ok(path_and_query) = axum::http::uri::PathAndQuery::try_from(pq.as_str()) else {
-        return next.run(request).await;
-    };
-    let new_uri = Uri::builder().path_and_query(path_and_query).build();
-    match new_uri {
-        Ok(new_uri) => {
-            let (mut parts, body) = request.into_parts();
-            parts.uri = new_uri;
-            next.run(axum::extract::Request::from_parts(parts, body))
-                .await
-        }
-        Err(_) => next.run(request).await,
+    if let Ok(new_uri) = Uri::builder().path_and_query(pq.as_str()).build() {
+        *request.uri_mut() = new_uri;
     }
+    request
 }
 
 pub async fn request_id_middleware(

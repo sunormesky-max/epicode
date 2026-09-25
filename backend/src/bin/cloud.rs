@@ -462,7 +462,6 @@ async fn main() {
             state.clone(),
             auth::auth_middleware,
         ))
-        .layer(middleware::from_fn(helpers::strip_api_prefix_middleware))
         .layer(middleware::from_fn(security_headers_middleware))
         .layer(middleware::from_fn(helpers::request_id_middleware))
         .layer(tower_http::limit::RequestBodyLimitLayer::new(
@@ -700,9 +699,14 @@ async fn main() {
         });
     }
 
+    // /api 前缀剥离必须在路由前(serve 层) — Router::layer 是路由后, 改 URI 已晚
+    use axum::ServiceExt;
+    use tower::util::MapRequestLayer;
+    use tower::Layer;
+    let app_svc = MapRequestLayer::new(helpers::strip_api_prefix).layer(app);
     if let Err(e) = axum::serve(
         listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
+        app_svc.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async {
         #[cfg(unix)]
