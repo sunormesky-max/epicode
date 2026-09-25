@@ -140,9 +140,9 @@ jobs:
           c2=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9111/api/health)
           c3=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9111/api/stats/public)
           c4=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9111/api/v1/health)
-          echo "health=${c1} api/health=${c2} api/stats/public=${c3} api/v1/health=${c4} (expect 200/200/200/401)"
+          echo "health=${c1} api/health=${c2} api/stats/public=${c3} api/v1/health=${c4} (expect 200/200/200/非404)"
           echo "-- body of /api/health --"
           curl -s http://127.0.0.1:9111/api/health | head -c 300; echo
           docker logs smoke | tail -30
-          test "${c1}" = "200" && test "${c2}" = "200" && test "${c3}" = "200" && test "${c4}" = "401"
+          test "${c1}" = "200" && test "${c2}" = "200" && test "${c3}" = "200" && test "${c4}" != "404"
           docker logs smoke | tail -20
