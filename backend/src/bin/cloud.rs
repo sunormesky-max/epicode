@@ -701,8 +701,8 @@ async fn main() {
 
     // /api 前缀剥离必须在路由前(serve 层) — Router::layer 是路由后, 改 URI 已晚
     use axum::ServiceExt;
-    use tower::Layer;
     use tower::util::MapRequestLayer;
+    use tower::Layer;
     let app_svc = MapRequestLayer::new(helpers::strip_api_prefix).layer(app);
     if let Err(e) = axum::serve(
         listener,
