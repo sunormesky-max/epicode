@@ -135,14 +135,14 @@ jobs:
             if curl -sf http://127.0.0.1:9111/health >/dev/null 2>&1; then break; fi
             sleep 2
           done
-          echo "== /health =="
-          curl -sf http://127.0.0.1:9111/health | head -c 300; echo
-          echo "== /api/health (prefix strip -> public /health) =="
-          curl -sf http://127.0.0.1:9111/api/health | head -c 300; echo
-          echo "== /api/stats/public (strip -> public) =="
-          curl -sf -o /dev/null -w "%{http_code}" http://127.0.0.1:9111/api/stats/public
-          echo "== /api/v1/health must NOT be 404 (401=auth OK, strip OK) =="
-          code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9111/api/v1/health)
-          echo "status: ${code}"
-          test "${code}" != "404"
+          echo "== probe all (collect then assert) =="
+          c1=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9111/health)
+          c2=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9111/api/health)
+          c3=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9111/api/stats/public)
+          c4=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9111/api/v1/health)
+          echo "health=${c1} api/health=${c2} api/stats/public=${c3} api/v1/health=${c4} (expect 200/200/200/401)"
+          echo "-- body of /api/health --"
+          curl -s http://127.0.0.1:9111/api/health | head -c 300; echo
+          docker logs smoke | tail -30
+          test "${c1}" = "200" && test "${c2}" = "200" && test "${c3}" = "200" && test "${c4}" = "401"
           docker logs smoke | tail -20
