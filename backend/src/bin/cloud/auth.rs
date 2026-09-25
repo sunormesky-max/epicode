@@ -176,11 +176,7 @@ pub async fn auth_middleware(
 }
 
 /// 限流检查, 返回 Some(429响应) 表示超限拒绝
-fn check_rate_limit(
-    st: &CloudState,
-    key: &str,
-    limit: usize,
-) -> Option<axum::response::Response> {
+fn check_rate_limit(st: &CloudState, key: &str, limit: usize) -> Option<axum::response::Response> {
     use std::time::Duration;
     const RATE_BUCKET_SOFT_CAP: usize = 100_000;
     let mut limits = st.rate_limits.lock();
@@ -191,12 +187,10 @@ fn check_rate_limit(
         let cutoff = now - Duration::from_secs(RATE_LIMIT_WINDOW_SECS * 2);
         limits.retain(|_, b| b.window_start > cutoff);
     }
-    let bucket = limits
-        .entry(key.to_string())
-        .or_insert_with(|| RateBucket {
-            count: 0,
-            window_start: now,
-        });
+    let bucket = limits.entry(key.to_string()).or_insert_with(|| RateBucket {
+        count: 0,
+        window_start: now,
+    });
     if now.duration_since(bucket.window_start).as_secs() > RATE_LIMIT_WINDOW_SECS {
         bucket.count = 0;
         bucket.window_start = now;
