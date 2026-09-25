@@ -12,8 +12,9 @@ services:
       REDIS_URL: ${REDIS_URL:-}
     volumes:
       - backend-data:/app/data
+    # 只绑定回环: 对外流量必须经 gateway(TLS 终止/限流/请求策略), 不可绕过网关直连
     ports:
-      - "9111:9111"
+      - "127.0.0.1:9111:9111"
     depends_on:
       redis:
         condition: service_started
@@ -22,8 +23,9 @@ services:
     build:
       context: ../frontend
       dockerfile: Dockerfile
+    # 只绑定回环: 由 gateway 反代, 不直接对外
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
 
   redis:
     image: redis:7-alpine

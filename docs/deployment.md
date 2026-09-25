@@ -17,20 +17,21 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-Default exposed ports:
+Default exposed ports (审计 2026-09: backend/frontend 仅绑定 127.0.0.1,
+对外唯一入口是网关 — 请勿把 9111/3000 直接发布到公网, 那会绕过网关的
+TLS 终止、限流与请求策略):
 
-| Service | Internal port | External port |
+| Service | Internal port | External binding |
 | --- | --- | --- |
-| frontend | 3000 | 3000 |
-| backend | 9111 | 9111 |
-| nginx gateway | 80 | 8080 |
+| nginx gateway | 80 | `0.0.0.0:8080`（唯一公网入口） |
+| backend | 9111 | `127.0.0.1:9111`（仅本机） |
+| frontend | 3000 | `127.0.0.1:3000`（仅本机） |
 
 After startup:
 
-- frontend: `http://localhost:3000`
-- backend health: `http://localhost:9111/health`
-- unified gateway: `http://localhost:8080`
+- unified gateway: `http://localhost:8080`（对外只用这个）
 - Swagger UI through gateway: `http://localhost:8080/docs`
+- backend health（本机调试）: `http://localhost:9111/health`
 
 ## Required environment variables
 

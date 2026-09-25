@@ -16,7 +16,7 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -53,10 +53,10 @@ jobs:
             archive_ext: zip
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           toolchain: "1.88"
           targets: ${{ matrix.target }}
@@ -75,7 +75,7 @@ jobs:
           sudo apt-get install -y libsqlite3-dev pkg-config libssl-dev
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
             ~/.cargo/registry
@@ -93,29 +93,40 @@ jobs:
           cd guard
           cargo build --release --target ${{ matrix.target }}
 
-      - name: Package binaries
+      - name: Package binaries (fail-closed)
         shell: bash
         run: |
+          set -euo pipefail
           VERSION=${{ needs.release-please.outputs.tag_name }}
           TARGET=${{ matrix.target }}
           SUFFIX=${{ matrix.binary_suffix }}
           EXT=${{ matrix.archive_ext }}
           PKG_NAME="epicode-${VERSION}-${TARGET}"
           mkdir -p "${PKG_NAME}"
-          
+
+          # Fail-closed: 缺失/空二进制必须中止打包,
+          # 不再发布带有效校验和的损坏归档 (审计 2026-09 高优 #9)
+          copy_required() {
+            if [[ ! -s "$1" ]]; then
+              echo "::error::required artifact missing or empty: $1" >&2
+              exit 1
+            fi
+            cp "$1" "$2/"
+          }
+
           # Backend binaries
-          cp "backend/target/${TARGET}/release/epicode${SUFFIX}" "${PKG_NAME}/" 2>/dev/null || true
-          cp "backend/target/${TARGET}/release/epicode-mcp${SUFFIX}" "${PKG_NAME}/" 2>/dev/null || true
-          cp "backend/target/${TARGET}/release/epicode-bench${SUFFIX}" "${PKG_NAME}/" 2>/dev/null || true
-          cp "backend/target/${TARGET}/release/epicode-migrate${SUFFIX}" "${PKG_NAME}/" 2>/dev/null || true
-          cp "backend/target/${TARGET}/release/epicode-cloud${SUFFIX}" "${PKG_NAME}/" 2>/dev/null || true
-          
+          copy_required "backend/target/${TARGET}/release/epicode${SUFFIX}" "${PKG_NAME}"
+          copy_required "backend/target/${TARGET}/release/epicode-mcp${SUFFIX}" "${PKG_NAME}"
+          copy_required "backend/target/${TARGET}/release/epicode-bench${SUFFIX}" "${PKG_NAME}"
+          copy_required "backend/target/${TARGET}/release/epicode-migrate${SUFFIX}" "${PKG_NAME}"
+          copy_required "backend/target/${TARGET}/release/epicode-cloud${SUFFIX}" "${PKG_NAME}"
+
           # Guard binary
-          cp "guard/target/${TARGET}/release/epicode-guard${SUFFIX}" "${PKG_NAME}/" 2>/dev/null || true
-          
+          copy_required "guard/target/${TARGET}/release/epicode-guard${SUFFIX}" "${PKG_NAME}"
+
           # README and LICENSE
-          cp README.md "${PKG_NAME}/" 2>/dev/null || true
-          cp LICENSE "${PKG_NAME}/" 2>/dev/null || true
+          copy_required "README.md" "${PKG_NAME}"
+          copy_required "LICENSE" "${PKG_NAME}"
           
           # Create archive
           if [[ "${{ runner.os }}" == "Windows" ]]; then
@@ -136,7 +147,7 @@ jobs:
           fi
 
       - name: Upload release asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           tag_name: ${{ needs.release-please.outputs.tag_name }}
           files: |

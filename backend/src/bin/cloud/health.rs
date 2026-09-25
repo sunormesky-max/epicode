@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 
-use epicode::engine::user_manager::{UserInfo, UserPlan};
+use epicode::engine::user_manager::{UserInfo, UserManager, UserPlan};
 
 use super::helpers::{disk_free_gb, error_response, require_admin, validate_user_id};
 use super::state::CloudState;
@@ -457,6 +457,12 @@ pub async fn register_user(
         }
     }
 
+    // 特权名抢注防护: 邀请码自助注册不可占用保留用户名(owner/admin),
+    // 否则 owner 账号创建前持码者可抢注获得库审批权 (审计 2026-09 中优 #9)
+    if !via_admin && UserManager::is_reserved_id(&req.user_id) {
+        return error_response(StatusCode::FORBIDDEN, "this username is reserved");
+    }
+
     // P17 越权修复: 套餐只能由admin路径授予 — 邀请码注册一律Free
     // (此前任何持码者可自选enterprise, 10万记忆额度自助封顶)
     let plan = match if via_admin {
@@ -487,7 +493,14 @@ pub async fn register_user(
                 })),
             )
         }
-        Err(e) => error_response(StatusCode::BAD_REQUEST, &e),
+        Err(e) => {
+            // 邀请码与账户创建非同事务: 注册失败时回补邀请码, 持码者不损失名额
+            // (审计 2026-09 低优 #22)
+            if !via_admin {
+                st.user_mgr.refund_invite_code(invite_code);
+            }
+            error_response(StatusCode::BAD_REQUEST, &e)
+        }
     }
 }
 

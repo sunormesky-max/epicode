@@ -56,21 +56,22 @@ export default function Login() {
             border: '1px solid var(--border-light)', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }}>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+              <label htmlFor="login-username" className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
                 {t('login.username')}
               </label>
-              <input type="text" value={username} onChange={(e) => setUsername(e.target.value)}
-                placeholder={t('login.username')} className="dark-input" />
+              <input id="login-username" name="username" type="text" value={username} onChange={(e) => setUsername(e.target.value)}
+                placeholder={t('login.username')} className="dark-input" autoComplete="username" />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+              <label htmlFor="login-password" className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
                 {t('login.password')}
               </label>
               <div className="relative">
-                <input type={showPassword ? 'text' : 'password'} value={password}
+                <input id="login-password" name="password" type={showPassword ? 'text' : 'password'} value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder={t('login.password')} className="dark-input pr-12" />
+                  placeholder={t('login.password')} className="dark-input pr-12" autoComplete="current-password" />
                 <button type="button" onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? '隐藏密码' : '显示密码'}
                   className="absolute right-4 top-1/2 -translate-y-1/2"
                   style={{ color: 'var(--text-tertiary)' }}>
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
