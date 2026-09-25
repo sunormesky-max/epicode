@@ -42,6 +42,8 @@ interface CacheEntry<T> {
 }
 
 const cache = new Map<string, CacheEntry<unknown>>();
+// cookie 会话已证实有效(首个无 header 成功请求后置位)
+let cookieSessionVerified = false;
 const CACHE_TTL = 30000; // 30 seconds
 
 // 缓存键掺入用户身份: 键只按 URL 时, 同一浏览器换号登录在 TTL 窗口内会
@@ -71,7 +73,10 @@ function setCached<T>(key: string, data: T): void {
 
 export function invalidateCache(...prefixes: string[]): void {
   for (const key of cache.keys()) {
-    if (prefixes.some((p) => key.startsWith(p))) {
+    // 键格式 `${uid}:${endpoint}:${body}` — 匹配 endpoint 需先剥 uid 前缀
+    // (回归修复: uid 前缀加入后原 startsWith 恒失配, 写入后缓存不失效)
+    const endpoint = key.slice(key.indexOf(':') + 1);
+    if (prefixes.some((p) => endpoint.startsWith(p))) {
       cache.delete(key);
     }
   }
@@ -92,7 +97,8 @@ export async function request<T>(
   const { method = 'GET', body, skipCache = false, public: isPublic = false, extraHeaders, rawResponse } = options;
 
   const url = `${API_BASE}${endpoint}`;
-  const cacheKey = getCacheKey(url, body);
+  // 键用 endpoint(不含 /api 前缀) — 与 invalidateCache("/v1/...") 调用点语义一致
+  const cacheKey = getCacheKey(endpoint, body);
 
   if (method === 'GET' && !skipCache) {
     const cached = getCached<T>(cacheKey);
@@ -103,20 +109,30 @@ export async function request<T>(
     'Content-Type': 'application/json',
   };
 
+  // 认证迁移(审计二轮): legacy 明文 key 只作迁移回退 —
+  // 首个受保护请求先不带 header 验证 cookie; cookie 证实有效即清除明文 key,
+  // 此后会话完全由 HttpOnly cookie 承载; cookie 失效则回退 header 一次并保留
   const apiKey = getApiKey();
-  if (apiKey && !isPublic) {
-    headers['X-API-Key'] = apiKey;
-  }
+  const wantsAuth = !isPublic;
+  const tryHeaderless = wantsAuth && apiKey && !cookieSessionVerified;
 
   if (extraHeaders) {
     Object.assign(headers, extraHeaders);
   }
 
-  const response = await fetch(url, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const doFetch = (hdrs: Record<string, string>) =>
+    fetch(url, { method, headers: hdrs, body: body ? JSON.stringify(body) : undefined });
+
+  let response = await doFetch(headers);
+
+  if (response.status === 401 && wantsAuth && apiKey && tryHeaderless) {
+    // 无 header 探针 401 = cookie 失效: 回退 legacy header 认证(迁移期)
+    const retry = { ...headers, 'X-API-Key': apiKey };
+    response = await doFetch(retry);
+  } else if (response.ok && tryHeaderless) {
+    cookieSessionVerified = true;
+    localStorage.removeItem(API_KEY_STORAGE);
+  }
 
   if (response.status === 429) {
     throw new Error('Rate limit exceeded. Please try again later.');
@@ -304,6 +320,17 @@ export async function registerUser(
   // 注册仅此一次回显 key(用户需抄录给 SDK 用), 不持久化 — 会话走 cookie
   setAuth(data.user_id);
   return data;
+}
+
+// 登出闭环(审计二轮): 必须调后端 /v1/logout 使 HttpOnly cookie 服务端失效,
+// 只清本地会让服务端会话最长残留 7 天
+export async function logout(): Promise<void> {
+  try {
+    await request('/v1/logout', { method: 'POST', public: true, skipCache: true });
+  } catch {
+    // 后端不可达也要完成本地清理 — 尽力而为
+  }
+  clearAuth();
 }
 
 // ── Stats API ──

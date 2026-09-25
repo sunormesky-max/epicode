@@ -13,8 +13,9 @@ metadata:
   namespace: epicode
 type: Opaque
 stringData:
-  DEEPSEEK_API_KEY: replace-me
-  EPICODE_ADMIN_KEY: replace-me
+  # 部署前必须替换为真实密钥 — 后端对已知占位值(replace-me 等)拒绝启动(fail-closed)
+  DEEPSEEK_API_KEY: REPLACE_WITH_REAL_KEY
+  EPICODE_ADMIN_KEY: REPLACE_WITH_REAL_KEY
   EPICODE_MASTER_KEY: ""
   REDIS_URL: redis://epicode-redis:6379
 ---
@@ -242,6 +243,13 @@ metadata:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   ingressClassName: nginx
+  # TLS(审计二轮): ssl-redirect 已强制 https, 此处声明证书;
+  # 1) 自备证书: kubectl create secret tls epicode-tls --cert=... --key=...
+  # 2) cert-manager: 部署前给 Ingress 加 cert-manager.io/cluster-issuer 注解
+  tls:
+    - hosts:
+        - epicode.example.com
+      secretName: epicode-tls
   rules:
     - host: epicode.example.com
       http:

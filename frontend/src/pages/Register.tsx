@@ -84,7 +84,7 @@ export default function Register() {
             border: '1px solid var(--border-light)', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }}>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+              <label htmlFor="reg-username" className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
                 {t('register.username')}
               </label>
               <input id="reg-username" name="username" type="text" value={username} onChange={(e) => setUsername(e.target.value)}
@@ -92,7 +92,7 @@ export default function Register() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+              <label htmlFor="reg-password" className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
                 {t('register.password')}
               </label>
               <div className="relative">
@@ -121,7 +121,7 @@ export default function Register() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+              <label htmlFor="reg-confirm" className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
                 {t('register.confirmPassword')}
               </label>
               <input id="reg-confirm" name="confirm-password" type={showPassword ? 'text' : 'password'} value={confirmPassword}

@@ -97,6 +97,13 @@ async fn main() {
 
     let admin_key = std::env::var("TETRAMEM_ADMIN_KEY")
         .expect("FATAL: admin key must be set (accepts EPICODE_ADMIN_KEY or TETRAMEM_ADMIN_KEY)");
+    // 已知占位密钥 fail-closed(审计二轮): K8s 清单/.env.example 的 "replace-me"
+    // 若不替换就部署, 任何知道仓库的人都能拿到管理接口 — 直接拒绝启动
+    const PLACEHOLDER_KEYS: [&str; 3] = ["replace-me", "changeme", "placeholder"];
+    if PLACEHOLDER_KEYS.contains(&admin_key.as_str()) {
+        eprintln!("FATAL: EPICODE_ADMIN_KEY is a known placeholder ({admin_key}) — set a real secret before deploying");
+        std::process::exit(1);
+    }
 
     let listen_addr =
         std::env::var("TETRAMEM_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:9111".into());

@@ -172,20 +172,20 @@ pub async fn register_user(
     }
 
     // 验证通过后检查授权（邀请码/admin）
-    if invite_code.is_empty() {
+    let via_admin = invite_code.is_empty();
+    if via_admin {
         if let Err(resp) = require_admin(&st.admin_key, &headers) {
             return resp;
         }
     } else {
+        // 保留名检查必须在消耗邀请码之前 — 否则用保留名注册的失败尝试
+        // 也会白烧一个名额 (审计二轮)
+        if epicode::engine::user_manager::UserManager::is_reserved_id(&req.user_id) {
+            return error_response(StatusCode::FORBIDDEN, "this username is reserved");
+        }
         if let Err(e) = st.user_mgr.use_invite_code(invite_code) {
             return error_response(StatusCode::FORBIDDEN, &e);
         }
-    }
-
-    // 特权名抢注防护 + via_admin 语义与本文件 invite/admin 分支一致
-    let via_admin = invite_code.is_empty();
-    if !via_admin && epicode::engine::user_manager::UserManager::is_reserved_id(&req.user_id) {
-        return error_response(StatusCode::FORBIDDEN, "this username is reserved");
     }
 
     let plan = match req.plan.as_deref().unwrap_or("free") {
