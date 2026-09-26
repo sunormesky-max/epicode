@@ -9,7 +9,7 @@ import {
   Copy, Check, RefreshCw, Terminal
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 import { useIsMobile } from '@/hooks/useIsMobile';
 
 /**

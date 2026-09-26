@@ -3,7 +3,7 @@ import { errMsg, type LibraryHit, type LibraryRequest } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading, ErrorBanner, NoticeBanner } from '@/components/DashboardUI';
 import { Search, Send, Inbox, Check, X, Clock, FileText } from 'lucide-react';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 
 const inputStyle: React.CSSProperties = {
   width: '100%', background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)',

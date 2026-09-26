@@ -4,7 +4,7 @@ import {
   Brain, Zap, RefreshCw, Radio, ArrowRight, Bot,
   Shield, Sparkles, Network, CheckCircle2
 } from 'lucide-react';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 import type { TranslationKey } from '@/i18n/translations';
 
 const PILLARS = [

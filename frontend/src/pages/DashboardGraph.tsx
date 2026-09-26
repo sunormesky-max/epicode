@@ -4,7 +4,7 @@ import { DashboardLoading } from '@/components/DashboardUI';
 import { errMsg, getGraphExport, getGraphAnalysis, getNodeRelations, getKgQuality } from '@/lib/api';
 import type { KgQuality } from '@/lib/api';
 import { Search, ZoomIn, ZoomOut, RotateCcw, X, GitBranch, Tag, Activity, ChevronDown, ChevronUp, Route, Navigation, HeartPulse, Target } from 'lucide-react';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 import type { TranslationKey } from '@/i18n/translations';
 
 const CLUSTER_COLORS = [
