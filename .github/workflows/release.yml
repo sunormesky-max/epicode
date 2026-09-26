@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '补发资产的既有tag(如 v1.0.3), 留空则仅跑release-please'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -30,7 +35,7 @@ jobs:
     needs: release-please
     permissions:
       contents: write
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    if: ${{ needs.release-please.outputs.release_created == 'true' || inputs.tag != '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -44,18 +49,9 @@ jobs:
             target: aarch64-unknown-linux-gnu
             binary_suffix: ''
             archive_ext: tar.gz
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            binary_suffix: ''
-            archive_ext: tar.gz
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            binary_suffix: ''
-            archive_ext: tar.gz
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            binary_suffix: '.exe'
-            archive_ext: zip
+          # macos/windows 暂移出矩阵: epicode-cloud 依赖 std::os::unix(TcpListener
+          # from_raw_fd) 无法在 Windows 编译; ort-sys 构建脚本在 macOS 失败。
+          # 跨平台移植立项后再加回。
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -70,7 +66,7 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
       - name: Install system dependencies (Ubuntu)
@@ -102,7 +98,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION=${{ needs.release-please.outputs.tag_name }}
+          VERSION=${{ inputs.tag || needs.release-please.outputs.tag_name }}
           TARGET=${{ matrix.target }}
           SUFFIX=${{ matrix.binary_suffix }}
           EXT=${{ matrix.archive_ext }}
@@ -154,7 +150,7 @@ jobs:
       - name: Upload release asset
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
-          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          tag_name: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
           files: |
             ${{ env.ASSET }}
             ${{ env.CHECKSUM_ASSET }}
