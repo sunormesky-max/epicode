@@ -110,6 +110,9 @@ export async function request<T>(
   };
 
   // 认证迁移(审计二轮): legacy 明文 key 只作迁移回退 —
+  // TODO(迁移债, 截止 v1.1): cookie 验证成功即清除; 回退场景保留明文 key
+  // 至下次登录, XSS 在此窗口内仍可读取 — v1.1 起强制重新登录移除该窗口
+
   // 首个受保护请求先不带 header 验证 cookie; cookie 证实有效即清除明文 key,
   // 此后会话完全由 HttpOnly cookie 承载; cookie 失效则回退 header 一次并保留
   const apiKey = getApiKey();

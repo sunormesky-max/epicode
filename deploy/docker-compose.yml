@@ -33,6 +33,9 @@ services:
 
   gateway:
     image: nginx:1.27-alpine
+    # 注意: 8080 是明文 HTTP — 公网部署必须在外层做 TLS 终止
+    # (云 LB / 自建 nginx TLS / 部署文档 TLS 章节), 否则凭据与 cookie 明文过网
+
     depends_on:
       - backend
       - frontend
