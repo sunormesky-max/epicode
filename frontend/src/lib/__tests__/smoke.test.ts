@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 // 并锁定构建元数据不被误改
 describe('production frontend smoke', () => {
   it('package metadata', async () => {
-    const pkg = await import('../../package.json', { with: { type: 'json' } });
+    const pkg = await import('../../../package.json', { with: { type: 'json' } });
     expect(pkg.default.name).toBe('epicode-frontend');
     expect(pkg.default.version).toMatch(/^\d+\.\d+\.\d+$/);
   });

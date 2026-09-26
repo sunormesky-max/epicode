@@ -22,7 +22,7 @@ RUN npm run build
 FROM node:20-alpine AS production
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-COPY package.json .env ./
+COPY package.json .env* ./  # .env 可选(生产本地注入, repo 只有 .env.example)
 
 EXPOSE 3000
 CMD ["npm", "start"]
