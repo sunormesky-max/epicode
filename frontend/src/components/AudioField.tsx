@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+/* eslint-disable react-hooks/refs -- latest-ref模式: toggle的useCallback经ref读最新值避免重建 */
+
 /**
  * 场的心跳 — AudioField
  *
@@ -67,6 +69,7 @@ function willBlip() {
 
 export default function AudioField() {
   const [on, setOn] = useState(() => { try { return localStorage.getItem('field_sound') === '1'; } catch { return false; } });
+  // latest-ref: toggle的useCallback依赖onRef读取最新值(避免重建回调)
   const onRef = useRef(on);
   onRef.current = on;
 

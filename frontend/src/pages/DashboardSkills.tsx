@@ -3,7 +3,7 @@ import { errMsg, getMySkills, getPublicSkills, createSkill, updateSkill, deleteS
 import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading } from '@/components/DashboardUI';
 import { Brain, Wrench, Users, Clock, Tag, Plus, Search, X, Star, Filter, Trash2, Upload, Pencil, Zap, Eye } from 'lucide-react';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 
 function SkillCard({ skill, color, onEdit, onDelete, onPublish }: {
   skill: SkillData | CommunitySkill;

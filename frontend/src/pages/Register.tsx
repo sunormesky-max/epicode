@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 import { registerUser, loginUser } from '@/lib/api';
 import { Loader2, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 
 // ═══ 统一 Loading (能量汇聚式 loader) ═══
 export function DashboardLoading() {

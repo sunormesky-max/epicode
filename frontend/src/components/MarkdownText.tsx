@@ -1,4 +1,5 @@
 import React from 'react';
+import { stripThinkTags } from '@/lib/think-tags';
 
 /**
  * 轻量级 Markdown 渲染器（无外部依赖）。
@@ -7,11 +8,6 @@ import React from 'react';
  *
  * 同时剥离 MiniMax-M3 等推理模型的 <think>...</think> 标签。
  */
-
-/** 去除 <think>...</think> 标签，返回纯回答文本 */
-export function stripThinkTags(text: string): string {
-  return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-}
 
 /** 行内格式化：粗体 + 行内代码 */
 function renderInline(text: string, keyPrefix: string): React.ReactNode[] {

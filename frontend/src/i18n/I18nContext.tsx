@@ -1,17 +1,8 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { I18nContext } from './i18n-context-object';
 import { translations, type TranslationKey, type Language } from './translations';
 
-interface I18nContextType {
-  lang: Language;
-  setLang: (lang: Language) => void;
-  t: (key: TranslationKey) => string;
-}
 
-const I18nContext = createContext<I18nContextType>({
-  lang: 'zh',
-  setLang: () => {},
-  t: (key) => key,
-});
 
 const STORAGE_KEY = 'epicode_language';
 
@@ -42,8 +33,4 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
       {children}
     </I18nContext.Provider>
   );
-}
-
-export function useI18nContext() {
-  return useContext(I18nContext);
 }
