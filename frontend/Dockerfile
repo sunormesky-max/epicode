@@ -3,6 +3,15 @@ WORKDIR /app
 
 FROM base AS deps
 COPY package.json package-lock.json ./
+# 代理配置通过 build arg 注入，不硬编码内网 IP，不禁用 SSL 验证
+ARG HTTP_PROXY=""
+ARG HTTPS_PROXY=""
+ARG NPM_REGISTRY="https://registry.npmjs.org"
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+RUN npm config set registry ${NPM_REGISTRY} \
+    && npm config set fund false \
+    && npm config set audit false
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --prefer-offline --no-audit
 
@@ -11,18 +20,11 @@ COPY . .
 RUN npm run build
 
 FROM node:20-alpine AS production
-WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# 运行时密钥经环境变量/挂载注入, 镜像只带模板
 COPY package.json ./
+COPY .env.example ./
 
-# Drop root: run as the unprivileged `node` user (uid 1000) built into the
-# node:alpine image. Chown first so the runtime can read everything it copied
-# in as root, then switch identity.
-RUN chown -R node:node /app
-USER node
-
-ENV NODE_ENV=production
-ENV PORT=3000
 EXPOSE 3000
 CMD ["npm", "start"]

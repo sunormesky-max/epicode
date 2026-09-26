@@ -1,4 +1,29 @@
-﻿@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
+/* ── 自托管字体(可变字重,latin 子集;中文回退系统字体) ──
+   替代 Google Fonts @import: 消除外网阻塞请求(国内可达性),字体与站点同源 */
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('./assets/fonts/space-grotesk-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./assets/fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('./assets/fonts/jetbrains-mono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
 @tailwind base;
 @tailwind components;
@@ -7,46 +32,56 @@
 
 @layer base {
   :root {
-    /* ── Deep Dark Base ── */
-    --bg-void: #030305;
+    /* ── Ink Base (研究所级深墨) ── */
+    --bg-void: #07070a;
     --bg-primary: #0a0a0f;
-    --bg-secondary: #111118;
-    --bg-tertiary: #1a1a24;
-    --bg-card: rgba(255, 255, 255, 0.04);
-    --bg-card-solid: #12121a;
-    
-    --text-primary: #f0f0f5;
-    --text-secondary: #9ca3af;
-    --text-tertiary: #6b7280;
-    
-    /* ── Accent Colors ── */
-    --accent-blue: #6366f1;
-    --accent-purple: #a855f7;
-    --accent-magenta: #d946ef;
-    --accent-pink: #ec4899;
-    --accent-gold: #FFD700;
-    --accent-gold-bright: #FFE44D;
-    --accent-gold-dim: #D4A017;
-    
-    /* ── Magenta-Purple Neural Theme ── */
-    --neural-primary: #d946ef;
-    --neural-secondary: #a855f7;
-    --neural-tertiary: #7c3aed;
-    --neural-glow: rgba(217, 70, 239, 0.3);
-    --ray-gold: rgba(255, 215, 0, 0.6);
-    
-    --border-light: rgba(255, 255, 255, 0.06);
-    --border-medium: rgba(255, 255, 255, 0.1);
-    
-    --success-green: #34d399;
+    --bg-secondary: #101016;
+    --bg-tertiary: #16161f;
+    --bg-card: rgba(245, 244, 240, 0.025);
+    --bg-card-solid: #101018;
+    /* Alias tokens — backward compatibility */
+    --bg-dark: #0a0a0f;
+    --bg-darker: #07070a;
+
+    --text-primary: #f5f4f0;
+    --text-secondary: #a3a3ad;
+    --text-tertiary: #63636e;
+
+    /* ── 单一强调:突触青 Synapse Teal + 潜意识紫(仅潜意识/梦境态) ── */
+    --accent-blue: #3ecfae;
+    --accent-blue-bright: #97ebd6;
+    --accent-cyan: #3ecfae;          /* 突触青 — 唯一主动作色 */
+    --accent-cyan-bright: #97ebd6;   /* 高亮青 */
+    --accent-purple: #8b7ec8;        /* 潜意识紫 — 仅用于潜意识/梦境 */
+    --accent-magenta: #8b7ec8;
+    --accent-pink: #8b7ec8;
+    --accent-gold: #e6c878;          /* 稀有:高能事件 */
+    --accent-gold-bright: #f0dcac;
+    --accent-gold-dim: #b89a58;
+    --accent-crimson: #ff3860;
+
+    /* ── 意识场主题(意识地平线:上=意识层青 / 下=潜意识场紫) ── */
+    --neural-primary: #3ecfae;
+    --neural-secondary: #8b7ec8;
+    --neural-tertiary: #5a9a8c;
+    --neural-glow: rgba(62, 207, 174, 0.25);
+    --neural-glow-purple: rgba(139, 126, 200, 0.18);
+    --ray-gold: rgba(230, 200, 120, 0.6);
+
+    --border-light: rgba(245, 244, 240, 0.07);
+    --border-medium: rgba(245, 244, 240, 0.14);
+    --border-hologram: rgba(62, 207, 174, 0.22);
+
+    --success-green: #3ecfae;
     --danger-red: #f87171;
-    --warning-orange: #fbbf24;
-    
-    /* ── Font tokens ── */
-    --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Noto Sans SC', system-ui, sans-serif;
-    --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Noto Sans SC', system-ui, sans-serif;
-    --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
-    
+    --warning-orange: #e6c878;
+
+    /* ── Font tokens (研究所排版:Grotesk + Inter + Mono) ── */
+    --font-display: 'Space Grotesk', 'Noto Sans SC', system-ui, sans-serif;
+    --font-heading: 'Space Grotesk', 'Noto Sans SC', system-ui, sans-serif;
+    --font-body: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+
     /* ── Spacing ── */
     --space-xs: 0.25rem;
     --space-sm: 0.5rem;
@@ -54,13 +89,13 @@
     --space-lg: 1.5rem;
     --space-xl: 3rem;
     --space-2xl: 6rem;
-    
-    --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 18px;
-    --radius-xl: 24px;
+
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
     --radius-full: 9999px;
-    
+
     --container-max: 1200px;
     --navbar-height: 56px;
   }
@@ -75,42 +110,69 @@ html {
 }
 
 body {
-  background: var(--bg-void);
+  background:
+    /* 极微弱的环境光 — 意识层方向 */
+    radial-gradient(ellipse 90% 55% at 50% -10%, rgba(62, 207, 174, 0.045) 0%, transparent 55%),
+    /* 潜意识层微光 — 底部 */
+    radial-gradient(ellipse 80% 45% at 50% 115%, rgba(139, 126, 200, 0.04) 0%, transparent 55%),
+    var(--bg-void);
+  background-attachment: fixed;
   color: var(--text-primary);
   font-family: var(--font-body);
   font-size: 16px;
-  line-height: 1.6;
+  line-height: 1.65;
   font-weight: 400;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   overflow-x: hidden;
 }
 
-/* ── Scrollbar ── */
+/* ── Scrollbar (安静) ── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(217, 70, 239, 0.2); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(217, 70, 239, 0.4); }
+::-webkit-scrollbar-thumb {
+  background: rgba(245, 244, 240, 0.12);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(62, 207, 174, 0.35); }
 
 /* ── Selection ── */
 ::selection {
-  background: rgba(217, 70, 239, 0.4);
-  color: white;
+  background: rgba(62, 207, 174, 0.28);
+  color: #fff;
+}
+
+/* ── 全局标题 ── */
+main h1, h1.brand-title, .display-title {
+  font-family: var(--font-display) !important;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-shadow: none;
+}
+
+main h2, main h3, .heading-text, nav, .nav-link {
+  font-family: var(--font-heading);
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
+
+.numeric, .stat-number, .data-value, code, pre {
+  font-family: var(--font-mono);
+}
+
+.stat-number.display-numeric {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Animations ── */
 @keyframes fade-in-up {
-  from { opacity: 0; transform: translateY(40px); }
+  from { opacity: 0; transform: translateY(24px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
-}
-
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 20px rgba(217, 70, 239, 0.2); }
-  50% { box-shadow: 0 0 40px rgba(217, 70, 239, 0.4); }
 }
 
 /* ── Marquee ── */
@@ -129,164 +191,155 @@ body {
   animation-play-state: paused;
 }
 
-/* ── Buttons ── */
+/* ── Buttons:实色单一强调,无渐变无扫光无uppercase ── */
 .btn-primary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 12px 28px;
-  background: linear-gradient(135deg, var(--accent-purple), var(--accent-magenta));
-  color: white;
-  font-family: var(--font-body);
-  font-size: 15px;
-  font-weight: 500;
-  border: none;
-  border-radius: var(--radius-full);
+  padding: 11px 26px;
+  background: var(--accent-cyan);
+  color: #06231c;
+  font-family: var(--font-heading);
+  font-size: 14.5px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
   text-decoration: none;
-  box-shadow: 0 4px 20px rgba(168, 85, 247, 0.3);
+  letter-spacing: 0;
+  text-transform: none;
+  text-shadow: none;
+  position: relative;
 }
-
 .btn-primary:hover {
-  transform: scale(1.03);
-  box-shadow: 0 6px 30px rgba(168, 85, 247, 0.5);
+  background: var(--accent-cyan-bright);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 24px rgba(62, 207, 174, 0.25);
 }
+.btn-primary::before { content: none; }
 
 .btn-secondary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 12px 28px;
+  padding: 11px 26px;
   background: transparent;
   color: var(--text-primary);
-  font-family: var(--font-body);
-  font-size: 15px;
+  font-family: var(--font-heading);
+  font-size: 14.5px;
   font-weight: 500;
-  border: 1.5px solid var(--border-medium);
-  border-radius: var(--radius-full);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.18s ease;
   text-decoration: none;
+  letter-spacing: 0;
+  text-transform: none;
 }
-
 .btn-secondary:hover {
-  border-color: var(--accent-purple);
-  color: var(--accent-purple);
-  background: rgba(168, 85, 247, 0.05);
+  border-color: rgba(62, 207, 174, 0.5);
+  color: var(--accent-cyan-bright);
+  background: rgba(62, 207, 174, 0.05);
 }
 
-/* ── Sections ──
-   All sections are semi-transparent so the fixed neural background shows through */
-.section-dark {
-  background: rgba(3, 3, 5, 0.7);
-  backdrop-filter: blur(8px);
-}
-
-.section-primary {
-  background: rgba(10, 10, 15, 0.65);
-  backdrop-filter: blur(8px);
-}
-
-.section-secondary {
-  background: rgba(17, 17, 24, 0.6);
-  backdrop-filter: blur(8px);
+/* ── Sections(全透明,让意识地平线背景透出) ── */
+.section-dark,
+.section-primary,
+.section-secondary,
+.section-light {
+  background: transparent;
+  backdrop-filter: none;
 }
 
 /* ── Code Block ── */
 .code-block {
-  background: var(--bg-card-solid);
+  background: rgba(7, 7, 10, 0.55);
+  backdrop-filter: none;
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
 }
 
 .code-block-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 14px 20px;
+  padding: 12px 18px;
   border-bottom: 1px solid var(--border-light);
 }
 
 .code-block-dot {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
 }
 
 .code-block pre {
-  padding: 20px 24px;
+  padding: 18px 22px;
   margin: 0;
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: 13.5px;
   line-height: 1.8;
   color: var(--text-primary);
 }
 
-.code-keyword { color: #c084fc; }
-.code-string { color: #34d399; }
+.code-keyword { color: #97ebd6; }
+.code-string { color: #8b9a6a; }
 .code-comment { color: var(--text-tertiary); font-style: italic; }
-.code-function { color: #60a5fa; }
+.code-function { color: #b9c8e8; }
 
-/* ── Feature Card ── */
+/* ── Feature Card:1px 边 + 微浮,无发光边框动画 ── */
 .feature-card-dark {
   background: var(--bg-card);
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(12px);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-xl);
-  padding: 40px;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 36px;
+  transition: border-color 0.25s ease, transform 0.25s ease;
+  position: relative;
 }
-
+.feature-card-dark::before { content: none; }
 .feature-card-dark:hover {
-  transform: translateY(-8px);
-  border-color: rgba(217, 70, 239, 0.2);
-  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.3), 0 0 30px rgba(217, 70, 239, 0.05);
+  transform: translateY(-4px);
+  border-color: rgba(62, 207, 174, 0.28);
 }
 
 /* ── Form Input ── */
 .dark-input {
   width: 100%;
-  height: 48px;
-  padding: 0 16px;
-  background: var(--bg-card);
+  height: 46px;
+  padding: 0 15px;
+  background: rgba(245, 244, 240, 0.03);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
   font-family: var(--font-body);
-  font-size: 16px;
+  font-size: 15px;
   color: var(--text-primary);
   outline: none;
-  transition: all 0.2s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .dark-input:focus {
-  border-color: var(--accent-purple);
-  box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.15);
+  border-color: rgba(62, 207, 174, 0.6);
+  box-shadow: 0 0 0 3px rgba(62, 207, 174, 0.1);
 }
 
 .dark-input::placeholder {
   color: var(--text-tertiary);
 }
 
-/* ── Gold Ray Animation ── */
-@keyframes ray-emit {
-  0% { 
-    opacity: 0; 
-    transform: scaleX(0) rotate(var(--ray-angle)); 
-  }
-  10% { 
-    opacity: 1; 
-  }
-  90% { 
-    opacity: 0.6; 
-  }
-  100% { 
-    opacity: 0; 
-    transform: scaleX(1) rotate(var(--ray-angle)); 
-  }
+/* ── Dashboard Card ── */
+.dash-card {
+  background: rgba(245, 244, 240, 0.02);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  transition: border-color 0.2s ease;
+}
+.dash-card:hover {
+  border-color: rgba(62, 207, 174, 0.25);
 }
 
 /* ── Neural BG ── */
@@ -297,15 +350,168 @@ body {
   pointer-events: none;
 }
 
-/* ── Apple pill segment ── */
-.pill-segment {
-  flex: 1;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.08);
-  transition: all 0.3s ease;
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 
-.pill-segment.active {
-  background: linear-gradient(90deg, var(--accent-purple), var(--accent-magenta));
+/* ── Dashboard transitions ── */
+.dashboard-card {
+  transition: all 0.25s ease;
 }
+.dashboard-card:hover {
+  border-color: rgba(62, 207, 174, 0.22);
+}
+
+/* ── List item entry ── */
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.list-item-enter {
+  animation: slide-in 0.2s ease-out forwards;
+}
+
+/* 旧扫光线 — 已退役,保留类名防止引用报错 */
+.holo-scan-line { display: none; }
+
+/* ── Loader:单色收敛脉冲 ── */
+.energy-loader {
+  position: relative;
+  width: 48px;
+  height: 48px;
+}
+.energy-loader::before,
+.energy-loader::after,
+.energy-loader .el-orbit {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  box-shadow: 0 0 10px rgba(62, 207, 174, 0.6);
+  animation: el-converge 1.6s ease-in-out infinite;
+}
+.energy-loader::before {
+  background: var(--accent-purple);
+  box-shadow: 0 0 10px rgba(139, 126, 200, 0.5);
+  animation-delay: -0.53s;
+}
+.energy-loader::after {
+  animation-delay: -1.06s;
+}
+.energy-loader .el-core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #f5f4f0 0%, var(--accent-cyan) 65%, transparent 100%);
+  box-shadow: 0 0 16px rgba(62, 207, 174, 0.5);
+  animation: el-core-pulse 1.6s ease-in-out infinite;
+}
+@keyframes el-converge {
+  0%, 100% { transform: translate(0, -20px) scale(0.6); opacity: 0.3; }
+  50% { transform: translate(0, 0) scale(1); opacity: 1; }
+}
+@keyframes el-core-pulse {
+  0%, 100% { transform: scale(0.7); opacity: 0.6; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .energy-loader::before,
+  .energy-loader::after,
+  .energy-loader .el-orbit,
+  .energy-loader .el-core { animation: none; }
+}
+
+/* ── 兼容旧类(防报错,视觉已简化) ── */
+.hero-glow { text-shadow: none; }
+.neon-text { text-shadow: none; }
+.nebula-bg { background: transparent; }
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(245, 244, 240, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(245, 244, 240, 0.03) 1px, transparent 1px);
+  background-size: 80px 80px;
+}
+.feature-card-apple {
+  padding: 32px;
+  background: rgba(16, 16, 24, 0.55);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-light);
+  border-radius: 18px;
+  transition: border-color 0.25s ease, transform 0.25s ease;
+}
+.feature-card-apple::before { content: none; }
+.feature-card-apple:hover {
+  border-color: rgba(62, 207, 174, 0.25);
+  transform: translateY(-3px);
+}
+.pill-segment {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(245, 244, 240, 0.08);
+  transition: all 0.3s ease;
+}
+.pill-segment.active { background: var(--accent-cyan); }
+.scanline-overlay::after { content: none; }
+
+/* 叛逆者 R8: 终端闪烁光标 */
+.term-cursor { animation: term-blink 1.1s steps(1) infinite; }
+@keyframes term-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .term-cursor { animation: none; } }
+
+/* 叛逆者: CTA 出血 — 桌面不换行冲出容器, 移动端正常换行 */
+.cta-bleed { white-space: nowrap; }
+@media (max-width: 768px) { .cta-bleed { white-space: normal; } }
+
+/* ═══ 观测站取景框: 四角刻度标记 — 内容区即仪器视口 ═══ */
+.observatory-frame {
+  position: relative;
+  min-height: calc(100vh - 56px);
+  --tick: rgba(62, 207, 174, 0.4);
+  --tick-len: 14px;
+}
+.observatory-frame::before,
+.observatory-frame::after {
+  content: '';
+  position: absolute;
+  width: var(--tick-len);
+  height: var(--tick-len);
+  pointer-events: none;
+}
+/* 左上 + 右上 */
+.observatory-frame::before {
+  top: 0; left: 0;
+  border-top: 1px solid var(--tick);
+  border-left: 1px solid var(--tick);
+}
+.observatory-frame::after {
+  top: 0; right: 0;
+  border-top: 1px solid var(--tick);
+  border-right: 1px solid var(--tick);
+}
+.observatory-frame > .of-corner-b {
+  position: absolute;
+  width: var(--tick-len);
+  height: var(--tick-len);
+  pointer-events: none;
+}
+.observatory-frame > .of-corner-b.left { bottom: 0; left: 0; border-bottom: 1px solid var(--tick); border-left: 1px solid var(--tick); }
+.observatory-frame > .of-corner-b.right { bottom: 0; right: 0; border-bottom: 1px solid var(--tick); border-right: 1px solid var(--tick); }
+
+/* ═══ 观测舱: 事件脉冲环 — 认知状态到达时的真实事件视效 ═══ */
+@keyframes ob-pulse {
+  0%   { transform: scale(0.4); opacity: 0.9; }
+  70%  { opacity: 0.35; }
+  100% { transform: scale(7); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { [style*="ob-pulse"], span[style*="animation: ob-pulse"] { animation-duration: 0.01s !important; } }

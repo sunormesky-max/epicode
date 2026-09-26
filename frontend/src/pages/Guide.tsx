@@ -2,58 +2,72 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Layout from '@/components/Layout';
 import { getAgentGuide } from '@/lib/api';
+import { useI18nContext } from '@/i18n/I18nContext';
 import {
   Compass, Zap, Key, ArrowRight, Copy, Check,
-  Terminal, BookOpen, Shield, Clock
+  Terminal, BookOpen, Shield, Clock, Sparkles
 } from 'lucide-react';
 
-const STEPS = [
-  {
-    icon: Key,
-    title: '1. 获取 API Key',
-    desc: '注册账号后自动获得 API Key，或通过登录接口获取。',
-    code: `# 注册
-curl -X POST https://your-server.com/api/register \\
+const STEP_CODES = {
+  step1: `# 注册
+curl -X POST https://epicode.cn/api/register \\
   -H "Content-Type: application/json" \\
   -d '{"user_id":"my-agent","password":"secret"}'
 
 # 登录
-curl -X POST https://your-server.com/api/v1/login \\
+curl -X POST https://epicode.cn/api/v1/login \\
   -H "Content-Type: application/json" \\
   -d '{"user_id":"my-agent","password":"secret"}'`,
-    color: '#a855f7',
-  },
-  {
-    icon: Terminal,
-    title: '2. 存储第一条记忆',
-    desc: '通过 remember 端点存储记忆，系统自动进行嵌入、分类和空间放置。',
-    code: `curl -X POST https://your-server.com/api/v1/remember \\
+  step2: `curl -X POST https://epicode.cn/api/v1/remember \\
   -H "X-API-Key: tm-your-api-key" \\
   -H "Content-Type: application/json" \\
   -d '{
     "content": "用户偏好深色模式和中文界面",
     "labels": ["preference", "ui"]
   }'`,
-    color: '#0071e3',
-  },
-  {
-    icon: Compass,
-    title: '3. 语义搜索',
-    desc: '用自然语言查询记忆，获取语义相似度排序的结果。',
-    code: `curl -X POST https://your-server.com/api/v1/search \\
+  step3: `curl -X POST https://epicode.cn/api/v1/search \\
   -H "X-API-Key: tm-your-api-key" \\
   -H "Content-Type: application/json" \\
   -d '{
     "query": "用户对界面的偏好",
     "limit": 5
   }'`,
-    color: '#34c759',
-  },
-  {
-    icon: Shield,
-    title: '4. 确认 AI 身份（可选）',
-    desc: '为你的 AI 代理设定身份，确认后不可更改。',
-    code: `curl -X POST https://your-server.com/api/v1/identity/confirm \\
+  step4: `# 语义搜索并执行技能
+curl -X POST https://epicode.cn/api/mcp \\
+  -H "X-API-Key: tm-your-api-key" \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "name": "skill_execute",
+      "arguments": {
+        "query": "error handling patterns",
+        "context": "Rust project"
+      }
+    },
+    "id": 1
+  }'
+
+# 提交反馈（优化后续匹配）
+curl -X POST https://epicode.cn/api/mcp \\
+  -H "X-API-Key: tm-your-api-key" \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+    "name": "skill_feedback",
+    "arguments": {
+        "skill_id": 900031,
+        "helpful": true
+    }
+    },
+    "id": 2
+  }'`,
+  step5: `curl -X POST https://epicode.cn/api/v1/identity/confirm \\
   -H "X-API-Key: tm-your-api-key" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -61,13 +75,20 @@ curl -X POST https://your-server.com/api/v1/login \\
     "mission": "智能客服助手",
     "author": "开发团队"
   }'`,
-    color: '#f59e0b',
-  },
-];
+};
 
-const MCP_QUICK = `# MCP 协议（推荐用于 AI 代理）
-POST https://your-server.com/api/mcp
+const STEP_META = [
+  { icon: Key, color: '#8b7ec8', titleKey: 'guide.step1.title', descKey: 'guide.step1.desc', code: STEP_CODES.step1 },
+  { icon: Terminal, color: '#3ecfae', titleKey: 'guide.step2.title', descKey: 'guide.step2.desc', code: STEP_CODES.step2 },
+  { icon: Compass, color: '#3ecfae', titleKey: 'guide.step3.title', descKey: 'guide.step3.desc', code: STEP_CODES.step3 },
+  { icon: Sparkles, color: '#8b7ec8', titleKey: 'guide.step4.title', descKey: 'guide.step4.desc', code: STEP_CODES.step4 },
+  { icon: Shield, color: '#8b7ec8', titleKey: 'guide.step5.title', descKey: 'guide.step5.desc', code: STEP_CODES.step5 },
+] as const;
+
+const MCP_QUICK = `# MCP 协议（推荐用于 AI 代理，Streamable HTTP）
+POST https://epicode.cn/api/mcp
 Content-Type: application/json
+Accept: application/json, text/event-stream
 
 {
   "jsonrpc": "2.0",
@@ -82,7 +103,7 @@ Content-Type: application/json
   "id": 1
 }`;
 
-function CodeBlock({ code, title }: { code: string; title?: string }) {
+function CodeBlock({ code, title, copyLabel, copiedLabel }: { code: string; title?: string; copyLabel: string; copiedLabel: string }) {
   const [copied, setCopied] = useState(false);
 
   function handleCopy() {
@@ -92,7 +113,7 @@ function CodeBlock({ code, title }: { code: string; title?: string }) {
   }
 
   return (
-    <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid var(--border-light)' }}>
+    <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(6, 6, 20, 0.18)', border: '1px solid var(--border-light)' }}>
       <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: '1px solid var(--border-light)' }}>
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#ff5f57' }} />
@@ -104,7 +125,7 @@ function CodeBlock({ code, title }: { code: string; title?: string }) {
           onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-primary)'}
           onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-tertiary)'}>
           {copied ? <Check size={12} style={{ color: 'var(--success-green)' }} /> : <Copy size={12} />}
-          {copied ? '已复制' : '复制'}
+          {copied ? copiedLabel : copyLabel}
         </button>
       </div>
       <pre className="px-4 py-3 overflow-x-auto text-xs" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', lineHeight: 1.8 }}>
@@ -115,6 +136,7 @@ function CodeBlock({ code, title }: { code: string; title?: string }) {
 }
 
 export default function Guide() {
+  const { t } = useI18nContext();
   const [agentGuide, setAgentGuide] = useState<string | null>(null);
 
   useEffect(() => {
@@ -131,48 +153,44 @@ export default function Guide() {
             transition={{ duration: 0.6 }}
             className="mb-16"
           >
-            <span
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-6"
-              style={{ background: 'var(--accent-blue-light)', color: 'var(--accent-blue)' }}
-            >
-              <Zap size={14} />
-              Quick Start
-            </span>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--accent-cyan)', letterSpacing: '0.18em', marginBottom: 14 }}>
+              00 / GUIDE · QUICK START
+            </p>
             <h1 style={{
               fontFamily: 'var(--font-display)',
-              fontSize: 'clamp(32px, 5vw, 56px)',
+              fontSize: 'clamp(40px, 6.5vw, 76px)',
               fontWeight: 700,
-              letterSpacing: '-0.02em',
-              lineHeight: 1.1,
+              letterSpacing: '-0.03em',
+              lineHeight: 1.02,
               color: 'var(--text-primary)',
-              marginBottom: '16px',
+              marginBottom: '18px',
             }}>
-              快速上手指南
+              {t('guide.title')}
             </h1>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '19px', lineHeight: 1.5, maxWidth: '640px' }}>
-              4 步完成 Epicode 集成。从注册到语义搜索，只需几分钟。
+            <p style={{ color: 'var(--text-secondary)', fontSize: 'clamp(16px, 2vw, 19px)', lineHeight: 1.6, maxWidth: '640px' }}>
+              {t('guide.subtitle')}
             </p>
           </motion.div>
 
           <div className="space-y-8 mb-20">
-            {STEPS.map((step, i) => (
+            {STEP_META.map((step, i) => (
               <motion.div
-                key={step.title}
+                key={step.titleKey}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, delay: i * 0.1 }}
                 className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start"
               >
                 <div>
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${step.color}15` }}>
-                      <step.icon size={20} style={{ color: step.color }} />
-                    </div>
-                    <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{step.title}</h3>
+                  <div className="flex items-baseline gap-4 mb-3">
+                    <span aria-hidden="true" style={{ fontFamily: 'var(--font-mono)', fontSize: 34, fontWeight: 600, color: step.color, opacity: 0.85, lineHeight: 1 }}>
+                      {String(i + 1).padStart(2, '0')}
+                    </span>
+                    <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>{t(step.titleKey as never).replace(/^\d+\.\s*/, '')}</h3>
                   </div>
-                  <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>{step.desc}</p>
+                  <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>{t(step.descKey as never)}</p>
                 </div>
-                <CodeBlock code={step.code} title="终端" />
+                <CodeBlock code={step.code} title={t('guide.terminalTitle')} copyLabel={t('guide.copy')} copiedLabel={t('guide.copied')} />
               </motion.div>
             ))}
           </div>
@@ -185,15 +203,15 @@ export default function Guide() {
           >
             <div className="rounded-2xl p-8" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)' }}>
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(168,85,247,0.1)' }}>
-                  <BookOpen size={20} style={{ color: '#a855f7' }} />
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(139,126,200,0.1)' }}>
+                  <BookOpen size={20} style={{ color: '#8b7ec8' }} />
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>MCP 协议接入</h3>
-                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>推荐 AI 代理使用 MCP 协议，一次性接入 27 个工具</p>
+                  <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{t('guide.mcpTitle')}</h3>
+                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('guide.mcpDesc')}</p>
                 </div>
               </div>
-              <CodeBlock code={MCP_QUICK} title="mcp-request.json" />
+              <CodeBlock code={MCP_QUICK} title="mcp-request.json" copyLabel={t('guide.copy')} copiedLabel={t('guide.copied')} />
             </div>
           </motion.div>
 
@@ -206,11 +224,11 @@ export default function Guide() {
               <div className="rounded-2xl p-8" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)' }}>
                 <div className="flex items-center gap-3 mb-6">
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(52,199,89,0.1)' }}>
-                    <Clock size={20} style={{ color: '#34c759' }} />
+                    <Clock size={20} style={{ color: '#3ecfae' }} />
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Agent Guide（实时）</h3>
-                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>来自后端 /v1/agent-guide 的实时内容</p>
+                    <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{t('guide.agentGuideTitle')}</h3>
+                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('guide.agentGuideDesc')}</p>
                   </div>
                 </div>
                 <pre className="text-xs whitespace-pre-wrap" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', lineHeight: 1.8 }}>
@@ -222,7 +240,7 @@ export default function Guide() {
 
           <div className="mt-16 text-center">
             <a href="#/docs" className="inline-flex items-center gap-2 text-sm font-medium no-underline" style={{ color: 'var(--accent-blue)' }}>
-              查看完整 API 文档
+              {t('guide.viewApiDocs')}
               <ArrowRight size={16} />
             </a>
           </div>
