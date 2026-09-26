@@ -209,7 +209,7 @@ export default function DashboardObserve() {
         <div style={isMobile ? { borderLeft: '2px solid var(--accent-purple)', paddingLeft: 12 } : { position: 'absolute', bottom: 8, right: 12, maxWidth: '40%', textAlign: 'right' }}>
           <p style={HUD_LABEL}>LATEST THOUGHT</p>
           <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 6, lineHeight: 1.6, maxHeight: 66, overflow: 'hidden', textAlign: isMobile ? 'left' : 'right' }}>
-            {(cog?.latestThought || '').trim()
+            {(cog?.latestThought || '').trim() && cog
               ? cog.latestThought
               : <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)', fontStyle: 'italic' }}>the mind is quiet</span>}
           </p>

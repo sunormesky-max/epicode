@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { errMsg, getUserId, type LibraryHit, type LibraryRequest } from '@/lib/api';
+import { errMsg, type LibraryHit, type LibraryRequest } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading, ErrorBanner, NoticeBanner } from '@/components/DashboardUI';
-import { BookOpen, Search, Send, Inbox, Check, X, Clock, FileText } from 'lucide-react';
+import { Search, Send, Inbox, Check, X, Clock, FileText } from 'lucide-react';
 import { useI18nContext } from '@/i18n/I18nContext';
 
 const inputStyle: React.CSSProperties = {
@@ -32,7 +32,6 @@ export default function DashboardLibrary() {
   const [pendingTotal, setPendingTotal] = useState(0);
   const [handling, setHandling] = useState<number | null>(null);
 
-  const uid = getUserId();
 
   const loadRequests = useCallback(async () => {
     try {
@@ -41,7 +40,7 @@ export default function DashboardLibrary() {
       setMyRequests(d.requests || []);
       setRole(d.role || 'user');
       setPendingTotal(d.pending_total || 0);
-    } catch (e) {
+    } catch {
       // 静默 — 请求列表非关键
     }
   }, []);
@@ -139,7 +138,7 @@ export default function DashboardLibrary() {
         </div>
         {results.length > 0 && (
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {results.map((r, i) => (
+            {results.map((r) => (
               <div key={r.chunk_id} style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                   <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 600 }}>

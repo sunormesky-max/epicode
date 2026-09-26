@@ -93,9 +93,9 @@ export type TranslationKey =
   | 'register.errorFillFields' | 'register.errorFailed' | 'register.errorInviteCode'
   | 'register.errorPasswordShort'
   // Dashboard (partial for Phase 1)
-  | 'dash.totalMemories' | 'dash.thisWeek' | 'dash.activeClusters'
+  | 'dash.totalMemories' | 'dash.thisWeek' | 'dash.activeClusters' | 'dash.library.title' | 'dash.library.subtitle'
   | 'dash.energy' | 'dash.avgQuery' | 'dash.apiCalls'
-  | 'dash.quickStore' | 'dash.quickSearch' | 'dash.quickDigest' | 'dash.quickDocs'
+  | 'dash.quickStore' | 'dash.quickSearch' | 'dash.quickDigest' | 'dash.quickDocs' | 'dash.skills.loadFailed'
   // Dashboard - Skills
   | 'dash.skills.title' | 'dash.skills.private' | 'dash.skills.edit' | 'dash.skills.publishToCommunity'
   | 'dash.skills.publish' | 'dash.skills.delete' | 'dash.skills.collapse' | 'dash.skills.viewContent'
@@ -389,6 +389,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'nav.skills': '技能',
     'nav.library': '图书馆',
     'dash.library.title': '图书馆',
+    'dash.skills.loadFailed': '技能加载失败',
     'dash.library.subtitle': '共享知识资产 · 语义检索 · 收集请求',
     'nav.subAccounts': '子账户',
     'nav.logout': '退出登录',
@@ -1266,6 +1267,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'nav.skills': 'Skills',
     'nav.library': 'Library',
     'dash.library.title': 'Library',
+    'dash.skills.loadFailed': 'Failed to load skills',
     'dash.library.subtitle': 'Shared knowledge · semantic search · collection requests',
     'nav.subAccounts': 'Sub Accounts',
     'nav.logout': 'Logout',
