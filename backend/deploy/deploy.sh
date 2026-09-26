@@ -40,13 +40,13 @@ fi
 # ---- Step 3: Clone source ----
 echo "[3/8] Cloning source..."
 # NOTE: For production, prefer downloading a pre-built binary instead of cloning source.
-if [ -d "${DEPLOY_DIR}/src" ]; then
-    cd "${DEPLOY_DIR}"
-    git pull origin main || true
+# Cargo 清单在 backend/ 子目录(审计三轮修复: 原脚本在仓库根跑 cargo 必失败)
+if [ -d "${DEPLOY_DIR}/.git" ]; then
+    git -C "${DEPLOY_DIR}" pull origin main || true
 else
     git clone "${REPO_URL}" "${DEPLOY_DIR}"
-    cd "${DEPLOY_DIR}"
 fi
+cd "${DEPLOY_DIR}/backend"
 
 # ---- Step 4: Remove MSVC flags for Linux ----
 echo "[4/8] Fixing Cargo config for Linux..."
@@ -100,9 +100,8 @@ RestartSec=5
 LimitNOFILE=65536
 
 Environment=EPICODE_DATA_DIR=${DATA_DIR}
-Environment=EPICODE_MASTER_KEY=__MASTER_KEY_PLACEHOLDER__
-Environment=EPICODE_API_KEY=__API_KEY_PLACEHOLDER__
-Environment=DEEPSEEK_API_KEY=__DEEPSEEK_KEY_PLACEHOLDER__
+# 密钥经 EnvironmentFile 加载(600 权限), 不写进 unit 本体
+EnvironmentFile=-/etc/epicode/env
 Environment=RUST_LOG=epicode=info
 
 StandardOutput=journal
@@ -113,14 +112,15 @@ SyslogIdentifier=epicode
 WantedBy=multi-user.target
 SERVICE
 
+chmod 600 /etc/systemd/system/epicode.service
 systemctl daemon-reload
 echo ""
 echo "=== Deployment Complete ==="
 echo ""
-echo "REQUIRED: Edit /etc/systemd/system/epicode.service and set:"
+echo "REQUIRED: create /etc/epicode/env (chmod 600) with:"
+echo "  EPICODE_ADMIN_KEY  — admin surface key (REQUIRED, empty/placeholder rejects boot)"
 echo "  EPICODE_MASTER_KEY — encryption key (base64, 32 bytes)"
-echo "  EPICODE_API_KEY    — API authentication key"
-echo "  DEEPSEEK_API_KEY    — DeepSeek LLM API key"
+echo "  DEEPSEEK_API_KEY   — DeepSeek LLM API key"
 echo ""
 echo "Then run:"
 echo "  systemctl enable epicode"

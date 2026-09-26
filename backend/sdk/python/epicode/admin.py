@@ -35,7 +35,9 @@ class EpicodeAdmin:
         self._base_url = (base_url or self.DEFAULT_BASE_URL).rstrip("/")
         self._timeout = timeout or self.DEFAULT_TIMEOUT
         self._session = session or requests.Session()
-        self._session.headers.update({"X-Admin-Key": self._admin_key, "Content-Type": "application/json"})
+        # 审计三轮中优: 密钥不写入(可能是调用方共享的) Session 全局 headers —
+        # 否则该 Session 后续请求任何主机都会携带密钥; 改为逐请求注入
+        pass
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -44,7 +46,10 @@ class EpicodeAdmin:
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         url = f"{self._base_url}{path}"
         kwargs.setdefault("timeout", self._timeout)
-        resp = self._session.request(method, url, **kwargs)
+        headers = {"Content-Type": "application/json", "X-Admin-Key": self._admin_key}
+        headers.update(kwargs.pop("headers", {}))
+        # 逐请求注入+禁重定向携带(审计三轮: 不污染共享 Session)
+        resp = self._session.request(method, url, headers=headers, allow_redirects=False, **kwargs)
         return self._handle_response(resp)
 
     @staticmethod
