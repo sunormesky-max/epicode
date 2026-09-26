@@ -22,8 +22,9 @@ RUN npm run build
 FROM node:20-alpine AS production
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# 运行时密钥经环境变量/挂载注入, 镜像只带模板
 COPY package.json ./
-COPY .env.example ./  # 运行时密钥经环境变量/挂载注入, 模板进镜像
+COPY .env.example ./
 
 EXPOSE 3000
 CMD ["npm", "start"]
