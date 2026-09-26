@@ -39,7 +39,7 @@ function useDebounced<T extends (...args: never[]) => void>(fn: T, delay: number
 
 export default function DashboardMemories() {
   // 渲染期纯函数要求: 时间取挂载快照(原Date.now()在render调用, CodeQL/React purity)
-  const [nowSnapshot] = useState(() => Date.now());
+  const [nowSnapshot, setNowSnapshot] = useState(() => Date.now());
   const { t } = useI18nContext();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -84,6 +84,9 @@ export default function DashboardMemories() {
         if (!mounted) return;
         setEvents(data.events || []);
         setTotalEvents(data.total || 0);
+        // 审查发现A修复: 快照跟随数据刷新 — 时间筛选cutoff与数据同刻,
+        // 长停留页面后切'今天'不再漏掉挂载后新增的记忆(渲染仍纯: 只在事件回调setState)
+        setNowSnapshot(Date.now());
       } catch (e: unknown) {
         if (mounted) setError(errMsg(e));
       }
