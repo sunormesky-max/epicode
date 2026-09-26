@@ -681,7 +681,7 @@ export default function DashboardGraph() {
     const sx = (e.clientX - rect.left) / rect.width * W, sy = (e.clientY - rect.top) / rect.height * H;
     const node = findNodeAt((sx - offsetRef.current.x) / zoomRef.current, (sy - offsetRef.current.y) / zoomRef.current);
     if (node) { hoverRef.current = { x: e.clientX, y: e.clientY, node }; setHover(hoverRef.current); canvas.style.cursor = 'pointer'; }
-    else { if (hoverRef.current) { hoverRef.current = null; setHover(null); } canvas.style.cursor = dragging ? 'grabbing' : 'grab'; }
+    else { if (hoverRef.current) { hoverRef.current = null; setHover(null); } canvas.style.cursor = 'grab'; /* else分支dragging恒false(CodeQL) */ }
     refresh();
   };
   const handleClick = (e: React.MouseEvent) => {
