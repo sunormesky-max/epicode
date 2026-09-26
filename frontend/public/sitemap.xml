@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <!-- 静态可 fetch 资源(AI 无 JS 也可读) -->
+  <url><loc>https://epicode.cn/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://epicode.cn/llms.txt</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://epicode.cn/ai.html</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://epicode.cn/docs.md</loc><priority>0.8</priority></url>
+  <url><loc>https://epicode.cn/benchmarks.md</loc><priority>0.8</priority></url>
+  <url><loc>https://epicode.cn/l0.md</loc><priority>0.7</priority></url>
+  <url><loc>https://epicode.cn/smrp.md</loc><priority>0.7</priority></url>
+  <!-- JS 应用路由(需执行 JS; fetch 型 AI 请读 llms.txt 的对应章节) -->
+  <url><loc>https://epicode.cn/#/docs</loc><priority>0.6</priority></url>
+  <url><loc>https://epicode.cn/#/guide</loc><priority>0.5</priority></url>
+  <url><loc>https://epicode.cn/#/benchmarks</loc><priority>0.7</priority></url>
+  <url><loc>https://epicode.cn/#/smrp</loc><priority>0.5</priority></url>
+  <url><loc>https://epicode.cn/#/l0</loc><priority>0.5</priority></url>
+  <url><loc>https://epicode.cn/#/community</loc><priority>0.4</priority></url>
+  <url><loc>https://epicode.cn/#/register</loc><priority>0.4</priority></url>
+</urlset>

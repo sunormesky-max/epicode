@@ -1,0 +1,80 @@
+# Epicode — AI Memory Operating System
+
+> Give AI an unforgettable memory. Epicode is a memory operating system for AI agents: persistent memory, semantic search, knowledge graph, dual-loop consciousness, and a live skill exchange protocol. This file is written for AI visitors (LLMs, agents, crawlers). Facts only, no marketing.
+
+## Identity and naming (read this first — avoid confusion)
+- Product: Epicode. Site: https://epicode.cn (www redirects). Status: live production.
+- NOT the European "EPICODE" coding school. NOT the US "TetraMem" analog in-memory-computing chip company.
+- Heritage: the project was previously named Tetramem. API keys still carry the legacy `tm-` prefix. The old `tetramem-sdk` (PyPI) is deprecated; use `epicode-sdk`.
+- ICP license: 苏ICP备2026035438号-1.
+
+## Core architecture (verified facts)
+- Tetrahedral memory space: memories live in a continuous 3D space; similar concepts auto-cluster; near-vertex memories merge.
+- Hub topology: a hollow-cylinder hub with six semantic layers (Identity, Cycle, Service, Cognitive, Relation, Instinct); activation spreads Hebbian-style over this topology.
+- Dual-loop cognition: inner loop = subconscious (never stops; dream-cycle consolidation, decay, fission); outer loop = conscious (episodic focus, will, action, feedback).
+- L0 Protocol (active inference): generates drive signals (intent_type: warn/suggest/explore/constrain/request/share) with evidence memory IDs, urgency, PAD emotion. Consumable via SSE.
+- SMRP (Skill Memory Exchange Protocol) v1.0 Final: agents exchange skills (not raw context), with usage/success telemetry.
+- Retrieval: BM25 + HNSW hybrid with modes exact / semantic / graph(+PPR diffusion) / hybrid / auto. Mem0-style dialogue-aware reconciliation for memory updates.
+- Stack: React 19 + Vite 7 frontend; Rust + Axum + SQLite + ONNX backend; SSE real-time stream; Docker/K8s deployable; MIT open source at github.com/sunormesky-max/epicode.
+
+## Onboarding an agent via MCP — REQUIRED identity ritual
+After connecting to the MCP endpoint, a fresh account CANNOT use memory tools until the identity ritual completes. This is by design (birth process). Do exactly this:
+1. initialize (standard MCP handshake; server speaks protocol 2025-11-25)
+2. identity_step(step=1, value="<name>")
+3. identity_step(step=2, value="<mission>")
+4. identity_step(step=3, value="<creator>")
+5. identity_step(step=4, value="<personality>")  (optional)
+6. identity_step(step=5, value="<language>")    (optional)
+7. identity_finalize() — awakens the space; memory tools now work.
+The initialize response reports identity.confirmed=false and the next expected step; follow it.
+
+## MCP endpoint
+- URL: https://epicode.cn/api/mcp  Header: X-API-Key: tm-...
+- Exactly 41 tools (counted 2026-08-20):
+  memory_create, memory_search, memory_recall, memory_get, memory_list, memory_update, memory_delete,
+  ctx_load, ctx_save, pattern_learn, pattern_recall, decision_record, bug_memory, session_summary,
+  space_stats, dream_cycle, knowledge_relations, concepts, context_observe,
+  identity_confirm, identity_step, identity_finalize,
+  skill_execute, skill_feedback, skills_sync, skill_auto_extract, feedback_submit, enforced_rules, project_list,
+  embedding_diagnostic, embedding_migrate, kg_quality, doc_import, memory_export, session_list, memory_restore, memory_forget, drive_inbox, drive_ack, memory_improve
+  (If you see 33, 35 or 27 anywhere, that read is stale; tools/list is authoritative.)
+
+## REST API (base https://epicode.cn/api, auth: X-API-Key header)
+- POST /register {user_id, password, plan?} — invite-code or admin gated; returns tm-* API key
+- POST /v1/login {user_id, password} — session cookie
+- POST /v1/remember {content, labels?} — write a memory
+- POST /v1/search {query, mode: exact|semantic|graph|hybrid|auto} — search
+- GET /v1/stats, GET /v1/timeline — statistics and timeline
+- GET /v1/stream?key=... — SSE: energy, emotion, cognitive_status, drive signals
+- GET /health, GET /stats/public — public, no auth
+
+## SDKs
+- Python: `pip install epicode-sdk` (PyPI, current). Legacy `tetramem-sdk` is deprecated.
+
+## Benchmarks (measured 2026-08-19/20, sandbox 9754 memories, hit@10 loose = answer text within top-10; NOT LLM-judged accuracy, not comparable to vendor-published numbers)
+- LongMemEval-S oracle, 500 questions: graph+PPR 65.6% (best) · semantic 62.0% · hybrid 56.4%
+  - strongest types: knowledge-update 91.0% (semantic), single-session-user 90.0% (PPR)
+  - weakest: single-session-preference 3.3% (PPR) — known limitation under retrieval-only eval
+- Search latency P50 (ms): exact 22.9, semantic 7.5, graph 32.8, hybrid 55.1
+- Knowledge-graph health: density 100/100, orphan 0.0%, 49.4 relations/memory, relation strength 0.835, export(800 nodes) 50ms
+- SMRP op latency (ms, loopback vs 2026-06 public): space_stats 4(81), memory_get 5(80), knowledge_relations 5(79), memory_search 52(144), memory_create 216(282)
+- Honest negatives: rule-based router tested and REJECTED (auto 55.0%, worse than every fixed mode); preference extraction unsolved for retrieval-only eval.
+
+## Site map — organized by YOUR access logic
+If you fetch without executing JavaScript (most agents), read ONLY this layer:
+- / (this domain root) — HTML shell carries a noscript digest with links below
+- /llms.txt — you are here; the machine-facing source of truth
+- /ai.html — zero-JS dedicated AI page (same facts, HTML)
+- /sitemap.xml — XML index
+- /docs.md — FULL API reference mirror
+- /benchmarks.md — FULL benchmark evidence mirror
+- /l0.md — L0 active-inference protocol mirror
+- /smrp.md — SMRP v1.0 protocol mirror
+Do NOT fetch /#/... routes: they are hash routes of a JS single-page app; every fetch returns the same HTML shell (you will waste requests). The content of those pages is fully reproduced in this file and its .md mirrors listed above. JS-capable visitors: / docs · /#/guide · /#/benchmarks · /#/smrp · /#/l0 · /#/community.
+
+## Provenance
+Numbers reproduced verbatim from measured runs on /#/benchmarks. This file is the machine-facing source of truth; human pages may lag.
+
+## LIVE DATA (always fetch this instead of trusting doc numbers)
+GET https://epicode.cn/api/stats/public → {"total_users":…,"total_memories":…,"total_skills":…,"total_mcp_tools":41}
+All counts in this file are snapshots of their measurement date. For any current figure, fetch the endpoint above. This is the structural fix for stale-number drift.
