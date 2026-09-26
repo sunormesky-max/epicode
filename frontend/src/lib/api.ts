@@ -865,7 +865,7 @@ export async function searchSkills(query: string, limit?: number): Promise<Skill
   return data.skills ?? [];
 }
 
-export async function updateSkill(id: number, name: string, skill_md: string, description?: string, triggers?: string[]): Promise<SkillData> {
+export async function updateSkill(id: number, _name: string, skill_md: string, description?: string, triggers?: string[]): Promise<SkillData> {
   // 刀2: 解 {skill} envelope — 曾直接返回顶层, updated.id 恒 undefined(审计前端P0-2)
   invalidateCache('/v1/skills');
   const data = await request<{ skill: SkillData }>(`/v1/skills/${id}`, {

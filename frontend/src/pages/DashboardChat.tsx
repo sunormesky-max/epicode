@@ -59,7 +59,7 @@ export default function DashboardChat() {
 
   // 持久化对话历史 (按 user_id 隔离)
   useEffect(() => {
-    try { localStorage.setItem(chatStorageKey, JSON.stringify(messages.slice(-50))); } catch {}
+    try { localStorage.setItem(chatStorageKey, JSON.stringify(messages.slice(-50))); } catch { /* 存储满/隐私模式: 历史不持久化, 不阻断 */ }
   }, [messages, chatStorageKey]);
 
   // 多阶段加载提示

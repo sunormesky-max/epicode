@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router';
 import { useI18nContext } from '@/i18n/I18nContext';
-import { clearAuth, getApiKey, isAuthenticated, getStats, logout } from '@/lib/api';
+import { getApiKey, getStats, logout } from '@/lib/api';
 import CommandBar from '@/components/CommandBar';
 import {
   LayoutDashboard, Brain, GitBranch, Wrench, Users,
-  LogOut, Copy, Check, Menu, X, Zap, Archive, Activity, MessageSquare, Radio, BookOpen
+  LogOut, Check, Menu, X, Zap, Archive, Activity, MessageSquare, Radio, BookOpen
 } from 'lucide-react';
 
 const RAIL_W = 64;

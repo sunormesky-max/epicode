@@ -5,7 +5,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading } from '@/components/DashboardUI';
 import {
   Brain, Zap, Layers, Crown, GitBranch,
-  User, Key, Users, Shield, Activity, Database,
+  User, Key, Shield, Activity, Database,
   Copy, Check, RefreshCw, Terminal
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';

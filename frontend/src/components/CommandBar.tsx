@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router';
+import { useLocation } from 'react-router';
 import {
   LayoutDashboard, Brain, GitBranch, Wrench, Users, Archive, Activity, MessageSquare,
   Home, BookOpen, Compass, UsersRound, BarChart3, Network, Sparkles,
@@ -27,7 +27,6 @@ export default function CommandBar() {
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const navigate = useNavigate();
   const location = useLocation();
 
   const go = useCallback((hash: string) => { window.location.hash = hash; setOpen(false); }, []);

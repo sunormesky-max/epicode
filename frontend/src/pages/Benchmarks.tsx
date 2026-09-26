@@ -4,8 +4,8 @@ import Layout from '@/components/Layout';
 import { getPublicStats } from '@/lib/api';
 import { useI18nContext } from '@/i18n/I18nContext';
 import {
-  Zap, Clock, Database, Brain, GitBranch,
-  Activity, TrendingUp, Server, Cpu, Target
+  Zap, Database, Brain, GitBranch,
+  Activity, Server, Cpu
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -497,10 +497,10 @@ export default function Benchmarks() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div>
                 <div className="text-xs mb-2" style={{ color: 'var(--text-tertiary)' }}>{t('bench.smrp.latencyTitle')}</div>
+                <p className="text-xs mb-2" style={{ color: 'var(--text-tertiary)' }}>
+                  ⚠ 公网 SMRP 实测(2026-06-19, 含 TLS+信封开销) — 与上方内部引擎基线(如 search 11.7ms)测量语境不同, 勿直接对比
+                </p>
                 <ResponsiveContainer width="100%" height={240}>
-                  <p className="text-xs mb-2" style={{ color: 'var(--text-tertiary)' }}>
-                    ⚠ 公网 SMRP 实测(2026-06-19, 含 TLS+信封开销) — 与上方内部引擎基线(如 search 11.7ms)测量语境不同, 勿直接对比
-                  </p>
                   <BarChart data={SMRP_LATENCY} barGap={2}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                     <XAxis dataKey="op" tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} angle={-15} textAnchor="end" height={50} />

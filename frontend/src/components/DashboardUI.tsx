@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useI18nContext } from '@/i18n/I18nContext';
 
 // ═══ 统一 Loading (能量汇聚式 loader) ═══

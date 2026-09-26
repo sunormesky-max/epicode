@@ -2,14 +2,14 @@
 import { errMsg, getStats, getSubAccounts, createSubAccount, revokeSubAccount, type SubAccount, type StatsData } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading } from '@/components/DashboardUI';
-import { Users, Plus, Trash2, Shield, Brain, Crown, AlertTriangle, BarChart3, UserCheck, Lock, X } from 'lucide-react';
+import { Users, Plus, Trash2, Shield, Brain, Crown, AlertTriangle, UserCheck, Lock, X } from 'lucide-react';
 import { useI18nContext } from '@/i18n/I18nContext';
 
 export default function DashboardSubAccounts() {
   const { t } = useI18nContext();
   const [accounts, setAccounts] = useState<SubAccount[]>([]);
   const [myStats, setMyStats] = useState<StatsData | null>(null);
-  const [total, setTotal] = useState(0);
+  const [, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isSubAccount, setIsSubAccount] = useState(false);

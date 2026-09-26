@@ -4,7 +4,7 @@ import Layout from '@/components/Layout';
 import { getAgentGuide } from '@/lib/api';
 import { useI18nContext } from '@/i18n/I18nContext';
 import {
-  Compass, Zap, Key, ArrowRight, Copy, Check,
+  Compass, Key, ArrowRight, Copy, Check,
   Terminal, BookOpen, Shield, Clock, Sparkles
 } from 'lucide-react';
 

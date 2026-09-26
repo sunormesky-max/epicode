@@ -97,17 +97,13 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
-      # 生产前端树(2026-09-20, 自 epicode-src 回流)携带历史类型债
-      # (187项严格模式)与lint债(52项) — 不阻断vite构建(生产运行6周稳定),
-      # 标注非阻塞并留档; 硬门禁= test + build + audit
-      - name: "Type check (non-blocking, documented type debt)"
+      # 类型债(187)与lint债(52)已于 2026-09-26 全面迭代清零 — 门禁恢复严格
+      - name: Type check
         run: npm run check
-        continue-on-error: true
       - name: Audit runtime deps (high+ blocking)  # 审计三轮: 供应链门禁
         run: npm audit --omit=dev --audit-level=high
-      - name: "Lint (non-blocking, documented lint debt)"
+      - name: Lint
         run: npm run lint
-        continue-on-error: true
       - name: Test
         run: npm run test
       - name: "Build (hard gate, must reproduce production fingerprint)"
