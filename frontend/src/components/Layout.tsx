@@ -9,9 +9,10 @@ interface LayoutProps {
   showBackground?: boolean;
 }
 
-export default function Layout({ children, showFooter = true, showBackground = true }: LayoutProps) {
+// 背景由App层全局渲染(PageBackground),Layout不再单独挂载(避免双实例)
+export default function Layout({ children, showFooter = true, showBackground = false }: LayoutProps) {
   return (
-    <div className="relative min-h-screen" style={{ background: 'var(--bg-void)' }}>
+    <div className="relative min-h-screen" style={{ background: 'transparent' }}>
       {showBackground && <SacredBackground />}
       <Navbar />
       <main className="relative z-10">

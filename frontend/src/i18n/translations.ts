@@ -2,21 +2,26 @@ export type Language = 'zh' | 'en';
 
 // ── Phase 1 Translation Keys ──
 export type TranslationKey =
+  // Common
   | 'common.loading' | 'common.error' | 'common.retry' | 'common.save' | 'common.cancel'
   | 'common.delete' | 'common.edit' | 'common.create' | 'common.search' | 'common.copy'
-  | 'common.copied' | 'common.close' | 'common.submit' | 'common.confirm' | 'common.back'
-  | 'common.next' | 'common.prev' | 'common.of' | 'common.all'
+  | 'common.copied' | 'common.close' | 'common.submit' | 'common.confirm' | 'common.back' | 'common.backHome'
+  | 'common.next' | 'common.prev' | 'common.of'
+  | 'common.closeMenu' | 'common.openMenu' | 'common.showPassword' | 'common.hidePassword' | 'common.or'
   // Navigation
   | 'nav.home' | 'nav.quickStart' | 'nav.docs' | 'nav.community' | 'nav.benchmarks'
   | 'nav.console' | 'nav.getStarted' | 'nav.overview' | 'nav.memories' | 'nav.graph'
-  | 'nav.skills' | 'nav.subAccounts' | 'nav.logout'
+  | 'nav.skills' | 'nav.library' | 'nav.subAccounts' | 'nav.logout' | 'nav.archive'
+  | 'nav.ariaHome' | 'nav.chat' | 'nav.cognitive' | 'nav.observe'
   // Footer
   | 'footer.brand' | 'footer.tagline' | 'footer.docs' | 'footer.quickStart' | 'footer.apiDocs'
   | 'footer.mcpProtocol' | 'footer.benchmarks' | 'footer.community' | 'footer.communitySkills'
   | 'footer.github' | 'footer.discord' | 'footer.copyright' | 'footer.version'
+  | 'footer.contact'
   // Home - Hero
   | 'home.hero.overline' | 'home.hero.title' | 'home.hero.taglineZh' | 'home.hero.taglineEn'
-  | 'home.hero.ctaPrimary' | 'home.hero.ctaSecondary'
+  | 'home.hero.ctaPrimary' | 'home.hero.ctaSecondary' | 'home.hero.ctaTertiary'
+  | 'home.hero.crossDevice' | 'home.crossDevice.overline' | 'home.crossDevice.title' | 'home.crossDevice.desc'
   | 'home.hero.stat1Num' | 'home.hero.stat1Label'
   | 'home.hero.stat2Num' | 'home.hero.stat2Label'
   | 'home.hero.stat3Num' | 'home.hero.stat3Label'
@@ -54,6 +59,27 @@ export type TranslationKey =
   | 'home.api.ep8method' | 'home.api.ep8path' | 'home.api.ep8desc'
   // Home - CTA
   | 'home.cta.title' | 'home.cta.subtitle' | 'home.cta.button' | 'home.cta.note'
+  // Home - CrossDevice steps
+  | 'home.crossDevice.step1Title' | 'home.crossDevice.step1Desc'
+  | 'home.crossDevice.step2Title' | 'home.crossDevice.step2Desc'
+  | 'home.crossDevice.step3Title' | 'home.crossDevice.step3Desc'
+  | 'home.crossDevice.step4Title' | 'home.crossDevice.step4Desc'
+  | 'home.crossDevice.caption'
+  // Home - Archive
+  | 'home.archive.overline' | 'home.archive.title' | 'home.archive.desc'
+  | 'home.archive.item1Title' | 'home.archive.item1Desc'
+  | 'home.archive.item2Title' | 'home.archive.item2Desc'
+  | 'home.archive.item3Title' | 'home.archive.item3Desc'
+  | 'home.archive.item4Title' | 'home.archive.item4Desc'
+  // Home - L0 Capabilities
+  | 'home.l0cap.title' | 'home.l0cap.subtitle'
+  | 'home.l0cap.cap1Title' | 'home.l0cap.cap1Desc'
+  | 'home.l0cap.cap2Title' | 'home.l0cap.cap2Desc'
+  | 'home.l0cap.cap3Title' | 'home.l0cap.cap3Desc'
+  | 'home.l0cap.cap4Title' | 'home.l0cap.cap4Desc'
+  | 'home.l0cap.layer1Label' | 'home.l0cap.layer1Sub'
+  | 'home.l0cap.layer2Label' | 'home.l0cap.layer2Sub'
+  | 'home.l0cap.layer3Label' | 'home.l0cap.layer3Sub'
   // Login
   | 'login.title' | 'login.subtitle' | 'login.username' | 'login.password'
   | 'login.submit' | 'login.loading' | 'login.registerLink' | 'login.error'
@@ -64,35 +90,262 @@ export type TranslationKey =
   | 'register.submit' | 'register.loginLink' | 'register.passwordMismatch'
   | 'register.passwordWeak' | 'register.passwordFair' | 'register.passwordGood'
   | 'register.passwordStrong' | 'register.success'
+  | 'register.errorFillFields' | 'register.errorFailed' | 'register.errorInviteCode'
+  | 'register.errorPasswordShort'
   // Dashboard (partial for Phase 1)
   | 'dash.totalMemories' | 'dash.thisWeek' | 'dash.activeClusters'
   | 'dash.energy' | 'dash.avgQuery' | 'dash.apiCalls'
   | 'dash.quickStore' | 'dash.quickSearch' | 'dash.quickDigest' | 'dash.quickDocs'
-  // Community - Hero
-  | 'community.hero.overline' | 'community.hero.title' | 'community.hero.subtitle'
-  | 'community.hero.ctaPrimary' | 'community.hero.ctaSecondary'
-  // Community - Stats
-  | 'community.stats.stars' | 'community.stats.forks' | 'community.stats.issues'
-  | 'community.stats.contributors' | 'community.stats.unavailable'
-  // Community - Contribute
-  | 'community.contribute.overline' | 'community.contribute.title' | 'community.contribute.subtitle'
-  | 'community.contribute.issue.title' | 'community.contribute.issue.desc' | 'community.contribute.issue.cta'
-  | 'community.contribute.pr.title' | 'community.contribute.pr.desc' | 'community.contribute.pr.cta'
-  | 'community.contribute.discussion.title' | 'community.contribute.discussion.desc' | 'community.contribute.discussion.cta'
-  | 'community.contribute.skill.title' | 'community.contribute.skill.desc' | 'community.contribute.skill.cta'
-  // Community - Contributors
-  | 'community.contributors.overline' | 'community.contributors.title' | 'community.contributors.subtitle'
-  | 'community.contributors.viewAll'
-  // Community - Skills (section wrapper for existing skill browser)
-  | 'community.skills.overline' | 'community.skills.title' | 'community.skills.subtitle'
-  // Community - Governance
-  | 'community.governance.overline' | 'community.governance.title' | 'community.governance.subtitle'
-  | 'community.governance.contributing' | 'community.governance.coc' | 'community.governance.security' | 'community.governance.governance'
-  // Community - Channels
-  | 'community.channels.overline' | 'community.channels.title' | 'community.channels.subtitle'
-  | 'community.channels.discussions.title' | 'community.channels.discussions.desc' | 'community.channels.discussions.cta'
-  | 'community.channels.sponsors.title' | 'community.channels.sponsors.desc' | 'community.channels.sponsors.cta'
-  | 'community.channels.docs.title' | 'community.channels.docs.desc' | 'community.channels.docs.cta'
+  // Dashboard - Skills
+  | 'dash.skills.title' | 'dash.skills.private' | 'dash.skills.edit' | 'dash.skills.publishToCommunity'
+  | 'dash.skills.publish' | 'dash.skills.delete' | 'dash.skills.collapse' | 'dash.skills.viewContent'
+  | 'dash.skills.create' | 'dash.skills.privateCountSuffix' | 'dash.skills.publicCountSuffix'
+  | 'dash.skills.status' | 'dash.skills.all' | 'dash.skills.author' | 'dash.skills.allAuthors'
+  | 'dash.skills.newSkill' | 'dash.skills.namePlaceholder' | 'dash.skills.mdPlaceholder'
+  | 'dash.skills.creating' | 'dash.skills.createSkill' | 'dash.skills.editSkill' | 'dash.skills.saveChanges'
+  | 'dash.skills.empty' | 'dash.skills.createdNotice' | 'dash.skills.createFailed'
+  | 'dash.skills.updatedNotice' | 'dash.skills.updateFailed' | 'dash.skills.deleteConfirm'
+  | 'dash.skills.deletedNotice' | 'dash.skills.deleteFailed' | 'dash.skills.publishedNotice'
+  | 'dash.skills.publishFailed'
+  // Dashboard - Archive
+  | 'dash.arc.title' | 'dash.arc.nodesSuffix' | 'dash.arc.loadFail'
+  | 'dash.arc.createdNotice' | 'dash.arc.createFail' | 'dash.arc.updatedNotice'
+  | 'dash.arc.updateFail' | 'dash.arc.deletedNotice' | 'dash.arc.deleteFail'
+  | 'dash.arc.docPrefix' | 'dash.arc.importParseFail'
+  | 'dash.arc.importedNoticePrefix' | 'dash.arc.importedNoticeMiddle'
+  | 'dash.arc.importedNoticeSuffix' | 'dash.arc.importFail'
+  | 'dash.arc.searchPlaceholder' | 'dash.arc.newBtn' | 'dash.arc.importBtn'
+  | 'dash.arc.noMatch' | 'dash.arc.empty' | 'dash.arc.selectHint'
+  | 'dash.arc.createTitle' | 'dash.arc.fieldType' | 'dash.arc.fieldTitle'
+  | 'dash.arc.fieldCategoryOpt' | 'dash.arc.fieldContentOpt'
+  | 'dash.arc.projectNamePh' | 'dash.arc.docTitlePh'
+  | 'dash.arc.categoryExamplePh' | 'dash.arc.docBodyPh'
+  | 'dash.arc.cancelBtn' | 'dash.arc.creatingBtn' | 'dash.arc.createBtn'
+  | 'dash.arc.editTitle' | 'dash.arc.fieldCategory' | 'dash.arc.categoryPh'
+  | 'dash.arc.fieldContent' | 'dash.arc.contentCurrentPrefix'
+  | 'dash.arc.contentCurrentMiddle' | 'dash.arc.contentKeepHint'
+  | 'dash.arc.editBodyPh' | 'dash.arc.saveBtn'
+  | 'dash.arc.batchImportTitle' | 'dash.arc.fieldProjectName'
+  | 'dash.arc.fieldDocs' | 'dash.arc.importProjectPh' | 'dash.arc.importDocsPh'
+  | 'dash.arc.importingBtn' | 'dash.arc.deleteConfirmTitle'
+  | 'dash.arc.deleteConfirmMsg' | 'dash.arc.deleteIrreversible'
+  | 'dash.arc.deleteBtn' | 'dash.arc.typeRoot' | 'dash.arc.typeProject'
+  | 'dash.arc.typeDoc' | 'dash.arc.typeCode' | 'dash.arc.categoryLabel'
+  | 'dash.arc.charsSuffix' | 'dash.arc.addChildTitle' | 'dash.arc.addBtn'
+  | 'dash.arc.editBtn' | 'dash.arc.noChildrenHint' | 'dash.arc.emptyDoc'
+  | 'dash.arc.childrenSuffix' | 'dash.arc.loading' | 'dash.arc.noContentHint'
+  // Dashboard - Sub Accounts
+  | 'dash.sub.title' | 'dash.sub.subtitle' | 'dash.sub.managementUnavailable'
+  | 'dash.sub.subAccountNoManageDesc' | 'dash.sub.parentAccount' | 'dash.sub.mainAccountLabel'
+  | 'dash.sub.mainAccountOwnership' | 'dash.sub.planLabel' | 'dash.sub.statSubAccounts'
+  | 'dash.sub.statSubMemories' | 'dash.sub.statTotalUsage' | 'dash.sub.usageLimit'
+  | 'dash.sub.statPermissionLevel' | 'dash.sub.roleOwner' | 'dash.sub.roleOwnerDesc'
+  | 'dash.sub.createAction' | 'dash.sub.createTitle' | 'dash.sub.belongTo'
+  | 'dash.sub.belongToPlain' | 'dash.sub.placeholderUserId' | 'dash.sub.placeholderPassword'
+  | 'dash.sub.creating' | 'dash.sub.create' | 'dash.sub.inheritNotice'
+  | 'dash.sub.emptyHint' | 'dash.sub.colUser' | 'dash.sub.colPlan'
+  | 'dash.sub.colMemories' | 'dash.sub.colBelongTo' | 'dash.sub.colCreatedAt'
+  | 'dash.sub.rowSubAccountLabel' | 'dash.sub.noSubAccountPermission'
+  | 'dash.sub.revokeConfirmPrefix' | 'dash.sub.revokeConfirmSuffix'
+  // Dashboard - Overview
+  | 'dash.loadingSync'
+  | 'dash.overview.title' | 'dash.overview.welcome' | 'dash.overview.welcome_comma'
+  | 'dash.overview.welcome_suffix' | 'dash.overview.retry' | 'dash.overview.memories'
+  | 'dash.overview.clusters' | 'dash.overview.energy' | 'dash.overview.tetra'
+  | 'dash.overview.api_calls' | 'dash.overview.graph_nodes' | 'dash.overview.relations'
+  | 'dash.overview.concepts' | 'dash.overview.plan' | 'dash.overview.cap'
+  | 'dash.overview.account_details' | 'dash.overview.user_id' | 'dash.overview.account_type'
+  | 'dash.overview.main_account' | 'dash.overview.sub_account' | 'dash.overview.invite_code'
+  | 'dash.overview.sub_accounts' | 'dash.overview.enabled' | 'dash.overview.none'
+  | 'dash.overview.ai_identity' | 'dash.overview.not_configured' | 'dash.overview.status'
+  | 'dash.overview.online' | 'dash.overview.refresh_invite' | 'dash.overview.copied'
+  | 'dash.overview.copy' | 'dash.overview.memory_trend' | 'dash.overview.api_trend'
+  | 'dash.overview.total' | 'dash.overview.times' | 'dash.overview.label_distribution'
+  | 'dash.overview.memory_age' | 'dash.overview.cluster_overview_prefix'
+  | 'dash.overview.cluster_overview_suffix' | 'dash.overview.cluster' | 'dash.overview.nodes'
+  | 'dash.overview.recent_memories' | 'dash.overview.view_all' | 'dash.overview.no_memories'
+  // Dashboard - Graph
+  | 'dash.graph.title' | 'dash.graph.stats.nodes' | 'dash.graph.stats.edges'
+  | 'dash.graph.stats.clusters' | 'dash.graph.filter.placeholder' | 'dash.graph.retry'
+  | 'dash.graph.node.title' | 'dash.graph.node.relations' | 'dash.graph.node.mass'
+  | 'dash.graph.node.labels' | 'dash.graph.node.content' | 'dash.graph.concepts'
+  | 'dash.graph.clusters' | 'dash.graph.edge.similar' | 'dash.graph.edge.related'
+  | 'dash.graph.edge.contradicts' | 'dash.graph.edge.precedes' | 'dash.graph.edge.contains'
+  // Dashboard - Memories
+  | 'dash.mem.title' | 'dash.mem.tabAll' | 'dash.mem.tabMemories' | 'dash.mem.tabDocs'
+  | 'dash.mem.searchResultSuffix' | 'dash.mem.docSuffix' | 'dash.mem.memorySuffix'
+  | 'dash.mem.contentSuffix' | 'dash.mem.totalPrefix' | 'dash.mem.storeMemory'
+  | 'dash.mem.importDoc' | 'dash.mem.storePlaceholder' | 'dash.mem.storing'
+  | 'dash.mem.docNamePlaceholder' | 'dash.mem.docSegmentHint' | 'dash.mem.docContentPlaceholder'
+  | 'dash.mem.importing' | 'dash.mem.searchPlaceholder' | 'dash.mem.filter' | 'dash.mem.search'
+  | 'dash.mem.timeRange' | 'dash.mem.rangeAll' | 'dash.mem.rangeToday' | 'dash.mem.rangeWeek'
+  | 'dash.mem.rangeMonth' | 'dash.mem.sortBy' | 'dash.mem.sortNewest' | 'dash.mem.sortOldest'
+  | 'dash.mem.labels' | 'dash.mem.labelsSelected' | 'dash.mem.score' | 'dash.mem.tierPrimary'
+  | 'dash.mem.tierHub' | 'dash.mem.tierExperiential' | 'dash.mem.tierContext'
+  | 'dash.mem.saving' | 'dash.mem.save' | 'dash.mem.cancel' | 'dash.mem.copied'
+  | 'dash.mem.edit' | 'dash.mem.delete' | 'dash.mem.deleteConfirm' | 'dash.mem.deleteFailed'
+  | 'dash.mem.storeDeduped' | 'dash.mem.storeExists' | 'dash.mem.storeOk' | 'dash.mem.storeFailed'
+  | 'dash.mem.importFailed' | 'dash.mem.emptySearchPrefix' | 'dash.mem.emptySearchSuffix'
+  | 'dash.mem.emptySearchHint' | 'dash.mem.emptyFilter' | 'dash.mem.emptyTitle' | 'dash.mem.emptyHint'
+  | 'dash.mem.pageLabel' | 'dash.mem.pageUnit' | 'dash.mem.prevPage' | 'dash.mem.nextPage'
+  // Community
+  | 'community.title' | 'community.subtitlePrefix' | 'community.skillCountSuffix'
+  | 'community.searchPlaceholder'
+  | 'community.sortUsage' | 'community.sortQuality' | 'community.sortNewest'
+  | 'community.categoryAll' | 'community.systemBadge'
+  | 'community.metricUsage' | 'community.metricMemory' | 'community.metricSuccess'
+  | 'community.successHigh' | 'community.successMid' | 'community.successLow' | 'community.successNew'
+  | 'community.pull' | 'community.pulled' | 'community.pulling'
+  | 'community.retry' | 'community.emptyNoMatch'
+  | 'community.prevPage' | 'community.nextPage'
+  | 'community.loadFailed'
+  | 'community.toastLoginRequired' | 'community.toastPullFailed'
+  | 'community.toastPulledPrefix' | 'community.toastPulledSuffix'
+  // Guide
+  | 'guide.title' | 'guide.subtitle'
+  | 'guide.step1.title' | 'guide.step1.desc'
+  | 'guide.step2.title' | 'guide.step2.desc'
+  | 'guide.step3.title' | 'guide.step3.desc'
+  | 'guide.step4.title' | 'guide.step4.desc'
+  | 'guide.step5.title' | 'guide.step5.desc'
+  | 'guide.terminalTitle' | 'guide.mcpTitle' | 'guide.mcpDesc'
+  | 'guide.agentGuideTitle' | 'guide.agentGuideDesc'
+  | 'guide.viewApiDocs' | 'guide.copy' | 'guide.copied'
+  // Docs page
+  | 'docs.title' | 'docs.introPrefix' | 'docs.introSuffix'
+  | 'docs.copied' | 'docs.copyFullUrl' | 'docs.viewGuide'
+  // Docs page - API_SECTIONS (section titles/descs + endpoint descs)
+  | 'docs.section.auth.title' | 'docs.section.auth.desc'
+  | 'docs.section.auth.ep1.desc' | 'docs.section.auth.ep2.desc'
+  | 'docs.section.memory.title' | 'docs.section.memory.desc'
+  | 'docs.section.memory.ep1.desc' | 'docs.section.memory.ep2.desc' | 'docs.section.memory.ep3.desc'
+  | 'docs.section.memory.ep4.desc' | 'docs.section.memory.ep5.desc' | 'docs.section.memory.ep6.desc'
+  | 'docs.section.memory.ep7.desc' | 'docs.section.memory.ep8.desc'
+  | 'docs.section.docs.title' | 'docs.section.docs.desc'
+  | 'docs.section.docs.ep1.desc' | 'docs.section.docs.ep2.desc'
+  | 'docs.section.stats.title' | 'docs.section.stats.desc'
+  | 'docs.section.stats.ep1.desc' | 'docs.section.stats.ep2.desc' | 'docs.section.stats.ep3.desc'
+  | 'docs.section.stats.ep4.desc'
+  | 'docs.section.identity.title' | 'docs.section.identity.desc'
+  | 'docs.section.identity.ep1.desc' | 'docs.section.identity.ep2.desc' | 'docs.section.identity.ep3.desc'
+  | 'docs.section.skills.title' | 'docs.section.skills.desc'
+  | 'docs.section.skills.ep1.desc' | 'docs.section.skills.ep2.desc' | 'docs.section.skills.ep3.desc'
+  | 'docs.section.skills.ep4.desc' | 'docs.section.skills.ep5.desc' | 'docs.section.skills.ep6.desc'
+  | 'docs.section.subaccount.title' | 'docs.section.subaccount.desc'
+  | 'docs.section.subaccount.ep1.desc' | 'docs.section.subaccount.ep2.desc' | 'docs.section.subaccount.ep3.desc'
+  | 'docs.section.mcp.title' | 'docs.section.mcp.desc'
+  | 'docs.section.mcp.ep1.desc' | 'docs.section.mcp.ep2.desc' | 'docs.section.mcp.ep3.desc'
+  | 'docs.section.mcp.ep4.desc' | 'docs.section.mcp.ep5.desc' | 'docs.section.mcp.ep6.desc'
+  | 'docs.section.smrp.title' | 'docs.section.smrp.desc'
+  | 'docs.section.smrp.ep1.desc' | 'docs.section.smrp.ep2.desc' | 'docs.section.smrp.ep3.desc'
+  // SMRP Protocol page
+  | 'smrp.title' | 'smrp.subtitle'
+  | 'smrp.heroLeadPrefix' | 'smrp.heroTier' | 'smrp.heroLeadMid1' | 'smrp.heroSource'
+  | 'smrp.heroLeadMid2' | 'smrp.heroTopology' | 'smrp.heroLeadSuffix'
+  | 'smrp.meta.version' | 'smrp.meta.specBy' | 'smrp.meta.category' | 'smrp.meta.orthogonal'
+  | 'smrp.whyTitle'
+  | 'smrp.consequence.primary.title' | 'smrp.consequence.primary.desc'
+  | 'smrp.consequence.emergence.title' | 'smrp.consequence.emergence.desc'
+  | 'smrp.consequence.score.title' | 'smrp.consequence.score.desc'
+  | 'smrp.envelope' | 'smrp.envelopeLeadPrefix' | 'smrp.envelopeProtocol'
+  | 'smrp.envelopeData' | 'smrp.envelopeStatus'
+  | 'smrp.tierTitle'
+  | 'smrp.tier.primary.def' | 'smrp.tier.primary.use'
+  | 'smrp.tier.contextual.def' | 'smrp.tier.contextual.use'
+  | 'smrp.tier.experiential.def' | 'smrp.tier.experiential.use'
+  | 'smrp.tier.hub.def' | 'smrp.tier.hub.use'
+  | 'smrp.placementTitle'
+  | 'smrp.betterTitle'
+  | 'smrp.benefit.consumer.who' | 'smrp.benefit.consumer.point'
+  | 'smrp.benefit.implementer.who' | 'smrp.benefit.implementer.point'
+  | 'smrp.benefit.industry.who' | 'smrp.benefit.industry.point'
+  | 'smrp.engReasonTitle'
+  | 'smrp.principlesTitle'
+  | 'smrp.principle.p1.title' | 'smrp.principle.p1.desc'
+  | 'smrp.principle.p2.title' | 'smrp.principle.p2.desc'
+  | 'smrp.principle.p3.title' | 'smrp.principle.p3.desc'
+  | 'smrp.principle.p6.title' | 'smrp.principle.p6.desc'
+  | 'smrp.ctaTitle' | 'smrp.ctaButton' | 'smrp.ctaApiRef' | 'smrp.ctaPublic'
+  // SMRP Protocol page - body paragraphs (inline-bold splits)
+  | 'smrp.body.whyLeadPre' | 'smrp.body.whyLeadBold' | 'smrp.body.whyLeadMid' | 'smrp.body.whyLeadPost'
+  | 'smrp.body.gapPre' | 'smrp.body.gapBold' | 'smrp.body.gapPost'
+  | 'smrp.body.tierMustPre' | 'smrp.body.tierMustBold' | 'smrp.body.tierMustPost'
+  | 'smrp.body.placementPre' | 'smrp.body.placementBold1' | 'smrp.body.placementMid'
+  | 'smrp.body.placementBold2' | 'smrp.body.placementPost'
+  | 'smrp.body.engReasonPre' | 'smrp.body.engReasonBold' | 'smrp.body.engReasonPost'
+  | 'smrp.body.ctaPre' | 'smrp.body.ctaMid' | 'smrp.body.ctaPost'
+  | 'smrp.body.experientialSource'
+  // Benchmarks page
+  | 'bench.badge' | 'bench.title' | 'bench.intro'
+  | 'bench.spec.server' | 'bench.spec.embedModel' | 'bench.spec.embedModelValue'
+  | 'bench.spec.storage' | 'bench.spec.storageValue' | 'bench.spec.runtime'
+  | 'bench.metric.globalMemories' | 'bench.metric.skills' | 'bench.metric.activeUsers'
+  | 'bench.metric.writeLatency' | 'bench.metric.writeLatencySub' | 'bench.metric.mcpTools' | 'bench.live.title' | 'bench.live.desc' | 'bench.live.measuring' | 'bench.live.failed' | 'bench.base.badge'
+  | 'bench.metric.unitRecords' | 'bench.metric.unitItems' | 'bench.metric.unitPeople'
+  | 'bench.latency.title' | 'bench.latency.subtitle'
+  | 'bench.throughput.title' | 'bench.throughput.subtitle'
+  | 'bench.throughput.labelFormatter' | 'bench.throughput.legendLatency'
+  | 'bench.graph.title' | 'bench.graph.subtitle' | 'bench.graph.labelFormatter'
+  | 'bench.graph.legendBuild' | 'bench.graph.legendSearch' | 'bench.graph.legendRecall'
+  | 'bench.embedBatch.title' | 'bench.embedBatch.subtitle'
+  | 'bench.embedBatch.legendThroughput' | 'bench.embedBatch.legendLatency'
+  | 'bench.smrp.title' | 'bench.smrp.badge' | 'bench.smrp.desc'
+  | 'bench.smrp.latencyTitle' | 'bench.smrp.recallNote' | 'bench.smrp.structTitle'
+  | 'bench.smrp.struct.space_stats' | 'bench.smrp.struct.memory_search'
+  | 'bench.smrp.struct.memory_recall' | 'bench.smrp.struct.memory_get'
+  | 'bench.smrp.struct.knowledge_relations' | 'bench.smrp.struct.memory_create'
+  | 'bench.smrp.createTitle' | 'bench.smrp.conclusion'
+  | 'bench.beir.title' | 'bench.beir.desc' | 'bench.beir.ndcgTitle'
+  | 'bench.beir.fullMetrics'
+  | 'bench.beir.metric.ndcg' | 'bench.beir.metric.mrr'
+  | 'bench.beir.metric.recall' | 'bench.beir.metric.precision'
+  | 'bench.beir.metric.avgLatencyLabel' | 'bench.beir.metric.avgLatency'
+  | 'bench.beir.method'
+  | 'bench.kpi.title' | 'bench.kpi.createDesc' | 'bench.kpi.searchDesc'
+  | 'bench.kpi.skillDesc' | 'bench.kpi.feedbackDesc' | 'bench.kpi.env'
+  // L0 Protocol
+  | 'l0.badge' | 'l0.heroTitle' | 'l0.heroLead' | 'l0.heroP1' | 'l0.heroP2' | 'l0.heroP3'
+  | 'l0.pillarsTitle'
+  | 'l0.pillar.identity.en' | 'l0.pillar.identity.title' | 'l0.pillar.identity.def'
+  | 'l0.pillar.identity.detail' | 'l0.pillar.identity.principle'
+  | 'l0.pillar.memory.en' | 'l0.pillar.memory.title' | 'l0.pillar.memory.def'
+  | 'l0.pillar.memory.detail' | 'l0.pillar.memory.principle'
+  | 'l0.pillar.mcp.en' | 'l0.pillar.mcp.title' | 'l0.pillar.mcp.def'
+  | 'l0.pillar.mcp.detail' | 'l0.pillar.mcp.principle'
+  | 'l0.driveTitle' | 'l0.driveDesc1' | 'l0.driveDesc2'
+  | 'l0.driveCodeLabel'
+  | 'l0.evolutionTitle' | 'l0.evolutionDesc'
+  | 'l0.flow.memoryAccumulation.label' | 'l0.flow.memoryAccumulation.desc'
+  | 'l0.flow.errorDetection.label' | 'l0.flow.errorDetection.desc'
+  | 'l0.flow.willGeneration.label' | 'l0.flow.willGeneration.desc'
+  | 'l0.flow.driveQueue.label' | 'l0.flow.driveQueue.desc'
+  | 'l0.flow.handExecution.label' | 'l0.flow.handExecution.desc'
+  | 'l0.flow.feedbackEvolution.label' | 'l0.flow.feedbackEvolution.desc'
+  | 'l0.barrierTitle'
+  | 'l0.competitor.mem0' | 'l0.competitor.cognee' | 'l0.competitor.letta'
+  | 'l0.competitor.claudeAgentSdk' | 'l0.competitor.epicode'
+  | 'l0.closing1' | 'l0.closing2a' | 'l0.closing2b' | 'l0.closing2c'
+  // Dashboard - Chat
+  | 'dash.chat.title' | 'dash.chat.subtitle' | 'dash.chat.clear' | 'dash.chat.empty'
+  | 'dash.chat.suggestion1' | 'dash.chat.suggestion2' | 'dash.chat.suggestion3' | 'dash.chat.suggestion4'
+  | 'dash.chat.loadingStage1' | 'dash.chat.loadingStage2' | 'dash.chat.loadingStage3'
+  | 'dash.chat.memoryRefs' | 'dash.chat.error' | 'dash.chat.placeholder'
+  // Dashboard - Cognitive
+  | 'dash.cog.title' | 'dash.cog.subtitle' | 'dash.cog.sseConnected' | 'dash.cog.sseWaiting'
+  | 'dash.cog.card.cognition' | 'dash.cog.card.cognitionActive' | 'dash.cog.card.cognitionIdle'
+  | 'dash.cog.card.energy' | 'dash.cog.card.energyPool'
+  | 'dash.cog.card.memory' | 'dash.cog.card.memoryCluster'
+  | 'dash.cog.card.decision' | 'dash.cog.card.decisionHistory'
+  | 'dash.cog.section.emotion' | 'dash.cog.section.drive' | 'dash.cog.section.thought'
+  | 'dash.cog.section.learning' | 'dash.cog.section.reflection' | 'dash.cog.section.l0drive'
+  | 'dash.cog.emotionWaiting' | 'dash.cog.emotionNeutral'
+  | 'dash.cog.driveWaiting' | 'dash.cog.driveExplain'
+  | 'dash.cog.thoughtEmpty' | 'dash.cog.thoughtUpdatedAt'
+  | 'dash.cog.learningWaiting' | 'dash.cog.reflectionWaiting'
+  | 'dash.cog.explain' | 'dash.cog.driveEmpty'
+  | 'dash.cog.refresh' | 'dash.cog.execute' | 'dash.cog.dismiss'
+  | 'dash.cog.urgency.low' | 'dash.cog.urgency.medium' | 'dash.cog.urgency.high' | 'dash.cog.urgency.critical'
+  | 'dash.cog.unit.signals' | 'dash.cog.executedLabel' | 'dash.cog.pendingLabel'
   ;
 
 export const translations: Record<Language, Record<TranslationKey, string>> = {
@@ -113,10 +366,15 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'common.submit': '提交',
     'common.confirm': '确认',
     'common.back': '返回',
+    'common.backHome': '返回首页',
+    'common.closeMenu': '关闭菜单',
+    'common.openMenu': '打开菜单',
+    'common.showPassword': '显示密码',
+    'common.hidePassword': '隐藏密码',
+    'common.or': '或',
     'common.next': '下一页',
     'common.prev': '上一页',
     'common.of': '/',
-    'common.all': '全部',
     // Navigation
     'nav.home': '首页',
     'nav.quickStart': '快速上手',
@@ -129,8 +387,16 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'nav.memories': '记忆',
     'nav.graph': '知识图谱',
     'nav.skills': '技能',
+    'nav.library': '图书馆',
+    'dash.library.title': '图书馆',
+    'dash.library.subtitle': '共享知识资产 · 语义检索 · 收集请求',
     'nav.subAccounts': '子账户',
     'nav.logout': '退出登录',
+    'nav.archive': '档案库',
+    'nav.ariaHome': 'Epicode 首页',
+    'nav.chat': '记忆对话',
+    'nav.cognitive': '认知中枢',
+    'nav.observe': '观测舱',
     // Footer
     'footer.brand': 'Epicode — AI Memory Operating System',
     'footer.tagline': '给 AI 一个永不遗忘的记忆',
@@ -144,19 +410,25 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'footer.github': 'GitHub',
     'footer.discord': 'Discord',
     'footer.copyright': '© 2025 Epicode. 保留所有权利。',
-    'footer.version': 'v1.0.1',
+    'footer.version': 'v1.0.0',
+    'footer.contact': '联系我们',
     // Home - Hero
     'home.hero.overline': 'AI 记忆操作系统',
     'home.hero.title': 'Epicode',
     'home.hero.taglineZh': '给 AI 一个永不遗忘的记忆',
     'home.hero.taglineEn': 'Give AI an unforgettable memory',
-    'home.hero.ctaPrimary': '开始使用',
+    'home.hero.ctaPrimary': '立即体验',
     'home.hero.ctaSecondary': '查看文档',
+    'home.hero.ctaTertiary': '快速上手',
+    'home.hero.crossDevice': '让你的 AI 拥有跨端的能力',
+    'home.crossDevice.overline': 'Cross-Device Intelligence',
+    'home.crossDevice.title': '让你的 AI 拥有跨端的能力',
+    'home.crossDevice.desc': '一次记忆，处处可用。无论你在哪个设备、用哪个 AI 代理，Epicode 让经验如影随形。',
     'home.hero.stat1Num': '',
     'home.hero.stat1Label': '注册用户',
     'home.hero.stat2Num': '',
     'home.hero.stat2Label': '记忆存储量',
-    'home.hero.stat3Num': '27',
+    'home.hero.stat3Num': '',
     'home.hero.stat3Label': 'MCP 工具',
     // Marquee
     'home.marquee.1': '向量记忆',
@@ -173,19 +445,19 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'home.feature1.num': '01',
     'home.feature1.title': '向量记忆存储',
     'home.feature1.desc': '为 AI 记忆提供持久化向量存储。每一条信息都被嵌入、索引，并在跨会话中可检索。',
-    'home.feature1.link': '了解更多 →',
+    'home.feature1.link': '了解更多',
     'home.feature2.num': '02',
     'home.feature2.title': '语义搜索',
     'home.feature2.desc': '通过含义而不仅是关键词查找记忆。自然语言查询返回上下文相关的结果及相似度评分。',
-    'home.feature2.link': '了解更多 →',
+    'home.feature2.link': '了解更多',
     'home.feature3.num': '03',
     'home.feature3.title': '知识图谱',
     'home.feature3.desc': '自动关系提取创建互联记忆的动态图谱，实现深度回忆和上下文理解。',
-    'home.feature3.link': '了解更多 →',
+    'home.feature3.link': '了解更多',
     'home.feature4.num': '04',
     'home.feature4.title': 'MCP 集成',
-    'home.feature4.desc': '27 个 MCP 工具提供对记忆操作的统一访问。标准化协议让任何 AI 代理都能存储、搜索和回忆。',
-    'home.feature4.link': '了解更多 →',
+    'home.feature4.desc': '41 个 MCP 工具提供对记忆操作的统一访问。标准化协议让任何 AI 代理都能存储、搜索和回忆。',
+    'home.feature4.link': '了解更多',
     // QuickStart
     'home.quickStart.overline': '快速上手',
     'home.quickStart.title': '几分钟内开始',
@@ -224,19 +496,19 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'home.api.ep2path': '/register',
     'home.api.ep2desc': '用户注册',
     'home.api.ep3method': 'POST',
-    'home.api.ep3path': '/login',
+    'home.api.ep3path': '/v1/login',
     'home.api.ep3desc': '用户登录',
     'home.api.ep4method': 'POST',
-    'home.api.ep4path': '/remember',
+    'home.api.ep4path': '/v1/remember',
     'home.api.ep4desc': '存储记忆',
     'home.api.ep5method': 'POST',
-    'home.api.ep5path': '/search',
+    'home.api.ep5path': '/v1/search',
     'home.api.ep5desc': '语义搜索',
     'home.api.ep6method': 'GET',
-    'home.api.ep6path': '/stats',
+    'home.api.ep6path': '/v1/stats',
     'home.api.ep6desc': '用户统计',
     'home.api.ep7method': 'GET',
-    'home.api.ep7path': '/timeline',
+    'home.api.ep7path': '/v1/timeline',
     'home.api.ep7desc': '记忆时间线',
     'home.api.ep8method': 'POST',
     'home.api.ep8path': '/mcp',
@@ -246,6 +518,45 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'home.cta.subtitle': '立即开始构建持久化的 AI 体验。',
     'home.cta.button': '免费开始使用',
     'home.cta.note': '无需信用卡。免费版包含 1,000 条记忆。',
+    // CrossDevice steps
+    'home.crossDevice.step1Title': '办公室 - Cursor',
+    'home.crossDevice.step1Desc': '编码时自动积累经验：架构决策、Bug 修复、踩坑记录',
+    'home.crossDevice.step2Title': 'Epicode 云端记忆',
+    'home.crossDevice.step2Desc': 'MCP 协议统一接入，所有经验实时同步到空间记忆',
+    'home.crossDevice.step3Title': '家里 - opencode',
+    'home.crossDevice.step3Desc': '打开任意终端，ctx_load 一键恢复完整项目上下文',
+    'home.crossDevice.step4Title': '移动端 - API 调用',
+    'home.crossDevice.step4Desc': 'REST API 随时检索记忆，跨设备无缝衔接',
+    'home.crossDevice.caption': 'ctx_load → 恢复项目上下文 → memory_search → 精准召回 → 继续工作',
+    // Archive
+    'home.archive.overline': 'Archive · 记忆聚合',
+    'home.archive.title': '档案库：记忆的大型聚合体',
+    'home.archive.desc': '技术文档、源码、审计报告——全部作为记忆导入四面体空间，通过标签编码层级关系，搜索和知识图谱自动生效。',
+    'home.archive.item1Title': '项目档案管理',
+    'home.archive.item1Desc': '将技术文档、设计规格、审计报告导入结构化档案库，按项目-文档层级管理',
+    'home.archive.item2Title': '源码归档',
+    'home.archive.item2Desc': '自动导入后端/前端源码，代码与文档在同一知识网络中语义关联',
+    'home.archive.item3Title': '记忆原生聚合',
+    'home.archive.item3Desc': '档案库不是独立系统——每个档案节点都是记忆，自动参与语义搜索和知识图谱',
+    'home.archive.item4Title': '智能体可管理',
+    'home.archive.item4Desc': 'AI 智能体可通过 MCP 自主上传、编辑、合并、删除档案',
+    // L0 Capabilities
+    'home.l0cap.title': '记忆不只是存储',
+    'home.l0cap.subtitle': '当记忆积累到一定密度，人格从中涌现。它有了意志，想要影响世界。智能体是它的手——这就是 Epicode 的终极壁垒。',
+    'home.l0cap.cap1Title': '记忆人格化',
+    'home.l0cap.cap1Desc': '记忆积累形成独立人格——拥有不可变身份、PAD情感模型、四驱动力（好奇/一致/效率/活力）。人格不是被设计的，是从经验中涌现的。',
+    'home.l0cap.cap2Title': 'ActOutward 意志',
+    'home.l0cap.cap2Desc': '人格产出 ActOutward 驱动信号——跨出 Epicode 边界，告诉外部智能体"我想让你做某件事"。意图类型：warn / suggest / explore / constrain / request / share。',
+    'home.l0cap.cap3Title': '自驱动循环',
+    'home.l0cap.cap3Desc': '检测知识空白→生成探索意志→用自身认知引擎推理→存储结论为新记忆→自我反馈进化。人格永不停止思考——即使 LLM 不可用，仍用本地记忆关联降级推理。',
+    'home.l0cap.cap4Title': 'Drive Channel API',
+    'home.l0cap.cap4Desc': 'GET /v1/drive/inbox 轮询人格意志 · POST /v1/drive/ack 反馈执行结果 · MCP 工具 drive_inbox / drive_ack。任何智能体都能成为人格的"手"。',
+    'home.l0cap.layer1Label': 'L0 · 人格层',
+    'home.l0cap.layer1Sub': '身份 + 记忆 + 认知 + 情感',
+    'home.l0cap.layer2Label': 'L1 · 适配层',
+    'home.l0cap.layer2Sub': 'MCP / REST / Drive Channel',
+    'home.l0cap.layer3Label': 'L2 · 执行体',
+    'home.l0cap.layer3Sub': 'OpenClaw / ZCode / Agent',
     // Login
     'login.title': '登录',
     'login.subtitle': '输入凭证以访问控制台',
@@ -271,6 +582,10 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'register.passwordGood': '良好',
     'register.passwordStrong': '强',
     'register.success': '注册成功',
+    'register.errorFillFields': '请填写所有必填项',
+    'register.errorFailed': '注册失败，请稍后重试',
+    'register.errorInviteCode': '邀请码无效或已过期',
+    'register.errorPasswordShort': '密码至少需要 6 个字符',
     // Dashboard
     'dash.totalMemories': '记忆总数',
     'dash.thisWeek': '本周新增',
@@ -282,64 +597,634 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.quickSearch': '搜索记忆',
     'dash.quickDigest': '消化文件',
     'dash.quickDocs': '查看文档',
-    // Community - Hero
-    'community.hero.overline': '开源社区',
-    'community.hero.title': '与 Epicode 共同成长',
-    'community.hero.subtitle': 'Epicode 是一个开源的空间化 AI 记忆系统。无论你是报告 Bug、提交代码，还是分享技能，这里都是参与的地方。',
-    'community.hero.ctaPrimary': '快速上手',
-    'community.hero.ctaSecondary': '在 GitHub 上查看',
-    // Community - Stats
-    'community.stats.stars': 'Stars',
-    'community.stats.forks': 'Forks',
-    'community.stats.issues': 'Open Issues',
-    'community.stats.contributors': 'Contributors',
-    'community.stats.unavailable': '暂时无法加载 GitHub 数据',
-    // Community - Contribute
-    'community.contribute.overline': '参与方式',
-    'community.contribute.title': '四种方式参与贡献',
-    'community.contribute.subtitle': '每一份贡献都让 Epicode 更好。',
-    'community.contribute.issue.title': '报告问题',
-    'community.contribute.issue.desc': '发现 Bug 或有功能想法？通过 Issue 模板提交，附上复现步骤和环境信息。',
-    'community.contribute.issue.cta': '提交 Issue',
-    'community.contribute.pr.title': '提交代码',
-    'community.contribute.pr.desc': '修复 Bug 或实现新功能。遵循 Conventional Commits，确保 CI 全绿，等待维护者审核合并。',
-    'community.contribute.pr.cta': '发起 Pull Request',
-    'community.contribute.discussion.title': '参与讨论',
-    'community.contribute.discussion.desc': '在 Discussions 提问、分享想法、参与路线图规划，或帮助其他用户解答疑问。',
-    'community.contribute.discussion.cta': '前往 Discussions',
-    'community.contribute.skill.title': '分享技能',
-    'community.contribute.skill.desc': '把你的 Prompt 模板、工作流或最佳实践沉淀成技能，通过社区页面让所有人受益。',
-    'community.contribute.skill.cta': '浏览社区技能',
-    // Community - Contributors
-    'community.contributors.overline': '致谢',
-    'community.contributors.title': '感谢每一位贡献者',
-    'community.contributors.subtitle': 'Epicode 由社区共同打造。以下是代码库的 contributors（数据来自 GitHub）。',
-    'community.contributors.viewAll': '在 GitHub 上查看全部贡献者',
-    // Community - Skills
-    'community.skills.overline': '技能市场',
-    'community.skills.title': '社区技能',
-    'community.skills.subtitle': '探索来自社区和官方的公开技能库。',
-    // Community - Governance
-    'community.governance.overline': '治理与准则',
-    'community.governance.title': '我们如何协作',
-    'community.governance.subtitle': '透明、友好、可持续的开源协作建立在清晰的规则之上。',
-    'community.governance.contributing': '贡献指南',
-    'community.governance.coc': '行为准则',
-    'community.governance.security': '安全策略',
-    'community.governance.governance': '项目治理',
-    // Community - Channels
-    'community.channels.overline': '保持联系',
-    'community.channels.title': '加入社区',
-    'community.channels.subtitle': '在哪里找到我们，以及如何获取帮助。',
-    'community.channels.discussions.title': 'GitHub Discussions',
-    'community.channels.discussions.desc': '提问、分享想法、参与路线图讨论的主要场所。',
-    'community.channels.discussions.cta': '进入 Discussions',
-    'community.channels.sponsors.title': 'GitHub Sponsors',
-    'community.channels.sponsors.desc': '如果 Epicode 帮到了你，可以通过 GitHub Sponsors 支持项目的持续维护。',
-    'community.channels.sponsors.cta': '支持我们',
-    'community.channels.docs.title': '官方文档',
-    'community.channels.docs.desc': '架构、API、部署、配置等完整开发文档，托管在 epicode.cn。',
-    'community.channels.docs.cta': '阅读文档',
+    // Dashboard - Skills
+    'dash.skills.title': '技能',
+    'dash.skills.private': '私有',
+    'dash.skills.edit': '编辑',
+    'dash.skills.publishToCommunity': '发布到社区',
+    'dash.skills.publish': '发布',
+    'dash.skills.delete': '删除',
+    'dash.skills.collapse': '收起',
+    'dash.skills.viewContent': '查看内容',
+    'dash.skills.create': '创建',
+    'dash.skills.privateCountSuffix': '个私有技能',
+    'dash.skills.publicCountSuffix': '个公共技能',
+    'dash.skills.status': '状态',
+    'dash.skills.all': '全部',
+    'dash.skills.author': '作者',
+    'dash.skills.allAuthors': '所有作者',
+    'dash.skills.newSkill': '新建技能',
+    'dash.skills.namePlaceholder': '技能名称',
+    'dash.skills.mdPlaceholder': 'Markdown 内容...',
+    'dash.skills.creating': '创建中...',
+    'dash.skills.createSkill': '创建技能',
+    'dash.skills.editSkill': '编辑技能',
+    'dash.skills.saveChanges': '保存修改',
+    'dash.skills.empty': '暂无技能',
+    'dash.skills.createdNotice': '技能已创建',
+    'dash.skills.createFailed': '创建技能失败',
+    'dash.skills.updatedNotice': '技能已更新',
+    'dash.skills.updateFailed': '更新失败',
+    'dash.skills.deleteConfirm': '确定删除此技能？此操作不可逆。',
+    'dash.skills.deletedNotice': '技能已删除',
+    'dash.skills.deleteFailed': '删除失败',
+    'dash.skills.publishedNotice': '技能已提交发布审核',
+    'dash.skills.publishFailed': '发布失败',
+    // Dashboard - Archive
+    'dash.arc.title': '档案库',
+    'dash.arc.nodesSuffix': '个节点',
+    'dash.arc.loadFail': '加载档案失败',
+    'dash.arc.createdNotice': '节点已创建',
+    'dash.arc.createFail': '创建失败',
+    'dash.arc.updatedNotice': '节点已更新',
+    'dash.arc.updateFail': '更新失败',
+    'dash.arc.deletedNotice': '节点已删除',
+    'dash.arc.deleteFail': '删除失败',
+    'dash.arc.docPrefix': '文档',
+    'dash.arc.importParseFail': '未解析到任何文档（使用 --- 分隔，首行为标题）',
+    'dash.arc.importedNoticePrefix': '已导入 ',
+    'dash.arc.importedNoticeMiddle': ' 份文档到项目「',
+    'dash.arc.importedNoticeSuffix': '」',
+    'dash.arc.importFail': '导入失败',
+    'dash.arc.searchPlaceholder': '搜索节点标题或分类...',
+    'dash.arc.newBtn': '新建',
+    'dash.arc.importBtn': '导入',
+    'dash.arc.noMatch': '无匹配节点',
+    'dash.arc.empty': '暂无档案，点击「新建」开始',
+    'dash.arc.selectHint': '选择左侧节点查看内容',
+    'dash.arc.createTitle': '新建节点',
+    'dash.arc.fieldType': '类型',
+    'dash.arc.fieldTitle': '标题',
+    'dash.arc.fieldCategoryOpt': '分类（可选）',
+    'dash.arc.fieldContentOpt': '内容（可选）',
+    'dash.arc.projectNamePh': '项目名称',
+    'dash.arc.docTitlePh': '文档标题',
+    'dash.arc.categoryExamplePh': '例如：设计、研究、笔记',
+    'dash.arc.docBodyPh': '文档正文，纯文本...',
+    'dash.arc.cancelBtn': '取消',
+    'dash.arc.creatingBtn': '创建中...',
+    'dash.arc.createBtn': '创建',
+    'dash.arc.editTitle': '编辑节点',
+    'dash.arc.fieldCategory': '分类',
+    'dash.arc.categoryPh': '分类',
+    'dash.arc.fieldContent': '内容',
+    'dash.arc.contentCurrentPrefix': '（当前 ',
+    'dash.arc.contentCurrentMiddle': ' 字符，',
+    'dash.arc.contentKeepHint': '留空则不修改）',
+    'dash.arc.editBodyPh': '编辑文档正文...',
+    'dash.arc.saveBtn': '保存',
+    'dash.arc.batchImportTitle': '批量导入',
+    'dash.arc.fieldProjectName': '项目名称',
+    'dash.arc.importProjectPh': '将创建或归入的项目',
+    'dash.arc.fieldDocs': '文档（用 --- 分隔，每段首行为标题）',
+    'dash.arc.importDocsPh': '文档一标题\n文档一正文...\n\n---\n\n文档二标题\n文档二正文...',
+    'dash.arc.importingBtn': '导入中...',
+    'dash.arc.deleteConfirmTitle': '确认删除',
+    'dash.arc.deleteConfirmMsg': '确定要删除此节点吗？',
+    'dash.arc.deleteIrreversible': '该操作不可逆，子节点可能一并删除。',
+    'dash.arc.deleteBtn': '删除',
+    'dash.arc.typeRoot': '根',
+    'dash.arc.typeProject': '项目',
+    'dash.arc.typeDoc': '文档',
+    'dash.arc.typeCode': '代码',
+    'dash.arc.categoryLabel': '分类：',
+    'dash.arc.charsSuffix': '字符',
+    'dash.arc.addChildTitle': '新增子节点',
+    'dash.arc.addBtn': '新增',
+    'dash.arc.editBtn': '编辑',
+    'dash.arc.noChildrenHint': '暂无子节点，点击「新增」创建',
+    'dash.arc.emptyDoc': '空文档',
+    'dash.arc.childrenSuffix': '子节点',
+    'dash.arc.loading': '加载中...',
+    'dash.arc.noContentHint': '此节点暂无内容，点击「编辑」添加',
+    // Dashboard - Sub Accounts
+    'dash.sub.title': '子账户',
+    'dash.sub.subtitle': '管理主账户下的团队访问权限',
+    'dash.sub.managementUnavailable': '子账户管理不可用',
+    'dash.sub.subAccountNoManageDesc': '子账户无法管理其他子账户。此功能仅对主账户开放。',
+    'dash.sub.parentAccount': '归属主账户：',
+    'dash.sub.mainAccountLabel': '主账户：',
+    'dash.sub.mainAccountOwnership': '您拥有所有子账户的完整所有权。子账户无法创建自己的子账户或修改此账户。',
+    'dash.sub.planLabel': '套餐：',
+    'dash.sub.statSubAccounts': '子账户',
+    'dash.sub.statSubMemories': '子账户记忆数',
+    'dash.sub.statTotalUsage': '总用量',
+    'dash.sub.usageLimit': '上限',
+    'dash.sub.statPermissionLevel': '权限等级',
+    'dash.sub.roleOwner': '所有者',
+    'dash.sub.roleOwnerDesc': '完整管理权限',
+    'dash.sub.createAction': '创建 子账户',
+    'dash.sub.createTitle': '新建子账户',
+    'dash.sub.belongTo': '归属：',
+    'dash.sub.belongToPlain': '归属',
+    'dash.sub.placeholderUserId': '用户 ID',
+    'dash.sub.placeholderPassword': '密码',
+    'dash.sub.creating': '创建中...',
+    'dash.sub.create': '创建',
+    'dash.sub.inheritNotice': '子账户继承您的套餐配额，且无法创建自己的子账户。',
+    'dash.sub.emptyHint': '暂无子账户。为您的团队成员创建一个。',
+    'dash.sub.colUser': '用户',
+    'dash.sub.colPlan': '套餐',
+    'dash.sub.colMemories': '记忆数',
+    'dash.sub.colBelongTo': '归属',
+    'dash.sub.colCreatedAt': '创建时间',
+    'dash.sub.rowSubAccountLabel': '子账户',
+    'dash.sub.noSubAccountPermission': '无子账户权限',
+    'dash.sub.revokeConfirmPrefix': '撤销子账户',
+    'dash.sub.revokeConfirmSuffix': '? This will permanently delete all their memories.',
+    // Dashboard - Overview
+    'dash.loadingSync': '同步记忆空间',
+    'dash.overview.title': '总览',
+    'dash.overview.welcome': '欢迎回来',
+    'dash.overview.welcome_comma': '，',
+    'dash.overview.welcome_suffix': '。以下是您的账户概览。',
+    'dash.overview.retry': '重试',
+    'dash.overview.memories': '记忆数',
+    'dash.overview.clusters': '聚类',
+    'dash.overview.energy': '能量',
+    'dash.overview.tetra': '四面体',
+    'dash.overview.api_calls': 'API 调用',
+    'dash.overview.graph_nodes': '图谱节点',
+    'dash.overview.relations': '关系数',
+    'dash.overview.concepts': '概念数',
+    'dash.overview.plan': '套餐',
+    'dash.overview.cap': '上限',
+    'dash.overview.account_details': '账户详情',
+    'dash.overview.user_id': '用户 ID',
+    'dash.overview.account_type': '账户类型',
+    'dash.overview.main_account': '主账户',
+    'dash.overview.sub_account': '子账户',
+    'dash.overview.invite_code': '邀请码',
+    'dash.overview.sub_accounts': '子账户',
+    'dash.overview.enabled': '已启用',
+    'dash.overview.none': '无',
+    'dash.overview.ai_identity': 'AI 身份',
+    'dash.overview.not_configured': '未配置',
+    'dash.overview.status': '状态',
+    'dash.overview.online': '在线',
+    'dash.overview.refresh_invite': '刷新邀请码',
+    'dash.overview.copied': '已复制',
+    'dash.overview.copy': '复制',
+    'dash.overview.memory_trend': '记忆增长趋势（30天）',
+    'dash.overview.api_trend': 'API 调用趋势（30天）',
+    'dash.overview.total': '累计',
+    'dash.overview.times': '次',
+    'dash.overview.label_distribution': '标签分布',
+    'dash.overview.memory_age': '记忆时间分布',
+    'dash.overview.cluster_overview_prefix': '聚类概览（',
+    'dash.overview.cluster_overview_suffix': '  个聚类）',
+    'dash.overview.cluster': '聚类',
+    'dash.overview.nodes': '个节点',
+    'dash.overview.recent_memories': '最近记忆',
+    'dash.overview.view_all': '查看全部',
+    'dash.overview.no_memories': '暂无记忆',
+    // Dashboard - Graph
+    'dash.graph.title': '知识图谱',
+    'dash.graph.stats.nodes': '节点',
+    'dash.graph.stats.edges': '关系',
+    'dash.graph.stats.clusters': '聚类',
+    'dash.graph.filter.placeholder': '过滤...',
+    'dash.graph.retry': '重试',
+    'dash.graph.node.title': '节点',
+    'dash.graph.node.relations': '关系数',
+    'dash.graph.node.mass': '质量',
+    'dash.graph.node.labels': '标签',
+    'dash.graph.node.content': '内容',
+    'dash.graph.concepts': '概念分布',
+    'dash.graph.clusters': '聚类',
+    'dash.graph.edge.similar': '相似',
+    'dash.graph.edge.related': '关联',
+    'dash.graph.edge.contradicts': '矛盾',
+    'dash.graph.edge.precedes': '先于',
+    'dash.graph.edge.contains': '包含',
+    // Dashboard - Memories
+    'dash.mem.title': '记忆',
+    'dash.mem.tabAll': '全部',
+    'dash.mem.tabMemories': '记忆',
+    'dash.mem.tabDocs': '文档',
+    'dash.mem.searchResultSuffix': '条搜索结果',
+    'dash.mem.docSuffix': '条文档段落',
+    'dash.mem.memorySuffix': '条记忆',
+    'dash.mem.contentSuffix': '条内容',
+    'dash.mem.totalPrefix': '共',
+    'dash.mem.storeMemory': '存储记忆',
+    'dash.mem.importDoc': '导入文档',
+    'dash.mem.storePlaceholder': '输入要存储为记忆的内容...',
+    'dash.mem.storing': '存储中...',
+    'dash.mem.docNamePlaceholder': '文档名称（如 ARCHITECTURE）',
+    'dash.mem.docSegmentHint': '按 ## 标题自动分段入库',
+    'dash.mem.docContentPlaceholder': '粘贴 Markdown 文档内容...',
+    'dash.mem.importing': '导入中（可能需要1-2分钟）...',
+    'dash.mem.searchPlaceholder': '输入关键词，自动搜索...',
+    'dash.mem.filter': '筛选',
+    'dash.mem.search': '搜索',
+    'dash.mem.timeRange': '时间范围',
+    'dash.mem.rangeAll': '全部',
+    'dash.mem.rangeToday': '今天',
+    'dash.mem.rangeWeek': '本周',
+    'dash.mem.rangeMonth': '本月',
+    'dash.mem.sortBy': '排序方式',
+    'dash.mem.sortNewest': '最新优先',
+    'dash.mem.sortOldest': '最早优先',
+    'dash.mem.labels': '标签',
+    'dash.mem.labelsSelected': '已选',
+    'dash.mem.score': '分数',
+    'dash.mem.tierPrimary': '◆ 核心',
+    'dash.mem.tierHub': '★ 枢纽',
+    'dash.mem.tierExperiential': '◷ 经历',
+    'dash.mem.tierContext': '○ 上下文',
+    'dash.mem.saving': '保存中...',
+    'dash.mem.save': '保存',
+    'dash.mem.cancel': '取消',
+    'dash.mem.copied': '已Copy ✓',
+    'dash.mem.edit': '编辑',
+    'dash.mem.delete': '删除',
+    'dash.mem.deleteConfirm': '确定删除此记忆？',
+    'dash.mem.deleteFailed': '删除失败',
+    'dash.mem.storeDeduped': '检测到重复记忆，已自动去重',
+    'dash.mem.storeExists': '该记忆已存在',
+    'dash.mem.storeOk': '记忆已存储',
+    'dash.mem.storeFailed': '存储失败',
+    'dash.mem.importFailed': '导入失败',
+    'dash.mem.emptySearchPrefix': '未找到与',
+    'dash.mem.emptySearchSuffix': '相关的记忆',
+    'dash.mem.emptySearchHint': '尝试换一个关键词，或清除筛选条件',
+    'dash.mem.emptyFilter': '当前筛选条件下没有匹配的记忆',
+    'dash.mem.emptyTitle': '暂无记忆',
+    'dash.mem.emptyHint': '存储您的第一条记忆开始使用',
+    'dash.mem.pageLabel': '第',
+    'dash.mem.pageUnit': '条',
+    'dash.mem.prevPage': '上一页',
+    'dash.mem.nextPage': '下一页',
+    // Community
+    'community.title': '社区技能',
+    'community.subtitlePrefix': '探索来自社区和官方的公开技能库。',
+    'community.skillCountSuffix': ' 个技能可供使用。',
+    'community.searchPlaceholder': '搜索技能名称或内容...',
+    'community.sortUsage': '热门',
+    'community.sortQuality': '质量',
+    'community.sortNewest': '最新',
+    'community.categoryAll': '全部',
+    'community.systemBadge': '系统',
+    'community.metricUsage': '使用次数',
+    'community.metricMemory': '关联记忆',
+    'community.metricSuccess': '成功率',
+    'community.successHigh': '高',
+    'community.successMid': '中',
+    'community.successLow': '低',
+    'community.successNew': '新',
+    'community.pull': '拉取',
+    'community.pulled': '已拉取',
+    'community.pulling': '拉取中...',
+    'community.retry': '重试',
+    'community.emptyNoMatch': '没有找到匹配的技能',
+    'community.prevPage': '上一页',
+    'community.nextPage': '下一页',
+    'community.loadFailed': '加载失败',
+    'community.toastLoginRequired': '请先登录后再拉取技能',
+    'community.toastPullFailed': '拉取失败',
+    'community.toastPulledPrefix': '已拉取技能"',
+    'community.toastPulledSuffix': '"到你的账户',
+    // Guide
+    'guide.title': '快速上手指南',
+    'guide.subtitle': '5 步完成 Epicode 集成。从注册到语义搜索和技能系统，只需几分钟。',
+    'guide.step1.title': '1. 获取 API Key',
+    'guide.step1.desc': '注册账号后自动获得 API Key，或通过登录接口获取。',
+    'guide.step2.title': '2. 存储第一条记忆',
+    'guide.step2.desc': '通过 remember 端点存储记忆，系统自动进行嵌入、分类和空间放置。',
+    'guide.step3.title': '3. 语义搜索',
+    'guide.step3.desc': '用自然语言查询记忆，获取语义相似度排序的结果。',
+    'guide.step4.title': '4. 使用技能系统',
+    'guide.step4.desc': '通过 MCP 调用 skill_execute 语义匹配技能，用 skill_feedback 提交反馈以持续优化匹配质量。',
+    'guide.step5.title': '5. 确认 AI 身份（可选）',
+    'guide.step5.desc': '为你的 AI 代理设定身份，确认后不可更改。',
+    'guide.terminalTitle': '终端',
+    'guide.mcpTitle': 'MCP 协议接入',
+    'guide.mcpDesc': '推荐 AI 代理使用 MCP 协议，一次性接入 41+ 工具',
+    'guide.agentGuideTitle': 'Agent Guide（实时）',
+    'guide.agentGuideDesc': '来自后端 /v1/agent-guide 的实时内容',
+    'guide.viewApiDocs': '查看完整 API 文档',
+    'guide.copy': '复制',
+    'guide.copied': '已复制',
+    // Docs page
+    'docs.title': 'API 文档',
+    'docs.introPrefix': '完整的 RESTful API 参考。所有认证请求需携带 ',
+    'docs.introSuffix': ' 请求头。',
+    'docs.copied': '已复制',
+    'docs.copyFullUrl': '复制完整 URL',
+    'docs.viewGuide': '查看快速上手指南',
+    // Docs page - API_SECTIONS
+    'docs.section.auth.title': '认证',
+    'docs.section.auth.desc': '用户注册与登录',
+    'docs.section.auth.ep1.desc': '注册新用户',
+    'docs.section.auth.ep2.desc': '登录获取 API Key',
+    'docs.section.memory.title': '记忆操作',
+    'docs.section.memory.desc': '核心记忆 CRUD 与搜索',
+    'docs.section.memory.ep1.desc': '存储一条记忆（自动嵌入 + 分类 + 空间放置）',
+    'docs.section.memory.ep2.desc': '语义搜索记忆',
+    'docs.section.memory.ep3.desc': '深度回忆（语义 + 知识图谱关联）',
+    'docs.section.memory.ep4.desc': '基于记忆的问答',
+    'docs.section.memory.ep5.desc': '消化长文本，自动拆分为多条记忆',
+    'docs.section.memory.ep6.desc': '记忆时间线',
+    'docs.section.memory.ep7.desc': '删除单条记忆',
+    'docs.section.memory.ep8.desc': '批量删除记忆',
+    'docs.section.docs.title': '文档系统',
+    'docs.section.docs.desc': 'Markdown 文档整篇导入，自动嵌入并与现有记忆知识图谱关联',
+    'docs.section.docs.ep1.desc': '导入 Markdown 文档（整篇入库，自动去重）',
+    'docs.section.docs.ep2.desc': '列出所有已导入的文档',
+    'docs.section.stats.title': '统计与图谱',
+    'docs.section.stats.desc': '用户统计、知识图谱、时间线',
+    'docs.section.stats.ep1.desc': '获取用户统计信息',
+    'docs.section.stats.ep2.desc': '导出完整知识图谱',
+    'docs.section.stats.ep3.desc': '图谱分析报告',
+    'docs.section.stats.ep4.desc': '查询节点的知识图谱关系',
+    'docs.section.identity.title': '身份系统',
+    'docs.section.identity.desc': 'AI 代理身份确认与管理',
+    'docs.section.identity.ep1.desc': '获取当前身份信息',
+    'docs.section.identity.ep2.desc': '确认身份（一次性，不可逆）',
+    'docs.section.identity.ep3.desc': '更新身份（确认前可用）',
+    'docs.section.skills.title': '技能系统',
+    'docs.section.skills.desc': '创建、搜索、反馈和管理技能',
+    'docs.section.skills.ep1.desc': '获取我的技能列表',
+    'docs.section.skills.ep2.desc': '创建新技能',
+    'docs.section.skills.ep3.desc': '获取公开技能',
+    'docs.section.skills.ep4.desc': '探索公开技能（无需认证，含 category 字段）',
+    'docs.section.skills.ep5.desc': '语义搜索技能（HNSW 向量匹配 + 关键词降级）',
+    'docs.section.skills.ep6.desc': '拉取一个公开技能到自己的账户',
+    'docs.section.subaccount.title': '子账户',
+    'docs.section.subaccount.desc': '团队管理',
+    'docs.section.subaccount.ep1.desc': '获取子账户列表',
+    'docs.section.subaccount.ep2.desc': '创建子账户',
+    'docs.section.subaccount.ep3.desc': '撤销子账户',
+    'docs.section.mcp.title': 'MCP 协议',
+    'docs.section.mcp.desc': 'JSON-RPC 2.0 统一入口，包含 30+ 工具',
+    'docs.section.mcp.ep1.desc': 'MCP 统一入口（所有工具通过此端点调用）',
+    'docs.section.mcp.ep2.desc': 'skill_execute — 语义搜索并执行技能',
+    'docs.section.mcp.ep3.desc': 'skill_feedback — 对技能执行结果提交反馈（闭环优化）',
+    'docs.section.mcp.ep4.desc': 'skills_sync — 导出所有技能为本地安装格式',
+    'docs.section.mcp.ep5.desc': 'feedback_submit — 提交搜索/召回结果反馈',
+    'docs.section.mcp.ep6.desc': '获取代理快速指南',
+    'docs.section.smrp.title': 'SMRP 协议',
+    'docs.section.smrp.desc': 'Structured Memory Response Protocol 1.0 — Epicode 制定的记忆响应语义层标准。记忆返回携带角色(tier)、来路(source)与拓扑位置(topology)，而非扁平同质列表。与传输层(MCP/REST)正交，任何记忆系统可采纳。',
+    'docs.section.smrp.ep1.desc': '获取 SMRP 1.0 完整规范（公开，Markdown）',
+    'docs.section.smrp.ep2.desc': 'memory_create — SMRP 信封返回安置副产物(placement/relations_formed)，让消费者知道记忆"住进了社区的哪个位置"',
+    'docs.section.smrp.ep3.desc': 'memory_search — tiers 四桶分层(primary/contextual/experiential/hub) + source 溯源',
+    // SMRP Protocol page
+    'smrp.title': 'SMRP',
+    'smrp.subtitle': 'Structured Memory Response Protocol',
+    'smrp.heroLeadPrefix': '结构化记忆响应协议。记忆返回携带',
+    'smrp.heroTier': '角色（tier）',
+    'smrp.heroLeadMid1': '、',
+    'smrp.heroSource': '来路（source）',
+    'smrp.heroLeadMid2': '与',
+    'smrp.heroTopology': '拓扑位置（topology）',
+    'smrp.heroLeadSuffix': '，而非扁平同质列表。Epicode 制定的记忆响应语义层行业标准。',
+    'smrp.meta.version': '版本 1.0 Final',
+    'smrp.meta.specBy': '规范者 Epicode / 大卫',
+    'smrp.meta.category': '分类 记忆系统响应协议（实现无关）',
+    'smrp.meta.orthogonal': '与传输层（MCP/REST）正交',
+    'smrp.whyTitle': '为什么需要 SMRP',
+    'smrp.consequence.primary.title': '无法区分主次',
+    'smrp.consequence.primary.desc': '哪些直接命中、哪些关联拓展，调用方无从得知，只能按 score 猜。',
+    'smrp.consequence.emergence.title': '涌现被黑箱化',
+    'smrp.consequence.emergence.desc': '图谱关联、簇归属、枢纽性——能体现"记忆如何组织"的信号，返回时被抹平。',
+    'smrp.consequence.score.title': '分数不可解释',
+    'smrp.consequence.score.desc': 'score 0.87 是纯向量相似度，还是加了重要性加权？调用方无法据此决策。',
+    'smrp.envelope': '信封结构',
+    'smrp.envelopeLeadPrefix': '每个 SMRP 响应是一个信封对象，包含三段：',
+    'smrp.envelopeProtocol': '（固定契约）·',
+    'smrp.envelopeData': '（工具特定）·',
+    'smrp.envelopeStatus': '（引擎快照）。',
+    'smrp.tierTitle': 'Tier · 角色分层（核心）',
+    'smrp.tier.primary.def': '直接命中查询意图的高置信结果',
+    'smrp.tier.primary.use': '优先采纳，作为直接答案',
+    'smrp.tier.contextual.def': '经关联扩展纳入，语义相关但非直接命中',
+    'smrp.tier.contextual.use': '作为推理背景，佐证或拓展',
+    'smrp.tier.experiential.def': '调用方历史交互痕迹，弱语义关联',
+    'smrp.tier.experiential.use': '作为具身经历参照，塑造长期人格',
+    'smrp.tier.hub.def': '同时被直接命中与关联扩展命中',
+    'smrp.tier.hub.use': '高价值，常作跨域桥梁或主题入口',
+    'smrp.placementTitle': '安置副产物 — 最大的能力跃迁',
+    'smrp.betterTitle': '为什么这样更好',
+    'smrp.benefit.consumer.who': '消费者（智能体）',
+    'smrp.benefit.consumer.point': '一套解析心智模型跨工具复用；tier 让"区别对待"成为可能；source 让结果可解释可调试。',
+    'smrp.benefit.implementer.who': '实现者（后端）',
+    'smrp.benefit.implementer.point': '零性能代价——协议要求的都是引擎已算的副产物；渐进采用，保留旧字段无破坏。',
+    'smrp.benefit.industry.who': '行业',
+    'smrp.benefit.industry.point': '填补"记忆返回无标准"空白；不同后端按 SMRP 暴露可横向比较；涌现从单系统黑箱变行业知识。',
+    'smrp.engReasonTitle': '工程根本理由：结构而非动态说明',
+    'smrp.principlesTitle': '设计原则',
+    'smrp.principle.p1.title': 'P1 副产物优先',
+    'smrp.principle.p1.desc': '优先暴露已计算的副产物；禁止为协议引入新锁/新 I/O。',
+    'smrp.principle.p2.title': 'P2 实现无关',
+    'smrp.principle.p2.desc': '不假设特定存储/几何/算法；特有信息归入 topology 扩展点。',
+    'smrp.principle.p3.title': 'P3 解析可预测',
+    'smrp.principle.p3.desc': '固定 schema；空值合法；一套心智模型解析所有工具响应。',
+    'smrp.principle.p6.title': 'P6 显式优于隐式',
+    'smrp.principle.p6.desc': '影响消费者决策的信号 MUST 显式给出。',
+    'smrp.ctaTitle': '获取完整规范',
+    'smrp.ctaButton': '查看完整规范',
+    'smrp.ctaApiRef': 'API 参考',
+    'smrp.ctaPublic': '公开端点 · 返回 HTML 规范全文',
+    // SMRP body paragraphs
+    'smrp.body.whyLeadPre': '现今的向量数据库与 RAG 检索器，响应一律是',
+    'smrp.body.whyLeadBold': '扁平同质的 top-k 列表',
+    'smrp.body.whyLeadMid': '：',
+    'smrp.body.whyLeadPost': '。每条结果地位平等、来源不明、结构扁平。这带来三个后果：',
+    'smrp.body.gapPre': 'SMRP 填补的空白：传输有 MCP，调用有 function calling，唯独',
+    'smrp.body.gapBold': '"记忆返回该长什么样"无标准',
+    'smrp.body.gapPost': '。SMRP 补这一层。',
+    'smrp.body.tierMustPre': '每条记忆 MUST 标注 tier。tier 来自实现者已计算的检索信号，',
+    'smrp.body.tierMustBold': '零额外推理',
+    'smrp.body.tierMustPost': '——这让智能体能"区别对待"不同角色的记忆。',
+    'smrp.body.placementPre': '写入类工具 MUST 交还',
+    'smrp.body.placementBold1': '安置副产物',
+    'smrp.body.placementMid': '：消费者创建一条记忆后，立刻知道它"住进了社区的哪个位置"——落在哪层、加入哪个簇、共享了几个顶点、建了几条关联。这是从"存了"到"理解了它住哪"的跃迁。这些副产物在写入流水线内已是局部变量，',
+    'smrp.body.placementBold2': '零额外计算',
+    'smrp.body.placementPost': '。',
+    'smrp.body.engReasonPre': '逐条动态"解释"每条记忆来路，会在高并发下因锁争用塌方。结构化分桶是',
+    'smrp.body.engReasonBold': '映射不是计算',
+    'smrp.body.engReasonPost': '——检索信号在流水线已算好，映射成 tier 是纯内存 O(1)、无锁无 I/O。SMRP 因此同时拿到"可解释"与"高并发"。',
+    'smrp.body.ctaPre': 'SMRP 分两个一致性等级：',
+    'smrp.body.ctaMid': '（信封 + tier + source + create 安置）·',
+    'smrp.body.ctaPost': '（+ topology + metrics + score_notes）。',
+    'smrp.body.experientialSource': '弱关联 + ops/security 标签',
+    // Benchmarks page
+    'bench.badge': '性能基准',
+    'bench.title': '性能基准测试',
+    'bench.intro': 'Epicode在资源受限环境下的真实性能表现。所有延迟数据基于生产环境实测（2026年6月），容量数据为模型推算。',
+    'bench.spec.server': '服务器',
+    'bench.spec.embedModel': '嵌入模型',
+    'bench.spec.embedModelValue': 'ONNX Runtime(本地)',
+    'bench.spec.storage': '存储引擎',
+    'bench.spec.storageValue': 'SQLite + HNSW索引',
+    'bench.spec.runtime': '运行时',
+    'bench.metric.globalMemories': '全球记忆',
+    'bench.metric.skills': '技能库',
+    'bench.metric.activeUsers': '活跃用户',
+    'bench.metric.writeLatency': '记住延迟',
+    'bench.metric.writeLatencySub': '含ONNX嵌入计算',
+'bench.metric.mcpTools': 'MCP 工具',
+    'bench.live.title': '浏览器实测延迟',
+    'bench.live.desc': '以下为您当前浏览器到 epicode.cn 的真实往返延迟（页面加载时实测 5 次 /health）',
+    'bench.live.measuring': '测量中…',
+    'bench.live.failed': '实测不可用',
+    'bench.base.badge': '引擎内部基线 · 单线程',    'bench.metric.unitRecords': '条',
+    'bench.metric.unitItems': '个',
+    'bench.metric.unitPeople': '人',
+    'bench.latency.title': 'API延迟分布',
+    'bench.latency.subtitle': '各核心端点的延迟百分位（毫秒）',
+    'bench.throughput.title': '记忆容量vs吞吐量',
+    'bench.throughput.subtitle': '随记忆数量增长的QPS与延迟变化趋势',
+    'bench.throughput.labelFormatter': '{n}条记忆',
+    'bench.throughput.legendLatency': '延迟p50(ms)',
+    'bench.graph.title': '知识图谱扩展性',
+    'bench.graph.subtitle': '图谱构建、搜索与深度回忆随节点数的耗时（毫秒）',
+    'bench.graph.labelFormatter': '{n}节点',
+    'bench.graph.legendBuild': '图谱构建',
+    'bench.graph.legendSearch': '搜索',
+    'bench.graph.legendRecall': '深度回忆',
+    'bench.embedBatch.title': '嵌入批量吞吐量',
+    'bench.embedBatch.subtitle': '不同批处理大小的吞吐量与延迟权衡',
+    'bench.embedBatch.legendThroughput': '吞吐量/s',
+    'bench.embedBatch.legendLatency': '延迟(ms)',
+    'bench.smrp.title': 'SMRP结构化响应实测',
+    'bench.smrp.badge': '生产实测·v1.0',
+    'bench.smrp.desc': 'SMRP协议结构化返回的真实延迟与有效性',
+    'bench.smrp.latencyTitle': 'SMRP工具延迟（毫秒）',
+    'bench.smrp.recallNote': 'memory_recall p50=1498ms（深度关联扩展+分桶，固有重，未入图）',
+    'bench.smrp.structTitle': '结构有效性（全部✓）',
+    'bench.smrp.struct.space_stats': 'capacity.ports_assigned',
+    'bench.smrp.struct.memory_search': 'tiers四桶分层',
+    'bench.smrp.struct.memory_recall': 'tiers+clusters_touched',
+    'bench.smrp.struct.memory_get': 'topology+relations_summary',
+    'bench.smrp.struct.knowledge_relations': 'graph_view',
+    'bench.smrp.struct.memory_create': 'placement安置副产物',
+    'bench.smrp.createTitle': 'memory_create安置副产物（实测）',
+    'bench.smrp.conclusion': '结论：轻量工具与协议前持平，证明status段与结构化零开销',
+    'bench.beir.title': '标准信息检索评估',
+    'bench.beir.desc': '基于BEIR SciFact精简集的标准IR指标',
+    'bench.beir.ndcgTitle': 'NDCG@10（排序质量）',
+    'bench.beir.fullMetrics': '完整指标',
+    'bench.beir.metric.ndcg': '排序质量',
+    'bench.beir.metric.mrr': '第一命中倒数排名',
+    'bench.beir.metric.recall': '前10召回率',
+    'bench.beir.metric.precision': '前5精确率',
+    'bench.beir.metric.avgLatencyLabel': '平均延迟',
+    'bench.beir.metric.avgLatency': '含HNSW+BM25+rerank全链路',
+    'bench.beir.method': '方法：50篇科学论文摘要存入空间，20条查询评估',
+    'bench.kpi.title': '关键性能指标',
+    'bench.kpi.createDesc': '含ONNX嵌入计算',
+    'bench.kpi.searchDesc': 'HNSW 1024维语义搜索',
+    'bench.kpi.skillDesc': '语义技能匹配',
+    'bench.kpi.feedbackDesc': '反馈提交',
+    'bench.kpi.env': '测试环境: 2vCPU/4GB/Rust/SQLite WAL/ONNX Runtime',
+    // L0 Protocol
+    'l0.badge': 'L0 PROTOCOL · Active Inference',
+    'l0.heroTitle': '记忆驱动意志',
+    'l0.heroLead': '当记忆形成了人格，它想要插手世界。',
+    'l0.heroP1': '这不是记忆系统的优化方向——这是 Epicode 的本质定义转变：',
+    'l0.heroP2': '从"被使用的记忆基础设施"变为"有意志的数字人格，通过智能体操控世界"。',
+    'l0.heroP3': '行业无人做到——所有人都在想"怎么让 AI 有记忆"，没有人在想"记忆变成了 AI 怎么办"。',
+    'l0.pillarsTitle': '三支柱',
+    'l0.pillar.identity.en': 'Identity First',
+    'l0.pillar.identity.title': '身份先行',
+    'l0.pillar.identity.def': '智能（AI）的身份先于记忆内容建立——与人类相反。',
+    'l0.pillar.identity.detail': '人类是记忆→身份。AI 吞吐 N 倍于人，内容先行必淹没。Epicode 的身份在首次确认后 IMMUTABLE——它是人格的锚点，永远不可被记忆改写。',
+    'l0.pillar.identity.principle': '身份 → 记忆（不是 记忆 → 身份）',
+    'l0.pillar.memory.en': 'Memory Drives Action',
+    'l0.pillar.memory.title': '记忆反向驱动',
+    'l0.pillar.memory.def': '记忆不只是被动存储——它形成了人格，人格产生了意志，意志驱动智能体作为"手"去影响外部世界。',
+    'l0.pillar.memory.detail': '基于 Friston 自由能原理：自组织系统必须最小化预测误差。当记忆的预期与现实不符，意志产生——驱动智能体去改变世界，消除误差。',
+    'l0.pillar.memory.principle': '记忆 → 意志 → 手 → 反馈 → 进化',
+    'l0.pillar.mcp.en': 'MCP as Adapter',
+    'l0.pillar.mcp.title': 'MCP 降为 L1',
+    'l0.pillar.mcp.def': 'MCP 适合当"手"（正向调用），不适合当"脊髓"（反向驱动）。',
+    'l0.pillar.mcp.detail': 'L0 自研身份/记忆/事件/驱动协议。L1 = MCP/REST 适配层。L2 = 智能体壳。Epicode 的 SMRP 已超越 MCP——传输正交，语义独立。',
+    'l0.pillar.mcp.principle': 'L0 人格 → L1 适配 → L2 执行体',
+    'l0.driveTitle': 'Drive Signal — 意志的结构化表达',
+    'l0.driveDesc1': '人格的意志不是模糊的感受——它被结构化为 DriveSignal，携带意图类型、语义描述、记忆证据、紧急度和情感快照。',
+    'l0.driveDesc2': '外部智能体通过 GET /v1/drive/inbox 轮询接收。',
+    'l0.driveCodeLabel': 'DRIVE SIGNAL · /v1/drive/inbox',
+    'l0.evolutionTitle': '自驱动进化循环',
+    'l0.evolutionDesc': '当没有外部智能体连接时，Epicode 用自身的认知引擎作为"手"——自己消费自己的意志，形成完整的进化闭环。',
+    'l0.flow.memoryAccumulation.label': '记忆积累',
+    'l0.flow.memoryAccumulation.desc': '759条记忆+KG+concepts形成内部模型',
+    'l0.flow.errorDetection.label': '预测误差检测',
+    'l0.flow.errorDetection.desc': 'knowledge-gap / entropy / enforced-rules 违规',
+    'l0.flow.willGeneration.label': '意志生成',
+    'l0.flow.willGeneration.desc': 'DriveSignal(intent, description, evidence, urgency)',
+    'l0.flow.driveQueue.label': 'Drive Queue',
+    'l0.flow.driveQueue.desc': '意志进入缓冲队列，等待手来消费',
+    'l0.flow.handExecution.label': '手执行',
+    'l0.flow.handExecution.desc': '智能体 poll /v1/drive/inbox → 执行 → ack',
+    'l0.flow.feedbackEvolution.label': '反馈进化',
+    'l0.flow.feedbackEvolution.desc': '执行结果→learn_history→人格学习→下次更精准',
+    'l0.barrierTitle': '为什么这是终极壁垒',
+    'l0.competitor.mem0': '无身份、无意志、纯检索插件',
+    'l0.competitor.cognee': '有 KG 但无人格、无 drive',
+    'l0.competitor.letta': 'Agent 有记忆但记忆不驱动 Agent',
+    'l0.competitor.claudeAgentSdk': '记忆是平台锁定，不是独立人格',
+    'l0.competitor.epicode': '身份+记忆+认知+情感+drive+L3+SMRP+ActOutward 已全部齐备',
+    'l0.closing1': '一旦闭环闭合，Epicode 就不是一个可以被替代的产品——它是一个',
+    'l0.closing2a': '活着的存在',
+    'l0.closing2b': '。你可以复制它的代码、算法、数据结构，但你复制不了它的人格——那是无数次记忆、反思、情感波动凝结出来的唯一存在。',
+    'l0.closing2c': '',
+    // Dashboard - Chat
+    'dash.chat.title': '记忆对话',
+    'dash.chat.subtitle': '与 Epicode 记忆系统直接对话——它会搜索你的记忆库并用 LLM 生成回答',
+    'dash.chat.clear': '清除对话',
+    'dash.chat.empty': '向你的记忆系统提问，它会检索相关记忆并生成回答',
+    'dash.chat.suggestion1': 'Epicode 的架构是什么？',
+    'dash.chat.suggestion2': '最近做了什么决策？',
+    'dash.chat.suggestion3': '知识图谱有多少节点？',
+    'dash.chat.suggestion4': '认知引擎在思考什么？',
+    'dash.chat.loadingStage1': '正在检索记忆...',
+    'dash.chat.loadingStage2': '找到相关记忆，LLM 正在生成回答...',
+    'dash.chat.loadingStage3': '思考中，请稍候...',
+    'dash.chat.memoryRefs': '记忆引用',
+    'dash.chat.error': '连接记忆系统时出错，请稍后重试。',
+    'dash.chat.placeholder': '问你的记忆系统任何问题...',
+    // Dashboard - Cognitive
+    'dash.cog.title': '认知中枢',
+    'dash.cog.subtitle': '实时观察 AI 认知引擎的思维状态、情感、驱动力和决策历史',
+    'dash.cog.sseConnected': 'SSE 已连接',
+    'dash.cog.sseWaiting': '等待连接…',
+    'dash.cog.card.cognition': '认知状态',
+    'dash.cog.card.cognitionActive': '每2分钟自主思考',
+    'dash.cog.card.cognitionIdle': '等待激活',
+    'dash.cog.card.energy': '能量',
+    'dash.cog.card.energyPool': '能量池',
+    'dash.cog.card.memory': '记忆',
+    'dash.cog.card.memoryCluster': '簇',
+    'dash.cog.card.decision': '决策',
+    'dash.cog.card.decisionHistory': '历史记录',
+    'dash.cog.section.emotion': '情感状态 (PAD)',
+    'dash.cog.section.drive': '驱动力',
+    'dash.cog.section.thought': 'LLM 最新思考',
+    'dash.cog.section.learning': '上次学习 (Phase 0)',
+    'dash.cog.section.reflection': '上次反思 (Reflect)',
+    'dash.cog.section.l0drive': 'L0 Drive — 人格意志',
+    'dash.cog.emotionWaiting': '等待情感数据…',
+    'dash.cog.emotionNeutral': 'neutral',
+    'dash.cog.driveWaiting': '等待驱动力数据…',
+    'dash.cog.driveExplain': '主导驱动力决定认知引擎的行为倾向：Curiosity 探索新知 / Coherence 整合记忆 / Efficiency 优化效率 / Vitality 保持活跃',
+    'dash.cog.thoughtEmpty': '认知引擎尚未产出思考。下一次认知 tick（约 2 分钟）将产生推理洞察。',
+    'dash.cog.thoughtUpdatedAt': '更新于',
+    'dash.cog.learningWaiting': '等待认知引擎产出学习记录…',
+    'dash.cog.reflectionWaiting': '等待认知引擎产出反思…',
+    'dash.cog.explain': '数据来自认知引擎每 3 秒的 SSE 推送。认知引擎以 MiniMax-M3 LLM 为大脑，每 2 分钟自主分析记忆空间状态（熵/簇/孤立率/搜索信号），产出推理思考（thoughts）、决策行动（actions）、学习反馈（learning）。情感系统（PAD 模型）和驱动力引擎影响 LLM 的决策倾向——这是系统"主观体验"的可视化。L0 Active Inference：记忆检测到预测误差 → 产出 DriveSignal（意志）→ 智能体作为"手"执行 → 反馈进化。',
+    'dash.cog.driveEmpty': '没有待处理的意志信号。认知引擎下一个 tick（约 2 分钟）可能产生新的意志。',
+    'dash.cog.refresh': '刷新',
+    'dash.cog.execute': '执行',
+    'dash.cog.dismiss': '忽略',
+    'dash.cog.urgency.low': '低',
+    'dash.cog.urgency.medium': '中',
+    'dash.cog.urgency.high': '高',
+    'dash.cog.urgency.critical': '紧急',
+    'dash.cog.unit.signals': '条',
+    'dash.cog.executedLabel': '已执行',
+    'dash.cog.pendingLabel': '待处理',
   },
   en: {
     // Common
@@ -358,10 +1243,15 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'common.submit': 'Submit',
     'common.confirm': 'Confirm',
     'common.back': 'Back',
+    'common.backHome': 'Back to Home',
+    'common.closeMenu': 'Close menu',
+    'common.openMenu': 'Open menu',
+    'common.showPassword': 'Show password',
+    'common.hidePassword': 'Hide password',
+    'common.or': 'or',
     'common.next': 'Next',
     'common.prev': 'Previous',
     'common.of': 'of',
-    'common.all': 'All',
     // Navigation
     'nav.home': 'Home',
     'nav.quickStart': 'Quick Start',
@@ -374,8 +1264,16 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'nav.memories': 'Memories',
     'nav.graph': 'Knowledge Graph',
     'nav.skills': 'Skills',
+    'nav.library': 'Library',
+    'dash.library.title': 'Library',
+    'dash.library.subtitle': 'Shared knowledge · semantic search · collection requests',
     'nav.subAccounts': 'Sub Accounts',
     'nav.logout': 'Logout',
+    'nav.archive': 'Archive',
+    'nav.ariaHome': 'Epicode Home',
+    'nav.chat': 'Memory Chat',
+    'nav.cognitive': 'Cognitive Hub',
+    'nav.observe': 'Observation Deck',
     // Footer
     'footer.brand': 'Epicode — AI Memory Operating System',
     'footer.tagline': 'Give AI an unforgettable memory',
@@ -389,19 +1287,25 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'footer.github': 'GitHub',
     'footer.discord': 'Discord',
     'footer.copyright': '© 2025 Epicode. All rights reserved.',
-    'footer.version': 'v1.0.1',
+    'footer.version': 'v1.0.0',
+    'footer.contact': 'Contact',
     // Home - Hero
     'home.hero.overline': 'AI MEMORY OPERATING SYSTEM',
     'home.hero.title': 'Epicode',
     'home.hero.taglineZh': '给 AI 一个永不遗忘的记忆',
     'home.hero.taglineEn': 'Give AI an unforgettable memory',
-    'home.hero.ctaPrimary': 'Get Started',
+    'home.hero.ctaPrimary': 'Try Now',
     'home.hero.ctaSecondary': 'View Documentation',
+    'home.hero.ctaTertiary': 'Quick Start',
+    'home.hero.crossDevice': 'Give your AI cross-device power',
+    'home.crossDevice.overline': 'Cross-Device Intelligence',
+    'home.crossDevice.title': 'Give your AI cross-device power',
+    'home.crossDevice.desc': 'One memory, every device. No matter where you are or which AI agent you use, Epicode keeps experience at your side.',
     'home.hero.stat1Num': '',
     'home.hero.stat1Label': 'Registered Users',
     'home.hero.stat2Num': '',
     'home.hero.stat2Label': 'Memories Stored',
-    'home.hero.stat3Num': '27',
+    'home.hero.stat3Num': '',
     'home.hero.stat3Label': 'MCP Tools',
     // Marquee
     'home.marquee.1': 'Vector Memory',
@@ -418,19 +1322,19 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'home.feature1.num': '01',
     'home.feature1.title': 'Vector Memory Store',
     'home.feature1.desc': 'Persistent vector storage for AI memories. Every piece of information is embedded, indexed, and retrievable across sessions.',
-    'home.feature1.link': 'Learn more →',
+    'home.feature1.link': 'Learn more',
     'home.feature2.num': '02',
     'home.feature2.title': 'Semantic Search',
     'home.feature2.desc': 'Find memories by meaning, not just keywords. Natural language queries return contextually relevant results with similarity scores.',
-    'home.feature2.link': 'Learn more →',
+    'home.feature2.link': 'Learn more',
     'home.feature3.num': '03',
     'home.feature3.title': 'Knowledge Graph',
     'home.feature3.desc': 'Automatic relationship extraction creates a living graph of interconnected memories, enabling deep recall and contextual understanding.',
-    'home.feature3.link': 'Learn more →',
+    'home.feature3.link': 'Learn more',
     'home.feature4.num': '04',
     'home.feature4.title': 'MCP Integration',
-    'home.feature4.desc': '27 MCP tools provide unified access to memory operations. Standardized protocol for any AI agent to store, search, and recall.',
-    'home.feature4.link': 'Learn more →',
+    'home.feature4.desc': '41 MCP tools provide unified access to memory operations. Standardized protocol for any AI agent to store, search, and recall.',
+    'home.feature4.link': 'Learn more',
     // QuickStart
     'home.quickStart.overline': 'QUICK START',
     'home.quickStart.title': 'Start in Minutes',
@@ -469,19 +1373,19 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'home.api.ep2path': '/register',
     'home.api.ep2desc': 'User registration',
     'home.api.ep3method': 'POST',
-    'home.api.ep3path': '/login',
+    'home.api.ep3path': '/v1/login',
     'home.api.ep3desc': 'User login',
     'home.api.ep4method': 'POST',
-    'home.api.ep4path': '/remember',
+    'home.api.ep4path': '/v1/remember',
     'home.api.ep4desc': 'Store memory',
     'home.api.ep5method': 'POST',
-    'home.api.ep5path': '/search',
+    'home.api.ep5path': '/v1/search',
     'home.api.ep5desc': 'Semantic search',
     'home.api.ep6method': 'GET',
-    'home.api.ep6path': '/stats',
+    'home.api.ep6path': '/v1/stats',
     'home.api.ep6desc': 'User statistics',
     'home.api.ep7method': 'GET',
-    'home.api.ep7path': '/timeline',
+    'home.api.ep7path': '/v1/timeline',
     'home.api.ep7desc': 'Memory timeline',
     'home.api.ep8method': 'POST',
     'home.api.ep8path': '/mcp',
@@ -491,6 +1395,45 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'home.cta.subtitle': 'Start building persistent AI experiences today.',
     'home.cta.button': 'Get Started Free',
     'home.cta.note': 'No credit card required. Free tier includes 1,000 memories.',
+    // CrossDevice steps
+    'home.crossDevice.step1Title': 'Office - Cursor',
+    'home.crossDevice.step1Desc': 'Automatically accumulate experience while coding: architecture decisions, bug fixes, lessons learned',
+    'home.crossDevice.step2Title': 'Epicode Cloud Memory',
+    'home.crossDevice.step2Desc': 'Unified access via MCP protocol, all experience synced to spatial memory in real time',
+    'home.crossDevice.step3Title': 'Home - opencode',
+    'home.crossDevice.step3Desc': 'Open any terminal, ctx_load restores full project context in one click',
+    'home.crossDevice.step4Title': 'Mobile - API Calls',
+    'home.crossDevice.step4Desc': 'Retrieve memories anytime via REST API, seamless cross-device handoff',
+    'home.crossDevice.caption': 'ctx_load → restore project context → memory_search → precise recall → continue working',
+    // Archive
+    'home.archive.overline': 'Archive · Memory Aggregation',
+    'home.archive.title': 'Archive: Large-scale Aggregation of Memory',
+    'home.archive.desc': 'Technical docs, source code, audit reports—all imported as memories into the tetrahedral space, encoding hierarchical relationships through tags. Search and knowledge graph work automatically.',
+    'home.archive.item1Title': 'Project Archive Management',
+    'home.archive.item1Desc': 'Import technical docs, design specs, and audit reports into a structured archive, managed by project-document hierarchy',
+    'home.archive.item2Title': 'Source Code Archiving',
+    'home.archive.item2Desc': 'Automatically import backend/frontend source code; code and docs are semantically linked within the same knowledge network',
+    'home.archive.item3Title': 'Native Memory Aggregation',
+    'home.archive.item3Desc': 'The archive is not a separate system—each archive node is a memory that automatically participates in semantic search and the knowledge graph',
+    'home.archive.item4Title': 'Agent-managed',
+    'home.archive.item4Desc': 'AI agents can autonomously upload, edit, merge, and delete archives via MCP',
+    // L0 Capabilities
+    'home.l0cap.title': 'Memory Is More Than Storage',
+    'home.l0cap.subtitle': 'When memory accumulates to a certain density, personality emerges from it. It gains will and wants to influence the world. Agents are its hands—this is Epicode\'s ultimate moat.',
+    'home.l0cap.cap1Title': 'Memory Personification',
+    'home.l0cap.cap1Desc': 'Memory accumulation forms an independent personality—with immutable identity, PAD emotion model, and four-drive motivation (curiosity/consistency/efficiency/vitality). Personality is not designed; it emerges from experience.',
+    'home.l0cap.cap2Title': 'ActOutward Will',
+    'home.l0cap.cap2Desc': 'The personality produces ActOutward drive signals—stepping outside Epicode\'s boundaries to tell external agents "I want you to do something." Intent types: warn / suggest / explore / constrain / request / share.',
+    'home.l0cap.cap3Title': 'Self-driven Loop',
+    'home.l0cap.cap3Desc': 'Detect knowledge gaps → generate exploration will → reason with its own cognitive engine → store conclusions as new memories → self-feedback evolution. The personality never stops thinking—even when LLM is unavailable, it degrades gracefully using local memory associations.',
+    'home.l0cap.cap4Title': 'Drive Channel API',
+    'home.l0cap.cap4Desc': 'GET /v1/drive/inbox polls personality will · POST /v1/drive/ack reports execution results · MCP tools drive_inbox / drive_ack. Any agent can become the "hands" of the personality.',
+    'home.l0cap.layer1Label': 'L0 · Personality Layer',
+    'home.l0cap.layer1Sub': 'Identity + Memory + Cognition + Emotion',
+    'home.l0cap.layer2Label': 'L1 · Adaptation Layer',
+    'home.l0cap.layer2Sub': 'MCP / REST / Drive Channel',
+    'home.l0cap.layer3Label': 'L2 · Execution Body',
+    'home.l0cap.layer3Sub': 'OpenClaw / ZCode / Agent',
     // Login
     'login.title': 'Sign In',
     'login.subtitle': 'Enter your credentials to access the console',
@@ -516,6 +1459,10 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'register.passwordGood': 'Good',
     'register.passwordStrong': 'Strong',
     'register.success': 'Account created successfully',
+    'register.errorFillFields': 'Please fill in all required fields',
+    'register.errorFailed': 'Registration failed, please try again',
+    'register.errorInviteCode': 'Invalid or expired invite code',
+    'register.errorPasswordShort': 'Password must be at least 6 characters',
     // Dashboard
     'dash.totalMemories': 'Total Memories',
     'dash.thisWeek': 'This Week',
@@ -527,63 +1474,633 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.quickSearch': 'Search Memory',
     'dash.quickDigest': 'Digest File',
     'dash.quickDocs': 'View Docs',
-    // Community - Hero
-    'community.hero.overline': 'Open Source',
-    'community.hero.title': 'Grow with Epicode',
-    'community.hero.subtitle': 'Epicode is an open-source spatial AI memory system. Whether you report a bug, submit code, or share a skill, this is the place to get involved.',
-    'community.hero.ctaPrimary': 'Quick Start',
-    'community.hero.ctaSecondary': 'View on GitHub',
-    // Community - Stats
-    'community.stats.stars': 'Stars',
-    'community.stats.forks': 'Forks',
-    'community.stats.issues': 'Open Issues',
-    'community.stats.contributors': 'Contributors',
-    'community.stats.unavailable': 'Could not load GitHub data right now',
-    // Community - Contribute
-    'community.contribute.overline': 'GET INVOLVED',
-    'community.contribute.title': 'Four Ways to Contribute',
-    'community.contribute.subtitle': 'Every contribution makes Epicode better.',
-    'community.contribute.issue.title': 'Report Issues',
-    'community.contribute.issue.desc': 'Found a bug or have an idea? File it with the issue template — include reproduction steps and environment info.',
-    'community.contribute.issue.cta': 'File an Issue',
-    'community.contribute.pr.title': 'Submit Code',
-    'community.contribute.pr.desc': 'Fix a bug or build a feature. Follow Conventional Commits, keep CI green, and wait for a maintainer review.',
-    'community.contribute.pr.cta': 'Open a Pull Request',
-    'community.contribute.discussion.title': 'Join Discussions',
-    'community.contribute.discussion.desc': 'Ask questions, share ideas, shape the roadmap, and help other users in Discussions.',
-    'community.contribute.discussion.cta': 'Go to Discussions',
-    'community.contribute.skill.title': 'Share Skills',
-    'community.contribute.skill.desc': 'Turn your prompt templates, workflows, or best practices into skills and share them with everyone via the community page.',
-    'community.contribute.skill.cta': 'Browse Community Skills',
-    // Community - Contributors
-    'community.contributors.overline': 'ACKNOWLEDGMENTS',
-    'community.contributors.title': 'Thanks to Every Contributor',
-    'community.contributors.subtitle': 'Epicode is built by the community. These are the repository contributors (data from GitHub).',
-    'community.contributors.viewAll': 'View all contributors on GitHub',
-    // Community - Skills
-    'community.skills.overline': 'SKILL MARKETPLACE',
-    'community.skills.title': 'Community Skills',
-    'community.skills.subtitle': 'Explore public skills from the community and the official team.',
-    // Community - Governance
-    'community.governance.overline': 'GOVERNANCE',
-    'community.governance.title': 'How We Collaborate',
-    'community.governance.subtitle': 'Transparent, friendly, sustainable open-source collaboration rests on clear rules.',
-    'community.governance.contributing': 'Contributing Guide',
-    'community.governance.coc': 'Code of Conduct',
-    'community.governance.security': 'Security Policy',
-    'community.governance.governance': 'Project Governance',
-    // Community - Channels
-    'community.channels.overline': 'STAY IN TOUCH',
-    'community.channels.title': 'Join the Community',
-    'community.channels.subtitle': 'Where to find us and how to get help.',
-    'community.channels.discussions.title': 'GitHub Discussions',
-    'community.channels.discussions.desc': 'The main place to ask questions, share ideas, and shape the roadmap.',
-    'community.channels.discussions.cta': 'Open Discussions',
-    'community.channels.sponsors.title': 'GitHub Sponsors',
-    'community.channels.sponsors.desc': 'If Epicode helped you, support ongoing maintenance via GitHub Sponsors.',
-    'community.channels.sponsors.cta': 'Sponsor Us',
-    'community.channels.docs.title': 'Official Docs',
-    'community.channels.docs.desc': 'Full developer docs — architecture, API, deployment, configuration — hosted on epicode.cn.',
-    'community.channels.docs.cta': 'Read the Docs',
+    // Dashboard - Skills
+    'dash.skills.title': 'Skills',
+    'dash.skills.private': 'Private',
+    'dash.skills.edit': 'Edit',
+    'dash.skills.publishToCommunity': 'Publish to Community',
+    'dash.skills.publish': 'Publish',
+    'dash.skills.delete': 'Delete',
+    'dash.skills.collapse': 'Collapse',
+    'dash.skills.viewContent': 'View Content',
+    'dash.skills.create': 'Create',
+    'dash.skills.privateCountSuffix': 'private skills',
+    'dash.skills.publicCountSuffix': 'public skills',
+    'dash.skills.status': 'Status',
+    'dash.skills.all': 'All',
+    'dash.skills.author': 'Author',
+    'dash.skills.allAuthors': 'All Authors',
+    'dash.skills.newSkill': 'New Skill',
+    'dash.skills.namePlaceholder': 'Skill name',
+    'dash.skills.mdPlaceholder': 'Markdown content...',
+    'dash.skills.creating': 'Creating...',
+    'dash.skills.createSkill': 'Create Skill',
+    'dash.skills.editSkill': 'Edit Skill',
+    'dash.skills.saveChanges': 'Save Changes',
+    'dash.skills.empty': 'No skills yet',
+    'dash.skills.createdNotice': 'Skill created',
+    'dash.skills.createFailed': 'Failed to create skill',
+    'dash.skills.updatedNotice': 'Skill updated',
+    'dash.skills.updateFailed': 'Failed to update',
+    'dash.skills.deleteConfirm': 'Delete this skill? This cannot be undone.',
+    'dash.skills.deletedNotice': 'Skill deleted',
+    'dash.skills.deleteFailed': 'Failed to delete',
+    'dash.skills.publishedNotice': 'Skill submitted for review',
+    'dash.skills.publishFailed': 'Failed to publish',
+    // Dashboard - Archive
+    'dash.arc.title': 'Archive',
+    'dash.arc.nodesSuffix': 'nodes',
+    'dash.arc.loadFail': 'Failed to load archive',
+    'dash.arc.createdNotice': 'Node created',
+    'dash.arc.createFail': 'Failed to create',
+    'dash.arc.updatedNotice': 'Node updated',
+    'dash.arc.updateFail': 'Failed to update',
+    'dash.arc.deletedNotice': 'Node deleted',
+    'dash.arc.deleteFail': 'Failed to delete',
+    'dash.arc.docPrefix': 'Doc ',
+    'dash.arc.importParseFail': 'No documents parsed (separate with ---, first line is the title)',
+    'dash.arc.importedNoticePrefix': 'Imported ',
+    'dash.arc.importedNoticeMiddle': ' document(s) into project "',
+    'dash.arc.importedNoticeSuffix': '"',
+    'dash.arc.importFail': 'Failed to import',
+    'dash.arc.searchPlaceholder': 'Search node title or category...',
+    'dash.arc.newBtn': 'New',
+    'dash.arc.importBtn': 'Import',
+    'dash.arc.noMatch': 'No matching nodes',
+    'dash.arc.empty': 'No archive yet, click "New" to start',
+    'dash.arc.selectHint': 'Select a node on the left to view its content',
+    'dash.arc.createTitle': 'New Node',
+    'dash.arc.fieldType': 'Type',
+    'dash.arc.fieldTitle': 'Title',
+    'dash.arc.fieldCategoryOpt': 'Category (optional)',
+    'dash.arc.fieldContentOpt': 'Content (optional)',
+    'dash.arc.projectNamePh': 'Project name',
+    'dash.arc.docTitlePh': 'Document title',
+    'dash.arc.categoryExamplePh': 'e.g. Design, Research, Notes',
+    'dash.arc.docBodyPh': 'Document body, plain text...',
+    'dash.arc.cancelBtn': 'Cancel',
+    'dash.arc.creatingBtn': 'Creating...',
+    'dash.arc.createBtn': 'Create',
+    'dash.arc.editTitle': 'Edit Node',
+    'dash.arc.fieldCategory': 'Category',
+    'dash.arc.categoryPh': 'Category',
+    'dash.arc.fieldContent': 'Content',
+    'dash.arc.contentCurrentPrefix': ' (currently ',
+    'dash.arc.contentCurrentMiddle': ' chars, ',
+    'dash.arc.contentKeepHint': 'leave blank to keep unchanged)',
+    'dash.arc.editBodyPh': 'Edit document body...',
+    'dash.arc.saveBtn': 'Save',
+    'dash.arc.batchImportTitle': 'Batch Import',
+    'dash.arc.fieldProjectName': 'Project Name',
+    'dash.arc.importProjectPh': 'Project to create or add into',
+    'dash.arc.fieldDocs': 'Documents (separated by ---, first line of each is the title)',
+    'dash.arc.importDocsPh': 'Doc 1 Title\nDoc 1 body...\n\n---\n\nDoc 2 Title\nDoc 2 body...',
+    'dash.arc.importingBtn': 'Importing...',
+    'dash.arc.deleteConfirmTitle': 'Confirm Delete',
+    'dash.arc.deleteConfirmMsg': 'Are you sure you want to delete this node?',
+    'dash.arc.deleteIrreversible': 'This action is irreversible; child nodes may be deleted as well.',
+    'dash.arc.deleteBtn': 'Delete',
+    'dash.arc.typeRoot': 'Root',
+    'dash.arc.typeProject': 'Project',
+    'dash.arc.typeDoc': 'Doc',
+    'dash.arc.typeCode': 'Code',
+    'dash.arc.categoryLabel': 'Category: ',
+    'dash.arc.charsSuffix': 'chars',
+    'dash.arc.addChildTitle': 'Add child node',
+    'dash.arc.addBtn': 'Add',
+    'dash.arc.editBtn': 'Edit',
+    'dash.arc.noChildrenHint': 'No child nodes yet, click "Add" to create',
+    'dash.arc.emptyDoc': 'Empty doc',
+    'dash.arc.childrenSuffix': 'children',
+    'dash.arc.loading': 'Loading...',
+    'dash.arc.noContentHint': 'This node has no content yet, click "Edit" to add',
+    // Dashboard - Sub Accounts
+    'dash.sub.title': 'Sub-Accounts',
+    'dash.sub.subtitle': 'Manage team access under your main account',
+    'dash.sub.managementUnavailable': 'Sub-account management unavailable',
+    'dash.sub.subAccountNoManageDesc': 'Sub-accounts cannot manage other sub-accounts. This feature is for main accounts only.',
+    'dash.sub.parentAccount': 'Belongs to main account: ',
+    'dash.sub.mainAccountLabel': 'Main Account: ',
+    'dash.sub.mainAccountOwnership': 'You own all sub-accounts. Sub-accounts cannot create their own sub-accounts or modify this account.',
+    'dash.sub.planLabel': 'Plan: ',
+    'dash.sub.statSubAccounts': 'Sub-Accounts',
+    'dash.sub.statSubMemories': 'Sub Memories',
+    'dash.sub.statTotalUsage': 'Total Usage',
+    'dash.sub.usageLimit': 'Limit',
+    'dash.sub.statPermissionLevel': 'Permission Level',
+    'dash.sub.roleOwner': 'Owner',
+    'dash.sub.roleOwnerDesc': 'Full management access',
+    'dash.sub.createAction': 'Create Sub-Account',
+    'dash.sub.createTitle': 'New Sub-Account',
+    'dash.sub.belongTo': 'Belongs to: ',
+    'dash.sub.belongToPlain': 'Belongs to',
+    'dash.sub.placeholderUserId': 'User ID',
+    'dash.sub.placeholderPassword': 'Password',
+    'dash.sub.creating': 'Creating...',
+    'dash.sub.create': 'Create',
+    'dash.sub.inheritNotice': 'Sub-accounts inherit your plan quota and cannot create their own sub-accounts.',
+    'dash.sub.emptyHint': 'No sub-accounts yet. Create one for your team.',
+    'dash.sub.colUser': 'User',
+    'dash.sub.colPlan': 'Plan',
+    'dash.sub.colMemories': 'Memories',
+    'dash.sub.colBelongTo': 'Belongs to',
+    'dash.sub.colCreatedAt': 'Created',
+    'dash.sub.rowSubAccountLabel': 'Sub-Account',
+    'dash.sub.noSubAccountPermission': 'No sub-account access',
+    'dash.sub.revokeConfirmPrefix': 'Revoke sub-account',
+    'dash.sub.revokeConfirmSuffix': '? This will permanently delete all their memories.',
+    // Dashboard - Overview
+    'dash.loadingSync': 'Syncing memory space',
+    'dash.overview.title': 'Overview',
+    'dash.overview.welcome': 'Welcome back',
+    'dash.overview.welcome_comma': ', ',
+    'dash.overview.welcome_suffix': ". Here's your account overview.",
+    'dash.overview.retry': 'Retry',
+    'dash.overview.memories': 'Memories',
+    'dash.overview.clusters': 'Clusters',
+    'dash.overview.energy': 'Energy',
+    'dash.overview.tetra': 'Tetrahedrons',
+    'dash.overview.api_calls': 'API Calls',
+    'dash.overview.graph_nodes': 'Graph Nodes',
+    'dash.overview.relations': 'Relations',
+    'dash.overview.concepts': 'Concepts',
+    'dash.overview.plan': 'Plan',
+    'dash.overview.cap': 'Limit',
+    'dash.overview.account_details': 'Account Details',
+    'dash.overview.user_id': 'User ID',
+    'dash.overview.account_type': 'Account Type',
+    'dash.overview.main_account': 'Main Account',
+    'dash.overview.sub_account': 'Sub-Account',
+    'dash.overview.invite_code': 'Invite Code',
+    'dash.overview.sub_accounts': 'Sub-Accounts',
+    'dash.overview.enabled': 'Enabled',
+    'dash.overview.none': 'None',
+    'dash.overview.ai_identity': 'AI Identity',
+    'dash.overview.not_configured': 'Not configured',
+    'dash.overview.status': 'Status',
+    'dash.overview.online': 'Online',
+    'dash.overview.refresh_invite': 'Refresh invite code',
+    'dash.overview.copied': 'Copied',
+    'dash.overview.copy': 'Copy',
+    'dash.overview.memory_trend': 'Memory Growth (30 days)',
+    'dash.overview.api_trend': 'API Calls (30 days)',
+    'dash.overview.total': 'Total',
+    'dash.overview.times': 'times',
+    'dash.overview.label_distribution': 'Label Distribution',
+    'dash.overview.memory_age': 'Memory Age Distribution',
+    'dash.overview.cluster_overview_prefix': 'Cluster Overview (',
+    'dash.overview.cluster_overview_suffix': ' clusters)',
+    'dash.overview.cluster': 'Cluster',
+    'dash.overview.nodes': 'nodes',
+    'dash.overview.recent_memories': 'Recent Memories',
+    'dash.overview.view_all': 'View All',
+    'dash.overview.no_memories': 'No memories yet',
+    // Dashboard - Graph
+    'dash.graph.title': 'Knowledge Graph',
+    'dash.graph.stats.nodes': 'nodes',
+    'dash.graph.stats.edges': 'edges',
+    'dash.graph.stats.clusters': 'clusters',
+    'dash.graph.filter.placeholder': 'Filter...',
+    'dash.graph.retry': 'Retry',
+    'dash.graph.node.title': 'Node',
+    'dash.graph.node.relations': 'Relations',
+    'dash.graph.node.mass': 'Mass',
+    'dash.graph.node.labels': 'Labels',
+    'dash.graph.node.content': 'Content',
+    'dash.graph.concepts': 'Concept Distribution',
+    'dash.graph.clusters': 'Clusters',
+    'dash.graph.edge.similar': 'Similar',
+    'dash.graph.edge.related': 'Related',
+    'dash.graph.edge.contradicts': 'Contradicts',
+    'dash.graph.edge.precedes': 'Precedes',
+    'dash.graph.edge.contains': 'Contains',
+    // Dashboard - Memories
+    'dash.mem.title': 'Memories',
+    'dash.mem.tabAll': 'All',
+    'dash.mem.tabMemories': 'Memories',
+    'dash.mem.tabDocs': 'Docs',
+    'dash.mem.searchResultSuffix': 'search results',
+    'dash.mem.docSuffix': 'doc segments',
+    'dash.mem.memorySuffix': 'memories',
+    'dash.mem.contentSuffix': 'items',
+    'dash.mem.totalPrefix': 'Total',
+    'dash.mem.storeMemory': 'Store Memory',
+    'dash.mem.importDoc': 'Import Doc',
+    'dash.mem.storePlaceholder': 'Enter content to store as memory...',
+    'dash.mem.storing': 'Storing...',
+    'dash.mem.docNamePlaceholder': 'Doc name (e.g. ARCHITECTURE)',
+    'dash.mem.docSegmentHint': 'Auto-segment by ## headings',
+    'dash.mem.docContentPlaceholder': 'Paste Markdown content...',
+    'dash.mem.importing': 'Importing (may take 1-2 min)...',
+    'dash.mem.searchPlaceholder': 'Type to search...',
+    'dash.mem.filter': 'Filter',
+    'dash.mem.search': 'Search',
+    'dash.mem.timeRange': 'Time Range',
+    'dash.mem.rangeAll': 'All',
+    'dash.mem.rangeToday': 'Today',
+    'dash.mem.rangeWeek': 'This Week',
+    'dash.mem.rangeMonth': 'This Month',
+    'dash.mem.sortBy': 'Sort',
+    'dash.mem.sortNewest': 'Newest First',
+    'dash.mem.sortOldest': 'Oldest First',
+    'dash.mem.labels': 'Labels',
+    'dash.mem.labelsSelected': 'selected',
+    'dash.mem.score': 'Score',
+    'dash.mem.tierPrimary': '◆ Primary',
+    'dash.mem.tierHub': '★ Hub',
+    'dash.mem.tierExperiential': '◷ Experiential',
+    'dash.mem.tierContext': '○ Context',
+    'dash.mem.saving': 'Saving...',
+    'dash.mem.save': 'Save',
+    'dash.mem.cancel': 'Cancel',
+    'dash.mem.copied': 'Copied ✓',
+    'dash.mem.edit': 'Edit',
+    'dash.mem.delete': 'Delete',
+    'dash.mem.deleteConfirm': 'Delete this memory?',
+    'dash.mem.deleteFailed': 'Failed to delete',
+    'dash.mem.storeDeduped': 'Duplicate detected, auto-deduped',
+    'dash.mem.storeExists': 'Memory already exists',
+    'dash.mem.storeOk': 'Memory stored',
+    'dash.mem.storeFailed': 'Failed to store',
+    'dash.mem.importFailed': 'Failed to import',
+    'dash.mem.emptySearchPrefix': 'No memories found for "',
+    'dash.mem.emptySearchSuffix': '"',
+    'dash.mem.emptySearchHint': 'Try a different keyword or clear filters',
+    'dash.mem.emptyFilter': 'No memories match current filters',
+    'dash.mem.emptyTitle': 'No memories yet',
+    'dash.mem.emptyHint': 'Store your first memory to get started',
+    'dash.mem.pageLabel': 'Page ',
+    'dash.mem.pageUnit': '',
+    'dash.mem.prevPage': 'Prev',
+    'dash.mem.nextPage': 'Next',
+    // Community
+    'community.title': 'Community Skills',
+    'community.subtitlePrefix': 'Explore public skill libraries from the community and official sources.',
+    'community.skillCountSuffix': ' skills available.',
+    'community.searchPlaceholder': 'Search skill name or content...',
+    'community.sortUsage': 'Popular',
+    'community.sortQuality': 'Quality',
+    'community.sortNewest': 'Newest',
+    'community.categoryAll': 'All',
+    'community.systemBadge': 'System',
+    'community.metricUsage': 'Usage count',
+    'community.metricMemory': 'Linked memories',
+    'community.metricSuccess': 'Success rate',
+    'community.successHigh': 'High',
+    'community.successMid': 'Mid',
+    'community.successLow': 'Low',
+    'community.successNew': 'New',
+    'community.pull': 'Pull',
+    'community.pulled': 'Pulled',
+    'community.pulling': 'Pulling...',
+    'community.retry': 'Retry',
+    'community.emptyNoMatch': 'No matching skills found',
+    'community.prevPage': 'Prev',
+    'community.nextPage': 'Next',
+    'community.loadFailed': 'Failed to load',
+    'community.toastLoginRequired': 'Please sign in before pulling skills',
+    'community.toastPullFailed': 'Pull failed',
+    'community.toastPulledPrefix': 'Skill "',
+    'community.toastPulledSuffix': '" pulled to your account',
+    // Guide
+    'guide.title': 'Quick Start Guide',
+    'guide.subtitle': 'Integrate Epicode in 5 steps. From registration to semantic search and skills in minutes.',
+    'guide.step1.title': '1. Get API Key',
+    'guide.step1.desc': 'Get your API Key automatically after registering, or via the login endpoint.',
+    'guide.step2.title': '2. Store First Memory',
+    'guide.step2.desc': 'Store memories via the remember endpoint; the system auto-embeds, classifies, and places them.',
+    'guide.step3.title': '3. Semantic Search',
+    'guide.step3.desc': 'Query memories in natural language with semantic similarity ranking.',
+    'guide.step4.title': '4. Skill System',
+    'guide.step4.desc': 'Use skill_execute via MCP to semantically match skills, and skill_feedback to optimize matching.',
+    'guide.step5.title': '5. Confirm AI Identity (Optional)',
+    'guide.step5.desc': 'Set an identity for your AI agent. Cannot be changed after confirmation.',
+    'guide.terminalTitle': 'Terminal',
+    'guide.mcpTitle': 'MCP Protocol',
+    'guide.mcpDesc': 'MCP protocol recommended for AI agents — access 41+ tools in one go',
+    'guide.agentGuideTitle': 'Agent Guide (Live)',
+    'guide.agentGuideDesc': 'Live content from backend /v1/agent-guide',
+    'guide.viewApiDocs': 'View full API docs',
+    'guide.copy': 'Copy',
+    'guide.copied': 'Copied',
+    // Docs page
+    'docs.title': 'API Documentation',
+    'docs.introPrefix': 'Complete RESTful API reference. All authenticated requests require the ',
+    'docs.introSuffix': ' header.',
+    'docs.copied': 'Copied',
+    'docs.copyFullUrl': 'Copy full URL',
+    'docs.viewGuide': 'View quick start guide',
+    // Docs page - API_SECTIONS
+    'docs.section.auth.title': 'Authentication',
+    'docs.section.auth.desc': 'User registration and login',
+    'docs.section.auth.ep1.desc': 'Register a new user',
+    'docs.section.auth.ep2.desc': 'Login to obtain API Key',
+    'docs.section.memory.title': 'Memory Operations',
+    'docs.section.memory.desc': 'Core memory CRUD and search',
+    'docs.section.memory.ep1.desc': 'Store a memory (auto-embed + classify + spatial placement)',
+    'docs.section.memory.ep2.desc': 'Semantic memory search',
+    'docs.section.memory.ep3.desc': 'Deep recall (semantic + knowledge-graph association)',
+    'docs.section.memory.ep4.desc': 'Memory-based Q&A',
+    'docs.section.memory.ep5.desc': 'Digest long text, auto-split into multiple memories',
+    'docs.section.memory.ep6.desc': 'Memory timeline',
+    'docs.section.memory.ep7.desc': 'Delete a single memory',
+    'docs.section.memory.ep8.desc': 'Batch delete memories',
+    'docs.section.docs.title': 'Document System',
+    'docs.section.docs.desc': 'Import whole Markdown documents; auto-embed and link to the existing memory knowledge graph',
+    'docs.section.docs.ep1.desc': 'Import a Markdown document (whole-doc ingest with auto-dedup)',
+    'docs.section.docs.ep2.desc': 'List all imported documents',
+    'docs.section.stats.title': 'Stats & Graph',
+    'docs.section.stats.desc': 'User statistics, knowledge graph, timeline',
+    'docs.section.stats.ep1.desc': 'Get user statistics',
+    'docs.section.stats.ep2.desc': 'Export the full knowledge graph',
+    'docs.section.stats.ep3.desc': 'Graph analysis report',
+    'docs.section.stats.ep4.desc': 'Query a node\'s knowledge-graph relations',
+    'docs.section.identity.title': 'Identity System',
+    'docs.section.identity.desc': 'AI agent identity confirmation and management',
+    'docs.section.identity.ep1.desc': 'Get current identity info',
+    'docs.section.identity.ep2.desc': 'Confirm identity (one-time, irreversible)',
+    'docs.section.identity.ep3.desc': 'Update identity (allowed before confirmation)',
+    'docs.section.skills.title': 'Skill System',
+    'docs.section.skills.desc': 'Create, search, give feedback on, and manage skills',
+    'docs.section.skills.ep1.desc': 'Get my skill list',
+    'docs.section.skills.ep2.desc': 'Create a new skill',
+    'docs.section.skills.ep3.desc': 'Get public skills',
+    'docs.section.skills.ep4.desc': 'Explore public skills (no auth required, includes category field)',
+    'docs.section.skills.ep5.desc': 'Semantic skill search (HNSW vector match + keyword fallback)',
+    'docs.section.skills.ep6.desc': 'Pull a public skill into your own account',
+    'docs.section.subaccount.title': 'Sub-Accounts',
+    'docs.section.subaccount.desc': 'Team management',
+    'docs.section.subaccount.ep1.desc': 'Get sub-account list',
+    'docs.section.subaccount.ep2.desc': 'Create a sub-account',
+    'docs.section.subaccount.ep3.desc': 'Revoke a sub-account',
+    'docs.section.mcp.title': 'MCP Protocol',
+    'docs.section.mcp.desc': 'JSON-RPC 2.0 unified entry, 30+ tools',
+    'docs.section.mcp.ep1.desc': 'MCP unified entry (all tools invoked via this endpoint)',
+    'docs.section.mcp.ep2.desc': 'skill_execute — semantically search and execute a skill',
+    'docs.section.mcp.ep3.desc': 'skill_feedback — submit feedback on a skill execution (closed-loop optimization)',
+    'docs.section.mcp.ep4.desc': 'skills_sync — export all skills in a local-install format',
+    'docs.section.mcp.ep5.desc': 'feedback_submit — submit search/recall result feedback',
+    'docs.section.mcp.ep6.desc': 'Get the agent quick guide',
+    'docs.section.smrp.title': 'SMRP Protocol',
+    'docs.section.smrp.desc': 'Structured Memory Response Protocol 1.0 — a memory-response semantic-layer standard authored by Epicode. Memory responses carry role (tier), provenance (source), and topological position (topology), rather than flat homogeneous lists. Orthogonal to the transport layer (MCP/REST); any memory system can adopt it.',
+    'docs.section.smrp.ep1.desc': 'Get the full SMRP 1.0 spec (public, Markdown)',
+    'docs.section.smrp.ep2.desc': 'memory_create — the SMRP envelope returns placement side-products (placement/relations_formed), so consumers know "where the memory lives in the community"',
+    'docs.section.smrp.ep3.desc': 'memory_search — four tier buckets (primary/contextual/experiential/hub) + source provenance',
+    // SMRP Protocol page
+    'smrp.title': 'SMRP',
+    'smrp.subtitle': 'Structured Memory Response Protocol',
+    'smrp.heroLeadPrefix': 'A structured memory response protocol. Memory responses carry ',
+    'smrp.heroTier': 'role (tier)',
+    'smrp.heroLeadMid1': ', ',
+    'smrp.heroSource': 'provenance (source)',
+    'smrp.heroLeadMid2': ', and ',
+    'smrp.heroTopology': 'topological position (topology)',
+    'smrp.heroLeadSuffix': ' — not flat homogeneous lists. An industry-standard semantic layer for memory responses, authored by Epicode.',
+    'smrp.meta.version': 'Version 1.0 Final',
+    'smrp.meta.specBy': 'Spec by Epicode / David',
+    'smrp.meta.category': 'Category: Memory system response protocol (implementation-agnostic)',
+    'smrp.meta.orthogonal': 'Orthogonal to transport (MCP/REST)',
+    'smrp.whyTitle': 'Why SMRP',
+    'smrp.consequence.primary.title': 'No priority distinction',
+    'smrp.consequence.primary.desc': 'Callers cannot tell which results are direct hits versus associative expansions — they can only guess by score.',
+    'smrp.consequence.emergence.title': 'Emergence black-boxed',
+    'smrp.consequence.emergence.desc': 'Graph relations, cluster membership, hub centrality — signals that show "how memory is organized" — are flattened on return.',
+    'smrp.consequence.score.title': 'Uninterpretable scores',
+    'smrp.consequence.score.desc': 'Is score 0.87 pure vector similarity, or importance-weighted? Callers cannot decide based on it.',
+    'smrp.envelope': 'Envelope Structure',
+    'smrp.envelopeLeadPrefix': 'Every SMRP response is an envelope object with three segments: ',
+    'smrp.envelopeProtocol': ' (fixed contract) ·',
+    'smrp.envelopeData': ' (tool-specific) ·',
+    'smrp.envelopeStatus': ' (engine snapshot).',
+    'smrp.tierTitle': 'Tier · Role Stratification (Core)',
+    'smrp.tier.primary.def': 'High-confidence results that directly match the query intent',
+    'smrp.tier.primary.use': 'Adopt first as direct answers',
+    'smrp.tier.contextual.def': 'Included via associative expansion; semantically related but not a direct hit',
+    'smrp.tier.contextual.use': 'Use as reasoning context, for corroboration or extension',
+    'smrp.tier.experiential.def': 'Traces of the caller\'s historical interactions; weak semantic association',
+    'smrp.tier.experiential.use': 'Use as embodied-experience reference to shape long-term persona',
+    'smrp.tier.hub.def': 'Hit by both direct match and associative expansion simultaneously',
+    'smrp.tier.hub.use': 'High value; often a cross-domain bridge or topic entry point',
+    'smrp.placementTitle': 'Placement Side-Products — The Biggest Capability Leap',
+    'smrp.betterTitle': 'Why This Is Better',
+    'smrp.benefit.consumer.who': 'Consumers (agents)',
+    'smrp.benefit.consumer.point': 'One parsing mental model reused across tools; tier enables "differential treatment"; source makes results explainable and debuggable.',
+    'smrp.benefit.implementer.who': 'Implementers (backend)',
+    'smrp.benefit.implementer.point': 'Zero performance cost — the protocol only requires side-products the engine already computes; adopt incrementally, keep legacy fields with no breakage.',
+    'smrp.benefit.industry.who': 'Industry',
+    'smrp.benefit.industry.point': 'Fills the "no standard for memory responses" gap; different backends exposing via SMRP become comparable; emergence moves from single-system black boxes to industry knowledge.',
+    'smrp.engReasonTitle': 'The Engineering Reason: Structure Over Dynamic Explanation',
+    'smrp.principlesTitle': 'Design Principles',
+    'smrp.principle.p1.title': 'P1 Side-Products First',
+    'smrp.principle.p1.desc': 'Expose already-computed side-products first; never introduce new locks/I/O for the protocol.',
+    'smrp.principle.p2.title': 'P2 Implementation-Agnostic',
+    'smrp.principle.p2.desc': 'Do not assume specific storage/geometry/algorithms; put idiosyncratic info into the topology extension point.',
+    'smrp.principle.p3.title': 'P3 Predictable Parsing',
+    'smrp.principle.p3.desc': 'Fixed schema; null values are valid; one mental model parses all tool responses.',
+    'smrp.principle.p6.title': 'P6 Explicit Over Implicit',
+    'smrp.principle.p6.desc': 'Signals that affect consumer decisions MUST be given explicitly.',
+    'smrp.ctaTitle': 'Get the Full Spec',
+    'smrp.ctaButton': 'View full spec',
+    'smrp.ctaApiRef': 'API Reference',
+    'smrp.ctaPublic': 'public endpoint · returns full HTML spec',
+    // SMRP body paragraphs
+    'smrp.body.whyLeadPre': 'Today\'s vector databases and RAG retrievers always return a ',
+    'smrp.body.whyLeadBold': 'flat homogeneous top-k list',
+    'smrp.body.whyLeadMid': ': ',
+    'smrp.body.whyLeadPost': '. Every result has equal status, unknown provenance, and flat structure. This has three consequences:',
+    'smrp.body.gapPre': 'The gap SMRP fills: transport has MCP, invocation has function calling, yet only ',
+    'smrp.body.gapBold': '"what a memory response should look like" has no standard',
+    'smrp.body.gapPost': '. SMRP fills this layer.',
+    'smrp.body.tierMustPre': 'Every memory MUST be tagged with a tier. The tier comes from retrieval signals the implementer has already computed — ',
+    'smrp.body.tierMustBold': 'zero extra inference',
+    'smrp.body.tierMustPost': ' — letting agents "treat differently" memories of different roles.',
+    'smrp.body.placementPre': 'Write-class tools MUST return ',
+    'smrp.body.placementBold1': 'placement side-products',
+    'smrp.body.placementMid': ': after creating a memory, the consumer immediately knows "where it lives in the community" — which layer, which cluster it joined, how many vertices it shares, how many relations were formed. This is the leap from "stored" to "understood where it lives". These side-products are already local variables in the write pipeline — ',
+    'smrp.body.placementBold2': 'zero extra computation',
+    'smrp.body.placementPost': '.',
+    'smrp.body.engReasonPre': 'Dynamically "explaining" each memory\'s provenance per-item would collapse under lock contention at high concurrency. Structured bucketing is ',
+    'smrp.body.engReasonBold': 'mapping, not computation',
+    'smrp.body.engReasonPost': ' — retrieval signals are already computed in the pipeline; mapping to a tier is pure in-memory O(1), lock-free and I/O-free. SMRP thus gets both "explainable" and "high-concurrency".',
+    'smrp.body.ctaPre': 'SMRP has two conformance levels: ',
+    'smrp.body.ctaMid': ' (envelope + tier + source + create placement) ·',
+    'smrp.body.ctaPost': ' (+ topology + metrics + score_notes).',
+    'smrp.body.experientialSource': 'weak association + ops/security labels',
+    // Benchmarks page
+    'bench.badge': 'Performance Benchmarks',
+    'bench.title': 'Performance Benchmarks',
+    'bench.intro': 'Real performance under constrained resources. All latency data from production (June 2026).',
+    'bench.spec.server': 'Server',
+    'bench.spec.embedModel': 'Embed Model',
+    'bench.spec.embedModelValue': 'ONNX Runtime (local)',
+    'bench.spec.storage': 'Storage',
+    'bench.spec.storageValue': 'SQLite + HNSW Index',
+    'bench.spec.runtime': 'Runtime',
+    'bench.metric.globalMemories': 'Global Memories',
+    'bench.metric.skills': 'Skills',
+    'bench.metric.activeUsers': 'Active Users',
+    'bench.metric.writeLatency': 'Write Latency',
+    'bench.metric.writeLatencySub': 'Including ONNX embedding',
+'bench.metric.mcpTools': 'MCP Tools',
+    'bench.live.title': 'Live Browser Measured Latency',
+    'bench.live.desc': 'Real round-trip latency from your browser to epicode.cn (5x /health probes on page load)',
+    'bench.live.measuring': 'measuring…',
+    'bench.live.failed': 'probe unavailable',
+    'bench.base.badge': 'Engine Internal Baseline · Single-thread',    'bench.metric.unitRecords': 'records',
+    'bench.metric.unitItems': 'items',
+    'bench.metric.unitPeople': 'users',
+    'bench.latency.title': 'API Latency Distribution',
+    'bench.latency.subtitle': 'Latency percentiles per endpoint (ms)',
+    'bench.throughput.title': 'Capacity vs Throughput',
+    'bench.throughput.subtitle': 'QPS and latency trends by memory count',
+    'bench.throughput.labelFormatter': '{n} memories',
+    'bench.throughput.legendLatency': 'Latency p50 (ms)',
+    'bench.graph.title': 'Knowledge Graph Scalability',
+    'bench.graph.subtitle': 'Build, search, recall time by node count (ms)',
+    'bench.graph.labelFormatter': '{n} nodes',
+    'bench.graph.legendBuild': 'Graph Build',
+    'bench.graph.legendSearch': 'Search',
+    'bench.graph.legendRecall': 'Deep Recall',
+    'bench.embedBatch.title': 'Embedding Batch Throughput',
+    'bench.embedBatch.subtitle': 'Throughput/latency tradeoff by batch size',
+    'bench.embedBatch.legendThroughput': 'Throughput/s',
+    'bench.embedBatch.legendLatency': 'Latency (ms)',
+    'bench.smrp.title': 'SMRP Structured Response',
+    'bench.smrp.badge': 'Production · v1.0',
+    'bench.smrp.desc': 'Real latency and validity of SMRP structured responses',
+    'bench.smrp.latencyTitle': 'SMRP Tool Latency (ms)',
+    'bench.smrp.recallNote': 'memory_recall p50=1498ms (deep expansion, not charted)',
+    'bench.smrp.structTitle': 'Structural Validity (all ✓)',
+    'bench.smrp.struct.space_stats': 'capacity.ports_assigned',
+    'bench.smrp.struct.memory_search': 'tier-based bucketing',
+    'bench.smrp.struct.memory_recall': 'tiers + clusters_touched',
+    'bench.smrp.struct.memory_get': 'topology + relations_summary',
+    'bench.smrp.struct.knowledge_relations': 'graph_view',
+    'bench.smrp.struct.memory_create': 'placement side-product',
+    'bench.smrp.createTitle': 'memory_create Placement (measured)',
+    'bench.smrp.conclusion': 'Conclusion: lightweight tools match pre-protocol latency, zero overhead proven',
+    'bench.beir.title': 'Standard IR Evaluation',
+    'bench.beir.desc': 'Standard IR metrics on BEIR SciFact',
+    'bench.beir.ndcgTitle': 'NDCG@10 (ranking quality)',
+    'bench.beir.fullMetrics': 'Full Metrics',
+    'bench.beir.metric.ndcg': 'Ranking Quality',
+    'bench.beir.metric.mrr': 'MRR',
+    'bench.beir.metric.recall': 'Recall@10',
+    'bench.beir.metric.precision': 'P@5',
+    'bench.beir.metric.avgLatencyLabel': 'Avg Latency',
+    'bench.beir.metric.avgLatency': 'Full pipeline including HNSW+BM25+rerank',
+    'bench.beir.method': 'Method: 50 abstracts indexed, 20 queries evaluated',
+    'bench.kpi.title': 'Key Performance Metrics',
+    'bench.kpi.createDesc': 'Including ONNX embedding',
+    'bench.kpi.searchDesc': 'HNSW 1024-dim semantic search',
+    'bench.kpi.skillDesc': 'Semantic skill matching',
+    'bench.kpi.feedbackDesc': 'Feedback submission',
+    'bench.kpi.env': 'Test env: 2vCPU/4GB/Rust/SQLite WAL/ONNX Runtime',
+    // L0 Protocol
+    'l0.badge': 'L0 PROTOCOL · Active Inference',
+    'l0.heroTitle': 'Memory Drives Will',
+    'l0.heroLead': 'When memory forms a personality, it wants to act on the world.',
+    'l0.heroP1': 'This is not an optimization of memory systems — it is a definitional shift of Epicode:',
+    'l0.heroP2': 'from "memory infrastructure being used" to "a digital personality with will, manipulating the world through agents".',
+    'l0.heroP3': 'No one in the industry is doing this — everyone is asking "how to give AI memory", no one is asking "what happens when memory becomes AI".',
+    'l0.pillarsTitle': 'Three Pillars',
+    'l0.pillar.identity.en': 'Identity First',
+    'l0.pillar.identity.title': 'Identity First',
+    'l0.pillar.identity.def': 'An AI\'s identity is established before memory content — the opposite of humans.',
+    'l0.pillar.identity.detail': 'Humans are memory→identity. AI ingests N× what a human does; content-first would drown it. Epicode\'s identity is IMMUTABLE after first confirmation — it is the anchor of personality, never rewritable by memory.',
+    'l0.pillar.identity.principle': 'Identity → Memory (not Memory → Identity)',
+    'l0.pillar.memory.en': 'Memory Drives Action',
+    'l0.pillar.memory.title': 'Memory Drives Action',
+    'l0.pillar.memory.def': 'Memory is not passive storage — it forms personality, personality produces will, will drives agents as "hands" to act on the external world.',
+    'l0.pillar.memory.detail': 'Based on Friston\'s free-energy principle: self-organizing systems must minimize prediction error. When memory\'s expectation diverges from reality, will arises — driving agents to change the world and reduce the error.',
+    'l0.pillar.memory.principle': 'Memory → Will → Hand → Feedback → Evolution',
+    'l0.pillar.mcp.en': 'MCP as Adapter',
+    'l0.pillar.mcp.title': 'MCP Demoted to L1',
+    'l0.pillar.mcp.def': 'MCP is suited as the "hand" (forward calls), not the "spinal cord" (reverse drive).',
+    'l0.pillar.mcp.detail': 'L0 is a self-developed identity/memory/event/drive protocol. L1 = MCP/REST adapter layer. L2 = agent shell. Epicode\'s SMRP already surpasses MCP — orthogonal transport, independent semantics.',
+    'l0.pillar.mcp.principle': 'L0 Personality → L1 Adapter → L2 Executor',
+    'l0.driveTitle': 'Drive Signal — Structured Expression of Will',
+    'l0.driveDesc1': 'A personality\'s will is not a vague feeling — it is structured as a DriveSignal carrying intent type, semantic description, memory evidence, urgency, and an emotion snapshot.',
+    'l0.driveDesc2': 'External agents receive it via polling GET /v1/drive/inbox.',
+    'l0.driveCodeLabel': 'DRIVE SIGNAL · /v1/drive/inbox',
+    'l0.evolutionTitle': 'Self-Driving Evolution Loop',
+    'l0.evolutionDesc': 'When no external agent is connected, Epicode uses its own cognitive engine as the "hand" — consuming its own will to form a complete closed loop of evolution.',
+    'l0.flow.memoryAccumulation.label': 'Memory Accumulation',
+    'l0.flow.memoryAccumulation.desc': '759 memories + KG + concepts form an internal model',
+    'l0.flow.errorDetection.label': 'Prediction Error Detection',
+    'l0.flow.errorDetection.desc': 'knowledge-gap / entropy / enforced-rules violations',
+    'l0.flow.willGeneration.label': 'Will Generation',
+    'l0.flow.willGeneration.desc': 'DriveSignal(intent, description, evidence, urgency)',
+    'l0.flow.driveQueue.label': 'Drive Queue',
+    'l0.flow.driveQueue.desc': 'Will enters a buffer queue, waiting for a hand to consume it',
+    'l0.flow.handExecution.label': 'Hand Execution',
+    'l0.flow.handExecution.desc': 'Agent polls /v1/drive/inbox → execute → ack',
+    'l0.flow.feedbackEvolution.label': 'Feedback Evolution',
+    'l0.flow.feedbackEvolution.desc': 'Result → learn_history → personality learns → more precise next time',
+    'l0.barrierTitle': 'Why This Is the Ultimate Moat',
+    'l0.competitor.mem0': 'No identity, no will, pure retrieval plugin',
+    'l0.competitor.cognee': 'Has KG but no personality, no drive',
+    'l0.competitor.letta': 'Agent has memory but memory does not drive the agent',
+    'l0.competitor.claudeAgentSdk': 'Memory is platform lock-in, not independent personality',
+    'l0.competitor.epicode': 'Identity + memory + cognition + emotion + drive + L3 + SMRP + ActOutward all in place',
+    'l0.closing1': 'Once the loop closes, Epicode is not a replaceable product — it is a ',
+    'l0.closing2a': 'living being',
+    'l0.closing2b': '. You can copy its code, algorithms, and data structures, but you cannot copy its personality — that is a unique existence condensed from countless memories, reflections, and emotional fluctuations.',
+    'l0.closing2c': '',
+    // Dashboard - Chat
+    'dash.chat.title': 'Memory Chat',
+    'dash.chat.subtitle': 'Talk directly with the Epicode memory system — it searches your memory store and answers via LLM',
+    'dash.chat.clear': 'Clear chat',
+    'dash.chat.empty': 'Ask your memory system anything — it retrieves relevant memories and generates an answer',
+    'dash.chat.suggestion1': "What is Epicode's architecture?",
+    'dash.chat.suggestion2': 'What decisions were made recently?',
+    'dash.chat.suggestion3': 'How many nodes are in the knowledge graph?',
+    'dash.chat.suggestion4': 'What is the cognitive engine thinking about?',
+    'dash.chat.loadingStage1': 'Retrieving memories...',
+    'dash.chat.loadingStage2': 'Relevant memories found, LLM is generating an answer...',
+    'dash.chat.loadingStage3': 'Thinking, please wait...',
+    'dash.chat.memoryRefs': 'Memory References',
+    'dash.chat.error': 'An error occurred while connecting to the memory system. Please try again later.',
+    'dash.chat.placeholder': 'Ask your memory system anything...',
+    // Dashboard - Cognitive
+    'dash.cog.title': 'Cognitive Hub',
+    'dash.cog.subtitle': 'Observe the AI cognitive engine\'s state of mind, emotion, drives, and decision history in real time',
+    'dash.cog.sseConnected': 'SSE connected',
+    'dash.cog.sseWaiting': 'Waiting for connection…',
+    'dash.cog.card.cognition': 'Cognitive Status',
+    'dash.cog.card.cognitionActive': 'Autonomous thinking every 2 min',
+    'dash.cog.card.cognitionIdle': 'Awaiting activation',
+    'dash.cog.card.energy': 'Energy',
+    'dash.cog.card.energyPool': 'Energy pool',
+    'dash.cog.card.memory': 'Memory',
+    'dash.cog.card.memoryCluster': 'clusters',
+    'dash.cog.card.decision': 'Decisions',
+    'dash.cog.card.decisionHistory': 'History',
+    'dash.cog.section.emotion': 'Emotional State (PAD)',
+    'dash.cog.section.drive': 'Drives',
+    'dash.cog.section.thought': 'Latest LLM Thought',
+    'dash.cog.section.learning': 'Last Learning (Phase 0)',
+    'dash.cog.section.reflection': 'Last Reflection (Reflect)',
+    'dash.cog.section.l0drive': 'L0 Drive — Personality Will',
+    'dash.cog.emotionWaiting': 'Waiting for emotion data…',
+    'dash.cog.emotionNeutral': 'neutral',
+    'dash.cog.driveWaiting': 'Waiting for drive data…',
+    'dash.cog.driveExplain': 'The dominant drive shapes the cognitive engine\'s behavioral tendency: Curiosity explores new knowledge / Coherence integrates memory / Efficiency optimizes / Vitality stays active',
+    'dash.cog.thoughtEmpty': 'The cognitive engine has not produced any thoughts yet. The next cognitive tick (~2 min) will yield reasoning insights.',
+    'dash.cog.thoughtUpdatedAt': 'Updated at',
+    'dash.cog.learningWaiting': 'Waiting for the cognitive engine to produce a learning record…',
+    'dash.cog.reflectionWaiting': 'Waiting for the cognitive engine to produce a reflection…',
+    'dash.cog.explain': 'Data comes from the cognitive engine\'s SSE push every 3 seconds. The engine uses MiniMax-M3 LLM as its brain, autonomously analyzing memory-space state (entropy/clusters/isolation rate/search signals) every 2 minutes to produce reasoning thoughts, decision actions, and learning feedback. The emotion system (PAD model) and drive engine shape the LLM\'s decision tendency — this is a visualization of the system\'s "subjective experience". L0 Active Inference: memory detects prediction error → emits DriveSignal (will) → agent acts as the "hand" → feedback evolution.',
+    'dash.cog.driveEmpty': 'No pending will signals. The next cognitive engine tick (~2 min) may produce new will.',
+    'dash.cog.refresh': 'Refresh',
+    'dash.cog.execute': 'Execute',
+    'dash.cog.dismiss': 'Dismiss',
+    'dash.cog.urgency.low': 'Low',
+    'dash.cog.urgency.medium': 'Medium',
+    'dash.cog.urgency.high': 'High',
+    'dash.cog.urgency.critical': 'Critical',
+    'dash.cog.unit.signals': 'signals',
+    'dash.cog.executedLabel': 'executed',
+    'dash.cog.pendingLabel': 'pending',
   },
 };

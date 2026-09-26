@@ -2,29 +2,30 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import Layout from '@/components/Layout';
 import { BookOpen, ArrowRight, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react';
+import { useI18nContext } from '@/i18n/I18nContext';
 
 interface Endpoint {
   method: string;
   path: string;
-  desc: string;
+  descKey: string;
   auth: boolean;
   body?: string;
   response?: string;
 }
 
-const API_SECTIONS: { title: string; desc: string; endpoints: Endpoint[] }[] = [
+const API_SECTIONS: { titleKey: string; descKey: string; endpoints: Endpoint[] }[] = [
   {
-    title: '认证',
-    desc: '用户注册与登录',
+    titleKey: 'docs.section.auth.title',
+    descKey: 'docs.section.auth.desc',
     endpoints: [
       {
-        method: 'POST', path: '/register', desc: '注册新用户',
+        method: 'POST', path: '/register', descKey: 'docs.section.auth.ep1.desc',
         auth: false,
         body: '{ "user_id": "alice", "password": "secret" }',
         response: '{ "success": true, "user_id": "alice", "api_key": "tm-...", "plan": "Free" }',
       },
       {
-        method: 'POST', path: '/v1/login', desc: '登录获取 API Key',
+        method: 'POST', path: '/v1/login', descKey: 'docs.section.auth.ep2.desc',
         auth: false,
         body: '{ "user_id": "alice", "password": "secret" }',
         response: '{ "success": true, "api_key": "tm-...", "user_id": "alice", "plan": "Free" }',
@@ -32,79 +33,96 @@ const API_SECTIONS: { title: string; desc: string; endpoints: Endpoint[] }[] = [
     ],
   },
   {
-    title: '记忆操作',
-    desc: '核心记忆 CRUD 与搜索',
+    titleKey: 'docs.section.memory.title',
+    descKey: 'docs.section.memory.desc',
     endpoints: [
       {
-        method: 'POST', path: '/v1/remember', desc: '存储一条记忆（自动嵌入 + 分类 + 空间放置）',
+        method: 'POST', path: '/v1/remember', descKey: 'docs.section.memory.ep1.desc',
         auth: true,
         body: '{ "content": "用户偏好深色模式", "labels": ["preference"] }',
-        response: '{ "success": true, "id": 42, "labels": ["preference", "ui"] }',
+        response: '{ "protocol": {"ok": true, "schema_version": "1.0"}, "data": {"status": "created", "id": 42, "placement": {"layer": "cognitive", "has_port": true}}, "status": {...} }',
       },
       {
-        method: 'POST', path: '/v1/search', desc: '语义搜索记忆',
+        method: 'POST', path: '/v1/search', descKey: 'docs.section.memory.ep2.desc',
         auth: true,
         body: '{ "query": "用户偏好", "limit": 10 }',
-        response: '{ "results": [{ "id": 42, "content": "...", "similarity": 0.87 }] }',
+        response: '{ "results": [{ "id": 42, "content": "...", "similarity": 0.87, "matched_by": ["bm25"] }], "tiers": {}, "score_notes": { "base": "..." } }',
       },
       {
-        method: 'POST', path: '/v1/recall', desc: '深度回忆（语义 + 知识图谱关联）',
+        method: 'POST', path: '/v1/recall', descKey: 'docs.section.memory.ep3.desc',
         auth: true,
         body: '{ "query": "用户偏好", "depth": 2 }',
-        response: '{ "query": "...", "sections": [{ "label": "...", "items": [...] }] }',
+        response: '{ "query": "...", "tiers": { "primary": [], "hub": [], "experiential": [], "contextual": [] }, "sections": { "general": [] } }',
       },
       {
-        method: 'POST', path: '/v1/ask', desc: '基于记忆的问答',
+        method: 'POST', path: '/v1/ask', descKey: 'docs.section.memory.ep4.desc',
         auth: true,
         body: '{ "question": "用户的 UI 偏好是什么？" }',
-        response: '{ "answer": "...", "sources": [...] }',
+        response: '{ "answer": "...", "memories": [{ "id": 1, "content": "...", "relevance": 0.8 }], "memory_count": 1 }',
       },
       {
-        method: 'POST', path: '/v1/digest', desc: '消化长文本，自动拆分为多条记忆',
+        method: 'POST', path: '/v1/digest', descKey: 'docs.section.memory.ep5.desc',
         auth: true,
         body: '{ "content": "很长的文本内容..." }',
         response: '{ "total_chunks": 5, "memories_created": 5, "ids": [50,51,52,53,54] }',
       },
       {
-        method: 'GET', path: '/v1/timeline', desc: '记忆时间线',
+        method: 'GET', path: '/v1/timeline', descKey: 'docs.section.memory.ep6.desc',
         auth: true,
         body: '?limit=20&offset=0',
         response: '{ "success": true, "total": 365, "events": [...] }',
       },
       {
-        method: 'DELETE', path: '/v1/memories/:id', desc: '删除单条记忆',
+        method: 'DELETE', path: '/v1/memories/:id', descKey: 'docs.section.memory.ep7.desc',
         auth: true,
-        response: '{ "success": true, "deleted": 1 }',
+        response: '{ "forgotten": 42, "mode": "forget", "valid_to": 1786970000 }',
       },
       {
-        method: 'POST', path: '/v1/memories/batch-delete', desc: '批量删除记忆',
+        method: 'POST', path: '/v1/memories/batch-delete', descKey: 'docs.section.memory.ep8.desc',
         auth: true,
         body: '{ "ids": [1, 2, 3] }',
-        response: '{ "success": true, "deleted_count": 3 }',
+        response: '{ "forgotten": [1, 2, 3], "forgotten_count": 3, "mode": "forget" }',
       },
     ],
   },
   {
-    title: '统计与图谱',
-    desc: '用户统计、知识图谱、时间线',
+    titleKey: 'docs.section.docs.title',
+    descKey: 'docs.section.docs.desc',
     endpoints: [
       {
-        method: 'GET', path: '/v1/stats', desc: '获取用户统计信息',
+        method: 'POST', path: '/v1/docs/import', descKey: 'docs.section.docs.ep1.desc',
+        auth: true,
+        body: '{ "name": "ARCHITECTURE", "content": "# Title\\n..." }',
+        response: '{ "success": true, "document": "ARCHITECTURE", "id": 660, "chars": 6740 }',
+      },
+      {
+        method: 'GET', path: '/v1/docs', descKey: 'docs.section.docs.ep2.desc',
+        auth: true,
+        response: '{ "success": true, "documents": 3, "docs": [{"id":660,"name":"ARCHITECTURE","chars":6740,"preview":"..."}] }',
+      },
+    ],
+  },
+  {
+    titleKey: 'docs.section.stats.title',
+    descKey: 'docs.section.stats.desc',
+    endpoints: [
+      {
+        method: 'GET', path: '/v1/stats', descKey: 'docs.section.stats.ep1.desc',
         auth: true,
         response: '{ "memories_used": 454, "clusters": 48, "energy": 10000, "plan": "Enterprise" }',
       },
       {
-        method: 'GET', path: '/v1/graph/export', desc: '导出完整知识图谱',
+        method: 'GET', path: '/v1/graph/export', descKey: 'docs.section.stats.ep2.desc',
         auth: true,
         response: '{ "nodes": [...], "edges": [...], "clusters": [...], "total_nodes": 365 }',
       },
       {
-        method: 'GET', path: '/v1/graph/analysis', desc: '图谱分析报告',
+        method: 'GET', path: '/v1/graph/analysis', descKey: 'docs.section.stats.ep3.desc',
         auth: true,
         response: '{ "cluster_count": 48, "concept_count": 12, "total_memories": 454 }',
       },
       {
-        method: 'POST', path: '/v1/knowledge', desc: '查询节点的知识图谱关系',
+        method: 'POST', path: '/v1/knowledge', descKey: 'docs.section.stats.ep4.desc',
         auth: true,
         body: '{ "id": 42 }',
         response: '{ "success": true, "id": 42, "relations": 5, "details": [...] }',
@@ -112,22 +130,22 @@ const API_SECTIONS: { title: string; desc: string; endpoints: Endpoint[] }[] = [
     ],
   },
   {
-    title: '身份系统',
-    desc: 'AI 代理身份确认与管理',
+    titleKey: 'docs.section.identity.title',
+    descKey: 'docs.section.identity.desc',
     endpoints: [
       {
-        method: 'GET', path: '/v1/identity', desc: '获取当前身份信息',
+        method: 'GET', path: '/v1/identity', descKey: 'docs.section.identity.ep1.desc',
         auth: true,
         response: '{ "success": true, "confirmed": true, "identity": { "name": "David" } }',
       },
       {
-        method: 'POST', path: '/v1/identity/confirm', desc: '确认身份（一次性，不可逆）',
+        method: 'POST', path: '/v1/identity/confirm', descKey: 'docs.section.identity.ep2.desc',
         auth: true,
         body: '{ "name": "David", "mission": "...", "author": "..." }',
         response: '{ "success": true, "identity": { "name": "David", "confirmed": true } }',
       },
       {
-        method: 'PUT', path: '/v1/identity', desc: '更新身份（确认前可用）',
+        method: 'PUT', path: '/v1/identity', descKey: 'docs.section.identity.ep3.desc',
         auth: true,
         body: '{ "name": "David", "mission": "新使命" }',
         response: '{ "success": true, "identity": { ... } }',
@@ -135,73 +153,42 @@ const API_SECTIONS: { title: string; desc: string; endpoints: Endpoint[] }[] = [
     ],
   },
   {
-    title: '技能系统',
-    desc: '创建、搜索和管理技能',
+    titleKey: 'docs.section.mcp.title',
+    descKey: 'docs.section.mcp.desc',
     endpoints: [
       {
-        method: 'GET', path: '/v1/skills', desc: '获取我的技能列表',
-        auth: true,
-        response: '{ "skills": [{ "id": 1, "name": "...", "skill_md": "...", "version": "1.0.0" }] }',
-      },
-      {
-        method: 'POST', path: '/v1/skills', desc: '创建新技能',
-        auth: true,
-        body: '{ "name": "my-skill", "skill_md": "# My Skill\n..." }',
-        response: '{ "skill": { "id": 100, "name": "my-skill" } }',
-      },
-      {
-        method: 'GET', path: '/v1/skills/public', desc: '获取公开技能',
-        auth: true,
-        response: '{ "skills": [...], "total": 254 }',
-      },
-      {
-        method: 'GET', path: '/v1/skills/explore', desc: '探索公开技能（无需认证）',
-        auth: false,
-        response: '{ "skills": [...], "total": 254 }',
-      },
-      {
-        method: 'POST', path: '/v1/skills/search', desc: '语义搜索技能',
-        auth: true,
-        body: '{ "query": "database", "limit": 10 }',
-        response: '{ "skills": [...] }',
-      },
-    ],
-  },
-  {
-    title: '子账户',
-    desc: '团队管理',
-    endpoints: [
-      {
-        method: 'GET', path: '/v1/subaccounts', desc: '获取子账户列表',
-        auth: true,
-        response: '{ "success": true, "subaccounts": [...], "total": 2 }',
-      },
-      {
-        method: 'POST', path: '/v1/subaccounts/create', desc: '创建子账户',
-        auth: true,
-        body: '{ "user_id": "team-001", "password": "secret" }',
-        response: '{ "message": "Sub-account created" }',
-      },
-      {
-        method: 'POST', path: '/v1/subaccounts/:user_id/revoke', desc: '撤销子账户',
-        auth: true,
-        response: '{ "message": "Sub-account revoked" }',
-      },
-    ],
-  },
-  {
-    title: 'MCP 协议',
-    desc: 'JSON-RPC 2.0 统一入口',
-    endpoints: [
-      {
-        method: 'POST', path: '/mcp', desc: 'MCP 统一入口（27个工具）',
+        method: 'POST', path: '/mcp', descKey: 'docs.section.mcp.ep1.desc',
         auth: true,
         body: '{ "jsonrpc": "2.0", "method": "tools/call", "params": { "name": "memory_search", "arguments": { "query": "..." } }, "id": 1 }',
         response: '{ "jsonrpc": "2.0", "id": 1, "result": { "content": [{ "type": "text", "text": "{...}" }] } }',
       },
       {
-        method: 'GET', path: '/v1/agent-guide', desc: '获取代理快速指南',
+        method: 'POST', path: '/mcp', descKey: 'docs.section.mcp.ep2.desc',
         auth: true,
+        body: '{ "jsonrpc": "2.0", "method": "tools/call", "params": { "name": "skill_execute", "arguments": { "query": "error handling", "context": "Rust project" } }, "id": 2 }',
+        response: '{ "result": { "content": [{ "type": "text", "text": "Skill content with frontmatter..." }] } }',
+      },
+      {
+        method: 'POST', path: '/mcp', descKey: 'docs.section.mcp.ep3.desc',
+        auth: true,
+        body: '{ "jsonrpc": "2.0", "method": "tools/call", "params": { "name": "skill_feedback", "arguments": { "skill_id": 900031, "helpful": true } }, "id": 3 }',
+        response: '{ "result": { "content": [{ "type": "text", "text": "Feedback recorded. skill updated." }] } }',
+      },
+      {
+        method: 'POST', path: '/mcp', descKey: 'docs.section.mcp.ep4.desc',
+        auth: true,
+        body: '{ "jsonrpc": "2.0", "method": "tools/call", "params": { "name": "skills_sync", "arguments": { "format": "opencode" } }, "id": 4 }',
+        response: '{ "result": { "content": [{ "type": "text", "text": "[{\\"name\\":\\"...\\",\\"slug\\":\\"...\\",\\"content\\":\\"---\\ncategory: ...\\n---\\n# Skill content\\"}]" }] } }',
+      },
+      {
+        method: 'POST', path: '/mcp', descKey: 'docs.section.mcp.ep5.desc',
+        auth: true,
+        body: '{ "jsonrpc": "2.0", "method": "tools/call", "params": { "name": "feedback_submit", "arguments": { "memory_ids": [1,2], "relevance": "highly_relevant", "outcome": "task_completed" } }, "id": 5 }',
+        response: '{ "result": { "content": [{ "type": "text", "text": "Feedback submitted successfully." }] } }',
+      },
+      {
+        method: 'GET', path: '/v1/agent-guide', descKey: 'docs.section.mcp.ep6.desc',
+        auth: false,
         response: '# Epicode Agent Guide\n...',
       },
     ],
@@ -209,17 +196,18 @@ const API_SECTIONS: { title: string; desc: string; endpoints: Endpoint[] }[] = [
 ];
 
 const METHOD_COLORS: Record<string, { bg: string; text: string }> = {
-  GET: { bg: 'rgba(52, 199, 89, 0.1)', text: '#34c759' },
-  POST: { bg: 'rgba(0, 113, 227, 0.1)', text: '#0071e3' },
-  PUT: { bg: 'rgba(245, 158, 11, 0.1)', text: '#f59e0b' },
+  GET: { bg: 'rgba(52, 199, 89, 0.1)', text: '#3ecfae' },
+  POST: { bg: 'rgba(62, 207, 174, 0.1)', text: '#3ecfae' },
+  PUT: { bg: 'rgba(245, 158, 11, 0.1)', text: '#8b7ec8' },
   DELETE: { bg: 'rgba(248, 113, 113, 0.1)', text: '#f87171' },
 };
 
 function EndpointCard({ ep }: { ep: Endpoint }) {
+  const { t } = useI18nContext();
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const fullUrl = `${window.location.origin}/api${ep.path}`;
+  const fullUrl = `https://epicode.cn/api${ep.path}`;
 
   function handleCopy() {
     navigator.clipboard.writeText(fullUrl);
@@ -248,11 +236,11 @@ function EndpointCard({ ep }: { ep: Endpoint }) {
           {ep.path}
         </span>
         <span className="text-sm hidden sm:block flex-1" style={{ color: 'var(--text-secondary)' }}>
-          {ep.desc}
+          {t(ep.descKey)}
         </span>
         <span className="text-xs px-2 py-0.5 rounded-md flex-shrink-0" style={{
-          background: ep.auth ? 'rgba(168,85,247,0.1)' : 'rgba(52,199,89,0.1)',
-          color: ep.auth ? '#a855f7' : '#34c759',
+          background: ep.auth ? 'rgba(139,126,200,0.1)' : 'rgba(52,199,89,0.1)',
+          color: ep.auth ? '#8b7ec8' : '#3ecfae',
           fontFamily: 'var(--font-mono)',
         }}>
           {ep.auth ? 'Auth' : 'Public'}
@@ -262,7 +250,7 @@ function EndpointCard({ ep }: { ep: Endpoint }) {
 
       {open && (
         <div className="px-5 pb-5 space-y-4" style={{ borderTop: '1px solid var(--border-light)' }}>
-          <p className="text-sm pt-3 sm:hidden" style={{ color: 'var(--text-secondary)' }}>{ep.desc}</p>
+          <p className="text-sm pt-3 sm:hidden" style={{ color: 'var(--text-secondary)' }}>{t(ep.descKey)}</p>
           {ep.body && (
             <div>
               <div className="text-xs font-mono mb-2 uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Request</div>
@@ -281,7 +269,7 @@ function EndpointCard({ ep }: { ep: Endpoint }) {
           )}
           <button onClick={handleCopy} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' }}>
             {copied ? <Check size={12} style={{ color: 'var(--success-green)' }} /> : <Copy size={12} />}
-            {copied ? '已复制' : '复制完整 URL'}
+            {copied ? t('docs.copied') : t('docs.copyFullUrl')}
           </button>
         </div>
       )}
@@ -290,6 +278,7 @@ function EndpointCard({ ep }: { ep: Endpoint }) {
 }
 
 export default function Docs() {
+  const { t } = useI18nContext();
   const [activeSection, setActiveSection] = useState<number | null>(null);
 
   return (
@@ -302,35 +291,38 @@ export default function Docs() {
             transition={{ duration: 0.6 }}
             className="mb-12"
           >
-            <span
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-6"
-              style={{ background: 'var(--accent-blue-light)', color: 'var(--accent-blue)' }}
-            >
-              <BookOpen size={14} />
-              API Reference
-            </span>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--accent-cyan)', letterSpacing: '0.18em', marginBottom: 14 }}>
+              00 / DOCS · API REFERENCE
+            </p>
             <h1 style={{
               fontFamily: 'var(--font-display)',
-              fontSize: 'clamp(32px, 5vw, 56px)',
+              fontSize: 'clamp(40px, 6.5vw, 76px)',
               fontWeight: 700,
-              letterSpacing: '-0.02em',
-              lineHeight: 1.1,
+              letterSpacing: '-0.03em',
+              lineHeight: 1.02,
               color: 'var(--text-primary)',
-              marginBottom: '16px',
+              marginBottom: '18px',
             }}>
-              API 文档
+              {t('docs.title')}
             </h1>
             <p style={{ color: 'var(--text-secondary)', fontSize: '19px', lineHeight: 1.5, maxWidth: '640px' }}>
-              完整的 RESTful API 参考。所有认证请求需携带 <code className="text-xs px-1.5 py-0.5 rounded-md" style={{ background: 'rgba(168,85,247,0.1)', color: '#a855f7', fontFamily: 'var(--font-mono)' }}>X-API-Key</code> 请求头。
+              {t('docs.introPrefix')}<code className="text-xs px-1.5 py-0.5 rounded-md" style={{ background: 'rgba(139,126,200,0.1)', color: '#8b7ec8', fontFamily: 'var(--font-mono)' }}>X-API-Key</code>{t('docs.introSuffix')}
             </p>
-          </motion.div>
+                      <p style={{ marginTop: 14, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-tertiary)' }}>
+              <a href="#/smrp" style={{ color: 'var(--accent-purple)', textDecoration: 'none' }}>SMRP 协议 →</a>
+              {'   ·   '}
+              <a href="#/community" style={{ color: 'var(--accent-purple)', textDecoration: 'none' }}>技能市场 →</a>
+              {'   ·   '}
+              <a href="#/l0" style={{ color: 'var(--accent-purple)', textDecoration: 'none' }}>L0 协议 →</a>
+            </p>
+</motion.div>
 
           <div className="flex flex-col lg:flex-row gap-8">
             <nav className="lg:w-56 flex-shrink-0">
               <div className="lg:sticky lg:top-32 space-y-1">
                 {API_SECTIONS.map((s, i) => (
                   <button
-                    key={s.title}
+                    key={s.titleKey}
                     onClick={() => {
                       setActiveSection(activeSection === i ? null : i);
                       document.getElementById(`section-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -338,12 +330,12 @@ export default function Docs() {
                     className="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
                     style={{
                       color: activeSection === i ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      background: activeSection === i ? 'rgba(168,85,247,0.1)' : 'transparent',
+                      background: activeSection === i ? 'rgba(139,126,200,0.1)' : 'transparent',
                     }}
                     onMouseEnter={(e) => { if (activeSection !== i) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
                     onMouseLeave={(e) => { if (activeSection !== i) e.currentTarget.style.background = 'transparent'; }}
                   >
-                    {s.title}
+                    {t(s.titleKey)}
                     <span className="ml-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>{s.endpoints.length}</span>
                   </button>
                 ))}
@@ -352,11 +344,11 @@ export default function Docs() {
 
             <div className="flex-1 space-y-12">
               {API_SECTIONS.map((section, si) => (
-                <div key={section.title} id={`section-${si}`}>
+                <div key={section.titleKey} id={`section-${si}`}>
                   <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
-                    {section.title}
+                    {t(section.titleKey)}
                   </h2>
-                  <p className="text-sm mb-4" style={{ color: 'var(--text-tertiary)' }}>{section.desc}</p>
+                  <p className="text-sm mb-4" style={{ color: 'var(--text-tertiary)' }}>{t(section.descKey)}</p>
                   <div className="space-y-2">
                     {section.endpoints.map((ep) => (
                       <EndpointCard key={ep.method + ep.path} ep={ep} />
@@ -374,7 +366,7 @@ export default function Docs() {
             className="mt-20 text-center"
           >
             <a href="#/guide" className="inline-flex items-center gap-2 text-sm font-medium no-underline" style={{ color: 'var(--accent-blue)' }}>
-              查看快速上手指南
+              {t('docs.viewGuide')}
               <ArrowRight size={16} />
             </a>
           </motion.div>
