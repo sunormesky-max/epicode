@@ -117,11 +117,21 @@ pub fn require_admin(
     admin_key: &str,
     headers: &axum::http::HeaderMap,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    // 防御纵深: 空 admin_key 时缺失 header 也是 "" — 相等比较会通过
+    // (审计三轮严重项); 无论启动检查如何, 这里直接拒绝
+    if admin_key.trim().is_empty() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "success": false, "error": "admin key not configured"
+            })),
+        ));
+    }
     let provided = headers
         .get("X-Admin-Key")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if !epicode::engine::crypto::constant_time_eq(provided, admin_key) {
+    if provided.is_empty() || !epicode::engine::crypto::constant_time_eq(provided, admin_key) {
         return Err((
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({"success": false, "error": "admin key required"})),
