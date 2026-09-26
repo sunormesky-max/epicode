@@ -30,7 +30,24 @@ pub async fn auth_middleware(
     // 使用 TCP 连接的真实远程地址。Nginx 反代场景下为 127.0.0.1（此时 Nginx 已做 limit_req），
     // 直连场景下为真实客户端 IP。
     let client_id = if path == "/v1/login" || path == "/register" {
-        format!("ip:{}", addr.ip())
+        // 受信代理模式(四轮审计): 反代后所有登录共享 TCP peer(网关IP)额度 —
+        // 显式设置 EPICODE_TRUSTED_PROXY=1 时改用网关注入的 X-Real-IP
+        // (默认关闭: 客户端伪造 X-Real-For/X-Forwarded-For 可绕过限流,
+        // 仅当后端仅接受网关流量时开启)
+        let trusted = std::env::var("TETRAMEM_TRUSTED_PROXY")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        let ip = if trusted {
+            headers
+                .get("X-Real-IP")
+                .and_then(|v| v.to_str().ok())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| addr.ip().to_string())
+        } else {
+            addr.ip().to_string()
+        };
+        format!("ip:{ip}")
     } else {
         "anonymous".to_string()
     };

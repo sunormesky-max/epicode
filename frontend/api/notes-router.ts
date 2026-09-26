@@ -1008,8 +1008,14 @@ export const notesRouter = createRouter({
     .input(
       z.object({
         title: z.string().min(1).max(500),
-        // MySQL TEXT 上限 64KB — 超长值直接失败更诚实(审计三轮中优)
-        content: z.string().max(60000),
+        // MySQL TEXT 上限 64KB(字节) — 按字节校验(四轮审计: 字符数×3倍
+        // 多字节仍可能超限), z.string().max 只数字符
+        content: z
+          .string()
+          .max(60000)
+          .refine((v) => Buffer.byteLength(v, "utf8") <= 60000, {
+            message: "content exceeds 60000 bytes",
+          }),
         tags: z.array(z.string()).optional(),
         source: z.string().optional(),
       })
@@ -1031,7 +1037,14 @@ export const notesRouter = createRouter({
       z.object({
         id: z.number(),
         title: z.string().min(1).max(500).optional(),
-        content: z.string().optional(),
+        // 与 create 同一字节上限(四轮审计: update 此前无限制)
+        content: z
+          .string()
+          .max(60000)
+          .refine((v) => Buffer.byteLength(v, "utf8") <= 60000, {
+            message: "content exceeds 60000 bytes",
+          })
+          .optional(),
         tags: z.array(z.string()).optional(),
         source: z.string().optional(),
       })

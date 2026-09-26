@@ -130,23 +130,37 @@ export function createOAuthCallbackHandler() {
     }
 
     try {
-      let redirectUri = state;
-      // 新格式: 校验一次性 nonce(login-CSRF 防护)
+      // OAuth 协议要求 token exchange 的 redirect_uri 与 authorize 时完全一致 —
+      // 一律用本回调的绝对 URL(四轮审计修复: 原实现把 state 里的目标路径传给
+      // exchange, 授权服务器校验不匹配, 登录无法完成)
+      const oauthRedirectUri = new URL(
+        Paths.oauthCallback,
+        c.req.url,
+      ).toString();
+      let finalRedirect = "/";
       try {
         const parsed = JSON.parse(atob(state)) as { ru?: string; n?: string };
         if (parsed.ru && parsed.n) {
+          // 新格式: 校验一次性 nonce(login-CSRF 防护), ru 仅作登录后跳转目标
           const cookies = cookie.parse(c.req.raw.headers.get("cookie") || "");
           const expected = cookies[OAUTH_NONCE_COOKIE];
           if (!expected || expected !== parsed.n) {
             return c.json({ error: "state nonce mismatch" }, 400);
           }
-          redirectUri = parsed.ru;
+          finalRedirect = parsed.ru;
+        } else {
+          // 旧格式: btoa(redirectUri) — ru 缺失, 保持原解码行为
+          finalRedirect = atob(state);
         }
-        // 旧格式(纯 b64 redirectUri)保持兼容 — 无 CSRF 保护
       } catch {
-        // 非 JSON → 旧格式
+        // 非 JSON → 旧格式纯 b64(目标路径), 解码后仅作跳转
+        try {
+          finalRedirect = atob(state);
+        } catch {
+          finalRedirect = "/";
+        }
       }
-      const tokenResp = await exchangeAuthCode(code, redirectUri);
+      const tokenResp = await exchangeAuthCode(code, oauthRedirectUri);
       const { userId } = await verifyAccessToken(tokenResp.access_token);
       const userProfile = await kimiUsers.getProfile(tokenResp.access_token);
       if (!userProfile) {
@@ -171,7 +185,11 @@ export function createOAuthCallbackHandler() {
         maxAge: Session.maxAgeMs / 1000,
       });
 
-      return c.redirect("/", 302);
+      // 跳转到发起时的目标路径(四轮审计: 原固定跳 / 丢失 ru); 仅允许相对路径
+      const safeRedirect = finalRedirect.startsWith("/") && !finalRedirect.startsWith("//")
+        ? finalRedirect
+        : "/";
+      return c.redirect(safeRedirect, 302);
     } catch (error) {
       console.error("[OAuth] Callback failed", error);
       return c.json({ error: "OAuth callback failed" }, 500);
