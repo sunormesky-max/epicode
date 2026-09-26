@@ -99,8 +99,17 @@ async fn main() {
         .expect("FATAL: admin key must be set (accepts EPICODE_ADMIN_KEY or TETRAMEM_ADMIN_KEY)");
     // 已知占位密钥 fail-closed(审计二轮): K8s 清单/.env.example 的 "replace-me"
     // 若不替换就部署, 任何知道仓库的人都能拿到管理接口 — 直接拒绝启动
-    const PLACEHOLDER_KEYS: [&str; 3] = ["replace-me", "changeme", "placeholder"];
-    if PLACEHOLDER_KEYS.contains(&admin_key.as_str()) {
+    if admin_key.trim().is_empty() {
+        eprintln!("FATAL: EPICODE_ADMIN_KEY is empty — set a real secret before deploying");
+        std::process::exit(1);
+    }
+    const PLACEHOLDER_KEYS: [&str; 4] = [
+        "replace-me",
+        "changeme",
+        "placeholder",
+        "replace_with_real_key",
+    ];
+    if PLACEHOLDER_KEYS.contains(&admin_key.to_lowercase().as_str()) {
         eprintln!("FATAL: EPICODE_ADMIN_KEY is a known placeholder ({admin_key}) — set a real secret before deploying");
         std::process::exit(1);
     }

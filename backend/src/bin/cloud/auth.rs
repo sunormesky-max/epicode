@@ -45,7 +45,10 @@ pub async fn auth_middleware(
                 .map(|s| s.contains("epicode_session="))
                 .unwrap_or(false)
         });
-    if !has_credential {
+    // IP 限流对登录/注册路径无条件执行(审计三轮高优): 凭据头"存在"不等于
+    // "有效" — 带任意 junk X-API-Key 的 /v1/login 此前会跳过 IP 桶绕过限流
+    let is_auth_endpoint = path == "/v1/login" || path == "/register";
+    if is_auth_endpoint || !has_credential {
         if let Some(resp) = check_rate_limit(&st, &client_id, RATE_LIMIT_MAX) {
             return resp;
         }

@@ -11,7 +11,9 @@ export async function signSessionToken(
   return new jose.SignJWT(payload)
     .setProtectedHeader({ alg: JWT_ALG })
     .setIssuedAt()
-    .setExpirationTime("1 year")
+    // 审计三轮中优: 一年期会话令牌在登出后仍可用 — 收紧到 7 天,
+    // 已复制令牌的暴露窗口随之缩短; cookie maxAge 同步(见 auth.ts setCookie)
+    .setExpirationTime("7d")
     .sign(secret);
 }
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, inArray } from "drizzle-orm";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { notes } from "../db/schema";
@@ -1008,7 +1008,8 @@ export const notesRouter = createRouter({
     .input(
       z.object({
         title: z.string().min(1).max(500),
-        content: z.string(),
+        // MySQL TEXT 上限 64KB — 超长值直接失败更诚实(审计三轮中优)
+        content: z.string().max(60000),
         tags: z.array(z.string()).optional(),
         source: z.string().optional(),
       })
@@ -1056,14 +1057,23 @@ export const notesRouter = createRouter({
     }),
 
   deleteMany: authedQuery
-    .input(z.object({ ids: z.array(z.number()) }))
+    .input(
+      z.object({
+        // 上限防滥用(审计三轮中优): 无上限数组逐条串行删除可压垮数据库
+        ids: z.array(z.number()).min(1).max(200),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      for (const id of input.ids) {
-        await db
-          .delete(notes)
-          .where(and(eq(notes.id, id), eq(notes.userId, ctx.user.id)));
-      }
+      // 单语句批量删除(in + 属主过滤), 不再 N 次往返
+      await db
+        .delete(notes)
+        .where(
+          and(
+            inArray(notes.id, input.ids),
+            eq(notes.userId, ctx.user.id),
+          ),
+        );
       return { success: true };
     }),
 

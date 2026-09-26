@@ -1,6 +1,6 @@
 export const Session = {
   cookieName: "kimi_sid",
-  maxAgeMs: 365 * 24 * 60 * 60 * 1000,
+  maxAgeMs: 7 * 24 * 60 * 60 * 1000, // 审计三轮: 会话7天(原一年)
 } as const;
 
 export const ErrorMessages = {
@@ -11,4 +11,5 @@ export const ErrorMessages = {
 export const Paths = {
   login: "/login",
   oauthCallback: "/api/oauth/callback",
+  oauthStart: "/api/oauth/start",
 } as const;

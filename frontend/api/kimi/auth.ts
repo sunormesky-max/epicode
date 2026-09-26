@@ -4,12 +4,15 @@ import * as jose from "jose";
 import * as cookie from "cookie";
 import { env } from "../lib/env";
 import { getSessionCookieOptions } from "../lib/cookies";
-import { Session } from "@contracts/constants";
+import { Paths, Session } from "@contracts/constants";
 import { Errors } from "@contracts/errors";
 import { signSessionToken, verifySessionToken } from "./session";
 import { users as kimiUsers } from "./platform";
 import { findUserByUnionId, upsertUser } from "../queries/users";
 import type { TokenResponse } from "./types";
+
+// OAuth 一次性 nonce cookie(审计三轮 login-CSRF 防护)
+const OAUTH_NONCE_COOKIE = "kimi_oauth_nonce";
 
 async function exchangeAuthCode(
   code: string,
@@ -71,6 +74,40 @@ export async function authenticateRequest(headers: Headers) {
   return user;
 }
 
+// 审计三轮中优: state 原本只是 btoa(redirectUri), 无会话绑定 → login-CSRF.
+// 新格式 state = btoa(JSON({ru, n})): n 为 start 端点写入 HttpOnly cookie 的
+// 一次性随机值, callback 校验 cookie.n === state.n. 旧格式(纯 b64)保持兼容
+// 但无保护 — 集成方应改用 /api/oauth/start 发起.
+export function createOAuthStartHandler() {
+  return async (c: Context) => {
+    const ru = c.req.query("redirect") || "/";
+    if (ru.includes("://") || ru.startsWith("//")) {
+      return c.json({ error: "redirect must be a relative path" }, 400);
+    }
+    const nonce = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, "");
+    const state = btoa(JSON.stringify({ ru, n: nonce }));
+    const authorize = new URL(`${env.kimiAuthUrl}/api/oauth/authorize`);
+    authorize.searchParams.set("response_type", "code");
+    authorize.searchParams.set("client_id", env.appId);
+    authorize.searchParams.set(
+      "redirect_uri",
+      new URL(Paths.oauthCallback, c.req.url).toString(),
+    );
+    authorize.searchParams.set("state", state);
+    c.header(
+      "set-cookie",
+      cookie.serialize(OAUTH_NONCE_COOKIE, nonce, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: getSessionCookieOptions(c.req.raw.headers).secure,
+        path: "/",
+        maxAge: 600,
+      }),
+    );
+    return c.redirect(authorize.toString(), 302);
+  };
+}
+
 export function createOAuthCallbackHandler() {
   return async (c: Context) => {
     const code = c.req.query("code");
@@ -93,7 +130,22 @@ export function createOAuthCallbackHandler() {
     }
 
     try {
-      const redirectUri = atob(state);
+      let redirectUri = state;
+      // 新格式: 校验一次性 nonce(login-CSRF 防护)
+      try {
+        const parsed = JSON.parse(atob(state)) as { ru?: string; n?: string };
+        if (parsed.ru && parsed.n) {
+          const cookies = cookie.parse(c.req.raw.headers.get("cookie") || "");
+          const expected = cookies[OAUTH_NONCE_COOKIE];
+          if (!expected || expected !== parsed.n) {
+            return c.json({ error: "state nonce mismatch" }, 400);
+          }
+          redirectUri = parsed.ru;
+        }
+        // 旧格式(纯 b64 redirectUri)保持兼容 — 无 CSRF 保护
+      } catch {
+        // 非 JSON → 旧格式
+      }
       const tokenResp = await exchangeAuthCode(code, redirectUri);
       const { userId } = await verifyAccessToken(tokenResp.access_token);
       const userProfile = await kimiUsers.getProfile(tokenResp.access_token);

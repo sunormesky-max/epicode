@@ -99,6 +99,8 @@ jobs:
         run: npm ci
       - name: Type check
         run: npm run check
+      - name: Audit runtime deps (high+ blocking)  # 审计三轮: 供应链门禁
+        run: npm audit --omit=dev --audit-level=high
       - name: Lint
         run: npm run lint
       - name: Test
