@@ -488,6 +488,18 @@ pub fn nft_healthy() -> bool {
     NFT_AVAILABLE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// 健康检查子命令: 供 systemd ExecStartPre/监控调用
+/// `epicode-guard --health` → nft 可用输出 ok 退出 0, 不可用输出 degraded 退出 1
+fn health_check_cli() {
+    if nft_healthy() {
+        println!("ok");
+        std::process::exit(0);
+    } else {
+        println!("degraded: nftables not enforcing");
+        std::process::exit(1);
+    }
+}
+
 fn nft_init() {
     migrate_v1_rules();
     let table_handle = run_cmd_output("nft", &["list", "table", "inet", NFT_TABLE]);
@@ -495,6 +507,7 @@ fn nft_init() {
         ensure_nft_set(NFT_SET_V4, "ipv4_addr");
         ensure_nft_set(NFT_SET_V6, "ipv6_addr");
         log_msg("nft table already present — reusing existing ban sets (no ban window)");
+        NFT_AVAILABLE.store(true, std::sync::atomic::Ordering::Relaxed);
         return;
     }
     if !run_cmd("nft", &["add", "table", "inet", NFT_TABLE]) {
@@ -581,7 +594,13 @@ fn nft_ban(ip: &str, timeout_secs: u64) {
     };
     let element = format!("{{ {} timeout {} }}", ip, timeout_str);
     if !run_cmd("nft", &["add", "element", "inet", NFT_TABLE, set, &element]) {
-        log_msg(&format!("nft_ban: failed to add {ip} to {set}"));
+        if !nft_healthy() {
+            log_msg(&format!(
+                "DEGRADED: ban requested for {ip} but nftables is NOT enforcing — bans are no-ops"
+            ));
+        } else {
+            log_msg(&format!("nft_ban: failed to add {ip} to {set}"));
+        }
     }
 }
 
@@ -1151,6 +1170,7 @@ fn cmd_help() {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|s| s.as_str()) {
+        Some("--health") => health_check_cli(),
         Some("status") => cmd_status(),
         Some("ban") => {
             if let Some(ip) = args.get(2) {

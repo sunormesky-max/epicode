@@ -115,6 +115,9 @@ echo "[OK] docker-compose.secure.yml 生成完成"
 # 7. 生成Nginx TLS配置
 mkdir -p nginx/ssl
 cat > nginx/epicode.conf << 'EOF'
+# 限流 zone(仅 http 上下文合法; server 块内的 limit_req 引用之)
+limit_req_zone $binary_remote_addr zone=api:10m rate=30r/s;
+
 server {
     listen 443 ssl http2;
     server_name _;
