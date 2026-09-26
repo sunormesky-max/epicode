@@ -5,6 +5,7 @@ import { errMsg, getGraphExport, getGraphAnalysis, getNodeRelations, getKgQualit
 import type { KgQuality } from '@/lib/api';
 import { Search, ZoomIn, ZoomOut, RotateCcw, X, GitBranch, Tag, Activity, ChevronDown, ChevronUp, Route, Navigation, HeartPulse, Target } from 'lucide-react';
 import { useI18nContext } from '@/i18n/I18nContext';
+import type { TranslationKey } from '@/i18n/translations';
 
 const CLUSTER_COLORS = [
   // 青蓝能量谱（主）→ 紫罗兰 → 金红（辅），吞噬星空双能量配色
@@ -41,8 +42,8 @@ export default function DashboardGraph() {
   const [error, setError] = useState('');
   const [graphMeta, setGraphMeta] = useState<{ truncated: boolean; total: number }>({ truncated: false, total: 0 });
   const [searchQ, setSearchQ] = useState('');
-  const [zoom, setZoom] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [, setZoom] = useState(1);
+  const [, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const [stats, setStats] = useState({ nodes: 0, edges: 0, clusters: 0, interCluster: 0 });
   const [selectedCluster, setSelectedCluster] = useState<number | null>(null);
@@ -58,7 +59,7 @@ export default function DashboardGraph() {
   const [clusterMembers, setClusterMembers] = useState<{ id: number; content: string; labels: string[] }[] | null>(null);
   const [pathMode, setPathMode] = useState(false); // 路径查找模式
   const [pathResult, setPathResult] = useState<number[] | null>(null); // 路径节点 idx 数组
-  const [pathStart, setPathStart] = useState<number | null>(null); // 路径起点 idx
+  const [, setPathStart] = useState<number | null>(null); // 路径起点 idx
   const [pathNotFound, setPathNotFound] = useState(false); // 路径未找到提示
   const [nodeRelationsDetail, setNodeRelationsDetail] = useState<{
     typeDist: Record<string, number>;
@@ -112,7 +113,7 @@ export default function DashboardGraph() {
         const numClusters = (data.clusters || []).length || 1;
         // 每个 cluster 分配一个中心点(极坐标：按 cluster index 均匀分布到画布)
         const clusterCenters = new Map<number, { x: number; y: number }>();
-        (data.clusters || []).forEach((c: { member_ids: number[] }, ci: number) => {
+        (data.clusters || []).forEach((_c: { member_ids: number[] }, ci: number) => {
           // 6 层分层：cluster index 决定层(0-5)
           const layer = ci % 6;
           const layerH = (H0 - 80) / 6;
@@ -184,8 +185,10 @@ export default function DashboardGraph() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !nodesRef.current.length) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const ctx0 = canvas.getContext('2d');
+    if (!ctx0) return;
+    // 显式非空注解: 闭包(draw/simulate内嵌函数)不继承收窄, 119处 ctx possibly-null 根治
+    const ctx: CanvasRenderingContext2D = ctx0;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const parent = canvas.parentElement;
     let W: number, H: number;
@@ -282,7 +285,6 @@ export default function DashboardGraph() {
       ctx.font = "500 10px JetBrains Mono, monospace";
       ctx.textAlign = 'left';
       const z = zoomRef.current;
-      const ox = offsetRef.current.x;
       const oy = offsetRef.current.y;
       for (let li = 0; li < 6; li++) {
         const ly = 40 + li * lh + lh / 2;
@@ -831,7 +833,7 @@ export default function DashboardGraph() {
                 {Object.entries(EDGE_COLORS).map(([type, color]) => (
                   <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                     <div style={{ width: 12, height: 2, background: color, borderRadius: 1 }} />
-                    <span style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>{EDGE_LABEL_KEYS[type] ? t(EDGE_LABEL_KEYS[type]) : type} ({edgeTypeCounts[type] || 0})</span>
+                    <span style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>{EDGE_LABEL_KEYS[type] ? t(EDGE_LABEL_KEYS[type] as TranslationKey) : type} ({edgeTypeCounts[type] || 0})</span>
                   </div>
                 ))}
               </div>
@@ -865,7 +867,7 @@ export default function DashboardGraph() {
                       const total = nodeRelationsDetail.degree || 1;
                       const pct = (count / total) * 100;
                       const color = EDGE_COLORS[type] || '#3ecfae';
-                      const label = EDGE_LABEL_KEYS[type] ? t(EDGE_LABEL_KEYS[type]) : type;
+                      const label = EDGE_LABEL_KEYS[type] ? t(EDGE_LABEL_KEYS[type] as TranslationKey) : type;
                       return (
                         <div key={type} style={{ marginBottom: 4 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
@@ -893,7 +895,7 @@ export default function DashboardGraph() {
                           const targetNode = nodesRef.current.find(n => n.id === s.target);
                           if (targetNode) focusNode(targetNode.idx);
                         }} style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', marginBottom: 3, padding: '4px 6px', background: 'rgba(62,207,174,0.03)', border: '1px solid rgba(62,207,174,0.08)', borderRadius: 6, cursor: 'pointer', textAlign: 'left' }}>
-                          <span style={{ color, fontSize: 9, padding: '1px 4px', borderRadius: 3, background: `${color}15` }}>{EDGE_LABEL_KEYS[s.type] ? t(EDGE_LABEL_KEYS[s.type]) : s.type}</span>
+                          <span style={{ color, fontSize: 9, padding: '1px 4px', borderRadius: 3, background: `${color}15` }}>{EDGE_LABEL_KEYS[s.type] ? t(EDGE_LABEL_KEYS[s.type] as TranslationKey) : s.type}</span>
                           <span style={{ color: 'var(--text-secondary)', fontSize: 10, fontFamily: 'var(--font-mono)', flex: 1 }}>#{s.target}</span>
                           <span style={{ color: 'var(--accent-cyan-bright)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>{s.strength.toFixed(2)}</span>
                         </button>

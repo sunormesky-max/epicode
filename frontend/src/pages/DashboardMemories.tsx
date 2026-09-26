@@ -1,8 +1,8 @@
 ﻿import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react';
 import { searchMemories, getTimeline, deleteMemory, updateMemoryContent, storeMemory, importDocument, recallMemories, errMsg, type SearchResult, type TimelineEvent } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
-import { DashboardLoading, ErrorBanner, NoticeBanner, SectionTitle } from '@/components/DashboardUI';
-import { Search, Plus, Trash2, Copy, Check, Filter, X, ChevronDown, Calendar, Tag, Hash, Pencil, FileText, Brain, Loader2, Sparkles } from 'lucide-react';
+import { DashboardLoading } from '@/components/DashboardUI';
+import { Search, Plus, Filter, X, ChevronDown, Calendar, Tag, Hash, Pencil, FileText, Brain, Loader2, Sparkles } from 'lucide-react';
 import { useI18nContext } from '@/i18n/I18nContext';
 
 // ── 搜索关键词高亮 ──
@@ -23,7 +23,7 @@ function highlightText(text: string, query: string): React.ReactNode {
 }
 
 // ── 去抖 hook ──
-function useDebounced<T extends (...args: unknown[]) => void>(fn: T, delay: number): T {
+function useDebounced<T extends (...args: never[]) => void>(fn: T, delay: number): T {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fnRef = useRef(fn);
   fnRef.current = fn;
@@ -104,7 +104,7 @@ export default function DashboardMemories() {
       if (recallMode) {
         // 刀2: 消费诚实分桶 data.tiers — 前端曾把 sections 数组当对象解, 结果全空(审计前端P0-1)
         const data = await recallMemories(query, 2);
-        const tiers = (data.tiers || {}) as Record<string, Array<SearchResult>>;
+        const tiers = (data.tiers || {}) as unknown as Record<string, Array<SearchResult>>;
         const order = ['primary', 'hub', 'experiential', 'contextual'];
         const groups: { tier: string; results: SearchResult[] }[] = [];
         const allResults: SearchResult[] = [];
@@ -153,7 +153,7 @@ export default function DashboardMemories() {
         if (recallModeRef.current) {
           const data = await recallMemories(q, 2);
           if (controller.signal.aborted) return;
-          const tiers = (data.tiers || {}) as Record<string, Array<SearchResult>>;
+          const tiers = (data.tiers || {}) as unknown as Record<string, Array<SearchResult>>;
           const allResults: SearchResult[] = [];
           const groups: { tier: string; results: SearchResult[] }[] = [];
           for (const tier of ['primary', 'hub', 'experiential', 'contextual']) {
@@ -312,7 +312,7 @@ export default function DashboardMemories() {
           if (ta !== tb) return sortBy === 'newest' ? tb - ta : ta - tb;
           return sortBy === 'newest' ? b.id - a.id : a.id - b.id;
         })
-        .map(e => ({ id: e.id, content: e.content, labels: e.labels, type: 'timeline' as const, similarity: undefined as number | undefined, tier: undefined as string | undefined, timestamp: e.timestamp })),
+        .map(e => ({ id: e.id, content: e.content, labels: e.labels, type: 'timeline' as const, similarity: undefined as number | undefined, tier: undefined as string | undefined, timestamp: e.timestamp, score_notes: undefined, source: undefined as string[] | undefined, matched_by: undefined as string[] | undefined })),
      [results, events, filterLabels, sortBy, contentTab, timeRange]);
 
   if (initialLoading) {
@@ -545,8 +545,8 @@ export default function DashboardMemories() {
                     <span style={{ background: 'rgba(52,211,153,0.08)', color: '#3ecfae', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>{t('dash.mem.score')} {item.similarity.toFixed(3)}</span>
                   )}
                   {/* 刀2: 检索来源诚实 — matched_by 后端早有, 前端首次展示(审计前端P0-5) */}
-                  {(item as SearchResult).matched_by && (item as SearchResult).matched_by!.length > 0 && (
-                    <span style={{ background: 'rgba(62,207,174,0.08)', color: '#3ecfae', fontSize: 10, padding: '2px 6px', borderRadius: 4, fontFamily: 'var(--font-mono)' }} title="matched_by">⚙ {(item as SearchResult).matched_by!.join(',')}</span>
+                  {item.matched_by && item.matched_by.length > 0 && (
+                    <span style={{ background: 'rgba(62,207,174,0.08)', color: '#3ecfae', fontSize: 10, padding: '2px 6px', borderRadius: 4, fontFamily: 'var(--font-mono)' }} title="matched_by">⚙ {(item.matched_by as string[]).join(',')}</span>
                   )}
                   {item.tier && (
                     <span style={{
@@ -604,13 +604,13 @@ export default function DashboardMemories() {
                       <div style={{ padding: '8px 12px', background: 'rgba(0,0,0,0.2)', borderRadius: 8, marginBottom: 8 }}>
                         <div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginBottom: 4 }}>Score Breakdown</div>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          {item.score_notes.adjustments.map((adj, i) => (
+                          {item.score_notes.adjustments.map((adj: { kind: string; reason?: string; delta?: number }, i: number) => (
                             <span key={i} style={{
                               fontSize: 10, padding: '2px 6px', borderRadius: 4,
-                              background: adj.delta > 0 ? 'rgba(52,211,153,0.08)' : 'rgba(248,113,113,0.08)',
-                              color: adj.delta > 0 ? '#3ecfae' : '#f87171',
+                              background: (adj.delta ?? 0) > 0 ? 'rgba(52,211,153,0.08)' : 'rgba(248,113,113,0.08)',
+                              color: (adj.delta ?? 0) > 0 ? '#3ecfae' : '#f87171',
                             }}>
-                              {adj.kind.replace(/_/g, ' ')} {adj.delta > 0 ? '+' : ''}{adj.delta.toFixed(2)}
+                              {adj.kind.replace(/_/g, ' ')} {(adj.delta ?? 0) > 0 ? '+' : ''}{(adj.delta ?? 0).toFixed(2)}
                             </span>
                           ))}
                         </div>

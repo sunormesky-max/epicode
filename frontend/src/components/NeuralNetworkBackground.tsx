@@ -41,7 +41,7 @@ export default function NeuralNetworkBackground() {
     let W = 0, H = 0, horizon = 0;
     let cn: CNode[] = [], syn: { a: number; b: number; st: number; pulses: Pulse[] }[] = [];
     let sub: SNode[] = [], rises: Rise[] = [];
-    let probes: { x: number; y: number; lf: number }[] = [];
+    const probes: { x: number; y: number; lf: number }[] = [];
     let horizonPhase = 0;
 
     function init() {

@@ -3,7 +3,7 @@ import { useCognitiveState, type EmotionState } from '@/components/CognitiveCont
 import DashboardLayout from '@/components/DashboardLayout';
 import { MarkdownText, stripThinkTags } from '@/components/MarkdownText';
 import { getDriveInbox, ackDrive, getRuntimeStatus, registerRuntime, heartbeatRuntime, getUserId, normalizeDriveEnum, getKnowledgeCards, type DriveSignal, type KnowledgeCard } from '@/lib/api';
-import { Brain, Activity, Heart, Zap, MessageSquare, Wifi, WifiOff, Radio, CheckCircle2, XCircle, AlertTriangle, Lightbulb } from 'lucide-react';
+import { Brain, Activity, Zap, MessageSquare, Wifi, WifiOff, Radio, CheckCircle2, XCircle, AlertTriangle, Lightbulb } from 'lucide-react';
 import { useI18nContext } from '@/i18n/I18nContext';
 import type { TranslationKey } from '@/i18n/translations';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -68,7 +68,7 @@ export default function DashboardCognitive() {
   const cleanThought = cog.latestThought ? stripThinkTags(cog.latestThought) : '';
 
   const [driveSignals, setDriveSignals] = useState<DriveSignal[]>([]);
-  const [driveStats, setDriveStats] = useState({ pending: 0, delivered: 0, executed: 0, rejected: 0, total: 0 });
+  const [driveStats, setDriveStats] = useState<{ pending: number; delivered: number; executed: number; rejected: number; total: number; policy_version?: number }>({ pending: 0, delivered: 0, executed: 0, rejected: 0, total: 0 });
   const [ackLoading, setAckLoading] = useState<number | null>(null);
   // 刀1: 错误可见 — 失败不再粉饰成「没有意志」(审计前端P0-3)
   const [driveError, setDriveError] = useState<string | null>(null);
@@ -93,7 +93,7 @@ export default function DashboardCognitive() {
         urgency: normalizeDriveEnum(s.urgency),
       }));
       setDriveSignals(sigs);
-      setDriveStats(data.stats || { pending: 0, delivered: 0, executed: 0, rejected: 0, total: 0 });
+      setDriveStats((data.stats || { pending: 0, delivered: 0, executed: 0, rejected: 0, total: 0 }) as typeof driveStats);
       setEmptyReason(data.empty_reason || null);
       setDriveError(null);
     } catch (e) {

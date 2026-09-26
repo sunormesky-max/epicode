@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { errMsg, getMySkills, getPublicSkills, createSkill, updateSkill, deleteSkill, publishSkill, searchSkills, type SkillData, type CommunitySkill } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
-import { DashboardLoading, ErrorBanner, NoticeBanner } from '@/components/DashboardUI';
-import { Brain, Wrench, Users, Clock, Tag, Plus, Search, X, Check, Star, Filter, Trash2, Upload, Pencil, Zap, Eye } from 'lucide-react';
+import { DashboardLoading } from '@/components/DashboardUI';
+import { Brain, Wrench, Users, Clock, Tag, Plus, Search, X, Star, Filter, Trash2, Upload, Pencil, Zap, Eye } from 'lucide-react';
 import { useI18nContext } from '@/i18n/I18nContext';
 
 function SkillCard({ skill, color, onEdit, onDelete, onPublish }: {
@@ -225,7 +225,7 @@ export default function DashboardSkills() {
   const filtered = useMemo(() => {
     // S2: 语义结果优先(my tab 有搜索词且语义命中时直接展示语义结果)
     if (tab === 'my' && semResults && searchQ.trim()) return semResults;
-    let f = display;
+    let f: (SkillData | CommunitySkill)[] = display;
     if (searchQ) f = f.filter(s => s.name.toLowerCase().includes(searchQ.toLowerCase()) || (('description' in s && s.description) ? String(s.description).toLowerCase().includes(searchQ.toLowerCase()) : false));
     if (statusFilter !== 'all') {
       if (tab === 'my') {

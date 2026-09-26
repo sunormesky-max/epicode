@@ -1,10 +1,11 @@
 import { motion } from 'framer-motion';
 import Layout from '@/components/Layout';
 import {
-  BookOpen, Layers, Shield, GitBranch, Network,
+  Layers, Shield, GitBranch, Network,
   CheckCircle2, ArrowRight, Box, Sparkles, Cpu, Users
 } from 'lucide-react';
 import { useI18nContext } from '@/i18n/I18nContext';
+import type { TranslationKey } from '@/i18n/translations';
 
 const TIERS = [
   {
@@ -140,8 +141,8 @@ export default function SmrpProtocol() {
                 ['smrp.consequence.score.title', 'smrp.consequence.score.desc'],
               ].map(([titleKey, descKey]) => (
                 <div key={titleKey} className="p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)' }}>
-                  <div className="text-sm font-semibold mb-2" style={{ color: 'var(--accent-magenta)' }}>{t(titleKey as any)}</div>
-                  <div className="text-sm" style={{ color: 'var(--text-tertiary)', lineHeight: 1.6 }}>{t(descKey as any)}</div>
+                  <div className="text-sm font-semibold mb-2" style={{ color: 'var(--accent-magenta)' }}>{t(titleKey as TranslationKey)}</div>
+                  <div className="text-sm" style={{ color: 'var(--text-tertiary)', lineHeight: 1.6 }}>{t(descKey as TranslationKey)}</div>
                 </div>
               ))}
             </div>

@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import Layout from '@/components/Layout';
-import { BookOpen, ArrowRight, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react';
 import { useI18nContext } from '@/i18n/I18nContext';
+import type { TranslationKey } from '@/i18n/translations';
 
 interface Endpoint {
   method: string;
@@ -236,7 +237,7 @@ function EndpointCard({ ep }: { ep: Endpoint }) {
           {ep.path}
         </span>
         <span className="text-sm hidden sm:block flex-1" style={{ color: 'var(--text-secondary)' }}>
-          {t(ep.descKey)}
+          {t(ep.descKey as TranslationKey)}
         </span>
         <span className="text-xs px-2 py-0.5 rounded-md flex-shrink-0" style={{
           background: ep.auth ? 'rgba(139,126,200,0.1)' : 'rgba(52,199,89,0.1)',
@@ -250,7 +251,7 @@ function EndpointCard({ ep }: { ep: Endpoint }) {
 
       {open && (
         <div className="px-5 pb-5 space-y-4" style={{ borderTop: '1px solid var(--border-light)' }}>
-          <p className="text-sm pt-3 sm:hidden" style={{ color: 'var(--text-secondary)' }}>{t(ep.descKey)}</p>
+          <p className="text-sm pt-3 sm:hidden" style={{ color: 'var(--text-secondary)' }}>{t(ep.descKey as TranslationKey)}</p>
           {ep.body && (
             <div>
               <div className="text-xs font-mono mb-2 uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Request</div>
@@ -335,7 +336,7 @@ export default function Docs() {
                     onMouseEnter={(e) => { if (activeSection !== i) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
                     onMouseLeave={(e) => { if (activeSection !== i) e.currentTarget.style.background = 'transparent'; }}
                   >
-                    {t(s.titleKey)}
+                    {t(s.titleKey as TranslationKey)}
                     <span className="ml-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>{s.endpoints.length}</span>
                   </button>
                 ))}
@@ -346,9 +347,9 @@ export default function Docs() {
               {API_SECTIONS.map((section, si) => (
                 <div key={section.titleKey} id={`section-${si}`}>
                   <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
-                    {t(section.titleKey)}
+                    {t(section.titleKey as TranslationKey)}
                   </h2>
-                  <p className="text-sm mb-4" style={{ color: 'var(--text-tertiary)' }}>{t(section.descKey)}</p>
+                  <p className="text-sm mb-4" style={{ color: 'var(--text-tertiary)' }}>{t(section.descKey as TranslationKey)}</p>
                   <div className="space-y-2">
                     {section.endpoints.map((ep) => (
                       <EndpointCard key={ep.method + ep.path} ep={ep} />

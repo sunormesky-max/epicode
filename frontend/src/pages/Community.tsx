@@ -4,7 +4,7 @@ import Layout from '@/components/Layout';
 import { exploreSkills, pullPublicSkill, isAuthenticated, errMsg, type CommunitySkill } from '@/lib/api';
 import { useI18nContext } from '@/i18n/I18nContext';
 import {
-  Users, Search, Brain, Clock, Tag, Star,
+  Search, Brain, Clock, Tag, Star,
   ChevronDown, ChevronUp, Download, CheckCircle, X
 } from 'lucide-react';
 
