@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { askQuestion, getUserId } from '@/lib/api';
-import { useCognitiveState } from '@/components/CognitiveContext';
-import { MarkdownText, stripThinkTags } from '@/components/MarkdownText';
+import { useCognitiveState } from '@/components/useCognitiveState';
+import { MarkdownText } from '@/components/MarkdownText';
+import { stripThinkTags } from '@/lib/think-tags';
 import { Send, Brain, Sparkles, Loader2 } from 'lucide-react';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -42,10 +43,9 @@ export default function DashboardChat() {
 
   // P0-CRITICAL: 检测 user_id 变化 (切换账户时清空聊天, 防止跨账户泄漏)
   const [trackedUserId, setTrackedUserId] = useState(currentUserId);
+  // 挂载一次: URL预填+账户追踪 — 挂载语义(依赖数组为空有意为之)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    // 53db90068005 R7: 547d4ee46761 "95ee573a" 5e265165768467e58be29884586b
-    // 挂载一次: URL预填+账户追踪(setInput不进依赖 — 挂载语义)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     const mq = location.hash.match(/[?&]q=([^&]+)/);
     if (mq) { try { setInput(decodeURIComponent(mq[1])); } catch { /* ignore */ } history.replaceState(null, "", location.pathname + location.hash.split("?")[0]); }
     const uid = getUserId() || "anonymous";

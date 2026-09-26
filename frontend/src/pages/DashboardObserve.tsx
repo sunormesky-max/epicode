@@ -39,6 +39,7 @@ function emoStr(e: unknown): string | null {
 }
 
 export default function DashboardObserve() {
+  const [nowSnapshot] = useState(() => Date.now()); // 渲染期纯函数: 挂载时快照
   const [cog, setCog] = useState<CognitiveState | null>(null);
   const [wills, setWills] = useState<DriveSignal[]>([]);
   const [pulses, setPulses] = useState<{ id: number; x: number; y: number; born: number }[]>([]);
@@ -215,7 +216,7 @@ export default function DashboardObserve() {
           </p>
           {cog && (cog.latestThought || '').trim() && (
             <p style={{ ...HUD_LABEL, marginTop: 6, opacity: 0.6 }}>
-              t-{Math.max(0, Math.round((Date.now() - cog.timestamp) / 1000))}s
+              t-{Math.max(0, Math.round((nowSnapshot - cog.timestamp) / 1000))}s
             </p>
           )}
         </div>

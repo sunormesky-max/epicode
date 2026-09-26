@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import Layout from '@/components/Layout';
 import { ArrowRight, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 import type { TranslationKey } from '@/i18n/translations';
 
 interface Endpoint {

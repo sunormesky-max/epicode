@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useCognitiveState, type EmotionState } from '@/components/CognitiveContext';
+import type { EmotionState } from '@/components/cognitive-context';
+import { useCognitiveState } from '@/components/useCognitiveState';
 import DashboardLayout from '@/components/DashboardLayout';
-import { MarkdownText, stripThinkTags } from '@/components/MarkdownText';
+import { MarkdownText } from '@/components/MarkdownText';
+import { stripThinkTags } from '@/lib/think-tags';
 import { getDriveInbox, ackDrive, getRuntimeStatus, registerRuntime, heartbeatRuntime, getUserId, normalizeDriveEnum, getKnowledgeCards, type DriveSignal, type KnowledgeCard } from '@/lib/api';
 import { Brain, Activity, Zap, MessageSquare, Wifi, WifiOff, Radio, CheckCircle2, XCircle, AlertTriangle, Lightbulb } from 'lucide-react';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 import type { TranslationKey } from '@/i18n/translations';
 import { useIsMobile } from '@/hooks/useIsMobile';
 
@@ -55,6 +57,7 @@ function EmotionPad({ emotion, t }: { emotion: EmotionState | null; t: (k: Trans
 }
 
 export default function DashboardCognitive() {
+  const [nowSnapshot] = useState(() => Date.now()); // 渲染期纯函数: 挂载时快照
   const { t } = useI18nContext();
   const cog = useCognitiveState();
   const isDream = cog.cognitiveStatus.includes('dream') || cog.cognitiveStatus.includes('sleep');
@@ -108,6 +111,8 @@ export default function DashboardCognitive() {
     }
   }, []);
 
+  // refreshDrive为async: setState均在await之后(fetch完成), v6规则对async边界保守误报
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refreshDrive(); const t = setInterval(refreshDrive, 30000); return () => clearInterval(t); }, [refreshDrive]);
 
   useEffect(() => {
@@ -329,7 +334,7 @@ export default function DashboardCognitive() {
                 const color = intentColor(sig.intent_type);
                 const desc = sig.description?.trim()
                   || `[${sig.intent_type}] evidence: ${(sig.evidence || []).join(', ') || '无'}`;
-                const ttl = sig.expires_at ? Math.max(0, Math.round((sig.expires_at * 1000 - Date.now()) / 60000)) : null;
+                const ttl = sig.expires_at ? Math.max(0, Math.round((sig.expires_at * 1000 - nowSnapshot) / 60000)) : null;
                 return (
                   <div key={sig.id} style={{
                     display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 4px',

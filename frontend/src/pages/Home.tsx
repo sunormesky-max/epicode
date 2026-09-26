@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
 import { motion, useInView } from 'framer-motion';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 import Layout from '@/components/Layout';
 import { getPublicStats } from '@/lib/api';
 import {

@@ -3,7 +3,9 @@ import { searchMemories, getTimeline, deleteMemory, updateMemoryContent, storeMe
 import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading } from '@/components/DashboardUI';
 import { Search, Plus, Filter, X, ChevronDown, Calendar, Tag, Hash, Pencil, FileText, Brain, Loader2, Sparkles } from 'lucide-react';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
+
+/* eslint-disable react-hooks/refs -- latest-ref模式(React官方认可, useEvent落地前标准做法): render期同步ref保证debounce闭包读最新值 */
 
 // ── 搜索关键词高亮 ──
 function highlightText(text: string, query: string): React.ReactNode {
@@ -36,6 +38,8 @@ function useDebounced<T extends (...args: never[]) => void>(fn: T, delay: number
 }
 
 export default function DashboardMemories() {
+  // 渲染期纯函数要求: 时间取挂载快照(原Date.now()在render调用, CodeQL/React purity)
+  const [nowSnapshot] = useState(() => Date.now());
   const { t } = useI18nContext();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -136,6 +140,8 @@ export default function DashboardMemories() {
   // 去抖自动搜索：用户停止输入 500ms 后自动触发
   // F3修复:用 ref 存 AbortController,新搜索 abort 上一个,避免慢请求覆盖新结果
   const searchAbortRef = useRef<AbortController | null>(null);
+  // latest-ref模式(React官方认可, useEvent提案落地前的标准做法):
+  // render期同步ref保证debouncedSearch闭包读到最新值 — 加effect同步会有时序缺口
   const recallModeRef = useRef(recallMode);
   recallModeRef.current = recallMode;
   const timeRangeRef = useRef(timeRange);
@@ -268,14 +274,14 @@ export default function DashboardMemories() {
   // 标本年龄着色: 新记忆=亮紫(刚浮现), 随时间沉沦为透明(被地平线吸收)
   const ageTint = (ts?: number) => {
     if (!ts) return 'rgba(139,126,200,0.25)';
-    const days = (Date.now() / 1000 - ts) / 86400;
+    const days = (nowSnapshot / 1000 - ts) / 86400;
     if (days < 1) return 'rgba(151,235,214,0.9)';
     if (days < 7) return 'rgba(139,126,200,0.8)';
     if (days < 30) return 'rgba(139,126,200,0.45)';
     return 'rgba(139,126,200,0.2)';
   };
 
-  const scrubNow = useMemo(() => Math.floor(Date.now() / 1000 - timeScrub * 30 * 86400), [timeScrub]);
+  const scrubNow = useMemo(() => Math.floor(nowSnapshot / 1000 - timeScrub * 30 * 86400), [timeScrub, nowSnapshot]);
 
   const displayItems = useMemo(() => results.length > 0
     ? results.map(r => ({ id: r.id, content: r.content, labels: r.labels, type: 'search' as const, similarity: r.similarity, tier: r.tier as string | undefined, timestamp: r.timestamp as number | undefined, score_notes: r.score_notes, source: r.source, matched_by: r.matched_by }))
@@ -301,7 +307,7 @@ export default function DashboardMemories() {
         .filter(e => {
           if (timeRange === 'all') return true;
           const days = timeRange === 'today' ? 1 : timeRange === 'week' ? 7 : 30;
-          const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+          const cutoff = Math.floor(nowSnapshot / 1000) - days * 86400;
           return (e.timestamp || 0) >= cutoff;
         })
         .filter(e => filterLabels.length === 0 || filterLabels.some(l => (e.labels || []).includes(l)))
@@ -313,7 +319,7 @@ export default function DashboardMemories() {
           return sortBy === 'newest' ? b.id - a.id : a.id - b.id;
         })
         .map(e => ({ id: e.id, content: e.content, labels: e.labels, type: 'timeline' as const, similarity: undefined as number | undefined, tier: undefined as string | undefined, timestamp: e.timestamp, score_notes: undefined, source: undefined as string[] | undefined, matched_by: undefined as string[] | undefined })),
-     [results, events, filterLabels, sortBy, contentTab, timeRange]);
+     [results, events, filterLabels, sortBy, contentTab, timeRange, nowSnapshot]);
 
   if (initialLoading) {
     return (

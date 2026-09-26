@@ -3,7 +3,7 @@ import { errMsg, getStats, getSubAccounts, createSubAccount, revokeSubAccount, t
 import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading } from '@/components/DashboardUI';
 import { Users, Plus, Trash2, Shield, Brain, Crown, AlertTriangle, UserCheck, Lock, X } from 'lucide-react';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 
 export default function DashboardSubAccounts() {
   const { t } = useI18nContext();

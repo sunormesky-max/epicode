@@ -104,7 +104,9 @@ export default function CommandBar() {
     listRef.current?.querySelector(`[data-idx="${sel}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [sel]);
 
-  useEffect(() => { setSel(0); }, [q]);
+  // q变化重置选中 — 官方"渲染期调整"模式替代 effect+setState(react-hooks v6)
+  const [prevQ, setPrevQ] = useState(q);
+  if (prevQ !== q) { setPrevQ(q); setSel(0); }
 
   if (!open) {
     return (

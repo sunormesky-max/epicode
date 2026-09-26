@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Layout from '@/components/Layout';
 import { getAgentGuide } from '@/lib/api';
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 import {
   Compass, Key, ArrowRight, Copy, Check,
   Terminal, BookOpen, Shield, Clock, Sparkles
