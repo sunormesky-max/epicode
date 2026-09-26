@@ -480,6 +480,14 @@ fn run_cmd_output(cmd: &str, args: &[&str]) -> Option<String> {
 /// the set, which on every guard restart lets attackers back in. Instead we
 /// probe for the table and only create it (and the dependent sets/chains/rules)
 /// if missing, preserving all in-kernel ban elements across restarts.
+// nftables 实际可用标志(审计三轮中优): 初始化失败后服务曾"看似运行"
+// 而实际未封禁任何 IP — 现在显式暴露健康状态, 日志与状态面都可见
+static NFT_AVAILABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn nft_healthy() -> bool {
+    NFT_AVAILABLE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn nft_init() {
     migrate_v1_rules();
     let table_handle = run_cmd_output("nft", &["list", "table", "inet", NFT_TABLE]);
@@ -490,11 +498,12 @@ fn nft_init() {
         return;
     }
     if !run_cmd("nft", &["add", "table", "inet", NFT_TABLE]) {
-        log_msg("FATAL: failed to create nft table (is CAP_NET_ADMIN available?)");
+        log_msg("FATAL: failed to create nft table (is CAP_NET_ADMIN available?) — BANS WILL NOT ENFORCE");
         return;
     }
     ensure_nft_set(NFT_SET_V4, "ipv4_addr");
     ensure_nft_set(NFT_SET_V6, "ipv6_addr");
+    NFT_AVAILABLE.store(true, std::sync::atomic::Ordering::Relaxed);
     run_cmd(
         "nft",
         &[
