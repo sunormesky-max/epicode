@@ -11,7 +11,7 @@ describe('stripThinkTags(拆出的纯函数)', () => {
   it('大小写不敏感', () => {
     expect(stripThinkTags('<THINK>x</THINK>y')).toBe('y');
   });
-  it('多行think(\s\S)', () => {
+  it('多行think(跨行匹配)', () => {
     expect(stripThinkTags('<think>第一行\n第二行</think>ok')).toBe('ok');
   });
   it('无think原样返回并trim', () => {
