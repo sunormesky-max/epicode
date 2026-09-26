@@ -580,7 +580,7 @@ checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
 name = "epicode"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "aes-gcm",
  "argon2",

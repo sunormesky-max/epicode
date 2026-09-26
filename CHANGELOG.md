@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3](https://github.com/sunormesky-max/epicode/compare/v1.0.2...v1.0.3) (2026-09-25)
+
+
+### Bug Fixes
+
+* release-please extra-files的toml/yaml更新器改generic ([#84](https://github.com/sunormesky-max/epicode/issues/84)) ([232964a](https://github.com/sunormesky-max/epicode/commit/232964a1dd3f94e2a6f0fb533b8d571a38cb88ee))
+* 审计二轮全量收尾 ([#86](https://github.com/sunormesky-max/epicode/issues/86)) ([d18ee88](https://github.com/sunormesky-max/epicode/commit/d18ee88c42378e5b436f6e1a9d6952f211ce9881))
+
 ## [Unreleased]
 
 ### Added
