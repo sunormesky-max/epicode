@@ -5,7 +5,7 @@ description: >-
   tetrahedrons in 3D space and auto-builds a knowledge graph.
 type: application
 version: 1.0.3
-appVersion: 1.0.2
+appVersion: "1.0.3"
 home: https://epicode.cn
 sources:
   - https://github.com/sunormesky-max/epicode
