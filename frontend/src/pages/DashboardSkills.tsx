@@ -141,6 +141,8 @@ export default function DashboardSkills() {
     }
     load();
     return () => { mounted = false; };
+    // 挂载一次(load每渲染重建; t来自稳定context)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // S2: 语义即时搜索(防抖400ms; 失败静默回退词面过滤)

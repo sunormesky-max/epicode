@@ -54,6 +54,8 @@ export default function Community() {
       .finally(() => setLoading(false));
   };
 
+  // 挂载时加载一次 — loadSkills每渲染重建, 加依赖即循环(标准挂载模式)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadSkills(); }, []);
 
   const categories = useMemo(() => Array.from(new Set(skills.map(s => getSkillCategory(s)))).sort(), [skills]);
