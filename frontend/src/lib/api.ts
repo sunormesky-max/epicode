@@ -779,7 +779,7 @@ export function storeMemory(content: string, labels?: string[]): Promise<CreateR
   });
 }
 
-export type SearchMode = 'exact' | 'hybrid' | 'semantic' | 'graph';
+export type SearchMode = 'exact' | 'hybrid' | 'semantic' | 'graph' | 'auto' | 'fusion';
 
 export async function searchMemories(
   query: string,
@@ -849,12 +849,16 @@ export interface DriveSignal {
   evidence: number[];
   urgency: string;
   target_capability: string | null;
+  emotion?: { pleasure: number; arousal: number; dominance: number; label?: string | null } | null;
   status: string;
+  feedback?: { responded_at: number; executed: boolean; outcome: string; reflection?: string | null } | null;
   origin_tick: number;
   expires_at?: number | null;
   retry_count?: number;
   retryable?: boolean;
   enqueued_at_ms?: number;
+  time_budget_ms?: number | null;
+  description_e2e?: string | null;
 }
 
 export function normalizeDriveEnum(v: string | undefined | null): string {

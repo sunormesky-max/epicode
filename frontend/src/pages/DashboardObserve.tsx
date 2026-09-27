@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { AUTH_CHANGE_EVENT } from '@/lib/api';
+import { presentDriveDescription } from '@/lib/drive-signals';
 // 历史火花线: 会话级状态环存(最近120个认知采样), 观测舱的心电图
 import DashboardLayout from '@/components/DashboardLayout';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useI18nContext } from '@/i18n/useI18n';
 
 /**
  * 观测舱 — Observation Deck
@@ -40,6 +42,7 @@ function emoStr(e: unknown): string | null {
 }
 
 export default function DashboardObserve() {
+  const { t } = useI18nContext();
   const [nowSnapshot] = useState(() => Date.now()); // 渲染期纯函数: 挂载时快照
   const [cog, setCog] = useState<CognitiveState | null>(null);
   const [wills, setWills] = useState<DriveSignal[]>([]);
@@ -130,9 +133,12 @@ export default function DashboardObserve() {
       setTimeout(() => setPulses(p => p.filter(x => x.id !== id)), 2600);
     };
     const onDrive = (e: Event) => {
-      const d = (e as CustomEvent).detail as { signals?: { id: number; intent_type: string; urgency: string; description: string }[] };
+      const d = (e as CustomEvent).detail as { signals?: { id: number; intent_type: string; urgency: string; description?: string | null; description_e2e?: string | null }[] };
       if (Array.isArray(d.signals)) {
-        setWills(prev => [...d.signals!.map(s => ({ id: s.id, intent: s.intent_type, urgency: s.urgency, desc: s.description, at: Date.now() })), ...prev].slice(0, 6));
+        setWills(prev => [...d.signals!.map(s => {
+          const description = presentDriveDescription(s, t('dash.cog.driveEncrypted'), s.intent_type);
+          return { id: s.id, intent: s.intent_type, urgency: s.urgency, desc: description.text, at: Date.now() };
+        }), ...prev].slice(0, 6));
       }
     };
     const onAuthChange = () => {
@@ -147,7 +153,7 @@ export default function DashboardObserve() {
       window.removeEventListener('drive-update', onDrive);
       window.removeEventListener(AUTH_CHANGE_EVENT, onAuthChange);
     };
-  }, []);
+  }, [t]);
 
   const status = cog?.cognitiveStatus ?? '—';
   const statusColor = status.includes('dream') || status.includes('sleep') ? 'var(--accent-purple)' : 'var(--accent-cyan)';

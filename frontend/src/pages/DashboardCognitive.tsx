@@ -4,6 +4,7 @@ import { useCognitiveState } from '@/components/useCognitiveState';
 import DashboardLayout from '@/components/DashboardLayout';
 import { MarkdownText } from '@/components/MarkdownText';
 import { stripThinkTags } from '@/lib/think-tags';
+import { canAcknowledgeDriveSignal, presentDriveDescription } from '@/lib/drive-signals';
 import { AUTH_CHANGE_EVENT, getDriveInbox, ackDrive, getRuntimeStatus, registerRuntime, heartbeatRuntime, getUserId, normalizeDriveEnum, getKnowledgeCards, type DriveSignal, type KnowledgeCard } from '@/lib/api';
 import { Brain, Activity, Zap, MessageSquare, Wifi, WifiOff, Radio, CheckCircle2, XCircle, AlertTriangle, Lightbulb } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
@@ -337,8 +338,13 @@ export default function DashboardCognitive() {
               {driveSignals.slice(0, 10).map((sig) => {
                 const Icon = intentIcon(sig.intent_type);
                 const color = intentColor(sig.intent_type);
-                const desc = sig.description?.trim()
-                  || `[${sig.intent_type}] evidence: ${(sig.evidence || []).join(', ') || '无'}`;
+                const description = presentDriveDescription(
+                  sig,
+                  t('dash.cog.driveEncrypted'),
+                  `[${sig.intent_type}] evidence: ${(sig.evidence || []).join(', ') || '无'}`,
+                );
+                const desc = description.text;
+                const ackDisabled = !canAcknowledgeDriveSignal(sig, canAck, ackLoading === sig.id);
                 const ttl = sig.expires_at ? Math.max(0, Math.round((sig.expires_at * 1000 - nowSnapshot) / 60000)) : null;
                 return (
                   <div key={sig.id} style={{
@@ -379,20 +385,20 @@ export default function DashboardCognitive() {
                         <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                           <button
                             onClick={() => handleAck(sig.id, true)}
-                            disabled={ackLoading === sig.id || !canAck}
+                            disabled={ackDisabled}
                             style={{
                               background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)',
-                              borderRadius: 6, padding: '3px 8px', cursor: ackLoading === sig.id || !canAck ? 'not-allowed' : 'pointer',
+                              borderRadius: 6, padding: '3px 8px', cursor: ackDisabled ? 'not-allowed' : 'pointer',
                               color: '#3ecfae', fontSize: 10, display: 'flex', alignItems: 'center', gap: 3,
                             }}>
                             <CheckCircle2 size={11} /> {t('dash.cog.execute')}
                           </button>
                           <button
                             onClick={() => handleAck(sig.id, false)}
-                            disabled={ackLoading === sig.id || !canAck}
+                            disabled={ackDisabled}
                             style={{
                               background: 'rgba(255,56,96,0.08)', border: '1px solid rgba(255,56,96,0.15)',
-                              borderRadius: 6, padding: '3px 8px', cursor: ackLoading === sig.id || !canAck ? 'not-allowed' : 'pointer',
+                              borderRadius: 6, padding: '3px 8px', cursor: ackDisabled ? 'not-allowed' : 'pointer',
                               color: '#ff3860', fontSize: 10, display: 'flex', alignItems: 'center', gap: 3,
                             }}>
                             <XCircle size={11} /> {t('dash.cog.dismiss')}

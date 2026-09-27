@@ -12,25 +12,21 @@ const TIERS = [
     name: 'primary', color: '#3ecfae', icon: Box,
     defKey: 'smrp.tier.primary.def' as const,
     useKey: 'smrp.tier.primary.use' as const,
-    source: 'source: ["vector"]',
   },
   {
     name: 'contextual', color: '#8b7ec8', icon: Network,
     defKey: 'smrp.tier.contextual.def' as const,
     useKey: 'smrp.tier.contextual.use' as const,
-    source: 'source: ["kg"]',
   },
   {
     name: 'experiential', color: '#8b7ec8', icon: Shield,
     defKey: 'smrp.tier.experiential.def' as const,
     useKey: 'smrp.tier.experiential.use' as const,
-    sourceKey: 'smrp.body.experientialSource' as const,
   },
   {
     name: 'hub', color: '#eab308', icon: Sparkles,
     defKey: 'smrp.tier.hub.def' as const,
     useKey: 'smrp.tier.hub.use' as const,
-    source: 'source: ["vector","kg"]',
   },
 ];
 
@@ -54,26 +50,90 @@ const ENVELOPE = `{
     "ok": true,
     "error": null
   },
-  "data": { "tiers": { ... }, "results": [ ... ] },
+  "data": {
+    "query": "architecture decisions",
+    "tiers": {
+      "primary": [{
+        "id": 714,
+        "content": "…",
+        "labels": ["documentation"],
+        "timestamp": 1781840244,
+        "tier": "primary",
+        "source": ["hybrid"],
+        "similarity": 0.87,
+        "metrics": { "importance": 1.9, "mass": 1.05, "memory_type": "security", "valid": true }
+      }],
+      "contextual": [],
+      "experiential": [],
+      "hub": []
+    },
+    "results": [{
+      "id": 714,
+      "content": "…",
+      "labels": ["documentation"],
+      "timestamp": 1781840244,
+      "tier": "primary",
+      "source": ["hybrid"],
+      "similarity": 0.87,
+      "metrics": { "importance": 1.9, "mass": 1.05, "memory_type": "security", "valid": true }
+    }],
+    "count": 1,
+    "total": 1,
+    "score_notes": {
+      "base": "hybrid_vector_similarity + bm25 + intent_rerank",
+      "adjustments": [
+        { "kind": "cluster_boost", "delta": 0.08, "applied_to": [] },
+        { "kind": "importance_boost", "delta": 0.06, "applied_to": [] },
+        { "kind": "access_boost", "delta": 0.04, "applied_to": [] },
+        { "kind": "outdated_penalty", "delta": -0.30, "applied_to": [] }
+      ]
+    }
+  },
   "status": {
-    "identity": { "name": "..." },
+    "identity": { "name": "...", "system": "Epicode" },
     "space": { "memories": 521, "energy": 10000 }
   }
 }`;
 
 const CREATE_EX = `{
-  "protocol": { "ok": true, "tool": "memory_create" },
+  "protocol": {
+    "schema_version": "1.0",
+    "tool": "memory_create",
+    "ok": true,
+    "error": null
+  },
   "data": {
     "status": "created",
     "id": 715,
+    "content_preview": "A concise memory preview",
+    "intake": {
+      "importance": 1.9,
+      "memory_type": "security",
+      "rationale": "…"
+    },
+    "classification": {
+      "auto_labels": ["ops"],
+      "classified": true
+    },
     "placement": {
       "layer": "service",
+      "core": [1.5, 0.0, 6.8],
       "joined_cluster": { "id": 0, "size": 1 },
       "vertices_shared": 1,
       "is_seed": true,
+      "is_orphan": false,
       "has_port": true
     },
+    "dedup": {
+      "checked": true,
+      "matched_existing": null,
+      "conflicts_marked": []
+    },
     "relations_formed": 22
+  },
+  "status": {
+    "identity": { "name": "...", "system": "Epicode" },
+    "space": { "memories": 715, "energy": 10000 }
   }
 }`;
 
@@ -183,11 +243,13 @@ export default function SmrpProtocol() {
                     </div>
                     <div className="text-sm mb-2" style={{ color: 'var(--text-primary)', lineHeight: 1.5 }}>{t(tier.defKey)}</div>
                     <div className="text-xs mb-3" style={{ color: 'var(--text-tertiary)' }}>→ {t(tier.useKey)}</div>
-                    <code className="text-xs" style={{ color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>{tier.sourceKey ? t(tier.sourceKey) : tier.source}</code>
                   </div>
                 );
               })}
             </div>
+            <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, marginTop: '20px' }}>
+              {t('smrp.body.sourceIndependent')}
+            </p>
           </motion.div>
 
           {/* create 安置副产物 */}

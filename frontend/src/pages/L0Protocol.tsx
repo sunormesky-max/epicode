@@ -39,12 +39,45 @@ const PILLARS = [
 
 const DRIVE_SIGNAL = `{
   "id": 1,
+  "timestamp": 1790000000,
   "intent_type": "explore",
   "description": "Knowledge gaps detected from 3 miss queries",
   "evidence": [474, 892, 1203],
   "urgency": "low",
-  "emotion": { "pleasure": 0.15, "arousal": 0.39, "dominance": 0.11 },
-  "status": "pending"
+  "target_capability": null,
+  "emotion": { "pleasure": 0.15, "arousal": 0.39, "dominance": 0.11, "label": null },
+  "origin_tick": 8,
+  "status": "pending",
+  "feedback": null,
+  "retry_count": 0,
+  "expires_at": 1791209600,
+  "enqueued_at_ms": 1790000000123,
+  "time_budget_ms": null,
+  "retryable": true
+}`;
+
+const DRIVE_SSE_EVENT = `{
+  "type": "drive",
+  "action": "enqueue",
+  "pushed_at_ms": 1790000000456,
+  "server_lag_ms": 333,
+  "signals": [{
+    "id": 1,
+    "intent_type": "explore",
+    "status": "pending",
+    "urgency": "low",
+    "description": "Knowledge gaps detected from 3 miss queries",
+    "description_e2e": null,
+    "evidence": [474, 892, 1203],
+    "enqueued_at_ms": 1790000000123
+  }]
+}`;
+
+const DRIVE_ACK = `{
+  "drive_id": 1,
+  "executed": true,
+  "outcome": "Completed after checking the referenced evidence",
+  "reflection": "Optional quality feedback"
 }`;
 
 const FLOW_STEPS = [
@@ -140,6 +173,14 @@ export default function L0Protocol() {
               {t('l0.driveDesc1')} {t('l0.driveDesc2')}
             </p>
             <CodeBlock code={DRIVE_SIGNAL} label={t('l0.driveCodeLabel')} />
+            <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, margin: '20px 0' }}>
+              {t('l0.driveSseDesc')}
+            </p>
+            <CodeBlock code={DRIVE_SSE_EVENT} label={t('l0.driveSseCodeLabel')} />
+            <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, margin: '20px 0' }}>
+              {t('l0.driveAckDesc')}
+            </p>
+            <CodeBlock code={DRIVE_ACK} label={t('l0.driveAckCodeLabel')} />
           </motion.div>
 
           {/* Evolution Loop */}

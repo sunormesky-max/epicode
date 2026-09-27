@@ -147,6 +147,55 @@ const API_SECTIONS: { titleKey: string; descKey: string; endpoints: Endpoint[] }
     ],
   },
   {
+    titleKey: 'docs.section.drive.title',
+    descKey: 'docs.section.drive.desc',
+    endpoints: [
+      {
+        method: 'GET', path: '/v1/drive/inbox', descKey: 'docs.section.drive.ep1.desc',
+        auth: true,
+        response: 'SMRP envelope: data = { "signals": [DriveSignal + "retryable"], "stats": {...}, "empty_reason": "has_signals" | "no_signals" | "no_pending" | "self_consumed" }',
+      },
+      {
+        method: 'POST', path: '/v1/drive/ack', descKey: 'docs.section.drive.ep2.desc',
+        auth: true,
+        body: '{ "drive_id": 1, "executed": true, "outcome": "Completed", "reflection": "Optional quality feedback" }',
+        response: 'SMRP envelope: data includes drive_id, acknowledged, first_ack, and learned',
+      },
+      {
+        method: 'POST', path: '/v1/runtime/register', descKey: 'docs.section.drive.ep3.desc',
+        auth: true,
+        body: '{ "agent_id": "my-agent", "capabilities": ["ack"], "e2e_enabled": false }',
+        response: 'SMRP envelope when an engine is loaded; otherwise the registration payload is returned directly.',
+      },
+      {
+        method: 'GET', path: '/v1/runtime/status', descKey: 'docs.section.drive.ep5.desc',
+        auth: true,
+        response: 'SMRP envelope when an engine is loaded; otherwise { "bound": true, "agent_id": "my-agent", "e2e_enabled": false, "capabilities": ["ack"], "expired": false } is returned directly.',
+      },
+      {
+        method: 'POST', path: '/v1/runtime/heartbeat', descKey: 'docs.section.drive.ep4.desc',
+        auth: true,
+        response: 'SMRP envelope when an engine is loaded; otherwise { "success": true, "timestamp": 1780000000 } is returned directly. success is false when no binding exists.',
+      },
+      {
+        method: 'POST', path: '/v1/runtime/unregister', descKey: 'docs.section.drive.ep6.desc',
+        auth: true,
+        response: 'SMRP envelope when an engine is loaded; otherwise { "success": true, "removed": true } is returned directly.',
+      },
+    ],
+  },
+  {
+    titleKey: 'docs.section.protocol.title',
+    descKey: 'docs.section.protocol.desc',
+    endpoints: [
+      {
+        method: 'GET', path: '/v1/smrp', descKey: 'docs.section.protocol.ep1.desc',
+        auth: false,
+        response: 'text/html; charset=utf-8 — canonical SMRP 1.0 specification',
+      },
+    ],
+  },
+  {
     titleKey: 'docs.section.identity.title',
     descKey: 'docs.section.identity.desc',
     endpoints: [

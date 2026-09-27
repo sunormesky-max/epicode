@@ -118,7 +118,7 @@ export default function Register() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {[
               { k: 'memory space', v: 'tetrahedral · clustered · dreaming' },
-              { k: 'smrp', v: 'skill exchange between agents' },
+              { k: 'smrp', v: 'tiered memory responses · retrieval provenance' },
               { k: 'l0 protocol', v: 'active inference · will signals' },
             ].map((row) => (
               <div key={row.k} style={{ display: 'flex', alignItems: 'baseline', gap: 16, fontFamily: 'var(--font-mono)', fontSize: 13 }}>

@@ -16,6 +16,7 @@ servers:
 
 security:
   - ApiKeyAuth: []
+  - SessionCookieAuth: []
 
 tags:
   - name: Auth
@@ -28,6 +29,10 @@ tags:
     description: Explore relations between memories
   - name: Ingestion
     description: Bulk ingest and digest content
+  - name: L0 Drive
+    description: Drive signal inbox, acknowledgements, executor binding, and event stream
+  - name: Protocols
+    description: Canonical machine-readable protocol specifications
   - name: Admin
     description: User management (requires admin key)
 
@@ -149,7 +154,7 @@ paths:
     post:
       tags: [Memory]
       summary: Store a new memory
-      description: Auto-classifies content and creates a semantic memory with 768-dim ONNX embedding
+      description: Auto-classifies content and returns an SMRP envelope with intake, classification, deduplication, and placement data.
       requestBody:
         required: true
         content:
@@ -166,21 +171,21 @@ paths:
                   example: "Epicode uses ONNX 768-dim multilingual-e5-base embeddings"
       responses:
         "200":
-          description: Memory stored
+          description: Memory stored; response follows SMRP 1.0
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean }
-                  id: { type: integer, description: "Unique memory ID" }
-                  labels: { type: array, items: { type: string }, description: "Auto-classified tags" }
+              schema: { $ref: "#/components/schemas/SmrpEnvelope" }
 
   /v1/search:
     post:
       tags: [Memory]
       summary: Semantic search across memories
-      description: Hybrid search combining vector similarity (0.7 weight) and BM25 text matching (0.3 weight)
+      description: |
+        Returns an SMRP 1.0 envelope. Search modes: hybrid (default vector+BM25 with
+        the scheduler's reranking/boost pipeline), exact (BM25), semantic (vector
+        similarity), graph (hybrid-search seeds with KG-PPR when relations are available),
+        auto (routes temporal/aggregation queries to graph, others to semantic), and
+        fusion (reciprocal-rank fusion of semantic and graph results).
       requestBody:
         required: true
         content:
@@ -199,31 +204,38 @@ paths:
                   minimum: 1
                   maximum: 200
                   default: 20
+                mode:
+                  type: string
+                  enum: [hybrid, exact, semantic, graph, auto, fusion]
+                  default: hybrid
+                labels:
+                  type: array
+                  items: { type: string }
+                min_importance:
+                  type: number
+                project:
+                  type: string
+                since_days:
+                  type: integer
+                  minimum: 0
+                strict_filter:
+                  type: boolean
+                  default: false
+                as_of:
+                  type: integer
+                  description: Unix timestamp for point-in-time validity filtering
       responses:
         "200":
-          description: Search results
+          description: SMRP envelope containing tier buckets, flat results, and score notes
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean }
-                  total: { type: integer }
-                  results:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        id: { type: integer }
-                        content: { type: string }
-                        labels: { type: array, items: { type: string } }
-                        similarity: { type: number, description: "Combined score (0-1)" }
+              schema: { $ref: "#/components/schemas/SmrpSearchEnvelope" }
 
   /v1/recall:
     post:
       tags: [Memory]
       summary: Deep memory recall with associations
-      description: Retrieves memories with emotional context, associations, and grouped by labels
+      description: Returns an SMRP 1.0 envelope with primary, contextual, experiential, and hub tiers.
       requestBody:
         required: true
         content:
@@ -243,29 +255,191 @@ paths:
                   default: 2
       responses:
         "200":
-          description: Recall result with associations
+          description: SMRP envelope containing recalled memory tiers and topology context
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SmrpRecallEnvelope" }
+
+  /v1/drive/inbox:
+    get:
+      tags: [L0 Drive]
+      summary: Poll unacknowledged drive signals
+      description: Returns pending and delivered signals (up to 50) in an SMRP envelope. Each signal carries retryable; this read does not acknowledge or transition the signal. When a primary executor E2E public key is registered, descriptions are encrypted into description_e2e.
+      responses:
+        "200":
+          description: SMRP envelope with signals, queue stats, and empty_reason
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SmrpDriveInboxEnvelope" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/drive/ack:
+    post:
+      tags: [L0 Drive]
+      summary: Acknowledge a drive signal with execution feedback
+      description: Requires the active primary-executor binding. High/Critical signals require E2E-enabled registration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [drive_id, executed, outcome]
+              properties:
+                drive_id: { type: integer, minimum: 1 }
+                executed: { type: boolean }
+                outcome: { type: string }
+                reflection: { type: [string, "null"] }
+      responses:
+        "200":
+          description: SMRP envelope with acknowledgement and learning result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SmrpDriveAckEnvelope" }
+        "403":
+          description: No active primary executor or E2E requirement not satisfied
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/runtime/register:
+    post:
+      tags: [L0 Drive]
+      summary: Register the primary executor for this account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id]
+              properties:
+                agent_id: { type: string }
+                capabilities:
+                  type: array
+                  items: { type: string }
+                  description: Defaults to write, ack, and forget when omitted or empty.
+                e2e_enabled: { type: boolean, default: false }
+                e2e_public_key: { type: [string, "null"], description: PEM public key used to encrypt drive descriptions for inbox/SSE transports. }
+                machine_fingerprint: { type: [string, "null"] }
+                manifest_version: { type: [string, "null"] }
+      responses:
+        "200":
+          description: SMRP envelope when an engine is loaded; otherwise the registration payload is returned directly.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SmrpEnvelope"
+                  - $ref: "#/components/schemas/RuntimeRegistrationResponse"
+        "409":
+          description: Another active primary executor is already registered.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeRegistrationConflict" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/runtime/unregister:
+    post:
+      tags: [L0 Drive]
+      summary: Unregister the primary executor for this account
+      responses:
+        "200":
+          description: SMRP envelope when an engine is loaded; otherwise the unregistration payload is returned directly.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SmrpEnvelope"
+                  - $ref: "#/components/schemas/RuntimeUnregisterResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/runtime/status:
+    get:
+      tags: [L0 Drive]
+      summary: Read the primary-executor binding status
+      responses:
+        "200":
+          description: SMRP envelope when an engine is loaded; otherwise the status payload is returned directly.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SmrpEnvelope"
+                  - $ref: "#/components/schemas/RuntimeStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/runtime/heartbeat:
+    post:
+      tags: [L0 Drive]
+      summary: Refresh or revive the primary-executor binding
+      responses:
+        "200":
+          description: SMRP envelope when an engine is loaded; otherwise the heartbeat payload is returned directly. success is false when no binding exists.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SmrpEnvelope"
+                  - $ref: "#/components/schemas/RuntimeHeartbeatResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/stream/ticket:
+    post:
+      tags: [L0 Drive]
+      summary: Mint a single-use SSE ticket
+      description: Authenticated by the session cookie or X-API-Key; tickets expire after 120 seconds and are consumed by one stream request.
+      responses:
+        "200":
+          description: Stream ticket
           content:
             application/json:
               schema:
                 type: object
+                required: [success, ticket, expires_in]
                 properties:
-                  success: { type: boolean }
-                  query: { type: string }
-                  seed_count: { type: integer }
-                  total_fragments: { type: integer }
-                  associated_count: { type: integer }
-                  emotion:
-                    type: object
-                    properties:
-                      pleasure: { type: number }
-                      arousal: { type: number }
-                      dominance: { type: number }
-                  memory_file:
-                    type: object
-                    additionalProperties:
-                      type: array
-                      items:
-                        type: object
+                  success: { type: boolean, const: true }
+                  ticket: { type: string }
+                  expires_in: { type: integer, const: 120 }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/stream:
+    get:
+      tags: [L0 Drive]
+      summary: Subscribe to cognitive status and drive events
+      description: Provide the fresh one-use ticket from POST /v1/stream/ticket. Mint a new ticket on every reconnect. Never put a long-lived API key in a URL.
+      security: []
+      parameters:
+        - name: ticket
+          in: query
+          required: true
+          schema: { type: string }
+          description: Single-use ticket, valid for 120 seconds.
+      responses:
+        "200":
+          description: Server-sent status and newly enqueued drive event frames
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401":
+          description: Missing, expired, or already-consumed ticket.
+
+  /v1/smrp:
+    get:
+      tags: [Protocols]
+      summary: Get the canonical SMRP 1.0 specification
+      security: []
+      responses:
+        "200":
+          description: Protocol specification HTML
+          content:
+            text/html:
+              schema: { type: string }
 
   /v1/ask:
     post:
@@ -485,10 +659,8 @@ paths:
       summary: MCP JSON-RPC endpoint
       description: |
         Model Context Protocol endpoint for AI agent integration.
-        Supports 17 tools: memory_create, memory_search, memory_recall, memory_get,
-        memory_list, ctx_load, ctx_save, pattern_learn, pattern_recall, session_summary,
-        space_stats, knowledge_relations, concept_list, bug_memory, decision_record,
-        context_observe, dream_cycle.
+        Discover the current tool catalog with the MCP tools/list method. The catalog
+        includes memory, identity, skill, project, and L0 drive operations.
         Authentication via X-API-Key header.
       security:
         - ApiKeyAuth: []
@@ -533,7 +705,12 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
-      description: "User API key (tm-...), obtained via /register or /v1/login"
+      description: "User API key (tm-...), returned by /register or after password-confirmed /v1/api-key/reveal."
+    SessionCookieAuth:
+      type: apiKey
+      in: cookie
+      name: epicode_session
+      description: "HttpOnly session cookie set by /v1/login."
     AdminKeyAuth:
       type: apiKey
       in: header
@@ -544,6 +721,244 @@ components:
       in: header
       name: X-Invite-Code
       description: "One-time invite code, rotated after each use"
+
+  schemas:
+    SmrpEnvelope:
+      type: object
+      required: [protocol, data, status]
+      properties:
+        protocol:
+          type: object
+          required: [schema_version, tool, ok, error]
+          properties:
+            schema_version: { type: string, example: "1.0" }
+            tool: { type: string }
+            ok: { type: boolean }
+            error:
+              oneOf:
+                - type: object
+                  required: [code, message]
+                  properties:
+                    code: { type: integer }
+                    message: { type: string }
+                - type: "null"
+        data:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: "null"
+          description: Tool-specific payload on success; null on a tool-level error.
+        status:
+          type: object
+          properties:
+            identity:
+              type: object
+              additionalProperties: true
+            space:
+              type: object
+              properties:
+                memories: { type: integer }
+                energy: { type: number }
+              additionalProperties: true
+          additionalProperties: true
+    SmrpMemoryItem:
+      type: object
+      required: [id, content, labels, timestamp, tier, source, similarity]
+      properties:
+        id: { type: integer }
+        content: { type: string }
+        labels: { type: array, items: { type: string } }
+        timestamp: { type: integer }
+        tier: { type: string, enum: [primary, contextual, experiential, hub] }
+        source:
+          type: array
+          items: { type: string, enum: [vector, bm25, kg, label, temporal, rerank, reasoning, hybrid] }
+        similarity: { type: number }
+        metrics:
+          type: object
+          properties:
+            importance: { type: number }
+            mass: { type: number }
+            memory_type: { type: [string, "null"] }
+            valid: { type: boolean }
+        topology:
+          type: object
+          properties:
+            cluster_id: { type: integer }
+            cluster_size: { type: integer }
+            is_hub: { type: boolean }
+        matched_by:
+          type: array
+          items: { type: string }
+    SmrpSearchEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/SmrpEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [query, tiers, results, count, total, score_notes]
+              properties:
+                query: { type: string }
+                tiers:
+                  type: object
+                  required: [primary, contextual, experiential, hub]
+                  description: Search tiers use the implementation's mode-specific retrieval signals; Fusion classifies direct vector/hybrid matches as primary and KG-PPR-only results as contextual because RRF scores are not similarity scores.
+                  properties:
+                    primary: { type: array, items: { $ref: "#/components/schemas/SmrpMemoryItem" } }
+                    contextual: { type: array, items: { $ref: "#/components/schemas/SmrpMemoryItem" } }
+                    experiential: { type: array, items: { $ref: "#/components/schemas/SmrpMemoryItem" } }
+                    hub: { type: array, items: { $ref: "#/components/schemas/SmrpMemoryItem" } }
+                results: { type: array, items: { $ref: "#/components/schemas/SmrpMemoryItem" } }
+                count: { type: integer }
+                total: { type: integer, description: Number of returned matches in this REST response. }
+                score_notes:
+                  type: object
+                  description: The base label is mode-specific. Hybrid includes the vector/BM25 score and intent reranking; Fusion identifies reciprocal-rank-fusion scores.
+                  properties:
+                    base: { type: string }
+                    adjustments:
+                      type: array
+                      items:
+                        type: object
+                        required: [kind, delta, applied_to]
+                        properties:
+                          kind: { type: string }
+                          delta: { type: number }
+                          applied_to: { type: array, items: { type: integer } }
+    SmrpRecallEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/SmrpEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [query, depth, tiers, sections, seed_count, associated_count, total_fragments, clusters_touched]
+              properties:
+                query: { type: string }
+                depth: { type: integer }
+                tiers:
+                  type: object
+                  required: [primary, contextual, experiential, hub]
+                  properties:
+                    primary: { type: array, items: { $ref: "#/components/schemas/SmrpMemoryItem" } }
+                    contextual: { type: array, items: { $ref: "#/components/schemas/SmrpMemoryItem" } }
+                    experiential: { type: array, items: { $ref: "#/components/schemas/SmrpMemoryItem" } }
+                    hub: { type: array, items: { $ref: "#/components/schemas/SmrpMemoryItem" } }
+                sections:
+                  type: object
+                  additionalProperties:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+                seed_count: { type: integer }
+                associated_count: { type: integer }
+                total_fragments: { type: integer }
+                emotion: { type: [object, "null"] }
+                clusters_touched:
+                  type: array
+                  items:
+                    type: object
+                    required: [cluster_id]
+                    properties:
+                      cluster_id: { type: integer }
+    SmrpDriveInboxEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/SmrpEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [signals, stats, empty_reason]
+              properties:
+                signals: { type: array, items: { $ref: "#/components/schemas/DriveSignal" } }
+                stats: { type: object, additionalProperties: { type: integer } }
+                empty_reason:
+                  type: string
+                  enum: [has_signals, no_signals, no_pending, self_consumed]
+    SmrpDriveAckEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/SmrpEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [drive_id, acknowledged, first_ack, learned]
+              properties:
+                drive_id: { type: integer }
+                acknowledged: { type: boolean }
+                first_ack: { type: boolean }
+                learned: { type: [string, boolean] }
+    RuntimeRegistrationResponse:
+      type: object
+      required: [success, agent_id, e2e_enabled, capabilities]
+      properties:
+        success: { type: boolean, const: true }
+        agent_id: { type: string }
+        e2e_enabled: { type: boolean }
+        capabilities: { type: array, items: { type: string } }
+    RuntimeRegistrationConflict:
+      type: object
+      required: [success, error, current_agent]
+      properties:
+        success: { type: boolean, const: false }
+        error: { type: string }
+        current_agent: { type: string }
+    RuntimeUnregisterResponse:
+      type: object
+      required: [success, removed]
+      properties:
+        success: { type: boolean, const: true }
+        removed: { type: boolean }
+    RuntimeStatusResponse:
+      type: object
+      required: [bound]
+      properties:
+        bound: { type: boolean }
+        agent_id: { type: string }
+        e2e_enabled: { type: boolean }
+        capabilities: { type: array, items: { type: string } }
+        registered_at: { type: integer }
+        last_heartbeat: { type: integer }
+        expired: { type: boolean }
+    RuntimeHeartbeatResponse:
+      type: object
+      required: [success, timestamp]
+      properties:
+        success: { type: boolean }
+        timestamp: { type: integer }
+    DriveSignal:
+      type: object
+      required: [id, timestamp, intent_type, description, evidence, urgency, target_capability, emotion, origin_tick, status, feedback, retry_count, expires_at, enqueued_at_ms, time_budget_ms, retryable]
+      properties:
+        id: { type: integer }
+        timestamp: { type: integer }
+        intent_type: { type: string, enum: [warn, suggest, explore, constrain, request, share] }
+        description: { type: [string, "null"] }
+        description_e2e: { type: [string, "null"], description: Present when description is encrypted for the registered executor. }
+        evidence: { type: array, items: { type: integer } }
+        urgency: { type: string, enum: [low, medium, high, critical] }
+        status: { type: string, enum: [pending, delivered, executed, rejected, expired] }
+        retryable: { type: boolean }
+        target_capability: { type: [string, "null"] }
+        origin_tick: { type: integer }
+        retry_count: { type: integer }
+        expires_at: { type: [integer, "null"] }
+        enqueued_at_ms: { type: integer }
+        time_budget_ms: { type: [integer, "null"] }
+        emotion:
+          type: [object, "null"]
+          properties:
+            pleasure: { type: number }
+            arousal: { type: number }
+            dominance: { type: number }
+            label: { type: [string, "null"] }
+        feedback:
+          type: [object, "null"]
+          properties:
+            responded_at: { type: integer }
+            executed: { type: boolean }
+            outcome: { type: string }
+            reflection: { type: [string, "null"] }
 
   responses:
     BadRequest:
