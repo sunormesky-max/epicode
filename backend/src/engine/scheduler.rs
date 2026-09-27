@@ -688,6 +688,8 @@ impl SchedulerCenter {
 
         if mode == super::search_engine::SearchMode::Semantic
             || mode == super::search_engine::SearchMode::Graph
+            || mode == super::search_engine::SearchMode::Auto
+            || mode == super::search_engine::SearchMode::Fusion
         {
             let scored = self
                 .gateway
@@ -5870,6 +5872,37 @@ mod tests {
         }
 
         ids
+    }
+
+    #[test]
+    fn api_search_scored_routes_auto_and_fusion_through_mode_specific_search() {
+        let (scheduler, space, _knowledge) = build_scheduler();
+        seed_reality(&space);
+
+        for mode in [
+            super::super::search_engine::SearchMode::Auto,
+            super::super::search_engine::SearchMode::Fusion,
+        ] {
+            let filters = super::super::search_engine::SearchFilters {
+                mode,
+                ..Default::default()
+            };
+            let (results, notes) = scheduler
+                .api_search_scored(
+                    "what happened before quantum wave function",
+                    5,
+                    Some(&filters),
+                )
+                .expect("mode-specific search should succeed");
+            assert!(
+                !results.is_empty(),
+                "{mode:?} should return fixture matches"
+            );
+            assert!(
+                !notes.matched_by_map.is_empty(),
+                "{mode:?} should preserve the sources reported by search_with_mode"
+            );
+        }
     }
 
     // ---- Test: TickSnapshot correctly captures space state ----

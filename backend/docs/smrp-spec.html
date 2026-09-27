@@ -167,10 +167,10 @@ REST 或 gRPC 之上。本规范不规定传输方式，仅规定返回的记忆
 </dl>
 
 <h2>4. 响应信封</h2>
-<p>每个 SMRP 响应 <em class="rfc2119">MUST</em> 是一个信封对象，包含三段：</p>
+<p>每个 SMRP 响应 <em class="rfc2119">MUST</em> 是一个包含 <code>protocol</code> 与 <code>data</code> 的信封对象；<code>status</code> 按 4.3 提供：</p>
 <pre><code>{
   "protocol": { "schema_version": "1.0", "tool": "&lt;工具名&gt;", "ok": &lt;bool&gt;, "error": &lt;object|null&gt; },
-  "data":     { /* 工具特定负载，见第 7 节 */ },
+  "data":     { /* 成功时为工具特定负载；失败时可为 null */ },
   "status":   { "identity": {…}, "space": { "memories": &lt;int&gt;, "energy": &lt;number&gt; } }
 }</code></pre>
 
@@ -180,7 +180,7 @@ REST 或 gRPC 之上。本规范不规定传输方式，仅规定返回的记忆
 成功时为 null）。消费者 <em class="rfc2119">SHOULD</em> 首先读取 <code>ok</code> 字段。</p>
 
 <h3>4.2 data 段</h3>
-<p><em class="rfc2119">MUST</em> 至少包含一个结果集合或状态字段。结构由第 7 节各工具契约规定。</p>
+<p>成功响应的 <code>data</code> <em class="rfc2119">MUST</em> 包含工具特定负载，结构由第 7 节各工具契约规定。失败响应 <em class="rfc2119">MAY</em> 将 <code>data</code> 设为 null；失败原因由 <code>protocol.error</code> 表达。</p>
 
 <h3>4.3 status 段</h3>
 <p><em class="rfc2119">SHOULD</em> 包含 <code>identity</code>（后端身份胶囊）与 <code>space</code>
@@ -191,7 +191,7 @@ REST 或 gRPC 之上。本规范不规定传输方式，仅规定返回的记忆
 <p>凡返回记忆条目之处，<em class="rfc2119">MUST</em> 使用 MemoryItem 结构（可按工具语义取字段子集，
 但字段名与语义 <em class="rfc2119">MUST</em> 一致）：</p>
 <pre><code>{
-  "id": "714",
+  "id": 714,
   "content": "…",
   "labels": ["documentation", "architecture"],
   "timestamp": 1781840244,
@@ -211,16 +211,16 @@ REST 或 gRPC 之上。本规范不规定传输方式，仅规定返回的记忆
   <dt>contextual</dt>
   <dd>经关联扩展（知识图谱、共现、结构）纳入，语义相关但非直接命中。</dd>
   <dt>experiential</dt>
-  <dd>由调用方历史交互产生、且语义关联较弱的记录（运维日志、反馈、曾发生的事件）。
-  其判定采用启发式：弱语义关联且来源为历史交互类标签。</dd>
+  <dd>由调用方历史交互产生的记录（如运维日志、反馈、曾发生的事件）。实现者可使用既有的内容标签或其他确定性元数据识别经历性质；tier 映射不得引入新的运行时推理。</dd>
   <dt>hub</dt>
   <dd>同时被直接命中与关联扩展命中的记忆，通常为知识结构的承重节点。</dd>
 </dl>
 <div class="note">
-  注：实现可将已有的检索信号映射为 tier。例如 Epicode 将召回阶段的二元组
+  注：实现可将已有的检索信号映射为 tier。例如 Epicode 对常规 search 使用经历标签优先、相似度 ≥ 0.3 为 primary、否则 contextual；对 recall 使用经历标签优先，再按 direct/association relevance 分桶：
   <code>[direct_similarity, association_similarity]</code> 映射为：
   direct &gt; 0 且 association = 0 → primary；association &gt; 0 且 direct = 0 → contextual；
   二者均 &gt; 0 → hub；满足 experiential 启发式者 → experiential。
+  Fusion 模式的 RRF 分数不是相似度，因此 Epicode 按来源判定其 tier：含直接 vector/hybrid 命中的结果为 primary，仅 KG-PPR 扩展的结果为 contextual。
 </div>
 
 <h3>5.2 source（来路 / Provenance）</h3>
@@ -228,6 +228,7 @@ REST 或 gRPC 之上。本规范不规定传输方式，仅规定返回的记忆
 允许的取值：</p>
 <dl>
   <dt>vector</dt><dd>向量相似度检索命中。</dd>
+  <dt>bm25</dt><dd>BM25 关键词检索命中（Epicode exact 模式使用）。</dd>
   <dt>kg</dt><dd>知识图谱关联扩展命中。</dd>
   <dt>label</dt><dd>标签精确匹配。</dd>
   <dt>temporal</dt><dd>时间近邻或时序命中。</dd>
@@ -270,6 +271,7 @@ REST 或 gRPC 之上。本规范不规定传输方式，仅规定返回的记忆
   "results": [MemoryItem],
   "count": 2, "total_found": 2, "offset": 0
 }</code></pre>
+<p>Epicode MCP <code>memory_search</code> includes <code>total_found</code> and <code>offset</code>. The REST <code>/v1/search</code> endpoint currently accepts <code>limit</code> without <code>offset</code> and returns <code>count</code> and <code>total</code> for the returned result set.</p>
 
 <h3>7.2 变更类工具</h3>
 <p>变更类工具（创建、更新、删除）<em class="rfc2119">MUST</em> 在响应中返回所产生或受影响的副产物。
@@ -349,35 +351,53 @@ REST 或 gRPC 之上。本规范不规定传输方式，仅规定返回的记忆
 
 <h2>附录 A. 示例</h2>
 
-<h3>A.1 memory_search 响应</h3>
+<h3>A.1 memory_search 响应（MCP，hybrid 模式）</h3>
+<p>以下为 MCP 搜索结果的示例；REST <code>/v1/search</code> 使用 <code>total</code> 且当前不接受 <code>offset</code> 参数。</p>
 <pre><code>{
   "protocol": { "schema_version": "1.0", "tool": "memory_search", "ok": true, "error": null },
   "data": {
     "query": "tetrahedron cluster",
     "tiers": {
-      "primary":     [{ "id": "714", "tier": "primary", "source": ["vector"], "similarity": 0.91,
-                        "topology": { "cluster_id": 12, "is_hub": true } }],
-      "contextual":  [{ "id": "638", "tier": "contextual", "source": ["kg"], "similarity": 0.0 }],
+      "primary":     [{ "id": 714, "content": "…", "labels": ["documentation"], "timestamp": 1781840244,
+                        "tier": "primary", "source": ["hybrid"], "similarity": 0.91,
+                        "metrics": { "importance": 1.9, "mass": 1.05, "memory_type": "security", "valid": true } }],
+      "contextual":  [],
       "experiential": [],
       "hub":          []
     },
-    "results": [{ "id": "714", "similarity": 0.91 }, { "id": "638", "similarity": 0.0 }],
-    "count": 2, "total_found": 2, "offset": 0
+    "results": [{ "id": 714, "content": "…", "labels": ["documentation"], "timestamp": 1781840244,
+                  "tier": "primary", "source": ["hybrid"], "similarity": 0.91,
+                  "metrics": { "importance": 1.9, "mass": 1.05, "memory_type": "security", "valid": true } }],
+    "count": 1, "total_found": 1, "offset": 0,
+    "score_notes": {
+      "base": "hybrid_vector_similarity + bm25 + intent_rerank",
+      "adjustments": [
+        { "kind": "cluster_boost", "delta": 0.08, "applied_to": [] },
+        { "kind": "importance_boost", "delta": 0.06, "applied_to": [] },
+        { "kind": "access_boost", "delta": 0.04, "applied_to": [] },
+        { "kind": "outdated_penalty", "delta": -0.30, "applied_to": [] }
+      ]
+    }
   },
-  "status": { "identity": { "name": "…" }, "space": { "memories": 521, "energy": 10000 } }
+  "status": { "identity": { "name": "…", "system": "Epicode" }, "space": { "memories": 521, "energy": 10000 } }
 }</code></pre>
 
 <h3>A.2 memory_create 响应</h3>
 <pre><code>{
   "protocol": { "schema_version": "1.0", "tool": "memory_create", "ok": true, "error": null },
   "data": {
-    "status": "created", "id": 715,
-    "intake": { "importance": 1.9, "memory_type": "security" },
-    "placement": { "layer": "service", "joined_cluster": { "id": 0, "size": 1 },
-                   "vertices_shared": 1, "is_seed": true, "has_port": true },
+    "status": "created",
+    "id": 715,
+    "content_preview": "A concise memory preview",
+    "intake": { "importance": 1.9, "memory_type": "security", "rationale": "…" },
+    "classification": { "auto_labels": ["ops"], "classified": true },
+    "placement": { "layer": "service", "core": [1.5, 0.0, 6.8],
+                   "joined_cluster": { "id": 0, "size": 1 },
+                   "vertices_shared": 1, "is_seed": true, "is_orphan": false, "has_port": true },
+    "dedup": { "checked": true, "matched_existing": null, "conflicts_marked": [] },
     "relations_formed": 22
   },
-  "status": { "space": { "memories": 522, "energy": 10000 } }
+  "status": { "identity": { "name": "…", "system": "Epicode" }, "space": { "memories": 522, "energy": 10000 } }
 }</code></pre>
 
 <h2>附录 B. 决议记录</h2>
@@ -386,7 +406,7 @@ REST 或 gRPC 之上。本规范不规定传输方式，仅规定返回的记忆
   <dt>experiential 是否独立</dt>
   <dd>独立，采用启发式判定。理由：须区分"所知"与"所经历"，后者与身份相关。</dd>
   <dt>source 取值集合</dt>
-  <dd>纳入 <code>rerank</code> 与 <code>reasoning</code>，因其可信度性质与直接检索不同。</dd>
+  <dd>纳入 <code>bm25</code>（Epicode exact 检索）、<code>rerank</code> 与 <code>reasoning</code>，因其与向量检索来源不同。</dd>
   <dt>安置字段命名</dt>
   <dd>创建操作使用 <code>placement</code>，更新与删除使用 <code>side_effects</code>，因语义不同。</dd>
   <dt>流式响应</dt>

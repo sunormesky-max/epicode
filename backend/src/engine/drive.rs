@@ -270,6 +270,67 @@ pub struct DriveSignal {
     pub time_budget_ms: Option<i64>,
 }
 
+impl DriveSignal {
+    pub fn is_retryable(&self) -> bool {
+        matches!(self.status, DriveStatus::Pending | DriveStatus::Delivered)
+    }
+
+    fn description_transport_fields(
+        &self,
+        e2e_public_key: Option<&str>,
+    ) -> (serde_json::Value, Option<String>) {
+        match e2e_public_key {
+            Some(public_key) => {
+                match super::e2e::encrypt_for(self.description.as_bytes(), public_key) {
+                    Ok(ciphertext) => (serde_json::Value::Null, Some(ciphertext)),
+                    Err(error) => {
+                        tracing::warn!("[γ2] drive description encryption failed; falling back to plaintext: {}", error);
+                        (serde_json::json!(self.description), None)
+                    }
+                }
+            }
+            None => (serde_json::json!(self.description), None),
+        }
+    }
+
+    pub fn inbox_value(&self) -> serde_json::Value {
+        self.inbox_value_with_e2e(None)
+    }
+
+    pub fn inbox_value_with_e2e(&self, e2e_public_key: Option<&str>) -> serde_json::Value {
+        let mut value = serde_json::to_value(self)
+            .expect("DriveSignal serialization is infallible for this struct");
+        let (description, encrypted_description) =
+            self.description_transport_fields(e2e_public_key);
+        if let Some(fields) = value.as_object_mut() {
+            fields.insert("description".to_string(), description);
+            if let Some(ciphertext) = encrypted_description {
+                fields.insert("description_e2e".to_string(), serde_json::json!(ciphertext));
+            }
+            fields.insert(
+                "retryable".to_string(),
+                serde_json::json!(self.is_retryable()),
+            );
+        }
+        value
+    }
+
+    pub fn sse_value(&self, e2e_public_key: Option<&str>) -> serde_json::Value {
+        let (description, encrypted_description) =
+            self.description_transport_fields(e2e_public_key);
+        serde_json::json!({
+            "id": self.id,
+            "intent_type": self.intent_type,
+            "status": self.status,
+            "urgency": self.urgency,
+            "description": description,
+            "description_e2e": encrypted_description,
+            "evidence": self.evidence,
+            "enqueued_at_ms": self.enqueued_at_ms,
+        })
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DriveIntent {
@@ -1000,6 +1061,85 @@ mod will_valve_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drive_signal_inbox_json_includes_retryability_and_snake_case_enums() {
+        let signal = DriveSignal {
+            id: 7,
+            timestamp: 1_780_000_000,
+            intent_type: DriveIntent::Explore,
+            description: "Inspect the documented route".into(),
+            evidence: vec![10, 20],
+            urgency: DriveUrgency::Low,
+            target_capability: None,
+            emotion: None,
+            origin_tick: 3,
+            status: DriveStatus::Delivered,
+            feedback: None,
+            retry_count: 0,
+            expires_at: Some(1_780_000_100),
+            enqueued_at_ms: 1_780_000_000_000,
+            time_budget_ms: None,
+        };
+
+        let value = signal.inbox_value();
+        assert_eq!(value["intent_type"], "explore");
+        assert_eq!(value["status"], "delivered");
+        assert_eq!(value["evidence"], serde_json::json!([10, 20]));
+        assert_eq!(value["retryable"], true);
+
+        let mut terminal = signal;
+        terminal.status = DriveStatus::Executed;
+        assert_eq!(terminal.inbox_value()["retryable"], false);
+    }
+
+    #[test]
+    fn drive_inbox_and_sse_share_e2e_description_protection() {
+        use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
+        use rsa::RsaPrivateKey;
+
+        let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+        let private_pem = private_key
+            .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+            .unwrap()
+            .to_string();
+        let public_pem = private_key
+            .to_public_key()
+            .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+            .unwrap();
+        let signal = DriveSignal {
+            id: 8,
+            timestamp: 1_780_000_000,
+            intent_type: DriveIntent::Warn,
+            description: "Private drive details".into(),
+            evidence: vec![22],
+            urgency: DriveUrgency::High,
+            target_capability: None,
+            emotion: None,
+            origin_tick: 4,
+            status: DriveStatus::Pending,
+            feedback: None,
+            retry_count: 0,
+            expires_at: None,
+            enqueued_at_ms: 1_780_000_000_100,
+            time_budget_ms: None,
+        };
+
+        let inbox = signal.inbox_value_with_e2e(Some(&public_pem));
+        let sse = signal.sse_value(Some(&public_pem));
+        for encrypted in [
+            inbox["description_e2e"].as_str().expect("inbox ciphertext"),
+            sse["description_e2e"].as_str().expect("SSE ciphertext"),
+        ] {
+            assert_eq!(
+                crate::engine::e2e::decrypt_with(encrypted, &private_pem).unwrap(),
+                signal.description.as_bytes()
+            );
+        }
+        assert_eq!(inbox["description"], serde_json::Value::Null);
+        assert_eq!(sse["description"], serde_json::Value::Null);
+        assert_eq!(inbox["retryable"], true);
+    }
 
     #[test]
     fn rejected_evidence_blocks_rebirth() {

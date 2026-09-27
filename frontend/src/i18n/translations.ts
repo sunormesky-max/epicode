@@ -228,6 +228,12 @@ export type TranslationKey =
   | 'docs.section.stats.ep4.desc'
   | 'docs.section.realtime.title' | 'docs.section.realtime.desc'
   | 'docs.section.realtime.ep1.desc' | 'docs.section.realtime.ep2.desc'
+  | 'docs.section.drive.title' | 'docs.section.drive.desc'
+  | 'docs.section.drive.ep1.desc' | 'docs.section.drive.ep2.desc'
+  | 'docs.section.drive.ep3.desc' | 'docs.section.drive.ep4.desc'
+  | 'docs.section.drive.ep5.desc' | 'docs.section.drive.ep6.desc'
+  | 'docs.section.protocol.title' | 'docs.section.protocol.desc'
+  | 'docs.section.protocol.ep1.desc'
   | 'docs.section.identity.title' | 'docs.section.identity.desc'
   | 'docs.section.identity.ep1.desc' | 'docs.section.identity.ep2.desc' | 'docs.section.identity.ep3.desc'
   | 'docs.section.skills.title' | 'docs.section.skills.desc'
@@ -276,7 +282,7 @@ export type TranslationKey =
   | 'smrp.body.placementBold2' | 'smrp.body.placementPost'
   | 'smrp.body.engReasonPre' | 'smrp.body.engReasonBold' | 'smrp.body.engReasonPost'
   | 'smrp.body.ctaPre' | 'smrp.body.ctaMid' | 'smrp.body.ctaPost'
-  | 'smrp.body.experientialSource'
+  | 'smrp.body.sourceIndependent'
   // Benchmarks page
   | 'bench.badge' | 'bench.title' | 'bench.intro'
   | 'bench.spec.server' | 'bench.spec.embedModel' | 'bench.spec.embedModelValue'
@@ -315,7 +321,8 @@ export type TranslationKey =
   | 'l0.pillar.mcp.en' | 'l0.pillar.mcp.title' | 'l0.pillar.mcp.def'
   | 'l0.pillar.mcp.detail' | 'l0.pillar.mcp.principle'
   | 'l0.driveTitle' | 'l0.driveDesc1' | 'l0.driveDesc2'
-  | 'l0.driveCodeLabel'
+  | 'l0.driveCodeLabel' | 'l0.driveSseDesc' | 'l0.driveSseCodeLabel'
+  | 'l0.driveAckDesc' | 'l0.driveAckCodeLabel'
   | 'l0.evolutionTitle' | 'l0.evolutionDesc'
   | 'l0.flow.memoryAccumulation.label' | 'l0.flow.memoryAccumulation.desc'
   | 'l0.flow.errorDetection.label' | 'l0.flow.errorDetection.desc'
@@ -345,6 +352,7 @@ export type TranslationKey =
   | 'dash.cog.thoughtEmpty' | 'dash.cog.thoughtUpdatedAt'
   | 'dash.cog.learningWaiting' | 'dash.cog.reflectionWaiting'
   | 'dash.cog.explain' | 'dash.cog.driveEmpty'
+  | 'dash.cog.driveEncrypted'
   | 'dash.cog.refresh' | 'dash.cog.execute' | 'dash.cog.dismiss'
   | 'dash.cog.urgency.low' | 'dash.cog.urgency.medium' | 'dash.cog.urgency.high' | 'dash.cog.urgency.critical'
   | 'dash.cog.unit.signals' | 'dash.cog.executedLabel' | 'dash.cog.pendingLabel'
@@ -945,6 +953,17 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'docs.section.realtime.desc': 'SSE 先申请短时一次性 ticket；每次断线重连都重新申请',
     'docs.section.realtime.ep1.desc': '使用 cookie 或 X-API-Key 申请有效期 120 秒的一次性 ticket',
     'docs.section.realtime.ep2.desc': '使用 ticket 建立 SSE 连接；断线重连时不要复用 ticket',
+    'docs.section.drive.title': 'L0 意志通道',
+    'docs.section.drive.desc': '轮询 drive 信号、回执执行结果，并注册回执所需的执行器',
+    'docs.section.drive.ep1.desc': '以 SMRP 信封返回待确认的 pending/delivered 信号、stats 和 empty_reason',
+    'docs.section.drive.ep2.desc': '确认信号；需要有效的 primary executor 绑定',
+    'docs.section.drive.ep3.desc': '注册 primary executor；未传 capabilities 时默认 write、ack、forget',
+    'docs.section.drive.ep4.desc': '刷新或复活已注册执行器的 heartbeat',
+    'docs.section.drive.ep5.desc': '读取执行器是否已绑定、租约是否过期及其 E2E/capability 状态',
+    'docs.section.drive.ep6.desc': '注销当前账户的 primary executor 绑定',
+    'docs.section.protocol.title': '响应协议',
+    'docs.section.protocol.desc': '与传输层正交的结构化记忆响应及协议规范',
+    'docs.section.protocol.ep1.desc': '获取规范 SMRP 1.0 说明（公开 HTML）',
     'docs.section.identity.title': '身份系统',
     'docs.section.identity.desc': 'AI 代理身份确认与管理',
     'docs.section.identity.ep1.desc': '获取当前身份信息',
@@ -973,7 +992,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'docs.section.mcp.ep6.desc': '获取代理快速指南',
     'docs.section.smrp.title': 'SMRP 协议',
     'docs.section.smrp.desc': 'Structured Memory Response Protocol 1.0 — Epicode 制定的记忆响应语义层标准。记忆返回携带角色(tier)、来路(source)与拓扑位置(topology)，而非扁平同质列表。与传输层(MCP/REST)正交，任何记忆系统可采纳。',
-    'docs.section.smrp.ep1.desc': '获取 SMRP 1.0 完整规范（公开，Markdown）',
+    'docs.section.smrp.ep1.desc': '获取 SMRP 1.0 完整规范（公开 HTML）',
     'docs.section.smrp.ep2.desc': 'memory_create — SMRP 信封返回安置副产物(placement/relations_formed)，让消费者知道记忆"住进了社区的哪个位置"',
     'docs.section.smrp.ep3.desc': 'memory_search — tiers 四桶分层(primary/contextual/experiential/hub) + source 溯源',
     // SMRP Protocol page
@@ -1005,9 +1024,9 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'smrp.tierTitle': 'Tier · 角色分层（核心）',
     'smrp.tier.primary.def': '直接命中查询意图的高置信结果',
     'smrp.tier.primary.use': '优先采纳，作为直接答案',
-    'smrp.tier.contextual.def': '经关联扩展纳入，语义相关但非直接命中',
+    'smrp.tier.contextual.def': '搜索中低于直接命中阈值；回忆中可能由关联扩展纳入',
     'smrp.tier.contextual.use': '作为推理背景，佐证或拓展',
-    'smrp.tier.experiential.def': '调用方历史交互痕迹，弱语义关联',
+    'smrp.tier.experiential.def': '由经历性质标签或元数据识别，不依赖相似度',
     'smrp.tier.experiential.use': '作为具身经历参照，塑造长期人格',
     'smrp.tier.hub.def': '同时被直接命中与关联扩展命中',
     'smrp.tier.hub.use': '高价值，常作跨域桥梁或主题入口',
@@ -1055,7 +1074,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'smrp.body.ctaPre': 'SMRP 分两个一致性等级：',
     'smrp.body.ctaMid': '（信封 + tier + source + create 安置）·',
     'smrp.body.ctaPost': '（+ topology + metrics + score_notes）。',
-    'smrp.body.experientialSource': '弱关联 + ops/security 标签',
+    'smrp.body.sourceIndependent': 'source 记录每条结果的实际检索来源，与 tier 独立：例如 exact 为 bm25、hybrid 为 hybrid、semantic 为 vector；graph、auto 和 fusion 按实际命中的检索来源报告。Fusion 的 RRF 分数并非相似度，因此 tier 按来源判定：直接 vector/hybrid 命中为 primary，仅 KG-PPR 扩展为 contextual。experiential tier 则由经历性质标签判定。',
     // Benchmarks page
     'bench.badge': '性能基准',
     'bench.title': '性能基准测试',
@@ -1150,9 +1169,13 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'l0.pillar.mcp.detail': 'L0 自研身份/记忆/事件/驱动协议。L1 = MCP/REST 适配层。L2 = 智能体壳。Epicode 的 SMRP 已超越 MCP——传输正交，语义独立。',
     'l0.pillar.mcp.principle': 'L0 人格 → L1 适配 → L2 执行体',
     'l0.driveTitle': 'Drive Signal — 意志的结构化表达',
-    'l0.driveDesc1': '人格的意志不是模糊的感受——它被结构化为 DriveSignal，携带意图类型、语义描述、记忆证据、紧急度和情感快照。',
-    'l0.driveDesc2': '外部智能体通过 GET /v1/drive/inbox 轮询接收。',
-    'l0.driveCodeLabel': 'DRIVE SIGNAL · /v1/drive/inbox',
+    'l0.driveDesc1': 'DriveSignal 的完整序列化结构由 /v1/drive/inbox 返回（SMRP data.signals）；包括状态、证据、过期时间和 retryable。MCP drive_inbox 返回同一信号结构。',
+    'l0.driveDesc2': '轮询：GET /v1/drive/inbox。确认：POST /v1/drive/ack，body 使用 drive_id、executed、outcome 和可选 reflection。ack 需要有效 primary executor 注册。',
+    'l0.driveCodeLabel': 'DRIVE SIGNAL · inbox data.signals[0]',
+    'l0.driveSseDesc': '浏览器 SSE 先用会话 cookie 或 API Key 调 POST /v1/stream/ticket，再以返回的一次性票据连接 GET /v1/stream?ticket=…。每次重连都必须重新申请票据。SSE 的 type=drive 事件包含新入队信号的传输子集；若启用端到端加密，description 为 null 且 description_e2e 携带密文。',
+    'l0.driveSseCodeLabel': 'SSE EVENT · type=drive',
+    'l0.driveAckDesc': 'REST ack 与 MCP drive_ack 都需要 active primary executor；绑定超时后，POST /v1/runtime/heartbeat 可复活既有绑定。High/Critical 信号还要求注册时启用 E2E。',
+    'l0.driveAckCodeLabel': 'REST ACK · POST /v1/drive/ack',
     'l0.evolutionTitle': '自驱动进化循环',
     'l0.evolutionDesc': '当没有外部智能体连接时，Epicode 用自身的认知引擎作为"手"——自己消费自己的意志，形成完整的进化闭环。',
     'l0.flow.memoryAccumulation.label': '记忆积累',
@@ -1164,7 +1187,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'l0.flow.driveQueue.label': 'Drive Queue',
     'l0.flow.driveQueue.desc': '意志进入缓冲队列，等待手来消费',
     'l0.flow.handExecution.label': '手执行',
-    'l0.flow.handExecution.desc': '智能体 poll /v1/drive/inbox → 执行 → ack',
+    'l0.flow.handExecution.desc': 'poll /v1/drive/inbox → 执行 → ack(drive_id, executed, outcome)',
     'l0.flow.feedbackEvolution.label': '反馈进化',
     'l0.flow.feedbackEvolution.desc': '执行结果→learn_history→人格学习→下次更精准',
     'l0.barrierTitle': '为什么这是终极壁垒',
@@ -1222,6 +1245,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.cog.reflectionWaiting': '等待认知引擎产出反思…',
     'dash.cog.explain': '数据来自认知引擎每 3 秒的 SSE 推送。认知引擎以 MiniMax-M3 LLM 为大脑，每 2 分钟自主分析记忆空间状态（熵/簇/孤立率/搜索信号），产出推理思考（thoughts）、决策行动（actions）、学习反馈（learning）。情感系统（PAD 模型）和驱动力引擎影响 LLM 的决策倾向——这是系统"主观体验"的可视化。L0 Active Inference：记忆检测到预测误差 → 产出 DriveSignal（意志）→ 智能体作为"手"执行 → 反馈进化。',
     'dash.cog.driveEmpty': '没有待处理的意志信号。认知引擎下一个 tick（约 2 分钟）可能产生新的意志。',
+    'dash.cog.driveEncrypted': '内容已加密；请使用已注册的执行器查看。',
     'dash.cog.refresh': '刷新',
     'dash.cog.execute': '执行',
     'dash.cog.dismiss': '忽略',
@@ -1827,6 +1851,17 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'docs.section.realtime.desc': 'Mint a short-lived one-use ticket before SSE and request a new ticket for every reconnect',
     'docs.section.realtime.ep1.desc': 'Use a session cookie or X-API-Key to mint a one-use ticket valid for 120 seconds',
     'docs.section.realtime.ep2.desc': 'Connect to SSE with the ticket; do not reuse it after disconnecting',
+    'docs.section.drive.title': 'L0 Drive Channel',
+    'docs.section.drive.desc': 'Poll queued drive signals, acknowledge outcomes, and register the executor required to acknowledge',
+    'docs.section.drive.ep1.desc': 'Get unacknowledged pending and delivered signals in an SMRP envelope, with stats and empty_reason',
+    'docs.section.drive.ep2.desc': 'Acknowledge a signal; requires an active primary-executor binding',
+    'docs.section.drive.ep3.desc': 'Register the primary executor; omitted capabilities default to write, ack, and forget',
+    'docs.section.drive.ep4.desc': 'Refresh or revive the registered executor heartbeat',
+    'docs.section.drive.ep5.desc': 'Read whether an executor is bound, whether its lease expired, and its E2E/capability state',
+    'docs.section.drive.ep6.desc': 'Unregister the primary executor binding for this account',
+    'docs.section.protocol.title': 'Response Protocols',
+    'docs.section.protocol.desc': 'Transport-independent structured memory responses and protocol specification',
+    'docs.section.protocol.ep1.desc': 'Fetch the canonical SMRP 1.0 specification (public HTML)',
     'docs.section.identity.title': 'Identity System',
     'docs.section.identity.desc': 'AI agent identity confirmation and management',
     'docs.section.identity.ep1.desc': 'Get current identity info',
@@ -1855,7 +1890,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'docs.section.mcp.ep6.desc': 'Get the agent quick guide',
     'docs.section.smrp.title': 'SMRP Protocol',
     'docs.section.smrp.desc': 'Structured Memory Response Protocol 1.0 — a memory-response semantic-layer standard authored by Epicode. Memory responses carry role (tier), provenance (source), and topological position (topology), rather than flat homogeneous lists. Orthogonal to the transport layer (MCP/REST); any memory system can adopt it.',
-    'docs.section.smrp.ep1.desc': 'Get the full SMRP 1.0 spec (public, Markdown)',
+    'docs.section.smrp.ep1.desc': 'Get the full SMRP 1.0 spec (public HTML)',
     'docs.section.smrp.ep2.desc': 'memory_create — the SMRP envelope returns placement side-products (placement/relations_formed), so consumers know "where the memory lives in the community"',
     'docs.section.smrp.ep3.desc': 'memory_search — four tier buckets (primary/contextual/experiential/hub) + source provenance',
     // SMRP Protocol page
@@ -1887,9 +1922,9 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'smrp.tierTitle': 'Tier · Role Stratification (Core)',
     'smrp.tier.primary.def': 'High-confidence results that directly match the query intent',
     'smrp.tier.primary.use': 'Adopt first as direct answers',
-    'smrp.tier.contextual.def': 'Included via associative expansion; semantically related but not a direct hit',
+    'smrp.tier.contextual.def': 'Below the direct-hit threshold in search; may be included through association in recall',
     'smrp.tier.contextual.use': 'Use as reasoning context, for corroboration or extension',
-    'smrp.tier.experiential.def': 'Traces of the caller\'s historical interactions; weak semantic association',
+    'smrp.tier.experiential.def': 'Identified by experience-class labels or metadata, independent of similarity',
     'smrp.tier.experiential.use': 'Use as embodied-experience reference to shape long-term persona',
     'smrp.tier.hub.def': 'Hit by both direct match and associative expansion simultaneously',
     'smrp.tier.hub.use': 'High value; often a cross-domain bridge or topic entry point',
@@ -1937,7 +1972,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'smrp.body.ctaPre': 'SMRP has two conformance levels: ',
     'smrp.body.ctaMid': ' (envelope + tier + source + create placement) ·',
     'smrp.body.ctaPost': ' (+ topology + metrics + score_notes).',
-    'smrp.body.experientialSource': 'weak association + ops/security labels',
+    'smrp.body.sourceIndependent': 'source records each result’s actual retrieval provenance and is independent of tier: for example, exact uses bm25, hybrid uses hybrid, and semantic uses vector; graph, auto, and fusion report the sources that actually matched. Fusion RRF scores are not similarities, so tiers use provenance: direct vector/hybrid matches are primary, and KG-PPR-only expansions are contextual. The experiential tier is determined by experience-class labels.',
     // Benchmarks page
     'bench.badge': 'Performance Benchmarks',
     'bench.title': 'Performance Benchmarks',
@@ -2032,9 +2067,13 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'l0.pillar.mcp.detail': 'L0 is a self-developed identity/memory/event/drive protocol. L1 = MCP/REST adapter layer. L2 = agent shell. Epicode\'s SMRP already surpasses MCP — orthogonal transport, independent semantics.',
     'l0.pillar.mcp.principle': 'L0 Personality → L1 Adapter → L2 Executor',
     'l0.driveTitle': 'Drive Signal — Structured Expression of Will',
-    'l0.driveDesc1': 'A personality\'s will is not a vague feeling — it is structured as a DriveSignal carrying intent type, semantic description, memory evidence, urgency, and an emotion snapshot.',
-    'l0.driveDesc2': 'External agents receive it via polling GET /v1/drive/inbox.',
-    'l0.driveCodeLabel': 'DRIVE SIGNAL · /v1/drive/inbox',
+    'l0.driveDesc1': 'The full serialized DriveSignal is returned by /v1/drive/inbox (SMRP data.signals), including status, evidence, expiry, and retryable. MCP drive_inbox returns the same signal shape.',
+    'l0.driveDesc2': 'Poll with GET /v1/drive/inbox. Acknowledge with POST /v1/drive/ack using drive_id, executed, outcome, and optional reflection. Ack requires an active primary-executor binding.',
+    'l0.driveCodeLabel': 'DRIVE SIGNAL · inbox data.signals[0]',
+    'l0.driveSseDesc': 'For browser SSE, mint a one-use ticket with POST /v1/stream/ticket using the session cookie or API key, then connect to GET /v1/stream?ticket=…. Mint a fresh ticket on every reconnect. The type=drive event contains a transport subset for newly enqueued signals; with end-to-end encryption enabled, description is null and description_e2e carries the ciphertext.',
+    'l0.driveSseCodeLabel': 'SSE EVENT · type=drive',
+    'l0.driveAckDesc': 'REST ack and MCP drive_ack both require an active primary executor. If its binding expires, POST /v1/runtime/heartbeat revives it. High/Critical signals also require E2E to be enabled at registration.',
+    'l0.driveAckCodeLabel': 'REST ACK · POST /v1/drive/ack',
     'l0.evolutionTitle': 'Self-Driving Evolution Loop',
     'l0.evolutionDesc': 'When no external agent is connected, Epicode uses its own cognitive engine as the "hand" — consuming its own will to form a complete closed loop of evolution.',
     'l0.flow.memoryAccumulation.label': 'Memory Accumulation',
@@ -2046,7 +2085,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'l0.flow.driveQueue.label': 'Drive Queue',
     'l0.flow.driveQueue.desc': 'Will enters a buffer queue, waiting for a hand to consume it',
     'l0.flow.handExecution.label': 'Hand Execution',
-    'l0.flow.handExecution.desc': 'Agent polls /v1/drive/inbox → execute → ack',
+    'l0.flow.handExecution.desc': 'Poll /v1/drive/inbox → execute → ack(drive_id, executed, outcome)',
     'l0.flow.feedbackEvolution.label': 'Feedback Evolution',
     'l0.flow.feedbackEvolution.desc': 'Result → learn_history → personality learns → more precise next time',
     'l0.barrierTitle': 'Why This Is the Ultimate Moat',
@@ -2104,6 +2143,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.cog.reflectionWaiting': 'Waiting for the cognitive engine to produce a reflection…',
     'dash.cog.explain': 'Data comes from the cognitive engine\'s SSE push every 3 seconds. The engine uses MiniMax-M3 LLM as its brain, autonomously analyzing memory-space state (entropy/clusters/isolation rate/search signals) every 2 minutes to produce reasoning thoughts, decision actions, and learning feedback. The emotion system (PAD model) and drive engine shape the LLM\'s decision tendency — this is a visualization of the system\'s "subjective experience". L0 Active Inference: memory detects prediction error → emits DriveSignal (will) → agent acts as the "hand" → feedback evolution.',
     'dash.cog.driveEmpty': 'No pending will signals. The next cognitive engine tick (~2 min) may produce new will.',
+    'dash.cog.driveEncrypted': 'Encrypted for the registered executor; view it through that agent.',
     'dash.cog.refresh': 'Refresh',
     'dash.cog.execute': 'Execute',
     'dash.cog.dismiss': 'Dismiss',

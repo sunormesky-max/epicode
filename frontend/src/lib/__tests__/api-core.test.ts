@@ -21,7 +21,7 @@ vi.stubGlobal('fetch', fetchMock);
 
 const {
   getApiKey, getUserId, setAuth, clearAuth, isAuthenticated,
-  logout, errMsg, invalidateCache, request, loginUser,
+  logout, errMsg, invalidateCache, request, loginUser, searchMemories,
 } = await import('../api');
 
 afterEach(() => vi.restoreAllMocks());
@@ -266,6 +266,20 @@ describe('缓存: 用户隔离与失效(历史双bug的永久回归网)', () => 
     setAuth(null, 'user-a');
     fetchMock.mockResolvedValueOnce(okJson({ error: 'rate' }, 429));
     await expect(request('/v1/stats')).rejects.toThrow(/请求过于频繁|Rate limit/);
+  });
+});
+
+describe('search mode API contract', () => {
+  beforeEach(() => { clearAuth(); localStorageMock.clear(); fetchMock.mockReset(); invalidateCache(); });
+
+  it.each(['auto', 'fusion'] as const)('passes %s through to the REST search endpoint', async (mode) => {
+    fetchMock.mockResolvedValueOnce(okJson({ results: [], total: 0 }));
+
+    await searchMemories('a temporal memory query', { mode });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/v1/search');
+    expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({ query: 'a temporal memory query', mode });
   });
 });
 
