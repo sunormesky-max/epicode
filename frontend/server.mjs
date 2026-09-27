@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
+import { open, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -14,6 +14,23 @@ async function isFile(path) {
     const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
     if (code === 'ENOENT' || code === 'ENOTDIR') return false;
     throw error;
+  }
+}
+
+async function readRegularFile(path) {
+  let handle;
+  try {
+    handle = await open(path, 'r');
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+    if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') return null;
+    throw error;
+  }
+  try {
+    if (!(await handle.stat()).isFile()) return null;
+    return await handle.readFile();
+  } finally {
+    await handle.close();
   }
 }
 
@@ -78,24 +95,16 @@ const server = createServer(async (request, response) => {
   }
 
   try {
-    const fileInfo = await stat(file);
-    if (!fileInfo.isFile()) file = indexFile;
-  } catch (error) {
-    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') {
-      console.error(`Failed to inspect ${file}:`, error);
-      sendText(response, 500, 'Unable to serve this page');
-      return;
+    let body = await readRegularFile(file);
+    if (!body) {
+      if (extname(pathname)) {
+        sendText(response, 404, 'Not found');
+        return;
+      }
+      file = indexFile;
+      body = await readRegularFile(indexFile);
+      if (!body) throw new Error(`Frontend build index is missing: ${indexFile}`);
     }
-    if (extname(pathname)) {
-      sendText(response, 404, 'Not found');
-      return;
-    }
-    file = indexFile;
-  }
-
-  try {
-    const body = await readFile(file);
     const extension = extname(file).toLowerCase();
     response.writeHead(200, {
       'Cache-Control': file === indexFile ? 'no-cache' : 'public, max-age=3600',

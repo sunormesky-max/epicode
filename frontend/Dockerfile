@@ -21,9 +21,9 @@ RUN npm run build
 
 FROM node:20-alpine AS production
 WORKDIR /app
-COPY --from=build --chown=node:node /app/dist/public ./dist
-COPY --chown=node:node package.json ./package.json
-COPY --chown=node:node server.mjs ./server.mjs
+COPY --from=build /app/dist/public ./dist
+COPY package.json ./package.json
+COPY server.mjs ./server.mjs
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000
 USER 1000:1000
 

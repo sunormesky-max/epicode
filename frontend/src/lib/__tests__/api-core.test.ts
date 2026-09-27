@@ -30,11 +30,11 @@ const okJson = (v: unknown, status = 200) => ({
   ok: status >= 200 && status < 300,
   status,
   json: async () => v,
-  text: async () => '',
+  text: async () => JSON.stringify(v),
 });
 
 describe('认证状态', () => {
-  beforeEach(() => { localStorageMock.clear(); fetchMock.mockReset(); invalidateCache(); });
+  beforeEach(() => { clearAuth(); localStorageMock.clear(); fetchMock.mockReset(); invalidateCache(); });
 
   it('setAuth(null) 不落地key, 只存userId(key仅注册首显持有)', () => {
     setAuth(null, 'user-a');
@@ -43,9 +43,10 @@ describe('认证状态', () => {
     expect(isAuthenticated()).toBe(true);
   });
 
-  it('setAuth带key时落地(注册路径首次回显)', () => {
+  it('setAuth将API Key绑定到当前页面会话', () => {
     setAuth('tm-abc', 'user-a');
     expect(getApiKey()).toBe('tm-abc');
+    expect(localStorageMock.getItem('epicode_api_key')).toBeNull();
   });
 
   it('换账号时删除旧账号密钥并拒绝身份不匹配的密钥', () => {
@@ -55,7 +56,9 @@ describe('认证状态', () => {
     expect(localStorageMock.getItem('epicode_api_key')).toBeNull();
     expect(localStorageMock.getItem('epicode_api_key_user_id')).toBeNull();
 
-    setAuth('tm-account-b', 'user-b');
+    clearAuth();
+    localStorageMock.setItem('epicode_api_key', 'tm-account-b');
+    localStorageMock.setItem('epicode_user_id', 'user-b');
     localStorageMock.setItem('epicode_api_key_user_id', 'user-a');
     expect(getApiKey()).toBeNull();
   });
@@ -203,7 +206,7 @@ describe('认证状态', () => {
 });
 
 describe('缓存: 用户隔离与失效(历史双bug的永久回归网)', () => {
-  beforeEach(() => { localStorageMock.clear(); fetchMock.mockReset(); invalidateCache(); });
+  beforeEach(() => { clearAuth(); localStorageMock.clear(); fetchMock.mockReset(); invalidateCache(); });
 
   it('键含uid: 换号后不命中前用户缓存', async () => {
     setAuth(null, 'user-a');

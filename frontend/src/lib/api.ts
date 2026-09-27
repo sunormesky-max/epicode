@@ -4,7 +4,8 @@
 //
 // 安全说明：
 // - Console sessions use the backend's HttpOnly cookie. A legacy API key is kept
-//   only for the same account's migration path and is never sent for another user.
+//   only after same-account verification; newly issued keys stay in memory rather
+//   than being persisted in Web Storage.
 
 const API_BASE = '/api';
 
@@ -19,6 +20,13 @@ export const AUTH_STORAGE_KEYS = [API_KEY_STORAGE, API_KEY_USER_STORAGE, LEGACY_
 let authGeneration = 0;
 let authTransitionInProgress = false;
 const activeRequestControllers = new Set<AbortController>();
+let inMemoryApiKey: string | null = null;
+let inMemoryApiKeyUserId: string | null = null;
+
+function clearInMemoryApiKey(): void {
+  inMemoryApiKey = null;
+  inMemoryApiKeyUserId = null;
+}
 
 function dispatchAuthChange(userId: string | null, transitioning = false): void {
   if (typeof window !== 'undefined') {
@@ -53,15 +61,22 @@ if (typeof window !== 'undefined') {
     authGeneration++;
     abortActiveRequests();
     invalidateCache();
-    dispatchAuthChange(getUserId());
+    const userId = getUserId();
+    if (inMemoryApiKeyUserId !== null && inMemoryApiKeyUserId !== userId) clearInMemoryApiKey();
+    dispatchAuthChange(userId);
   });
 }
 
 export function getApiKey(): string | null {
-  const apiKey = localStorage.getItem(API_KEY_STORAGE);
+  if (authTransitionInProgress) return null;
   const userId = localStorage.getItem(USER_ID_STORAGE);
-  if (!apiKey || !userId) return null;
+  if (!userId) return null;
 
+  if (inMemoryApiKey && inMemoryApiKeyUserId === userId) return inMemoryApiKey;
+  if (inMemoryApiKeyUserId !== null && inMemoryApiKeyUserId !== userId) clearInMemoryApiKey();
+
+  const apiKey = localStorage.getItem(API_KEY_STORAGE);
+  if (!apiKey) return null;
   const keyUserId = localStorage.getItem(API_KEY_USER_STORAGE);
   if (keyUserId === null) return null;
   if (keyUserId !== userId) {
@@ -77,12 +92,32 @@ export function getApiKeyInfo(): Promise<{ user_id?: string; request_key_matches
   return request('/v1/api-key', { skipCache: true });
 }
 
-export function resetApiKey(password: string): Promise<{ api_key: string; warning?: string }> {
-  return request('/v1/api-key/reset', { method: 'POST', body: { password } });
+export async function resetApiKey(password: string): Promise<{ api_key: string; warning?: string }> {
+  const requestUserId = getUserId();
+  const requestGeneration = authGeneration;
+  const result = await request<{ api_key: string; warning?: string }>('/v1/api-key/reset', {
+    method: 'POST',
+    body: { password },
+  });
+  if (requestUserId && getUserId() === requestUserId && authGeneration === requestGeneration) {
+    inMemoryApiKey = result.api_key;
+    inMemoryApiKeyUserId = requestUserId;
+  }
+  return result;
 }
 
-export function revealApiKey(password: string): Promise<{ api_key: string; note?: string }> {
-  return request('/v1/api-key/reveal', { method: 'POST', body: { password } });
+export async function revealApiKey(password: string): Promise<{ api_key: string; note?: string }> {
+  const requestUserId = getUserId();
+  const requestGeneration = authGeneration;
+  const result = await request<{ api_key: string; note?: string }>('/v1/api-key/reveal', {
+    method: 'POST',
+    body: { password },
+  });
+  if (requestUserId && getUserId() === requestUserId && authGeneration === requestGeneration) {
+    inMemoryApiKey = result.api_key;
+    inMemoryApiKeyUserId = requestUserId;
+  }
+  return result;
 }
 
 export async function mintStreamTicket(): Promise<string> {
@@ -95,19 +130,39 @@ export function getUserId(): string | null {
   return localStorage.getItem(USER_ID_STORAGE);
 }
 
-export function setAuth(apiKey: string | null, userId: string): void {
+export function setAuth(
+  apiKey: string | null,
+  userId: string,
+  options: { adoptVerifiedLegacyKey?: boolean } = {},
+): void {
   const previousUserId = getUserId();
   const previousKeyUserId = localStorage.getItem(API_KEY_USER_STORAGE);
+  const storedApiKey = localStorage.getItem(API_KEY_STORAGE);
   const identityChanged = previousUserId !== userId;
+  const preserveVerifiedLegacyKey = !!storedApiKey && (
+    (options.adoptVerifiedLegacyKey && storedApiKey === apiKey)
+    || (previousUserId === null
+      && localStorage.getItem(LEGACY_KEY_USER_HINT_STORAGE) === userId
+      && previousKeyUserId === userId)
+  );
 
-  if (identityChanged || (previousKeyUserId !== null && previousKeyUserId !== previousUserId)) {
+  if (
+    (identityChanged || (previousKeyUserId !== null && previousKeyUserId !== previousUserId))
+    && !preserveVerifiedLegacyKey
+  ) {
     localStorage.removeItem(API_KEY_STORAGE);
     localStorage.removeItem(API_KEY_USER_STORAGE);
   }
 
   if (apiKey) {
-    localStorage.setItem(API_KEY_STORAGE, apiKey);
-    localStorage.setItem(API_KEY_USER_STORAGE, userId);
+    // Keep newly-issued keys in memory; the HttpOnly cookie persists console sessions.
+    inMemoryApiKey = apiKey;
+    inMemoryApiKeyUserId = userId;
+    if (options.adoptVerifiedLegacyKey && storedApiKey === apiKey) {
+      localStorage.setItem(API_KEY_USER_STORAGE, userId);
+    }
+  } else if (inMemoryApiKeyUserId !== userId) {
+    clearInMemoryApiKey();
   }
 
   localStorage.removeItem(LEGACY_KEY_USER_HINT_STORAGE);
@@ -117,6 +172,7 @@ export function setAuth(apiKey: string | null, userId: string): void {
 }
 
 export function clearAuth(options: { preserveLegacyApiKey?: boolean } = {}): void {
+  clearInMemoryApiKey();
   const previousUserId = getUserId();
   const apiKey = localStorage.getItem(API_KEY_STORAGE);
   const keyUserId = localStorage.getItem(API_KEY_USER_STORAGE);
@@ -401,14 +457,13 @@ export async function request<T>(
 
 // ── MCP JSON-RPC 调用封装（用于 kg_quality 等仅 MCP 暴露的能力）──
 export async function callMcp<T = unknown>(tool: string, args: Record<string, unknown> = {}): Promise<T> {
-  const apiKey = getApiKey();
-  const response = await fetch('/api/mcp', {
+  const raw = await request<{
+    result?: { content?: { type: string; text?: string }[] };
+    error?: { message?: string };
+  }>('/mcp', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(apiKey ? { 'X-API-Key': apiKey } : {}) }, // cookie兜底
-    body: JSON.stringify({ jsonrpc: '2.0', method: 'tools/call', params: { name: tool, arguments: args }, id: 1 }),
+    body: { jsonrpc: '2.0', method: 'tools/call', params: { name: tool, arguments: args }, id: 1 },
   });
-  if (!response.ok) throw new Error(`MCP ${tool} failed: ${response.status}`);
-  const raw = await response.json() as { result?: { content?: { type: string; text?: string }[] }; error?: { message?: string } };
   if (raw.error) throw new Error(raw.error.message || `MCP ${tool} error`);
   // MCP 返回的 content[0].text 是 JSON 字符串，解析后可能再套 SMRP 信封 {data, protocol}
   const textContent = raw.result?.content?.find(c => c.type === 'text')?.text;
@@ -612,13 +667,15 @@ interface SubAccountsResponse {
 export async function loginUser(username: string, password: string): Promise<{ api_key?: string; user_id: string }> {
   const previousKeyUserHint = localStorage.getItem(LEGACY_KEY_USER_HINT_STORAGE);
   const previousUserId = getUserId() ?? previousKeyUserHint;
-  const previousKeyUserId = localStorage.getItem(API_KEY_USER_STORAGE);
-  const previousApiKey = previousKeyUserId === null || previousKeyUserId === previousUserId
-    ? localStorage.getItem(API_KEY_STORAGE)
-    : getApiKey();
-  localStorage.removeItem(API_KEY_STORAGE);
-  localStorage.removeItem(API_KEY_USER_STORAGE);
-  localStorage.removeItem(LEGACY_KEY_USER_HINT_STORAGE);
+  const previousMemoryKey = inMemoryApiKey && inMemoryApiKeyUserId === previousUserId
+    ? inMemoryApiKey
+    : null;
+  const previousKeyUserId = previousMemoryKey
+    ? previousUserId
+    : localStorage.getItem(API_KEY_USER_STORAGE);
+  const storedApiKey = localStorage.getItem(API_KEY_STORAGE);
+  const previousApiKey = previousMemoryKey
+    ?? (previousKeyUserId === null || previousKeyUserId === previousUserId ? storedApiKey : getApiKey());
   beginAuthTransition(previousUserId);
   const transitionGeneration = authGeneration;
 
@@ -629,6 +686,7 @@ export async function loginUser(username: string, password: string): Promise<{ a
       public: true,
     });
     let sameUserKey: string | null = null;
+    let adoptVerifiedLegacyKey = false;
     if (previousApiKey && data.user_id === previousUserId) {
       if (previousKeyUserId === data.user_id) {
         sameUserKey = previousApiKey;
@@ -642,31 +700,26 @@ export async function loginUser(username: string, password: string): Promise<{ a
           });
           if (identity.user_id === data.user_id && identity.request_key_matches === true) {
             sameUserKey = previousApiKey;
+            adoptVerifiedLegacyKey = true;
+          } else {
+            localStorage.removeItem(API_KEY_STORAGE);
+            localStorage.removeItem(API_KEY_USER_STORAGE);
+            console.warn('Ignoring an unverified legacy API key after login.');
           }
-          else console.warn('Ignoring an unverified legacy API key after login.');
         } catch (error) {
+          if (error instanceof Error
+            && /conflicting authentication credentials|invalid API key/i.test(error.message)) {
+            localStorage.removeItem(API_KEY_STORAGE);
+            localStorage.removeItem(API_KEY_USER_STORAGE);
+          }
           console.warn('Unable to verify the legacy API key for this account; discarding it.', error);
         }
       }
     }
-    setAuth(data.api_key ?? sameUserKey, data.user_id); // Cookie session; same-user legacy-key migration only.
+    setAuth(data.api_key ?? sameUserKey, data.user_id, { adoptVerifiedLegacyKey });
     return data;
   } catch (error) {
-    const currentUserId = getUserId();
-    const identityUnchanged = currentUserId === previousUserId
-      || (currentUserId === null && previousKeyUserHint === previousUserId && previousUserId !== null);
-    if (authGeneration === transitionGeneration && identityUnchanged && previousUserId && previousApiKey) {
-      localStorage.setItem(API_KEY_STORAGE, previousApiKey);
-      if (previousKeyUserId === previousUserId) {
-        localStorage.setItem(API_KEY_USER_STORAGE, previousUserId);
-      } else {
-        localStorage.removeItem(API_KEY_USER_STORAGE);
-      }
-      if (previousKeyUserHint === previousUserId) {
-        localStorage.setItem(LEGACY_KEY_USER_HINT_STORAGE, previousUserId);
-      }
-    }
-    finishAuthTransition(getUserId());
+    if (authGeneration === transitionGeneration) finishAuthTransition(getUserId());
     throw error;
   }
 }
