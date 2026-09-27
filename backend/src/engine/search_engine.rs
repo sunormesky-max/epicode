@@ -1383,21 +1383,6 @@ pub fn hash_content(s: &str) -> u64 {
     hash_string(s)
 }
 
-#[cfg(test)]
-mod search_mode_tests {
-    use super::SearchMode;
-
-    #[test]
-    fn public_search_modes_parse_to_their_implemented_variants() {
-        assert_eq!(SearchMode::from_str_lossy("hybrid"), SearchMode::Hybrid);
-        assert_eq!(SearchMode::from_str_lossy("exact"), SearchMode::Exact);
-        assert_eq!(SearchMode::from_str_lossy("semantic"), SearchMode::Semantic);
-        assert_eq!(SearchMode::from_str_lossy("graph"), SearchMode::Graph);
-        assert_eq!(SearchMode::from_str_lossy("auto"), SearchMode::Auto);
-        assert_eq!(SearchMode::from_str_lossy("fusion"), SearchMode::Fusion);
-    }
-}
-
 fn keyword_score(query_tokens: &[String], payload: &MemoryPayload) -> f64 {
     if query_tokens.is_empty() {
         return 0.0;
@@ -1821,4 +1806,19 @@ fn score_tetra_exact(
 
     let matched_by = compute_matched_by(query_tokens, &t.data, doc_tokens);
     (t.id, score, t.mass, t.data.clone(), matched_by)
+}
+
+#[cfg(test)]
+mod search_mode_tests {
+    use super::SearchMode;
+
+    #[test]
+    fn public_search_modes_parse_to_their_implemented_variants() {
+        assert_eq!(SearchMode::from_str_lossy("hybrid"), SearchMode::Hybrid);
+        assert_eq!(SearchMode::from_str_lossy("exact"), SearchMode::Exact);
+        assert_eq!(SearchMode::from_str_lossy("semantic"), SearchMode::Semantic);
+        assert_eq!(SearchMode::from_str_lossy("graph"), SearchMode::Graph);
+        assert_eq!(SearchMode::from_str_lossy("auto"), SearchMode::Auto);
+        assert_eq!(SearchMode::from_str_lossy("fusion"), SearchMode::Fusion);
+    }
 }
