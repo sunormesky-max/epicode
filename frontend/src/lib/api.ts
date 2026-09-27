@@ -138,7 +138,7 @@ export function invalidateCache(...prefixes: string[]): void {
 
 // ── Request helper ──
 // F3修复:支持外部 signal,组件卸载时可 abort 避免 setState on unmounted。
-async function request<T>(
+export async function request<T>(
   endpoint: string,
   options: {
     method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
