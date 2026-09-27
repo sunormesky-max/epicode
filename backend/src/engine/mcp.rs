@@ -6032,8 +6032,8 @@ mod tests {
             .contains("pending and delivered"));
     }
 
-    #[test]
-    fn mcp_drive_inbox_includes_the_shared_retryable_signal_contract() {
+    #[tokio::test]
+    async fn mcp_drive_inbox_includes_the_shared_retryable_signal_contract() {
         let mut engine = Engine::new();
         engine.start();
         engine
@@ -6086,8 +6086,8 @@ mod tests {
         assert_eq!(response["data"]["empty_reason"], "has_signals");
     }
 
-    #[test]
-    fn mcp_drive_inbox_encrypts_descriptions_for_registered_e2e_key() {
+    #[tokio::test]
+    async fn mcp_drive_inbox_encrypts_descriptions_for_registered_e2e_key() {
         use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
         use rsa::RsaPrivateKey;
 
