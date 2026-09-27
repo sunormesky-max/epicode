@@ -207,20 +207,31 @@ jobs:
             docker network rm epicode-smoke >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          docker run -d --name epicode-backend --network epicode-smoke \
+          docker run -d --name epicode-backend --network epicode-smoke --network-alias backend \
             -e EPICODE_ADMIN_KEY=smoke-key \
             -e EPICODE_LISTEN_ADDR=0.0.0.0:9111 \
             -e RUST_LOG=info \
             epicode-smoke:ci
-          docker run -d --name epicode-frontend --network epicode-smoke epicode-frontend-smoke:ci
+          docker run -d --name epicode-frontend --network epicode-smoke --network-alias frontend epicode-frontend-smoke:ci
           docker run -d --name epicode-gateway --network epicode-smoke \
             -p 127.0.0.1:8080:80 \
             -v "$GITHUB_WORKSPACE/deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
             nginx:1.27-alpine
+          gateway_ready=false
           for i in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:8080/health >/dev/null 2>&1; then break; fi
+            if curl -sf http://127.0.0.1:8080/health >/dev/null 2>&1; then
+              gateway_ready=true
+              break
+            fi
             sleep 2
           done
+          if [[ "${gateway_ready}" != "true" ]]; then
+            docker ps -a
+            docker logs epicode-gateway || true
+            docker logs epicode-frontend || true
+            docker logs epicode-backend || true
+            exit 1
+          fi
           root_code=$(curl -s -o "$RUNNER_TEMP/frontend-root.html" -w "%{http_code}" http://127.0.0.1:8080/)
           spa_code=$(curl -s -o "$RUNNER_TEMP/frontend-route.html" -w "%{http_code}" http://127.0.0.1:8080/dashboard/memories)
           health_code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/health)
