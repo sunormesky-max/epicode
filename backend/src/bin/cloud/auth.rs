@@ -15,6 +15,12 @@ use epicode::engine::user_manager::UserPlan;
 use super::helpers::require_admin;
 use super::state::{CloudState, RateBucket, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_SECS};
 
+fn has_conflicting_user_ids(user_ids: &[&str]) -> bool {
+    user_ids
+        .first()
+        .is_some_and(|first| user_ids.iter().any(|user_id| user_id != first))
+}
+
 pub async fn auth_middleware(
     State(st): State<CloudState>,
     headers: axum::http::HeaderMap,
@@ -164,13 +170,51 @@ pub async fn auth_middleware(
     } else {
         None
     };
-    let api_key_owned = header_key.or(cookie_key).or(ticket_key).unwrap_or_default();
-    let api_key = api_key_owned.as_str();
+    let mut authenticated_users = Vec::new();
+    for credential in [
+        header_key.as_deref(),
+        cookie_key.as_deref(),
+        ticket_key.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(user) = st.user_mgr.authenticate(credential) {
+            authenticated_users.push(user);
+        }
+    }
 
-    let user_info = match st.user_mgr.authenticate(api_key) {
-        Some(u) => u,
+    let user_ids: Vec<&str> = authenticated_users
+        .iter()
+        .map(|user| user.user_id.as_str())
+        .collect();
+    // Never let header precedence route a request as a different account than its cookie or SSE ticket.
+    if has_conflicting_user_ids(&user_ids) {
+        if let Some(response) = check_rate_limit(
+            &st,
+            &format!("conflicting-auth-ip:{}", addr.ip()),
+            RATE_LIMIT_MAX,
+        ) {
+            return response;
+        }
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "success": false, "error": "conflicting authentication credentials"
+            })),
+        )
+            .into_response();
+    }
+
+    let user_info = match authenticated_users.into_iter().next() {
+        Some(user) => user,
         None => {
-            tracing::warn!("auth failed: path={} key_len={}", path, api_key.len()); // 不打印 key 前缀（kimi2.7 #20）
+            let key_len = header_key
+                .as_ref()
+                .or(cookie_key.as_ref())
+                .or(ticket_key.as_ref())
+                .map_or(0, String::len);
+            tracing::warn!("auth failed: path={} key_len={}", path, key_len); // 不打印 key 前缀（kimi2.7 #20）
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(serde_json::json!({
@@ -191,6 +235,7 @@ pub async fn auth_middleware(
     if let Some(resp) = check_rate_limit(&st, &format!("user:{}", user_info.user_id), plan_limit) {
         return resp;
     }
+
     request.extensions_mut().insert(user_info);
     next.run(request).await
 }
@@ -229,4 +274,17 @@ fn check_rate_limit(st: &CloudState, key: &str, limit: usize) -> Option<axum::re
         );
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_conflicting_user_ids;
+
+    #[test]
+    fn conflicting_user_credentials_are_rejected_without_rejecting_same_user_migration() {
+        assert!(has_conflicting_user_ids(&["user-a", "user-b"]));
+        assert!(!has_conflicting_user_ids(&["user-a", "user-a"]));
+        assert!(!has_conflicting_user_ids(&["user-a"]));
+        assert!(!has_conflicting_user_ids(&[]));
+    }
 }

@@ -29,7 +29,7 @@ const API_SECTIONS: { titleKey: string; descKey: string; endpoints: Endpoint[] }
         method: 'POST', path: '/v1/login', descKey: 'docs.section.auth.ep2.desc',
         auth: false,
         body: '{ "user_id": "alice", "password": "secret" }',
-        response: '{ "success": true, "api_key": "tm-...", "user_id": "alice", "plan": "Free" }',
+        response: 'JSON: { "success": true, "user_id": "alice", "plan": "Free", "max_memories": 100 }\nSet-Cookie: epicode_session=<HttpOnly; Secure; SameSite=Strict>',
       },
     ],
   },
@@ -127,6 +127,22 @@ const API_SECTIONS: { titleKey: string; descKey: string; endpoints: Endpoint[] }
         auth: true,
         body: '{ "id": 42 }',
         response: '{ "success": true, "id": 42, "relations": 5, "details": [...] }',
+      },
+    ],
+  },
+  {
+    titleKey: 'docs.section.realtime.title',
+    descKey: 'docs.section.realtime.desc',
+    endpoints: [
+      {
+        method: 'POST', path: '/v1/stream/ticket', descKey: 'docs.section.realtime.ep1.desc',
+        auth: true,
+        response: '{ "success": true, "ticket": "<one-use-ticket>", "expires_in": 120 }',
+      },
+      {
+        method: 'GET', path: '/v1/stream?ticket=YOUR_ONE_USE_TICKET', descKey: 'docs.section.realtime.ep2.desc',
+        auth: true,
+        response: 'text/event-stream — request a fresh ticket for every reconnect',
       },
     ],
   },
@@ -254,6 +270,7 @@ function EndpointCard({ ep }: { ep: Endpoint }) {
           <p className="text-sm pt-3 sm:hidden" style={{ color: 'var(--text-secondary)' }}>{t(ep.descKey as TranslationKey)}</p>
           {ep.body && (
             <div>
+              <div className="text-xs font-mono mb-2" style={{ color: 'var(--text-tertiary)' }}>Content-Type: application/json</div>
               <div className="text-xs font-mono mb-2 uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Request</div>
               <pre className="text-xs p-3 rounded-lg overflow-x-auto" style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', lineHeight: 1.7 }}>
                 {ep.body}

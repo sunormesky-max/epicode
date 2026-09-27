@@ -20,11 +20,12 @@ COPY . .
 RUN npm run build
 
 FROM node:20-alpine AS production
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-# 运行时密钥经环境变量/挂载注入, 镜像只带模板
-COPY package.json ./
-COPY .env.example ./
+WORKDIR /app
+COPY --from=build --chown=node:node /app/dist/public ./dist
+COPY --chown=node:node package.json ./package.json
+COPY --chown=node:node server.mjs ./server.mjs
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000
+USER 1000:1000
 
 EXPOSE 3000
 CMD ["npm", "start"]

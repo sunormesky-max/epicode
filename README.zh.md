@@ -42,12 +42,12 @@ docker compose up --build -d
 然后存储并搜索一条记忆：
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/remember \
+curl -X POST http://127.0.0.1:8080/api/v1/remember \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
   -d '{"content": "Epicode 让 AI 拥有持久化的空间记忆", "labels": ["ai", "memory"]}'
 
-curl -X POST http://localhost:8080/api/v1/search \
+curl -X POST http://127.0.0.1:8080/api/v1/search \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
   -d '{"query": "AI 记忆"}'
@@ -116,7 +116,7 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-访问 `http://localhost:8080`。生产部署细节见 [docs/deployment.md](docs/deployment.md)（英文）。
+本机 HTTP 网关地址为 `http://127.0.0.1:8080`。公网部署必须在其前方配置 TLS 代理；详见 [docs/deployment.md](docs/deployment.md)（英文）。
 
 ## 文档
 

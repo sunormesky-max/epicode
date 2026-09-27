@@ -3,7 +3,7 @@ import os
 import urllib.request
 
 
-BASE_URL = os.environ.get("EPICODE_BASE_URL", "http://localhost:8080/api/v1")
+BASE_URL = os.environ.get("EPICODE_BASE_URL", "http://127.0.0.1:8080/api/v1")
 API_KEY = os.environ.get("EPICODE_API_KEY")
 
 if not API_KEY:

@@ -1,6 +1,6 @@
 //! 用户自助密钥旅程 (P20/P21 重建, 2026-09-04 三重审计找回): /v1/api-key 家族。
 //! 前端契约(frontend/src/lib/api.ts):
-//!   GET  /v1/api-key                        -> {masked_key, hint}
+//!   GET  /v1/api-key                        -> {user_id, request_key_matches, masked_key, hint}
 //!   POST /v1/api-key/reveal  {password}     -> {api_key, note}    (非破坏)
 //!   POST /v1/api-key/reset   {password}     -> {api_key, warning} (破坏性: 旧钥即失效)
 //! 设计原则(P21入档): 破坏性操作永远不该是满足日常需求的唯一路径 —
@@ -33,15 +33,26 @@ fn mask_key(k: &str) -> String {
     }
 }
 
+fn request_key_matches(authenticated_key: &str, presented_key: Option<&str>) -> bool {
+    presented_key.is_some_and(|key| key == authenticated_key)
+}
+
 /// GET /v1/api-key — 掩码视图(浏览器身份区安全默认)
 pub async fn api_key_masked(
     axum::extract::Extension(user): axum::extract::Extension<UserInfo>,
+    headers: axum::http::HeaderMap,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    let presented_key = headers
+        .get("X-API-Key")
+        .and_then(|value| value.to_str().ok());
     (
         StatusCode::OK,
         Json(epicode::engine::smrp::envelope_ok_plain(
             "api_key_masked",
             serde_json::json!({
+                // Lets the console verify an unpartitioned legacy key before adopting it.
+                "user_id": user.user_id,
+                "request_key_matches": request_key_matches(&user.api_key, presented_key),
                 "masked_key": mask_key(&user.api_key),
                 "hint": "完整密钥需密码确认: 显示(非破坏)或重置(破坏性, 现有连接立即失效)",
             }),
@@ -112,5 +123,17 @@ pub async fn api_key_reset(
                 &e,
             )),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::request_key_matches;
+
+    #[test]
+    fn legacy_key_verification_requires_the_presented_key_to_match() {
+        assert!(request_key_matches("tm-account-a", Some("tm-account-a")));
+        assert!(!request_key_matches("tm-account-b", Some("tm-account-a")));
+        assert!(!request_key_matches("tm-account-a", None));
     }
 }

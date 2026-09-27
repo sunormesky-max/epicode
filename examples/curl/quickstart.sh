@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${EPICODE_BASE_URL:-http://localhost:8080/api/v1}"
+BASE_URL="${EPICODE_BASE_URL:-http://127.0.0.1:8080/api/v1}"
 API_KEY="${EPICODE_API_KEY:-}"
 
 if [ -z "$API_KEY" ]; then
