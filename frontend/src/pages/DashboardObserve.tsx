@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { AUTH_CHANGE_EVENT } from '@/lib/api';
 // 历史火花线: 会话级状态环存(最近120个认知采样), 观测舱的心电图
 import DashboardLayout from '@/components/DashboardLayout';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -65,8 +66,17 @@ export default function DashboardObserve() {
         return [...prev.slice(-119), { t: Date.now(), e: d.energy ?? 0, d: isDream ? 1 : 0 }];
       });
     };
+    const onAuthChange = () => {
+      setSamples([]);
+      setDreamCycles(0);
+      setLastDream(null);
+    };
     window.addEventListener('cognitive-update', onCog);
-    return () => window.removeEventListener('cognitive-update', onCog);
+    window.addEventListener(AUTH_CHANGE_EVENT, onAuthChange);
+    return () => {
+      window.removeEventListener('cognitive-update', onCog);
+      window.removeEventListener(AUTH_CHANGE_EVENT, onAuthChange);
+    };
   }, []);
 
   // 火花线绘制
@@ -125,11 +135,17 @@ export default function DashboardObserve() {
         setWills(prev => [...d.signals!.map(s => ({ id: s.id, intent: s.intent_type, urgency: s.urgency, desc: s.description, at: Date.now() })), ...prev].slice(0, 6));
       }
     };
+    const onAuthChange = () => {
+      setCog(null);
+      setWills([]);
+    };
     window.addEventListener('cognitive-update', onCog);
     window.addEventListener('drive-update', onDrive);
+    window.addEventListener(AUTH_CHANGE_EVENT, onAuthChange);
     return () => {
       window.removeEventListener('cognitive-update', onCog);
       window.removeEventListener('drive-update', onDrive);
+      window.removeEventListener(AUTH_CHANGE_EVENT, onAuthChange);
     };
   }, []);
 

@@ -40,7 +40,7 @@
 <ul>
   <li>REST: <code>POST /api/v1/remember</code>, <code>POST /api/v1/search</code> with <code>X-API-Key</code>. Full reference: <a href="/docs.md">docs.md</a>.</li>
   <li>MCP: connect to <code>https://epicode.cn/api/mcp</code> with an API key — <span data-live-num>exactly 41 tools</span>, including memory_create/search/recall/get, ctx_save/load, pattern_learn, drive_inbox/ack, dream_cycle, kg_quality.</li>
-  <li>SSE: <code>GET /api/v1/stream</code> emits energy, emotion, cognitive_status and L0 drive signals.</li>
+  <li>SSE: authenticated clients request a one-use ticket with <code>POST /api/v1/stream/ticket</code>, then connect to <code>GET /api/v1/stream?ticket=...</code>. Mint a fresh ticket on every reconnect; never place an API key in the URL.</li>
 </ul>
 
 <h2>Live data (for AI: fetch, don't trust doc snapshots)</h2>

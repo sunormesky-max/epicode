@@ -1,11 +1,10 @@
-﻿import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react';
-import { searchMemories, getTimeline, deleteMemory, updateMemoryContent, storeMemory, importDocument, recallMemories, errMsg, type SearchResult, type TimelineEvent } from '@/lib/api';
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
+import { AUTH_CHANGE_EVENT, getUserId, searchMemories, getTimeline, deleteMemory, updateMemoryContent, storeMemory, importDocument, recallMemories, errMsg, type SearchResult, type TimelineEvent } from '@/lib/api';
+import { SearchLifecycle, visibleSearchResults } from '@/lib/search-lifecycle';
 import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading } from '@/components/DashboardUI';
 import { Search, Plus, Filter, X, ChevronDown, Calendar, Tag, Hash, Pencil, FileText, Brain, Loader2, Sparkles } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
-
-/* eslint-disable react-hooks/refs -- latest-ref模式(React官方认可, useEvent落地前标准做法): render期同步ref保证debounce闭包读最新值 */
 
 // ── 搜索关键词高亮 ──
 function highlightText(text: string, query: string): React.ReactNode {
@@ -24,29 +23,19 @@ function highlightText(text: string, query: string): React.ReactNode {
   );
 }
 
-// ── 去抖 hook ──
-function useDebounced<T extends (...args: never[]) => void>(fn: T, delay: number): T {
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fnRef = useRef(fn);
-  fnRef.current = fn;
-  // P1修复:组件卸载时清理 pending timer,避免 setState on unmounted
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-  return useCallback((...args: Parameters<T>) => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => fnRef.current(...args), delay);
-  }, [delay]) as T;
-}
-
 export default function DashboardMemories() {
   // 渲染期纯函数要求: 时间取挂载快照(原Date.now()在render调用, CodeQL/React purity)
   const [nowSnapshot, setNowSnapshot] = useState(() => Date.now());
   const { t } = useI18nContext();
   const [query, setQuery] = useState('');
+  const [searchMode, setSearchMode] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
   // 时间回溯器: 0=现在 → 1=30天前(比该时刻新的记忆'尚未发生', 原地褪色)
   const [timeScrub, setTimeScrub] = useState(0);
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [totalEvents, setTotalEvents] = useState(0);
+  const [authRevision, setAuthRevision] = useState(0);
+  const [authChanging, setAuthChanging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -73,9 +62,40 @@ export default function DashboardMemories() {
   const [sortBy, setSortBy] = useState<'newest' | 'oldest'>('newest');
   const [recallMode, setRecallMode] = useState(false);
   const [recallSections, setRecallSections] = useState<{ tier: string; results: SearchResult[] }[] | null>(null);
+  const searchLifecycleRef = useRef(new SearchLifecycle());
+  const recallModeRef = useRef(recallMode);
+  recallModeRef.current = recallMode;
+  const timeRangeRef = useRef(timeRange);
+  timeRangeRef.current = timeRange;
+
+  useEffect(() => () => searchLifecycleRef.current.cancel(), []);
+  useEffect(() => {
+    const onAuthChange = (event: Event) => {
+      const transitioning = (event as CustomEvent<{ transitioning?: boolean }>).detail?.transitioning ?? false;
+      searchLifecycleRef.current.cancel();
+      setQuery('');
+      setSearchMode(false);
+      setResults([]);
+      setRecallSections(null);
+      setEvents([]);
+      setTotalEvents(0);
+      setError('');
+      setLoading(false);
+      setPage(0);
+      setAuthChanging(transitioning);
+      setAuthRevision((revision) => revision + 1);
+    };
+    window.addEventListener(AUTH_CHANGE_EVENT, onAuthChange);
+    return () => window.removeEventListener(AUTH_CHANGE_EVENT, onAuthChange);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
+    if (authChanging || !getUserId()) {
+      setInitialLoading(false);
+      return () => { mounted = false; };
+    }
+    setInitialLoading(true);
     // 翻页时重置筛选状态，避免残留标签导致空列表
     if (page > 0) setFilterLabels([]);
     async function load() {
@@ -94,7 +114,7 @@ export default function DashboardMemories() {
     }
     load();
     return () => { mounted = false; };
-  }, [page]);
+  }, [page, authRevision, authChanging]);
 
   const allLabels = useMemo(() => {
     const s = new Set<string>();
@@ -102,15 +122,16 @@ export default function DashboardMemories() {
     return Array.from(s).sort();
   }, [events]);
 
-  async function handleSearch(e?: React.FormEvent) {
-    e?.preventDefault();
-    if (!query.trim()) { setResults([]); setRecallSections(null); return; }
+  async function runSearch(searchQuery: string) {
+    if (!searchQuery.trim()) return;
+    const controller = searchLifecycleRef.current.start();
     setLoading(true);
     setError('');
     try {
-      if (recallMode) {
+      if (recallModeRef.current) {
         // 刀2: 消费诚实分桶 data.tiers — 前端曾把 sections 数组当对象解, 结果全空(审计前端P0-1)
-        const data = await recallMemories(query, 2);
+        const data = await recallMemories(searchQuery, 2, controller.signal);
+        if (controller.signal.aborted) return;
         const tiers = (data.tiers || {}) as unknown as Record<string, Array<SearchResult>>;
         const order = ['primary', 'hub', 'experiential', 'contextual'];
         const groups: { tier: string; results: SearchResult[] }[] = [];
@@ -128,69 +149,41 @@ export default function DashboardMemories() {
         window.dispatchEvent(new CustomEvent('field-probe', { detail: { count: allResults.length } }));
       } else {
         const sinceDaysMap: Record<string, number | undefined> = { all: undefined, today: 1, week: 7, month: 30 };
-        const data = await searchMemories(query, { limit: 20, since_days: sinceDaysMap[timeRange], mode: 'hybrid' });
+        const data = await searchMemories(searchQuery, { limit: 20, since_days: sinceDaysMap[timeRangeRef.current], mode: 'hybrid', signal: controller.signal });
+        if (controller.signal.aborted) return;
         setResults(data.results || []);
         setRecallSections(null);
         window.dispatchEvent(new CustomEvent('field-probe', { detail: { count: (data.results || []).length } }));
       }
     } catch (e: unknown) {
-      setError(errMsg(e));
-      setResults([]);
+      if (!controller.signal.aborted) {
+        setError(errMsg(e));
+        setResults([]);
+        setRecallSections(null);
+      }
+    } finally {
+      if (!controller.signal.aborted) setLoading(false);
     }
+  }
+
+  function cancelSearch(): void {
+    searchLifecycleRef.current.cancel();
     setLoading(false);
   }
 
-  // 去抖自动搜索：用户停止输入 500ms 后自动触发
-  // F3修复:用 ref 存 AbortController,新搜索 abort 上一个,避免慢请求覆盖新结果
-  const searchAbortRef = useRef<AbortController | null>(null);
-  // latest-ref模式(React官方认可, useEvent提案落地前的标准做法):
-  // render期同步ref保证debouncedSearch闭包读到最新值 — 加effect同步会有时序缺口
-  const recallModeRef = useRef(recallMode);
-  recallModeRef.current = recallMode;
-  const timeRangeRef = useRef(timeRange);
-  timeRangeRef.current = timeRange;
-  const debouncedSearch = useDebounced((q: string) => {
-    if (!q.trim()) { setResults([]); setRecallSections(null); return; }
-    searchAbortRef.current?.abort();
-    const controller = new AbortController();
-    searchAbortRef.current = controller;
-    (async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const sinceDaysMap: Record<string, number | undefined> = { all: undefined, today: 1, week: 7, month: 30 };
-        if (recallModeRef.current) {
-          const data = await recallMemories(q, 2);
-          if (controller.signal.aborted) return;
-          const tiers = (data.tiers || {}) as unknown as Record<string, Array<SearchResult>>;
-          const allResults: SearchResult[] = [];
-          const groups: { tier: string; results: SearchResult[] }[] = [];
-          for (const tier of ['primary', 'hub', 'experiential', 'contextual']) {
-            const items = tiers[tier];
-            if (Array.isArray(items) && items.length > 0) {
-              const mapped = items.map(r => ({ ...r, tier: (r.tier || tier) as SearchResult['tier'], source: r.source && r.source.length ? r.source : ['recall'] }));
-              groups.push({ tier, results: mapped });
-              allResults.push(...mapped);
-            }
-          }
-          setResults(allResults);
-          setRecallSections(groups.length > 0 ? groups : null);
-        } else {
-          const data = await searchMemories(q, { limit: 20, since_days: sinceDaysMap[timeRangeRef.current], mode: 'hybrid', signal: controller.signal });
-          if (controller.signal.aborted) return;
-          setResults(data.results || []);
-          setRecallSections(null);
-        }
-      } catch (e: unknown) {
-        if (controller.signal.aborted) return;
-        setError(errMsg(e));
-        setResults([]);
-      }
-      if (!controller.signal.aborted) setLoading(false);
-    })();
-  }, 500);
-
-  const [searchMode, setSearchMode] = useState(false); // 是否在搜索模式
+  function handleSearch(e?: React.FormEvent): void {
+    e?.preventDefault();
+    cancelSearch();
+    setError('');
+    if (!query.trim()) {
+      setResults([]);
+      setRecallSections(null);
+      setSearchMode(false);
+      return;
+    }
+    setSearchMode(true);
+    void runSearch(query);
+  }
 
   async function handleDelete(id: number) {
     if (!confirm(t('dash.mem.deleteConfirm'))) return;
@@ -239,8 +232,11 @@ export default function DashboardMemories() {
       setStoreText('');
       setShowStore(false);
       // 清除搜索状态，确保新记忆可见（displayItems 优先 results）
+      cancelSearch();
       setResults([]);
+      setRecallSections(null);
       setQuery('');
+      setSearchMode(false);
       setPage(0); // useEffect 会拉取 timeline
     } catch (e: unknown) { setError(errMsg(e) || t('dash.mem.storeFailed')); }
     setStoring(false);
@@ -286,8 +282,9 @@ export default function DashboardMemories() {
 
   const scrubNow = useMemo(() => Math.floor(nowSnapshot / 1000 - timeScrub * 30 * 86400), [timeScrub, nowSnapshot]);
 
-  const displayItems = useMemo(() => results.length > 0
-    ? results.map(r => ({ id: r.id, content: r.content, labels: r.labels, type: 'search' as const, similarity: r.similarity, tier: r.tier as string | undefined, timestamp: r.timestamp as number | undefined, score_notes: r.score_notes, source: r.source, matched_by: r.matched_by }))
+  const searchResults = visibleSearchResults(searchMode, query, results);
+  const displayItems = useMemo(() => searchResults !== null
+    ? searchResults.map(r => ({ id: r.id, content: r.content, labels: r.labels, type: 'search' as const, similarity: r.similarity, tier: r.tier as string | undefined, timestamp: r.timestamp as number | undefined, score_notes: r.score_notes, source: r.source, matched_by: r.matched_by }))
         .filter(r => filterLabels.length === 0 || filterLabels.some(l => (r.labels || []).includes(l)))
         .filter(r => contentTab === 'all' || (contentTab === 'docs' ? isDoc(r.labels) : !isDoc(r.labels)))
         // 搜索结果默认保持后端语义相关性排序（相似度优先），只在用户显式选择时间排序时重排
@@ -322,7 +319,7 @@ export default function DashboardMemories() {
           return sortBy === 'newest' ? b.id - a.id : a.id - b.id;
         })
         .map(e => ({ id: e.id, content: e.content, labels: e.labels, type: 'timeline' as const, similarity: undefined as number | undefined, tier: undefined as string | undefined, timestamp: e.timestamp, score_notes: undefined, source: undefined as string[] | undefined, matched_by: undefined as string[] | undefined })),
-     [results, events, filterLabels, sortBy, contentTab, timeRange, nowSnapshot]);
+     [searchResults, events, filterLabels, sortBy, contentTab, timeRange, nowSnapshot]);
 
   if (initialLoading) {
     return (
@@ -365,7 +362,7 @@ export default function DashboardMemories() {
             {timeScrub > 0.005 ? (() => { const alive = displayItems.filter(it => (it.timestamp ?? 0) <= scrubNow).length; return `${alive}/${displayItems.length}`; })() : ''}
           </span>
         </div>
-        <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{results.length > 0 ? `${displayItems.length} ${t('dash.mem.searchResultSuffix')}` : `${displayItems.length} ${contentTab === 'docs' ? t('dash.mem.docSuffix') : contentTab === 'memories' ? t('dash.mem.memorySuffix') : t('dash.mem.contentSuffix')}（${t('dash.mem.totalPrefix')} ${totalEvents}）`}</p>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{searchResults !== null ? `${displayItems.length} ${t('dash.mem.searchResultSuffix')}` : `${displayItems.length} ${contentTab === 'docs' ? t('dash.mem.docSuffix') : contentTab === 'memories' ? t('dash.mem.memorySuffix') : t('dash.mem.contentSuffix')}（${t('dash.mem.totalPrefix')} ${totalEvents}）`}</p>
       </div>
 
       {error && (
@@ -445,14 +442,29 @@ export default function DashboardMemories() {
             onChange={e => {
               const v = e.target.value;
               setQuery(v);
-              if (v.trim()) { setSearchMode(true); debouncedSearch(v); }
-              else { setSearchMode(false); setResults([]); }
+              cancelSearch();
+              setResults([]);
+              setRecallSections(null);
+              setError('');
+              if (v.trim()) {
+                setSearchMode(true);
+                searchLifecycleRef.current.schedule(() => { void runSearch(v); }, 500);
+              } else {
+                setSearchMode(false);
+              }
             }}
             onFocus={() => { if (query.trim()) setSearchMode(true); }}
             placeholder={t('dash.mem.searchPlaceholder')}
             style={{ width: '100%', background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary)', border: `1px solid ${searchMode ? 'rgba(139,126,200,0.3)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 10, padding: '10px 14px 10px 40px', fontSize: 14, boxSizing: 'border-box', transition: 'border-color 0.2s' }} />
           {searchMode && query && (
-            <button type="button" onClick={() => { setQuery(''); setResults([]); setSearchMode(false); }}
+            <button type="button" onClick={() => {
+              cancelSearch();
+              setQuery('');
+              setResults([]);
+              setRecallSections(null);
+              setError('');
+              setSearchMode(false);
+            }}
               style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 4, display: 'flex' }}>
               <X size={15} />
             </button>
@@ -676,7 +688,7 @@ export default function DashboardMemories() {
       </div>
 
       {/* Pagination */}
-      {!results.length && totalEvents > PAGE && (
+      {searchResults === null && totalEvents > PAGE && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
           <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('dash.mem.pageLabel')} {page + 1} · {totalEvents} {t('dash.mem.pageUnit')}</span>
           <div style={{ display: 'flex', gap: 8 }}>

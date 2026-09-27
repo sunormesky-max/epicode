@@ -2,12 +2,12 @@
 
 > Mirror of https://epicode.cn/#/docs for fetch-only visitors. Generated 2026-08-20 from the same source. Human page may add newer endpoints; llms.txt lists the canonical summary.
 
-Auth: all /v1/* endpoints require `X-API-Key: tm-...` header (obtained at /register). Rate limits per plan: Free 60 req/min, Pro 300, Enterprise 1000.
+Public API base URL: `https://epicode.cn/api`. Authenticated endpoints accept an `X-API-Key` header or the HttpOnly `epicode_session` cookie; if both are sent, they must belong to the same account. JSON request bodies use `Content-Type: application/json`. The console uses the cookie; external API clients can use the key returned once at registration. Rate limits per plan: Free 60 req/min, Pro 300, Enterprise 1000.
 
 ## Auth
-- POST /register {user_id, password, plan?} — create account; invite code (X-Invite-Code header) or admin gated. Returns {api_key: "tm-...", plan, max_memories}.
-- POST /v1/login {user_id, password} — sets HttpOnly session cookie (epicode_session). Console uses cookie; API uses key.
-- POST /v1/logout — clears session.
+- POST /register {user_id, password, plan?} — create account; invite code (X-Invite-Code header) or admin gated. Returns {success, user_id, api_key, plan, max_memories}.
+- POST /v1/login {user_id, password} — sets the HttpOnly, Secure, SameSite=Strict `epicode_session` cookie. Returns {success, user_id, plan, max_memories}; the JSON body does not contain an API key.
+- POST /v1/logout — clears the session cookie.
 
 ## Memory
 - POST /v1/remember {content, labels?: string[]} — store a memory (auto embedding + classification + spatial placement). ~0.4ms write.
@@ -18,7 +18,8 @@ Auth: all /v1/* endpoints require `X-API-Key: tm-...` header (obtained at /regis
 - PUT /v1/memory/:id — update.
 - DELETE /v1/memory/:id — delete.
 - GET /v1/timeline — memory timeline.
-- SSE GET /v1/stream?key=... — live cognitive stream (energy, emotion, cognitive_status, drive signals). Short-lived tickets via /v1/stream/ticket for cookie sessions.
+- POST /v1/stream/ticket — authenticated request that returns a short-lived, single-use stream ticket (`expires_in: 120`).
+- SSE GET /v1/stream?ticket=YOUR_ONE_USE_TICKET — live cognitive stream (energy, emotion, cognitive_status, drive signals). Request a fresh ticket for every reconnect. Never put a long-lived API key in a URL.
 
 ## Identity (required before memory tools on a fresh account)
 - POST /v1/identity/confirm — confirm agent identity (REST path of the MCP ritual).

@@ -226,6 +226,8 @@ export type TranslationKey =
   | 'docs.section.stats.title' | 'docs.section.stats.desc'
   | 'docs.section.stats.ep1.desc' | 'docs.section.stats.ep2.desc' | 'docs.section.stats.ep3.desc'
   | 'docs.section.stats.ep4.desc'
+  | 'docs.section.realtime.title' | 'docs.section.realtime.desc'
+  | 'docs.section.realtime.ep1.desc' | 'docs.section.realtime.ep2.desc'
   | 'docs.section.identity.title' | 'docs.section.identity.desc'
   | 'docs.section.identity.ep1.desc' | 'docs.section.identity.ep2.desc' | 'docs.section.identity.ep3.desc'
   | 'docs.section.skills.title' | 'docs.section.skills.desc'
@@ -909,8 +911,8 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'guide.copied': '已复制',
     // Docs page
     'docs.title': 'API 文档',
-    'docs.introPrefix': '完整的 RESTful API 参考。所有认证请求需携带 ',
-    'docs.introSuffix': ' 请求头。',
+    'docs.introPrefix': '完整的 RESTful API 参考。受保护 API 支持 ',
+    'docs.introSuffix': ' 请求头或 HttpOnly 会话 cookie；若同时提供，两者必须属于同一账号。浏览器 SSE 使用短时一次性 ticket；不要把 API Key 放入 URL。',
     'docs.copied': '已复制',
     'docs.copyFullUrl': '复制完整 URL',
     'docs.viewGuide': '查看快速上手指南',
@@ -918,7 +920,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'docs.section.auth.title': '认证',
     'docs.section.auth.desc': '用户注册与登录',
     'docs.section.auth.ep1.desc': '注册新用户',
-    'docs.section.auth.ep2.desc': '登录获取 API Key',
+    'docs.section.auth.ep2.desc': '登录并设置 HttpOnly 会话 cookie；响应体不返回 API Key',
     'docs.section.memory.title': '记忆操作',
     'docs.section.memory.desc': '核心记忆 CRUD 与搜索',
     'docs.section.memory.ep1.desc': '存储一条记忆（自动嵌入 + 分类 + 空间放置）',
@@ -939,6 +941,10 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'docs.section.stats.ep2.desc': '导出完整知识图谱',
     'docs.section.stats.ep3.desc': '图谱分析报告',
     'docs.section.stats.ep4.desc': '查询节点的知识图谱关系',
+    'docs.section.realtime.title': '实时认知流',
+    'docs.section.realtime.desc': 'SSE 先申请短时一次性 ticket；每次断线重连都重新申请',
+    'docs.section.realtime.ep1.desc': '使用 cookie 或 X-API-Key 申请有效期 120 秒的一次性 ticket',
+    'docs.section.realtime.ep2.desc': '使用 ticket 建立 SSE 连接；断线重连时不要复用 ticket',
     'docs.section.identity.title': '身份系统',
     'docs.section.identity.desc': 'AI 代理身份确认与管理',
     'docs.section.identity.ep1.desc': '获取当前身份信息',
@@ -1787,8 +1793,8 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'guide.copied': 'Copied',
     // Docs page
     'docs.title': 'API Documentation',
-    'docs.introPrefix': 'Complete RESTful API reference. All authenticated requests require the ',
-    'docs.introSuffix': ' header.',
+    'docs.introPrefix': 'Complete RESTful API reference. Protected APIs accept the ',
+    'docs.introSuffix': ' header or an HttpOnly session cookie; if both are sent, they must belong to the same account. Browser SSE uses a short-lived one-use ticket; never put an API key in a URL.',
     'docs.copied': 'Copied',
     'docs.copyFullUrl': 'Copy full URL',
     'docs.viewGuide': 'View quick start guide',
@@ -1796,7 +1802,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'docs.section.auth.title': 'Authentication',
     'docs.section.auth.desc': 'User registration and login',
     'docs.section.auth.ep1.desc': 'Register a new user',
-    'docs.section.auth.ep2.desc': 'Login to obtain API Key',
+    'docs.section.auth.ep2.desc': 'Login sets an HttpOnly session cookie; the response body does not include an API key',
     'docs.section.memory.title': 'Memory Operations',
     'docs.section.memory.desc': 'Core memory CRUD and search',
     'docs.section.memory.ep1.desc': 'Store a memory (auto-embed + classify + spatial placement)',
@@ -1817,6 +1823,10 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'docs.section.stats.ep2.desc': 'Export the full knowledge graph',
     'docs.section.stats.ep3.desc': 'Graph analysis report',
     'docs.section.stats.ep4.desc': 'Query a node\'s knowledge-graph relations',
+    'docs.section.realtime.title': 'Real-time Cognitive Stream',
+    'docs.section.realtime.desc': 'Mint a short-lived one-use ticket before SSE and request a new ticket for every reconnect',
+    'docs.section.realtime.ep1.desc': 'Use a session cookie or X-API-Key to mint a one-use ticket valid for 120 seconds',
+    'docs.section.realtime.ep2.desc': 'Connect to SSE with the ticket; do not reuse it after disconnecting',
     'docs.section.identity.title': 'Identity System',
     'docs.section.identity.desc': 'AI agent identity confirmation and management',
     'docs.section.identity.ep1.desc': 'Get current identity info',

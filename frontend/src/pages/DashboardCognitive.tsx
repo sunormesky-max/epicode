@@ -4,7 +4,7 @@ import { useCognitiveState } from '@/components/useCognitiveState';
 import DashboardLayout from '@/components/DashboardLayout';
 import { MarkdownText } from '@/components/MarkdownText';
 import { stripThinkTags } from '@/lib/think-tags';
-import { getDriveInbox, ackDrive, getRuntimeStatus, registerRuntime, heartbeatRuntime, getUserId, normalizeDriveEnum, getKnowledgeCards, type DriveSignal, type KnowledgeCard } from '@/lib/api';
+import { AUTH_CHANGE_EVENT, getDriveInbox, ackDrive, getRuntimeStatus, registerRuntime, heartbeatRuntime, getUserId, normalizeDriveEnum, getKnowledgeCards, type DriveSignal, type KnowledgeCard } from '@/lib/api';
 import { Brain, Activity, Zap, MessageSquare, Wifi, WifiOff, Radio, CheckCircle2, XCircle, AlertTriangle, Lightbulb } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
 import type { TranslationKey } from '@/i18n/translations';
@@ -158,8 +158,13 @@ export default function DashboardCognitive() {
         return Array.from(map.values()).sort((a, b) => b.id - a.id);
       });
     };
+    const onAuthChange = () => setDriveSignals([]);
     window.addEventListener('drive-update', onDrive);
-    return () => window.removeEventListener('drive-update', onDrive);
+    window.addEventListener(AUTH_CHANGE_EVENT, onAuthChange);
+    return () => {
+      window.removeEventListener('drive-update', onDrive);
+      window.removeEventListener(AUTH_CHANGE_EVENT, onAuthChange);
+    };
   }, []);
 
   const handleAck = async (id: number, executed: boolean) => {

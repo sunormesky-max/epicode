@@ -100,8 +100,8 @@ jobs:
       # 类型债(187)与lint债(52)已于 2026-09-26 全面迭代清零 — 门禁恢复严格
       - name: Type check
         run: npm run check
-      - name: Audit runtime deps (high+ blocking)  # 审计三轮: 供应链门禁
-        run: npm audit --omit=dev --audit-level=high
+      - name: Audit all frontend dependencies (high+ blocking)
+        run: npm audit --audit-level=high
       - name: Lint
         run: npm run lint
       - name: Test
