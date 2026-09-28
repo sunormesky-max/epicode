@@ -49,8 +49,8 @@ export default function Register() {
     setLoading(true);
     try {
       const reg = await registerUser(username.trim(), password.trim(), inviteCode.trim() || undefined);
-      await loginUser(username.trim(), password.trim());
       setIssuedKey(reg.api_key || '');
+      await loginUser(username.trim(), password.trim());
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
       if (msg.toLowerCase().includes('invite')) {
@@ -76,6 +76,7 @@ export default function Register() {
           <h2 style={{ margin: '0 0 8px', color: 'var(--accent-cyan-bright, #3ecfae)' }}>账号创建成功</h2>
           <p style={{ margin: '0 0 4px', fontSize: 13 }}>你的 API Key 已生成 — <b style={{ color: 'var(--warning-orange, #ec8)' }}>仅此一次完整显示</b>, 请立即保存:</p>
           <p style={{ margin: '12px 0', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', borderRadius: 8, fontFamily: 'var(--font-mono, monospace)', wordBreak: 'break-all', fontSize: 14 }}>{issuedKey || '(注册响应未含密钥, 登录后在总览-身份区获取)'}</p>
+          {error && <p role="alert" style={{ margin: '8px 0', color: 'var(--warning-orange, #ec8)', fontSize: 12 }}>{error}</p>}
           <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
             <button onClick={() => { navigator.clipboard.writeText(issuedKey); }} style={{ flex: 1, padding: '9px 0', background: 'transparent', border: '1px solid var(--line, #333)', borderRadius: 8, cursor: 'pointer', color: 'inherit' }}>复制密钥</button>
             <button onClick={() => navigate('/dashboard')} style={{ flex: 1, padding: '9px 0', background: 'var(--accent-cyan-bright, #3ecfae)', border: 'none', borderRadius: 8, cursor: 'pointer', color: '#04121a', fontWeight: 600 }}>进入控制台</button>
@@ -117,7 +118,7 @@ export default function Register() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {[
               { k: 'memory space', v: 'tetrahedral · clustered · dreaming' },
-              { k: 'smrp', v: 'skill exchange between agents' },
+              { k: 'smrp', v: 'tiered memory responses · retrieval provenance' },
               { k: 'l0 protocol', v: 'active inference · will signals' },
             ].map((row) => (
               <div key={row.k} style={{ display: 'flex', alignItems: 'baseline', gap: 16, fontFamily: 'var(--font-mono)', fontSize: 13 }}>

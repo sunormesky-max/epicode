@@ -743,6 +743,13 @@ pub async fn mint_stream_ticket(
     )
 }
 
+fn drive_sse_signal(
+    signal: &epicode::engine::drive::DriveSignal,
+    e2e_public_key: Option<&str>,
+) -> serde_json::Value {
+    signal.sse_value(e2e_public_key)
+}
+
 /// 智能化突破: SSE实时流 — 每3秒推送完整认知状态 + 订阅洞察事件
 /// 推送内容：能量/记忆/簇/Port/情感(PAD)/驱动力/认知状态 + insight事件
 pub async fn sse_stream(
@@ -854,23 +861,10 @@ pub async fn sse_stream(
                     .get(&uid2)
                     .and_then(|slot| slot.engine.scheduler().e2e_pubkey())
             };
-            let sig_json: Vec<_> = fresh.iter().map(|s| {
-                let (desc_field, e2e_field) = match &e2e_pem {
-                    Some(pem) => match epicode::engine::e2e::encrypt_for(s.description.as_bytes(), pem) {
-                        Ok(ct) => (serde_json::Value::Null, serde_json::json!(ct)),
-                        Err(_) => (serde_json::json!(s.description), serde_json::Value::Null),
-                    },
-                    None => (serde_json::json!(s.description), serde_json::Value::Null),
-                };
-                serde_json::json!({
-                    "id": s.id,
-                    "intent_type": s.intent_type,
-                    "status": s.status,
-                    "urgency": s.urgency,
-                    "description": desc_field, "description_e2e": e2e_field, "evidence": s.evidence,
-                    "enqueued_at_ms": s.enqueued_at_ms,
-                })
-            }).collect();
+            let sig_json: Vec<_> = fresh
+                .iter()
+                .map(|signal| drive_sse_signal(signal, e2e_pem.as_deref()))
+                .collect();
             let pushed_at_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -901,4 +895,42 @@ pub async fn sse_stream(
     });
 
     Sse::new(ReceiverStream::new(rx)).keep_alive(axum::response::sse::KeepAlive::default())
+}
+
+#[cfg(test)]
+mod drive_sse_tests {
+    use super::drive_sse_signal;
+    use epicode::engine::drive::{DriveIntent, DriveSignal, DriveStatus, DriveUrgency};
+
+    #[test]
+    fn sse_drive_event_uses_the_documented_transport_projection() {
+        let signal = DriveSignal {
+            id: 7,
+            timestamp: 1_780_000_000,
+            intent_type: DriveIntent::Explore,
+            description: "Inspect the documented route".into(),
+            evidence: vec![10, 20],
+            urgency: DriveUrgency::Low,
+            target_capability: None,
+            emotion: None,
+            origin_tick: 3,
+            status: DriveStatus::Pending,
+            feedback: None,
+            retry_count: 0,
+            expires_at: Some(1_780_000_100),
+            enqueued_at_ms: 1_780_000_000_000,
+            time_budget_ms: None,
+        };
+
+        let value = drive_sse_signal(&signal, None);
+        assert_eq!(value["id"], 7);
+        assert_eq!(value["intent_type"], "explore");
+        assert_eq!(value["status"], "pending");
+        assert_eq!(value["description"], "Inspect the documented route");
+        assert_eq!(value["description_e2e"], serde_json::Value::Null);
+        assert_eq!(value["evidence"], serde_json::json!([10, 20]));
+        assert_eq!(value["enqueued_at_ms"], 1_780_000_000_000i64);
+        assert!(value.get("emotion").is_none());
+        assert!(value.get("timestamp").is_none());
+    }
 }

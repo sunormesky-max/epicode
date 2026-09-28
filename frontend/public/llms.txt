@@ -12,9 +12,9 @@
 - Tetrahedral memory space: memories live in a continuous 3D space; similar concepts auto-cluster; near-vertex memories merge.
 - Hub topology: a hollow-cylinder hub with six semantic layers (Identity, Cycle, Service, Cognitive, Relation, Instinct); activation spreads Hebbian-style over this topology.
 - Dual-loop cognition: inner loop = subconscious (never stops; dream-cycle consolidation, decay, fission); outer loop = conscious (episodic focus, will, action, feedback).
-- L0 Protocol (active inference): generates drive signals (intent_type: warn/suggest/explore/constrain/request/share) with evidence memory IDs, urgency, PAD emotion. Consumable via SSE.
-- SMRP (Skill Memory Exchange Protocol) v1.0 Final: agents exchange skills (not raw context), with usage/success telemetry.
-- Retrieval: BM25 + HNSW hybrid with modes exact / semantic / graph(+PPR diffusion) / hybrid / auto. Mem0-style dialogue-aware reconciliation for memory updates.
+- L0 Protocol (active inference): generates drive signals (`intent_type`: warn/suggest/explore/constrain/request/share) with evidence memory IDs, urgency, and lifecycle status. Consume through `GET /api/v1/drive/inbox`, MCP `drive_inbox`, or ticket-authenticated SSE.
+- SMRP (Structured Memory Response Protocol) v1.0 Final: transport-independent structured memory responses with tier, retrieval source, optional topology, and an envelope. Skills are exposed separately through the skill APIs/tools.
+- Retrieval: modes exact / semantic / graph(+PPR diffusion) / hybrid / auto / fusion. Graph expands hybrid-search seeds with KG-PPR; auto routes temporal/aggregation queries to graph and other queries to semantic; fusion combines semantic and graph+PPR rankings. Mem0-style dialogue-aware reconciliation for memory updates.
 - Stack: React 19 + Vite 7 frontend; Rust + Axum + SQLite + ONNX backend; SSE real-time stream; Docker/K8s deployable; MIT open source at github.com/sunormesky-max/epicode.
 
 ## Onboarding an agent via MCP — REQUIRED identity ritual
@@ -30,23 +30,38 @@ The initialize response reports identity.confirmed=false and the next expected s
 
 ## MCP endpoint
 - URL: https://epicode.cn/api/mcp  Header: X-API-Key: tm-...
-- Exactly 41 tools (counted 2026-08-20):
+- The available tool catalog is runtime data; call MCP `tools/list` rather than relying on a hard-coded count. Representative tools include:
   memory_create, memory_search, memory_recall, memory_get, memory_list, memory_update, memory_delete,
   ctx_load, ctx_save, pattern_learn, pattern_recall, decision_record, bug_memory, session_summary,
   space_stats, dream_cycle, knowledge_relations, concepts, context_observe,
   identity_confirm, identity_step, identity_finalize,
   skill_execute, skill_feedback, skills_sync, skill_auto_extract, feedback_submit, enforced_rules, project_list,
   embedding_diagnostic, embedding_migrate, kg_quality, doc_import, memory_export, session_list, memory_restore, memory_forget, drive_inbox, drive_ack, memory_improve
-  (If you see 33, 35 or 27 anywhere, that read is stale; tools/list is authoritative.)
 
 ## REST API (base https://epicode.cn/api, auth: X-API-Key header)
 - POST /register {user_id, password, plan?} — invite-code or admin gated; returns tm-* API key
 - POST /v1/login {user_id, password} — session cookie
 - POST /v1/remember {content, labels?} — write a memory
-- POST /v1/search {query, mode: exact|semantic|graph|hybrid|auto} — search
+- POST /v1/search {query, mode: exact|semantic|graph|hybrid|auto|fusion} — search
 - GET /v1/stats, GET /v1/timeline — statistics and timeline
-- GET /v1/stream?key=... — SSE: energy, emotion, cognitive_status, drive signals
+- POST /v1/stream/ticket — mint a short-lived, single-use SSE ticket using the session cookie or X-API-Key.
+- GET /v1/stream?ticket=... — SSE snapshots and newly enqueued drive events; mint a new ticket for every reconnect. Never put an API key in a URL.
+- GET /v1/drive/inbox — authenticated SMRP envelope with unacknowledged signals, stats, and empty_reason.
+- POST /v1/drive/ack {drive_id, executed, outcome, reflection?} — acknowledge a drive; requires an active primary executor. Register/heartbeat via `/v1/runtime/register` and `/v1/runtime/heartbeat`.
+- GET /v1/smrp — canonical SMRP 1.0 response specification.
 - GET /health, GET /stats/public — public, no auth
+
+### L0 wire details
+- REST `/v1/drive/inbox` returns pending and delivered unacknowledged signals; each includes `status` and `retryable`.
+- SSE data frames use `type: "status"` or `type: "drive"`. A drive frame wraps newly enqueued signal projections in `signals`; it is not the full inbox record.
+- Browser EventSource authentication: POST `/v1/stream/ticket`, then GET `/v1/stream?ticket=...`; tickets are single-use and must be reminted on reconnect. Never put API keys in URLs.
+- Both REST and MCP drive acknowledgements require an active primary-executor binding. High/Critical signals require E2E-enabled registration.
+
+### SMRP wire details
+- SMRP means Structured Memory Response Protocol, not Skill Memory Exchange Protocol.
+- REST memory endpoints return the SMRP JSON envelope directly. MCP tool-call JSON is in `result.content[0].text`; parse that text to obtain the SMRP envelope.
+- Search roles use experience labels first, then `primary` at similarity >= 0.3 and `contextual` below it; Fusion uses retrieval provenance because its RRF score is not a similarity. Recall additionally uses `hub` when direct and association relevance are both positive.
+- Exact search provenance is `bm25`; vector search uses `vector`; recall can include `kg`.
 
 ## SDKs
 - Python: `pip install epicode-sdk` (PyPI, current). Legacy `tetramem-sdk` is deprecated.

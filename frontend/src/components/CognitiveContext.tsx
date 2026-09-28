@@ -1,5 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { CognitiveContext, DEFAULT_STATE } from './cognitive-context';
+import { AUTH_CHANGE_EVENT } from '@/lib/api';
+import { CognitiveContext, DEFAULT_STATE, resetCognitiveState } from './cognitive-context';
 import type { CognitiveState } from './cognitive-context';
 
 // 智能化突破：全局认知状态 Context
@@ -21,9 +22,14 @@ export function CognitiveProvider({ children }: { children: ReactNode }) {
       const detail = (e as CustomEvent<CognitiveState>).detail;
       if (detail) setState(detail);
     };
+    const onAuthChange = () => resetCognitiveState();
     window.addEventListener('cognitive-update', handler);
+    window.addEventListener(AUTH_CHANGE_EVENT, onAuthChange);
 
-    return () => window.removeEventListener('cognitive-update', handler);
+    return () => {
+      window.removeEventListener('cognitive-update', handler);
+      window.removeEventListener(AUTH_CHANGE_EVENT, onAuthChange);
+    };
   }, []);
 
   return <CognitiveContext.Provider value={state}>{children}</CognitiveContext.Provider>;

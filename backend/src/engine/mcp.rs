@@ -193,42 +193,6 @@ impl McpHandler {
         }
     }
 
-    /// experiential 判定（SMRP §5.1 决议）：纯按"经历性质"（标签）判定，不依赖分数。
-    /// 调用方历史交互产生的痕迹（运维/安全/反馈/事件）无论召回 sim 多高，性质上是"经历"
-    /// 而非"知识"。这是"我知道什么 vs 我经历了什么"的正确落地——按内容性质分类，不按分数。
-    fn is_experiential(_similarity: f64, labels: &[String]) -> bool {
-        // P0-3 修复: 扩充 experiential 标签覆盖 (Tester-H报告 experiential tier 0 触发)
-        // SMRP §5.1: "我经历了什么" — 涵盖所有经历性质的记忆
-        const EXP_LABELS: &[&str] = &[
-            // 原有
-            "ops",
-            "deployment",
-            "security",
-            "feedback",
-            "session-summary",
-            "bug",
-            "fix",
-            "observation",
-            "system-observation",
-            "ctx-finding",
-            // P0-3 扩充: 治理/驱动/决策/学习类经历
-            "op_audit",
-            "drive",
-            "decision",
-            "pattern",
-            "bug_memory",
-            "session_summary",
-            "task",
-            "incident",
-            "postmortem",
-            "learning",
-            "experiment",
-            "test-result",
-            "review",
-        ];
-        labels.iter().any(|l| EXP_LABELS.iter().any(|e| l == *e))
-    }
-
     fn build_search_filters(
         &self,
         args: &serde_json::Value,
@@ -663,7 +627,7 @@ impl McpHandler {
                                 "min_importance": { "type": "number", "description": "Filter: minimum importance score" },
                                 "project": { "type": "string", "description": "Filter: project name" },
                                 "since_days": { "type": "integer", "description": "Filter: only memories from the last N days" },
-                                "mode": { "type": "string", "enum": ["hybrid", "exact", "semantic", "graph"], "default": "hybrid", "description": "Phase 1 search mode: hybrid (default, vector+BM25 blend), exact (pure BM25×10, precise token match, no vector dilution — use for identifiers/known-phrases/self-content), semantic (pure vector, concept similarity), graph (semantic + KG expansion, Phase 1 stub)" },
+                                "mode": { "type": "string", "enum": ["hybrid", "exact", "semantic", "graph", "auto", "fusion"], "default": "hybrid", "description": "Search mode: hybrid (vector+BM25 blend), exact (pure BM25 for identifiers and known phrases), semantic (vector similarity), graph (hybrid-search seeds expanded/reranked with knowledge-graph PPR), auto (routes temporal/aggregation queries to graph and other queries to semantic), fusion (reciprocal-rank fusion of semantic and graph results)." },
                                 "strict_filter": { "type": "boolean", "default": false, "description": "Phase 1: strict filter mode — no semantic backfill, only return exact filter matches. Combine with mode=exact for database-like lookups." }
                             },
                             "required": ["query"]
@@ -1100,11 +1064,11 @@ impl McpHandler {
                     },
                     {
                         "name": "drive_inbox",
-                        "description": "L0 Active Inference: Poll the personality's drive signals. Returns pending will-expressions that the personality (cognitive engine) generated for external agents to act upon. Each signal has intent_type (warn/suggest/explore/constrain/request/share), description, evidence memory IDs, and urgency.",
+                        "description": "L0 Active Inference: Poll unacknowledged drive signals (pending and delivered). Returns an SMRP envelope whose data contains signals, stats, and empty_reason. Use each signal's retryable flag and status when deciding whether to act.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "limit": { "type": "integer", "description": "Max signals to retrieve (default 10)", "default": 10 }
+                                "limit": { "type": "integer", "description": "Max unacknowledged signals to retrieve (default 50)", "default": 50 }
                             }
                         }
                     },
@@ -3175,11 +3139,10 @@ impl McpHandler {
         let limit = requested_limit.min(200);
         let fetch = (limit + offset).min(200);
         let filters = self.build_search_filters(args);
-        // Phase 1 收口: 从 filters.mode 读 is_exact_mode(与 REST 端对称, 不靠结果猜)
-        let is_exact_mode = filters
+        let search_mode = filters
             .as_ref()
-            .map(|f| f.mode == super::search_engine::SearchMode::Exact)
-            .unwrap_or(false);
+            .map(|filters| filters.mode)
+            .unwrap_or_default();
         match self
             .engine
             .scheduler
@@ -3207,26 +3170,20 @@ impl McpHandler {
                 let mut contextual: Vec<serde_json::Value> = Vec::new();
                 let mut experiential: Vec<serde_json::Value> = Vec::new();
                 for (id, sim, _mass, payload) in &picked {
-                    let tier = if Self::is_experiential(*sim, &payload.labels) {
-                        "experiential"
-                    } else if *sim >= 0.3 {
-                        "primary"
-                    } else {
-                        "contextual"
-                    };
-                    // Phase 1 收口: exact 模式 source 标 "bm25"(诚实标签, 与 REST 端对称)
-                    let source_tag: Vec<&str> = if is_exact_mode {
-                        vec!["bm25"]
-                    } else {
-                        vec!["vector"]
-                    };
+                    let matched_by = notes.matched_by_map.get(id).map(Vec::as_slice);
+                    let tier = super::smrp::tier_search_for_mode(
+                        *sim,
+                        &payload.labels,
+                        search_mode,
+                        matched_by,
+                    );
                     let mut item = self.memory_item(
                         *id,
                         &payload.content,
                         &payload.labels,
                         payload.timestamp,
                         tier,
-                        source_tag,
+                        super::smrp::search_sources(search_mode, matched_by),
                         *sim,
                         None,
                     );
@@ -3250,12 +3207,7 @@ impl McpHandler {
                         .copied()
                         .collect::<Vec<_>>()
                 };
-                // Phase 1: score_notes.base 按 mode 区分(与 REST 端对称, 从 filters.mode 读)
-                let score_base = if is_exact_mode || !notes.matched_by_map.is_empty() {
-                    "bm25_exact (no vector, no rerank)"
-                } else {
-                    "vector_similarity + rerank"
-                };
+                let score_base = super::smrp::search_score_base(search_mode);
                 let mut data = serde_json::json!({
                     "query": query,
                     "tiers": {
@@ -5861,7 +5813,15 @@ impl McpHandler {
 
     fn tool_drive_inbox(&self, args: &serde_json::Value) -> serde_json::Value {
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
-        let signals = self.engine.scheduler().drive_queue().peek_unacked(limit);
+        let e2e_public_key = self.engine.scheduler().e2e_pubkey();
+        let signals: Vec<serde_json::Value> = self
+            .engine
+            .scheduler()
+            .drive_queue()
+            .peek_unacked(limit)
+            .iter()
+            .map(|signal| signal.inbox_value_with_e2e(e2e_public_key.as_deref()))
+            .collect();
         let stats = self.engine.scheduler().drive_queue().stats();
         // P1-6 残余修复: MCP drive_inbox 加 empty_reason (和REST对齐)
         let empty_reason = if signals.is_empty() {
@@ -5877,7 +5837,7 @@ impl McpHandler {
         } else {
             "has_signals"
         };
-        self.smrp_ok_nn(
+        self.smrp_ok(
             "drive_inbox",
             serde_json::json!({
                 "signals": signals,
@@ -6043,6 +6003,137 @@ mod tests {
         assert!(names.contains(&"decision_record"));
         assert!(names.contains(&"bug_memory"));
         assert!(names.contains(&"session_summary"));
+
+        let memory_search = tools
+            .iter()
+            .find(|tool| tool["name"] == "memory_search")
+            .expect("memory_search tool must be listed");
+        let search_modes = memory_search["inputSchema"]["properties"]["mode"]["enum"]
+            .as_array()
+            .expect("memory_search mode enum");
+        assert!(search_modes
+            .iter()
+            .any(|mode| mode.as_str() == Some("auto")));
+        assert!(search_modes
+            .iter()
+            .any(|mode| mode.as_str() == Some("fusion")));
+
+        let drive_inbox = tools
+            .iter()
+            .find(|tool| tool["name"] == "drive_inbox")
+            .expect("drive_inbox tool must be listed");
+        assert_eq!(
+            drive_inbox["inputSchema"]["properties"]["limit"]["default"],
+            50
+        );
+        assert!(drive_inbox["description"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("pending and delivered"));
+    }
+
+    #[tokio::test]
+    async fn mcp_drive_inbox_includes_the_shared_retryable_signal_contract() {
+        let mut engine = Engine::new();
+        engine.start();
+        engine
+            .scheduler()
+            .drive_queue()
+            .enqueue(crate::engine::drive::DriveSignal {
+                id: 0,
+                timestamp: 1_780_000_000,
+                intent_type: crate::engine::drive::DriveIntent::Explore,
+                description: "test inbox wire shape".into(),
+                evidence: vec![10],
+                urgency: crate::engine::drive::DriveUrgency::Low,
+                target_capability: None,
+                emotion: None,
+                origin_tick: 1,
+                status: crate::engine::drive::DriveStatus::Pending,
+                feedback: None,
+                retry_count: 0,
+                expires_at: None,
+                enqueued_at_ms: 1_780_000_000_000,
+                time_budget_ms: None,
+            });
+        let handler = McpHandler::new(Arc::new(engine));
+
+        let response = handler.tool_drive_inbox(&serde_json::json!({"limit": 1}));
+
+        assert_eq!(response["data"]["signals"][0]["intent_type"], "explore");
+        assert_eq!(response["data"]["signals"][0]["retryable"], true);
+        assert_eq!(
+            response["data"]["signals"][0]["target_capability"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            response["data"]["signals"][0]["emotion"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            response["data"]["signals"][0]["feedback"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            response["data"]["signals"][0]["expires_at"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            response["data"]["signals"][0]["time_budget_ms"],
+            serde_json::Value::Null
+        );
+        assert_eq!(response["protocol"]["error"], serde_json::Value::Null);
+        assert_eq!(response["data"]["empty_reason"], "has_signals");
+    }
+
+    #[tokio::test]
+    async fn mcp_drive_inbox_encrypts_descriptions_for_registered_e2e_key() {
+        use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
+        use rsa::RsaPrivateKey;
+
+        let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+        let private_pem = private_key
+            .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+            .unwrap()
+            .to_string();
+        let public_pem = private_key
+            .to_public_key()
+            .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+            .unwrap();
+        let mut engine = Engine::new();
+        engine.start();
+        engine.scheduler().set_e2e_pubkey(Some(&public_pem));
+        engine
+            .scheduler()
+            .drive_queue()
+            .enqueue(crate::engine::drive::DriveSignal {
+                id: 0,
+                timestamp: 1_780_000_000,
+                intent_type: crate::engine::drive::DriveIntent::Warn,
+                description: "private MCP drive detail".into(),
+                evidence: vec![11],
+                urgency: crate::engine::drive::DriveUrgency::High,
+                target_capability: None,
+                emotion: None,
+                origin_tick: 4,
+                status: crate::engine::drive::DriveStatus::Pending,
+                feedback: None,
+                retry_count: 0,
+                expires_at: None,
+                enqueued_at_ms: 1_780_000_000_100,
+                time_budget_ms: None,
+            });
+        let handler = McpHandler::new(Arc::new(engine));
+
+        let response = handler.tool_drive_inbox(&serde_json::json!({"limit": 1}));
+        let signal = &response["data"]["signals"][0];
+        assert_eq!(signal["description"], serde_json::Value::Null);
+        assert_eq!(signal["retryable"], true);
+        let ciphertext = signal["description_e2e"].as_str().expect("E2E ciphertext");
+        assert_eq!(
+            crate::engine::e2e::decrypt_with(ciphertext, &private_pem).unwrap(),
+            b"private MCP drive detail"
+        );
     }
 
     #[test]

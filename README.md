@@ -42,18 +42,18 @@ docker compose up --build -d
 Then store and search a memory:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/remember \
+curl -X POST http://127.0.0.1:8080/api/v1/remember \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
   -d '{"content": "Epicode gives AI persistent spatial memory"}'
 
 # Store a memory that expires in 7 days
-curl -X POST http://localhost:8080/api/v1/remember \
+curl -X POST http://127.0.0.1:8080/api/v1/remember \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
   -d '{"content": "Sprint deadline: ship v1.0 by Friday", "ttl_seconds": 604800}'
 
-curl -X POST http://localhost:8080/api/v1/search \
+curl -X POST http://127.0.0.1:8080/api/v1/search \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
   -d '{"query": "AI memory"}'
@@ -67,8 +67,9 @@ curl -X POST http://localhost:8080/api/v1/search \
 - **Semantic Search** — BM25 + HNSW hybrid search for natural-language retrieval.
 - **Knowledge Graph** — automatic relationship extraction and dynamic graph updates.
 - **Temporal Validity** — every memory supports `valid_from` / `valid_until` windows and freshness decay scoring, enabling time-aware recall (on par with Zep/Graphiti's core capability).
-- **MCP Integration** — 35 standardized tools for any MCP-compatible AI agent.
-- **SMRP Protocol** — structured memory responses with topology and placement metadata.
+- **MCP Integration** — discover the current tool catalog with MCP `tools/list`, including memory, identity, skills, and L0 drive tools.
+- **L0 Active Inference** — evidence-backed drive signals with REST/MCP inbox and acknowledgement flows.
+- **SMRP Protocol** — transport-independent structured memory responses with tier, retrieval provenance, and optional topology/placement metadata.
 - **Multi-tenant Cloud** — user management, quotas, invite codes, and admin controls.
 - **Self-hosted Defense** — `epicode-guard` watches SSH/Web/honeypot traffic and auto-bans attackers.
 - **Observable** — call-detail stats (request/retrieval/cache/decision metrics) exposed on `/v1/stats`.
@@ -125,7 +126,7 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-Visit `http://localhost:8080`. For production details, see [docs/deployment.md](docs/deployment.md).
+Visit `http://127.0.0.1:8080` for the local HTTP gateway. Public deployments must put a TLS proxy in front; see [docs/deployment.md](docs/deployment.md).
 
 ## Documentation
 

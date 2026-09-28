@@ -33,14 +33,13 @@ services:
 
   gateway:
     image: nginx:1.27-alpine
-    # 注意: 8080 是明文 HTTP — 公网部署必须在外层做 TLS 终止
-    # (云 LB / 自建 nginx TLS / 部署文档 TLS 章节), 否则凭据与 cookie 明文过网
+    # HTTP only; keep the default loopback-only and publish through a TLS proxy.
 
     depends_on:
       - backend
       - frontend
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
 

@@ -37,3 +37,12 @@ export const DEFAULT_STATE: CognitiveState = {
 
 export const CognitiveContext = createContext<CognitiveState>(DEFAULT_STATE);
 
+export function publishCognitiveState(state: CognitiveState): void {
+  if (typeof window === 'undefined') return;
+  (window as Window & { __cognitiveState?: CognitiveState }).__cognitiveState = state;
+  window.dispatchEvent(new CustomEvent('cognitive-update', { detail: state }));
+}
+
+export function resetCognitiveState(): void {
+  publishCognitiveState(DEFAULT_STATE);
+}
