@@ -271,6 +271,7 @@ async fn main() {
         .route("/v1/stream/ticket", post(health::mint_stream_ticket))
         .route("/v1/agent-guide", get(health::agent_guide))
         .route("/v1/smrp", get(admin::smrp_spec))
+        .route("/v1/smrp/spec.html", get(admin::smrp_spec_html))
         .route("/stats/public", get(health::public_stats))
         .route("/docs", get(admin::swagger_ui))
         .route("/openapi.yaml", get(admin::openapi_spec))

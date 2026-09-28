@@ -5,7 +5,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { MarkdownText } from '@/components/MarkdownText';
 import { stripThinkTags } from '@/lib/think-tags';
 import { canAcknowledgeDriveSignal, presentDriveDescription } from '@/lib/drive-signals';
-import { AUTH_CHANGE_EVENT, getDriveInbox, ackDrive, getRuntimeStatus, registerRuntime, heartbeatRuntime, getUserId, normalizeDriveEnum, getKnowledgeCards, type DriveSignal, type KnowledgeCard } from '@/lib/api';
+import { AUTH_CHANGE_EVENT, getDrivePolicy, getDriveInbox, ackDrive, getRuntimeStatus, registerRuntime, heartbeatRuntime, getUserId, normalizeDriveEnum, getKnowledgeCards, type DriveSignal, type KnowledgeCard } from '@/lib/api';
 import { Brain, Activity, Zap, MessageSquare, Wifi, WifiOff, Radio, CheckCircle2, XCircle, AlertTriangle, Lightbulb } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
 import type { TranslationKey } from '@/i18n/translations';
@@ -72,6 +72,7 @@ export default function DashboardCognitive() {
   const cleanThought = cog.latestThought ? stripThinkTags(cog.latestThought) : '';
 
   const [driveSignals, setDriveSignals] = useState<DriveSignal[]>([]);
+  const [drivePolicy, setDrivePolicy] = useState<{ policy_version: number; bins: number; suppressed: number; stats: Record<string, number> } | null>(null);
   const [driveStats, setDriveStats] = useState<{ pending: number; delivered: number; executed: number; rejected: number; total: number; policy_version?: number }>({ pending: 0, delivered: 0, executed: 0, rejected: 0, total: 0 });
   const [ackLoading, setAckLoading] = useState<number | null>(null);
   // 刀1: 错误可见 — 失败不再粉饰成「没有意志」(审计前端P0-3)
@@ -115,6 +116,12 @@ export default function DashboardCognitive() {
   // refreshDrive为async: setState均在await之后(fetch完成), v6规则对async边界保守误报
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refreshDrive(); const t = setInterval(refreshDrive, 30000); return () => clearInterval(t); }, [refreshDrive]);
+  // L0策略面板(2026-09-28系统能力完整性): 消费零曝光的/v1/drive/policy
+  useEffect(() => {
+    let mounted = true;
+    getDrivePolicy().then(p => { if (mounted) setDrivePolicy(p); }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     let hb: ReturnType<typeof setInterval> | undefined;
@@ -304,6 +311,11 @@ export default function DashboardCognitive() {
               <span style={{ color: 'var(--text-primary)' }}>{driveStats.total}</span> sig ·{' '}
               <span style={{ color: 'var(--accent-cyan)' }}>{driveStats.executed}</span> exec ·{' '}
               <span style={{ color: 'var(--accent-purple)' }}>{driveStats.pending}</span> pend
+              {drivePolicy && (
+                <span style={{ color: 'var(--text-tertiary)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
+                  pol v{drivePolicy.policy_version} · {drivePolicy.bins} bins · sup {drivePolicy.suppressed}
+                </span>
+              )}
               {typeof driveStats.policy_version === 'number' ? ` · pv${driveStats.policy_version}` : ''}
             </p>
           </div>
