@@ -213,10 +213,15 @@ pub fn status(engine: &Engine) -> serde_json::Value {
     })
 }
 
+/// SMRP schema 版本 — 信封与协议卡统一引用, 升级只改一处(协议进化锚点)
+pub const SMRP_SCHEMA_VERSION: &str = "1.0";
+/// L0 能力声明级(协议卡用): active-inference drive 层版本
+pub const L0_CAPABILITY_LEVEL: &str = "1";
+
 /// SMRP §4 成功信封。
 pub fn envelope_ok(engine: &Engine, tool: &str, data: serde_json::Value) -> serde_json::Value {
     serde_json::json!({
-        "protocol": {"schema_version": "1.0", "tool": tool, "ok": true, "error": null},
+        "protocol": {"schema_version": SMRP_SCHEMA_VERSION, "tool": tool, "ok": true, "error": null},
         "data": data,
         "status": status(engine),
     })
@@ -225,7 +230,7 @@ pub fn envelope_ok(engine: &Engine, tool: &str, data: serde_json::Value) -> serd
 /// SMRP §4 失败信封。
 pub fn envelope_err(engine: &Engine, tool: &str, code: i64, msg: &str) -> serde_json::Value {
     serde_json::json!({
-        "protocol": {"schema_version": "1.0", "tool": tool, "ok": false, "error": {"code": code, "message": msg}},
+        "protocol": {"schema_version": SMRP_SCHEMA_VERSION, "tool": tool, "ok": false, "error": {"code": code, "message": msg}},
         "data": serde_json::Value::Null,
         "status": status(engine),
     })
@@ -234,7 +239,7 @@ pub fn envelope_err(engine: &Engine, tool: &str, code: i64, msg: &str) -> serde_
 /// P17: 无引擎信封 — 账户管理等与记忆引擎无关的端点专用(避免PERSONA_WARMING_UP伪故障)
 pub fn envelope_ok_plain(tool: &str, data: serde_json::Value) -> serde_json::Value {
     serde_json::json!({
-        "protocol": {"schema_version": "1.0", "tool": tool, "ok": true, "error": null},
+        "protocol": {"schema_version": SMRP_SCHEMA_VERSION, "tool": tool, "ok": true, "error": null},
         "data": data,
         "status": {"identity": {"system": "Epicode"}, "space": {"memories": 0, "energy": 0}},
     })
@@ -242,7 +247,7 @@ pub fn envelope_ok_plain(tool: &str, data: serde_json::Value) -> serde_json::Val
 
 pub fn envelope_err_plain(tool: &str, code: i64, msg: &str) -> serde_json::Value {
     serde_json::json!({
-        "protocol": {"schema_version": "1.0", "tool": tool, "ok": false, "error": {"code": code, "message": msg}},
+        "protocol": {"schema_version": SMRP_SCHEMA_VERSION, "tool": tool, "ok": false, "error": {"code": code, "message": msg}},
         "data": serde_json::Value::Null,
         "status": {"identity": {"system": "Epicode"}, "space": {"memories": 0, "energy": 0}},
     })

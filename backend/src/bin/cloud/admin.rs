@@ -748,7 +748,36 @@ pub async fn openapi_spec() -> (axum::http::StatusCode, axum::http::HeaderMap, &
 }
 
 /// SMRP 协议规范（公开，无需认证）—— 官网发布入口，返回 RFC/W3C 风格的 HTML 规范。
-pub async fn smrp_spec() -> (axum::http::StatusCode, axum::http::HeaderMap, &'static str) {
+pub async fn smrp_spec() -> axum::response::Response {
+    // 协议进化(2026-09-28): Accept: text/html 返回人类可读规范页,
+    // 其余(application/json/缺省)返回机器可读协议卡 — 版本/能力/传输正交声明
+    // 消费方(AI代理)可程序化发现协议版本与能力级, 无需解析HTML
+    let card = serde_json::json!({
+        "protocol": {
+            "name": "SMRP",
+            "title": "Structured Memory Response Protocol",
+            "schema_version": epicode::engine::smrp::SMRP_SCHEMA_VERSION,
+            "transports": ["REST", "MCP", "SSE"],
+            "orthogonal_to_transport": true,
+            "spec_html": "/v1/smrp?format=html"
+        },
+        "l0": {
+            "name": "L0 Active Inference",
+            "capability_level": epicode::engine::smrp::L0_CAPABILITY_LEVEL,
+            "surfaces": ["drive_signals", "drive_channel_api", "personality_export"],
+            "endpoints": ["/v1/drive/inbox", "/v1/drive/policy", "/v1/drive/evolution", "/v1/personality/export"]
+        },
+        "envelope": {
+            "fields": ["protocol", "data", "status"],
+            "protocol_fields": ["schema_version", "tool", "ok", "error"],
+            "error_shape": {"code": "i64", "message": "string"}
+        }
+    });
+    axum::Json(card).into_response()
+}
+
+/// 人类可读规范页(原smrp_spec保留形态)
+pub async fn smrp_spec_html() -> (axum::http::StatusCode, axum::http::HeaderMap, &'static str) {
     let mut headers = axum::http::HeaderMap::new();
     headers.insert("content-type", "text/html; charset=utf-8".parse().unwrap());
     (
