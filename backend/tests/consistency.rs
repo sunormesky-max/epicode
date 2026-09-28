@@ -109,30 +109,48 @@ fn frontend_api_calls_have_backend_routes() {
 #[test]
 fn mcp_tools_list_matches_dispatch() {
     let src = read("backend/src/engine/mcp.rs");
-    // dispatch分支: "name" => self.tool_xxx(
+    // dispatch分支: 行首 "name" => self.tool_xxx( — 仅工具方法(排除RPC方法)
     let dispatch: BTreeSet<String> = src
         .lines()
         .filter_map(|l| {
-            let l = l.trim();
-            l.strip_prefix('"')
+            let t = l.trim();
+            if !t.contains("=> self.tool_") {
+                return None;
+            }
+            t.strip_prefix('"')
                 .and_then(|r| r.split('"').next())
-                .filter(|name| l.contains("=> self.tool_") && !name.contains('/'))
+                .filter(|n| !n.is_empty())
                 .map(String::from)
         })
         .collect();
-    // tools_list声明: "name": "xxx"
+    // tools_list声明体: fn tools_list 到下一个fn(非60K窗口)
     let tl_start = src.find("fn tools_list").expect("tools_list not found");
-    let tl_body = &src[tl_start..tl_start + 60_000.min(src.len() - tl_start)];
-    let declared: BTreeSet<String> = tl_body
-        .match_indices("\"name\": \"")
-        .map(|(i, _)| {
-            let s = i + 8;
-            let e = tl_body[s..].find('"').map(|e| s + e).unwrap_or(s);
-            tl_body[s..e].to_string()
-        })
-        .collect();
-
-    assert!(!dispatch.is_empty() && !declared.is_empty(), "提取失败");
+    let tl_end = src[tl_start..]
+        .find(
+            "
+    fn ",
+        )
+        .map(|e| tl_start + e)
+        .unwrap_or(src.len());
+    let tl_body = &src[tl_start..tl_end];
+    let mut declared = BTreeSet::new();
+    let mut rest = tl_body;
+    while let Some(pos) = rest.find("\"name\": \"") {
+        let after = &rest[pos + 8..];
+        if let Some(close) = after.find('"') {
+            let name = &after[..close];
+            if !name.is_empty() {
+                declared.insert(name.to_string());
+            }
+        }
+        rest = &after[1.min(after.len())..];
+    }
+    assert!(
+        !dispatch.is_empty() && !declared.is_empty(),
+        "dispatch={} declared={}",
+        dispatch.len(),
+        declared.len()
+    );
     let undeclared: Vec<_> = dispatch.difference(&declared).collect();
     let unimplemented: Vec<_> = declared.difference(&dispatch).collect();
     assert!(
@@ -145,10 +163,13 @@ fn mcp_tools_list_matches_dispatch() {
 fn smrp_envelope_shared_fields_present() {
     let smrp = read("backend/src/engine/smrp.rs");
     // 信封关键字段: 成功信封必须携带的结构
-    for field in ["structure_version", "status", "ttl_ms"] {
-        let snake = field;
+    for (field, alt) in [
+        ("structure_version", "structure_version"),
+        ("status", "status"),
+        ("ttl", "ttlMs"),
+    ] {
         assert!(
-            smrp.contains(snake) || smrp.contains(&field.replace("_ms", "Ms")),
+            smrp.contains(field) || smrp.contains(alt),
             "SMRP信封缺关键字段: {field}"
         );
     }
