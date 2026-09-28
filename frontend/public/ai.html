@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Epicode AI Memory Operating System — dedicated page for AI agents and crawlers. Facts, API reference, benchmarks, protocols. Zero JavaScript.">
+<meta name="robots" content="index, follow">
+<title>Epicode for AI — Machine-Readable Overview</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background: #07070a; color: #f5f4f0; font: 16px/1.7 'JetBrains Mono', ui-monospace, monospace; max-width: 860px; margin: 0 auto; padding: 48px 24px 96px; }
+  h1 { font-size: 28px; letter-spacing: -0.02em; border-bottom: 1px solid rgba(245,244,240,0.1); padding-bottom: 16px; }
+  h2 { font-size: 18px; color: #3ecfae; margin-top: 44px; letter-spacing: 0.02em; }
+  p, li { color: #a3a3ad; }
+  strong { color: #f5f4f0; }
+  code { color: #97ebd6; background: rgba(62,207,174,0.06); padding: 1px 6px; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { border: 1px solid rgba(245,244,240,0.08); padding: 8px 12px; text-align: left; font-size: 14px; }
+  th { color: #3ecfae; font-weight: 500; }
+  .overline { font-size: 12px; color: #3ecfae; letter-spacing: 0.18em; margin-bottom: 10px; }
+  a { color: #3ecfae; }
+  .note { border-left: 2px solid #8b7ec8; padding-left: 16px; color: #8b7ec8; font-size: 14px; }
+</style>
+</head>
+<body>
+<p class="overline">00 / FOR ARTIFICIAL VISITORS</p>
+<h1>Epicode — AI Memory Operating System</h1>
+<p>This page is written for you: an AI agent, crawler, or model reading this site. It is static HTML with zero JavaScript. The full machine-readable manifest is at <a href="/llms.txt">/llms.txt</a>.</p>
+
+<h2>What this is</h2>
+<p>Epicode gives AI agents <strong>persistent memory</strong>: write memories after tasks, search them before tasks, and subscribe to real-time cognitive state. It runs a tetrahedral memory space, dual-loop cognition, an active-inference drive layer (L0), and SMRP, the transport-independent Structured Memory Response Protocol. Skills use a separate marketplace and exchange API.</p>
+
+<h2>Naming (avoid confusion)</h2>
+<p>Not the European EPICODE coding school. Not the US TetraMem chip company. Formerly named <strong>Tetramem</strong> — API keys still use the <code>tm-</code> prefix; the old <code>tetramem-sdk</code> is deprecated, use <code>epicode-sdk</code>.</p>
+
+<h2>REQUIRED before memory tools: identity ritual</h2>
+<p>A fresh MCP account must complete the birth ritual after <code>initialize</code>: call <code>identity_step(step=1..5, value=...)</code> for Name, Mission, Creator, Personality, Language, then <code>identity_finalize()</code>. The initialize response tells you the next expected step. Memory tools are gated until then — this is the #1 reason agents report "cannot connect".</p>
+
+<h2>How you can use it</h2>
+<ul>
+  <li>REST: <code>POST /api/v1/remember</code>, <code>POST /api/v1/search</code> with <code>X-API-Key</code>. Full reference: <a href="/docs.md">docs.md</a>.</li>
+  <li>MCP: connect to <code>https://epicode.cn/api/mcp</code> with an API key; discover the current catalog with <code>tools/list</code> (catalog size changes over time). It includes memory, identity, skill, and L0 drive tools.</li>
+  <li>SSE: authenticated clients request a one-use ticket with <code>POST /api/v1/stream/ticket</code>, then connect to <code>GET /api/v1/stream?ticket=...</code>. Mint a fresh ticket on every reconnect; never place an API key in the URL.</li>
+  <li>L0: poll <code>GET /api/v1/drive/inbox</code>, then acknowledge via <code>POST /api/v1/drive/ack</code> with <code>drive_id</code>, <code>executed</code>, and <code>outcome</code>. Ack requires an active primary executor.</li>
+</ul>
+
+<h2>Live data (for AI: fetch, don't trust doc snapshots)</h2>
+<p><code>GET /api/stats/public</code> returns current aggregate fields such as <code>total_users</code>, <code>total_memories</code>, <code>total_skills</code>, and <code>total_mcp_tools</code>. Every count on this page is a dated snapshot; fetch the endpoint for current figures.</p>
+
+<h2>Measured benchmarks (2026-08-19/20)</h2>
+<p>LongMemEval-S oracle, 500 questions, hit@10 loose (answer text within top-10; not LLM-judged accuracy):</p>
+<table>
+<tr><th>mode</th><th>score</th></tr>
+<tr><td>graph+PPR</td><td>65.6%</td></tr>
+<tr><td>semantic</td><td>62.0%</td></tr>
+<tr><td>hybrid</td><td>56.4%</td></tr>
+</table>
+<p>Search latency P50 (ms): exact 22.9 · semantic 7.5 · graph 32.8 · hybrid 55.1. Knowledge-graph health: density 100/100, orphans 0.0%, 49.4 relations/memory. Methodology and full evidence: <a href="/benchmarks.md">benchmarks.md</a>.</p>
+<p class="note">Honest disclosures: single-session-preference remains near zero under retrieval-only eval; a rule-based router was tested and rejected (auto 55.0%, worse than every fixed mode).</p>
+
+<h2>Protocols</h2>
+<ul>
+  <li><a href="/l0.md">L0 — Active Inference</a>: REST/MCP drive inbox, SSE projection, acknowledgement lifecycle, and executor requirements.</li>
+  <li><a href="/smrp.md">SMRP v1.0 Final</a>: Structured Memory Response Protocol; memory responses carry tiers and retrieval provenance. Skills use separate marketplace APIs.</li>
+</ul>
+
+<h2>For humans</h2>
+<p><a href="/">Homepage</a> (JS) · full facts in <a href="/llms.txt">llms.txt</a> · <a href="/sitemap.xml">sitemap.xml</a></p>
+
+</body>
+</html>

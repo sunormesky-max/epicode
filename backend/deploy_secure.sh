@@ -115,6 +115,9 @@ echo "[OK] docker-compose.secure.yml 生成完成"
 # 7. 生成Nginx TLS配置
 mkdir -p nginx/ssl
 cat > nginx/epicode.conf << 'EOF'
+# 限流 zone(仅 http 上下文合法; server 块内的 limit_req 引用之)
+limit_req_zone $binary_remote_addr zone=api:10m rate=30r/s;
+
 server {
     listen 443 ssl http2;
     server_name _;
@@ -133,8 +136,7 @@ server {
     # 请求体限制
     client_max_body_size 100k;
 
-    # 速率限制
-    limit_req_zone $binary_remote_addr zone=api:10m rate=30r/s;
+    # limit_req 沿用 http 块的 api zone(zone 指令不可置于 server, 审计三轮)
     limit_req zone=api burst=50 nodelay;
 
     location / {
@@ -167,7 +169,7 @@ echo "   docker compose -f docker-compose.secure.yml up -d"
 echo ""
 echo "4. 注册第一个用户:"
 echo "   curl -X POST https://your-server/register \\"
-echo "     -H 'X-Admin-Key: ${ADMIN_KEY}' \\"
+echo "     -H 'X-Admin-Key: <cat .admin_key>' \\"  # 密钥不回显
 echo "     -H 'Content-Type: application/json' \\"
 echo "     -d '{\"user_id\":\"alice\",\"plan\":\"free\"}'"
 echo ""

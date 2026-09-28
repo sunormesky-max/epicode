@@ -5,7 +5,7 @@ use std::net::IpAddr;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -294,7 +294,10 @@ impl GuardState {
                     BAN_TIMEOUT_SECS
                 };
                 to_ban.push((ip.clone(), timeout));
-                self.total_bans += 1;
+            }
+        }
+        for (ip, timeout) in &to_ban {
+            if let Some(entry) = self.enforce_ban(ip, now, *timeout, nft_ban) {
                 log_msg(&format!(
                     "BANNED {} (score={} ssh={} web_atk={} web_scan={} honeypot={}) for {}h",
                     ip,
@@ -305,13 +308,12 @@ impl GuardState {
                     entry.honeypot_hits,
                     timeout / 3600
                 ));
-            }
-        }
-        for (ip, timeout) in &to_ban {
-            nft_ban(ip, *timeout);
-            if let Some(e) = self.ips.get_mut(ip) {
-                e.banned_until = now + *timeout as i64;
-                epicode_remember_ban(ip, e, *timeout);
+                epicode_remember_ban(ip, &entry, *timeout);
+            } else {
+                log_msg(&format!(
+                "BAN FAILED for {} (score remains pending; nftables did not confirm enforcement)",
+                ip
+                ));
             }
         }
         for ip in to_clean {
@@ -319,17 +321,46 @@ impl GuardState {
         }
     }
 
+    fn enforce_ban<F>(&mut self, ip: &str, now: i64, timeout: u64, enforce: F) -> Option<IpEntry>
+    where
+        F: FnOnce(&str, u64) -> bool,
+    {
+        if !self.ips.contains_key(ip) || !enforce(ip, timeout) {
+            return None;
+        }
+        let entry = self.ips.get_mut(ip)?;
+        entry.banned_until = now + timeout as i64;
+        self.total_bans += 1;
+        Some(entry.clone())
+    }
+
     fn reapply_bans(&mut self, now: i64) {
+        let active: Vec<(String, u64)> = self
+            .ips
+            .iter()
+            .filter(|(_, entry)| entry.banned_until > now)
+            .map(|(ip, entry)| (ip.clone(), (entry.banned_until - now) as u64))
+            .collect();
         let mut count = 0u64;
-        for (ip, entry) in self.ips.iter() {
-            if entry.banned_until > now {
-                let remaining = (entry.banned_until - now) as u64;
-                nft_ban(ip, remaining);
+        let mut failures = Vec::new();
+        for (ip, remaining) in active {
+            if nft_ban(&ip, remaining) {
                 count += 1;
+            } else {
+                failures.push(ip.clone());
+                if let Some(entry) = self.ips.get_mut(&ip) {
+                    entry.banned_until = 0;
+                }
             }
         }
         if count > 0 {
             log_msg(&format!("Re-applied {} bans from state", count));
+        }
+        for ip in failures {
+            log_msg(&format!(
+                "BAN REAPPLY FAILED for {} (removed from enforced-ban state; will retry)",
+                ip
+            ));
         }
         let mut expired = 0u64;
         self.ips.retain(|_, entry| {
@@ -457,22 +488,60 @@ fn is_whitelisted(ip: &str) -> bool {
     }
 }
 
-fn run_cmd(cmd: &str, args: &[&str]) -> bool {
-    Command::new(cmd)
+fn run_cmd_result(cmd: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new(cmd)
         .args(args)
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .map_err(|error| format!("{cmd}: {error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("{cmd} exited with {}", output.status)
+        } else {
+            format!("{cmd}: {stderr}")
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn run_cmd_with_input(cmd: &str, args: &[&str], input: &str) -> Result<String, String> {
+    let mut child = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("{cmd}: {error}"))?;
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        return Err(format!("{cmd}: failed to open command input"));
+    };
+    if let Err(error) = stdin.write_all(input.as_bytes()) {
+        drop(stdin);
+        let _ = child.kill();
+        return Err(format!("{cmd}: failed to write command input: {error}"));
+    }
+    drop(stdin);
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("{cmd}: {error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("{cmd} exited with {}", output.status)
+        } else {
+            format!("{cmd}: {stderr}")
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn run_cmd(cmd: &str, args: &[&str]) -> bool {
+    run_cmd_result(cmd, args).is_ok()
 }
 
 fn run_cmd_output(cmd: &str, args: &[&str]) -> Option<String> {
-    Command::new(cmd).args(args).output().ok().and_then(|o| {
-        if o.status.success() {
-            Some(String::from_utf8_lossy(&o.stdout).to_string())
-        } else {
-            None
-        }
-    })
+    run_cmd_result(cmd, args).ok()
 }
 
 /// One-time nft setup. We do NOT `delete table` unconditionally — that wipes
@@ -480,99 +549,274 @@ fn run_cmd_output(cmd: &str, args: &[&str]) -> Option<String> {
 /// the set, which on every guard restart lets attackers back in. Instead we
 /// probe for the table and only create it (and the dependent sets/chains/rules)
 /// if missing, preserving all in-kernel ban elements across restarts.
-fn nft_init() {
-    migrate_v1_rules();
-    let table_handle = run_cmd_output("nft", &["list", "table", "inet", NFT_TABLE]);
-    if table_handle.is_some() {
-        ensure_nft_set(NFT_SET_V4, "ipv4_addr");
-        ensure_nft_set(NFT_SET_V6, "ipv6_addr");
-        log_msg("nft table already present — reusing existing ban sets (no ban window)");
-        return;
-    }
-    if !run_cmd("nft", &["add", "table", "inet", NFT_TABLE]) {
-        log_msg("FATAL: failed to create nft table (is CAP_NET_ADMIN available?)");
-        return;
-    }
-    ensure_nft_set(NFT_SET_V4, "ipv4_addr");
-    ensure_nft_set(NFT_SET_V6, "ipv6_addr");
-    run_cmd(
-        "nft",
-        &[
-            "add",
-            "chain",
-            "inet",
-            NFT_TABLE,
-            "input",
-            "{ type filter hook input priority 0; policy accept; }",
-        ],
-    );
-    run_cmd(
-        "nft",
-        &[
-            "add",
-            "rule",
-            "inet",
-            NFT_TABLE,
-            "input",
-            "ip",
-            "saddr",
-            &format!("@{NFT_SET_V4}"),
-            "drop",
-        ],
-    );
-    run_cmd(
-        "nft",
-        &[
-            "add",
-            "rule",
-            "inet",
-            NFT_TABLE,
-            "input",
-            "ip6",
-            "saddr",
-            &format!("@{NFT_SET_V6}"),
-            "drop",
-        ],
-    );
-    log_msg("nft firewall initialized (inet table with v4+v6 ban sets)");
+// nftables 实际可用标志(审计三轮中优): 初始化失败后服务曾"看似运行"
+// 而实际未封禁任何 IP — 现在显式暴露健康状态, 日志与状态面都可见
+static NFT_AVAILABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn nft_healthy() -> bool {
+    NFT_AVAILABLE.load(std::sync::atomic::Ordering::Acquire)
 }
 
-fn ensure_nft_set(name: &str, addr_type: &str) {
-    run_cmd(
+fn health_exit_code(healthy: bool) -> i32 {
+    if healthy {
+        0
+    } else {
+        1
+    }
+}
+
+fn nft_set_definition_valid(output: &str, name: &str, addr_type: &str) -> bool {
+    output
+        .lines()
+        .any(|line| line.trim() == format!("set {name} {{"))
+        && output.contains(&format!("type {addr_type}"))
+        && output.contains("flags timeout")
+}
+
+fn nft_input_chain_valid(output: &str) -> bool {
+    output.contains("type filter hook input") && output.contains("policy accept")
+}
+
+fn nft_chain_has_drop_rule(output: &str, family: &str, set: &str) -> bool {
+    let expected = format!("{family} saddr @{set} drop");
+    output
+        .lines()
+        .any(|line| line.trim().starts_with(&expected))
+}
+
+fn verify_nft_configuration(set_v4: &str, set_v6: &str, chain: &str) -> Result<(), String> {
+    if !nft_set_definition_valid(set_v4, NFT_SET_V4, "ipv4_addr") {
+        return Err(format!(
+            "nft set {NFT_SET_V4} is missing or has an incompatible definition"
+        ));
+    }
+    if !nft_set_definition_valid(set_v6, NFT_SET_V6, "ipv6_addr") {
+        return Err(format!(
+            "nft set {NFT_SET_V6} is missing or has an incompatible definition"
+        ));
+    }
+    if !nft_input_chain_valid(chain) {
+        return Err("nft input chain is not an accepting input filter base chain".to_string());
+    }
+    if !nft_chain_has_drop_rule(chain, "ip", NFT_SET_V4) {
+        return Err(format!(
+            "nft input chain is missing the IPv4 drop rule for {NFT_SET_V4}"
+        ));
+    }
+    if !nft_chain_has_drop_rule(chain, "ip6", NFT_SET_V6) {
+        return Err(format!(
+            "nft input chain is missing the IPv6 drop rule for {NFT_SET_V6}"
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_nft_table() -> Result<(), String> {
+    if run_cmd_result("nft", &["list", "table", "inet", NFT_TABLE]).is_ok() {
+        return Ok(());
+    }
+    run_cmd_result("nft", &["add", "table", "inet", NFT_TABLE])
+        .map(|_| ())
+        .map_err(|error| format!("failed to create nft table {NFT_TABLE}: {error}"))
+}
+
+fn ensure_nft_set(name: &str, addr_type: &str) -> Result<(), String> {
+    match run_cmd_result("nft", &["list", "set", "inet", NFT_TABLE, name]) {
+        Ok(output) => {
+            if nft_set_definition_valid(&output, name, addr_type) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "existing nft set {name} has an incompatible definition"
+                ))
+            }
+        }
+        Err(_) => run_cmd_result(
+            "nft",
+            &[
+                "add",
+                "set",
+                "inet",
+                NFT_TABLE,
+                name,
+                &format!("{{ type {addr_type}; flags timeout; }}"),
+            ],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("failed to create nft set {name}: {error}")),
+    }
+}
+
+fn ensure_nft_input_chain() -> Result<(), String> {
+    match run_cmd_result("nft", &["list", "chain", "inet", NFT_TABLE, "input"]) {
+        Ok(output) => {
+            if nft_input_chain_valid(&output) {
+                Ok(())
+            } else {
+                Err(
+                    "existing nft input chain is not an accepting input filter base chain"
+                        .to_string(),
+                )
+            }
+        }
+        Err(_) => run_cmd_result(
+            "nft",
+            &[
+                "add",
+                "chain",
+                "inet",
+                NFT_TABLE,
+                "input",
+                "{ type filter hook input priority 0; policy accept; }",
+            ],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("failed to create nft input chain: {error}")),
+    }
+}
+
+fn ensure_nft_drop_rule(family: &str, set: &str) -> Result<(), String> {
+    let chain = run_cmd_result("nft", &["list", "chain", "inet", NFT_TABLE, "input"])
+        .map_err(|error| format!("failed to list nft input chain: {error}"))?;
+    if nft_chain_has_drop_rule(&chain, family, set) {
+        return Ok(());
+    }
+    let set_reference = format!("@{set}");
+    run_cmd_result(
         "nft",
         &[
             "add",
-            "set",
+            "rule",
             "inet",
             NFT_TABLE,
-            name,
-            &format!("{{ type {addr_type}; flags timeout; }}"),
+            "input",
+            family,
+            "saddr",
+            &set_reference,
+            "drop",
         ],
-    );
+    )
+    .map(|_| ())
+    .map_err(|error| format!("failed to add nft {family} drop rule for {set}: {error}"))
+}
+
+fn reconcile_nft_firewall() -> Result<(), String> {
+    ensure_nft_table()?;
+    ensure_nft_set(NFT_SET_V4, "ipv4_addr")?;
+    ensure_nft_set(NFT_SET_V6, "ipv6_addr")?;
+    ensure_nft_input_chain()?;
+    ensure_nft_drop_rule("ip", NFT_SET_V4)?;
+    ensure_nft_drop_rule("ip6", NFT_SET_V6)?;
+
+    run_cmd_result("nft", &["list", "table", "inet", NFT_TABLE])
+        .map_err(|error| format!("failed to verify nft table {NFT_TABLE}: {error}"))?;
+    let set_v4 = run_cmd_result("nft", &["list", "set", "inet", NFT_TABLE, NFT_SET_V4])
+        .map_err(|error| format!("failed to verify nft set {NFT_SET_V4}: {error}"))?;
+    let set_v6 = run_cmd_result("nft", &["list", "set", "inet", NFT_TABLE, NFT_SET_V6])
+        .map_err(|error| format!("failed to verify nft set {NFT_SET_V6}: {error}"))?;
+    let chain = run_cmd_result("nft", &["list", "chain", "inet", NFT_TABLE, "input"])
+        .map_err(|error| format!("failed to verify nft input chain: {error}"))?;
+    verify_nft_configuration(&set_v4, &set_v6, &chain)
+}
+
+fn nft_init() -> bool {
+    NFT_AVAILABLE.store(false, std::sync::atomic::Ordering::Release);
+    match reconcile_nft_firewall() {
+        Ok(()) => {
+            migrate_v1_rules();
+            NFT_AVAILABLE.store(true, std::sync::atomic::Ordering::Release);
+            log_msg("nft firewall verified and enforcing (inet table with IPv4+IPv6 drop rules)");
+            true
+        }
+        Err(error) => {
+            log_msg(&format!(
+                "FATAL: nft firewall integrity check failed; bans are not enforced: {error}"
+            ));
+            false
+        }
+    }
+}
+
+/// Reconcile and verify the firewall before returning a monitorable exit status.
+fn health_check_cli() -> i32 {
+    let healthy = nft_init() && nft_healthy();
+    if healthy {
+        println!("healthy: nftables drop rules verified");
+    } else {
+        eprintln!("degraded: nftables enforcement is unavailable");
+    }
+    health_exit_code(healthy)
 }
 
 /// Dispatch a ban to the correct address-family set. The old single
 /// `ipv4_addr` set silently rejected IPv6 attacker addresses (nft errored but
 /// `run_cmd` swallowed it), making operators believe they were protected when
 /// they were not. We now split into `ban4`/`ban6`.
-fn nft_ban(ip: &str, timeout_secs: u64) {
-    let Ok(addr) = ip.parse::<IpAddr>() else {
-        log_msg(&format!("nft_ban: not a valid IP: {ip}"));
-        return;
-    };
-    let set = match addr {
+fn nft_set_for_ip(addr: &IpAddr) -> &'static str {
+    match addr {
         IpAddr::V4(_) => NFT_SET_V4,
         IpAddr::V6(_) => NFT_SET_V6,
+    }
+}
+
+fn nft_set_contains_ip(set: &str, ip: &str) -> bool {
+    let Ok(target) = ip.parse::<IpAddr>() else {
+        return false;
     };
+    run_cmd_output("nft", &["list", "set", "inet", NFT_TABLE, set])
+        .map(|output| {
+            output
+                .split(|c: char| c.is_whitespace() || matches!(c, ',' | '{' | '}'))
+                .filter_map(|token| token.trim().parse::<IpAddr>().ok())
+                .any(|address| address == target)
+        })
+        .unwrap_or(false)
+}
+
+fn nft_ban(ip: &str, timeout_secs: u64) -> bool {
+    let Ok(addr) = ip.parse::<IpAddr>() else {
+        log_msg(&format!("nft_ban: not a valid IP: {ip}"));
+        return false;
+    };
+    let set = nft_set_for_ip(&addr);
+    if !nft_healthy() {
+        log_msg(&format!(
+            "DEGRADED: ban requested for {ip} but nftables is not verified"
+        ));
+        return false;
+    }
     let hours = timeout_secs / 3600;
     let timeout_str = if hours > 0 {
         format!("{}h", hours)
     } else {
         format!("{}s", timeout_secs)
     };
-    let element = format!("{{ {} timeout {} }}", ip, timeout_str);
-    if !run_cmd("nft", &["add", "element", "inet", NFT_TABLE, set, &element]) {
-        log_msg(&format!("nft_ban: failed to add {ip} to {set}"));
+    let canonical_ip = addr.to_string();
+    let element = format!("{{ {} timeout {} }}", canonical_ip, timeout_str);
+    if nft_set_contains_ip(set, &canonical_ip) {
+        let batch = format!(
+            "delete element inet {NFT_TABLE} {set} {{ {canonical_ip} }}\nadd element inet {NFT_TABLE} {set} {element}\n"
+        );
+        match run_cmd_with_input("nft", &["-f", "-"], &batch) {
+            Ok(_) => return true,
+            Err(refresh_error) => {
+                if nft_set_contains_ip(set, &canonical_ip) {
+                    log_msg(&format!(
+                        "nft_ban: failed to refresh existing {ip} in {set}: {refresh_error}"
+                    ));
+                    return false;
+                }
+            }
+        }
+    }
+    match run_cmd_result("nft", &["add", "element", "inet", NFT_TABLE, set, &element]) {
+        Ok(_) => true,
+        Err(add_error) => {
+            log_msg(&format!(
+                "nft_ban: failed to enforce {ip} in {set}: {add_error}"
+            ));
+            false
+        }
     }
 }
 
@@ -854,7 +1098,10 @@ fn run_daemon() {
     let _ = fs::write(PID_FILE, std::process::id().to_string());
 
     log_msg(&format!("=== epicode-guard v{} starting ===", VERSION));
-    nft_init();
+    if !nft_init() {
+        let _ = fs::remove_file(PID_FILE);
+        std::process::exit(1);
+    }
     open_honeypot_ports();
 
     let (tx, rx) = mpsc::channel();
@@ -972,8 +1219,9 @@ fn run_daemon() {
     }
 }
 
-fn cmd_status() {
+fn cmd_status() -> i32 {
     println!("=== epicode-guard v{} Status ===\n", VERSION);
+    let firewall_healthy = nft_init();
     let state = GuardState::load();
     let banned = nft_banned_count();
     let now = now_ts();
@@ -992,6 +1240,14 @@ fn cmd_status() {
 
     println!("Uptime:            {}", uptime);
     println!("Tracked IPs:       {}", state.ips.len());
+    println!(
+        "Firewall:          {}",
+        if firewall_healthy {
+            "HEALTHY"
+        } else {
+            "DEGRADED"
+        }
+    );
     println!("Currently Banned:  {}", banned);
     println!("Total Bans:        {}", state.total_bans);
     println!("Total Attacks:     {}", state.total_attacks);
@@ -1039,14 +1295,22 @@ fn cmd_status() {
         }
     }
     println!();
+    health_exit_code(firewall_healthy)
 }
 
-fn cmd_ban(ip: &str) {
+fn cmd_ban(ip: &str) -> i32 {
     if ip.parse::<IpAddr>().is_err() {
         eprintln!("Invalid IP: {}", ip);
-        return;
+        return 2;
     }
-    nft_ban(ip, BAN_TIMEOUT_SECS);
+    if !nft_healthy() && !nft_init() {
+        eprintln!("Ban not applied: nftables enforcement could not be verified.");
+        return 1;
+    }
+    if !nft_ban(ip, BAN_TIMEOUT_SECS) {
+        eprintln!("Ban not applied or recorded: nftables did not confirm enforcement.");
+        return 1;
+    }
     let mut state = GuardState::load();
     let entry = state.ips.entry(ip.to_string()).or_default();
     entry.banned_until = now_ts() + BAN_TIMEOUT_SECS as i64;
@@ -1059,6 +1323,7 @@ fn cmd_ban(ip: &str) {
         BAN_TIMEOUT_SECS / 3600
     ));
     println!("Banned {} for {} hours", ip, BAN_TIMEOUT_SECS / 3600);
+    0
 }
 
 fn cmd_unban(ip: &str) {
@@ -1136,18 +1401,21 @@ fn cmd_help() {
     println!("  epicode-guard unban <ip> Manual unban IP");
     println!("  epicode-guard check      File integrity + ports + flood");
     println!("  epicode-guard nft        Show nft table");
+    println!("  epicode-guard --health  Verify firewall integrity (exit 0 healthy, 1 degraded)");
     println!("  epicode-guard help       Show this help");
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|s| s.as_str()) {
-        Some("status") => cmd_status(),
+        Some("--health") => std::process::exit(health_check_cli()),
+        Some("status") => std::process::exit(cmd_status()),
         Some("ban") => {
             if let Some(ip) = args.get(2) {
-                cmd_ban(ip);
+                std::process::exit(cmd_ban(ip));
             } else {
                 eprintln!("Usage: epicode-guard ban <ip>");
+                std::process::exit(2);
             }
         }
         Some("unban") => {
@@ -1276,18 +1544,49 @@ mod tests {
         );
     }
 
-    // nft_ban router: IPv4 and IPv6 must dispatch to the right set name. We
-    // cannot run `nft` in CI, but we can at least assert the IpAddr dispatch
-    // logic by constructing it via a tiny mirroring helper — we instead assert
-    // via the public function's behavior on a whitelisted IP (which the set
-    // commands will reject before mutating kernel state).
+    // nft_ban router: IPv4 and IPv6 must dispatch to the right set name.
     #[test]
     fn nft_ban_command_construction_v4_vs_v6() {
-        // Both should be callable without panic. Whitelisted IPs short-circuit
-        // the kernel call; we just exercise the IpAddr branch.
-        nft_ban("127.0.0.1", 60);
-        nft_ban("::1", 60);
-        nft_ban("not-an-ip", 60);
+        assert_eq!(nft_set_for_ip(&"203.0.113.5".parse().unwrap()), NFT_SET_V4);
+        assert_eq!(nft_set_for_ip(&"2001:db8::5".parse().unwrap()), NFT_SET_V6);
+    }
+
+    #[test]
+    fn nft_health_requires_both_sets_chain_and_drop_rules() {
+        let set_v4 = "set ban4 {\n type ipv4_addr\n flags timeout\n}";
+        let set_v6 = "set ban6 {\n type ipv6_addr\n flags timeout\n}";
+        let chain = "chain input {\n type filter hook input priority filter; policy accept;\n ip saddr @ban4 drop\n ip6 saddr @ban6 drop\n}";
+
+        assert!(verify_nft_configuration(set_v4, set_v6, chain).is_ok());
+        assert!(
+            verify_nft_configuration(set_v4, set_v6, "chain input { policy accept; }").is_err()
+        );
+        assert!(verify_nft_configuration(
+            set_v4,
+            set_v6,
+            "chain input { type filter hook input priority filter; policy accept; ip saddr @ban4 drop }"
+        )
+        .is_err());
+        assert_eq!(health_exit_code(true), 0);
+        assert_eq!(health_exit_code(false), 1);
+    }
+
+    #[test]
+    fn failed_nft_ban_is_not_recorded_as_enforced() {
+        let mut state = GuardState::default();
+        state.ips.insert(
+            "203.0.113.9".to_string(),
+            IpEntry {
+                score: BAN_THRESHOLD,
+                ..Default::default()
+            },
+        );
+
+        let result = state.enforce_ban("203.0.113.9", 100, 60, |_, _| false);
+
+        assert!(result.is_none());
+        assert_eq!(state.total_bans, 0);
+        assert_eq!(state.ips.get("203.0.113.9").unwrap().banned_until, 0);
     }
 
     #[test]

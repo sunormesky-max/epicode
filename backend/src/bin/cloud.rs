@@ -99,8 +99,17 @@ async fn main() {
         .expect("FATAL: admin key must be set (accepts EPICODE_ADMIN_KEY or TETRAMEM_ADMIN_KEY)");
     // 已知占位密钥 fail-closed(审计二轮): K8s 清单/.env.example 的 "replace-me"
     // 若不替换就部署, 任何知道仓库的人都能拿到管理接口 — 直接拒绝启动
-    const PLACEHOLDER_KEYS: [&str; 3] = ["replace-me", "changeme", "placeholder"];
-    if PLACEHOLDER_KEYS.contains(&admin_key.as_str()) {
+    if admin_key.trim().is_empty() {
+        eprintln!("FATAL: EPICODE_ADMIN_KEY is empty — set a real secret before deploying");
+        std::process::exit(1);
+    }
+    const PLACEHOLDER_KEYS: [&str; 4] = [
+        "replace-me",
+        "changeme",
+        "placeholder",
+        "replace_with_real_key",
+    ];
+    if PLACEHOLDER_KEYS.contains(&admin_key.to_lowercase().as_str()) {
         eprintln!("FATAL: EPICODE_ADMIN_KEY is a known placeholder ({admin_key}) — set a real secret before deploying");
         std::process::exit(1);
     }
@@ -262,6 +271,7 @@ async fn main() {
         .route("/v1/stream/ticket", post(health::mint_stream_ticket))
         .route("/v1/agent-guide", get(health::agent_guide))
         .route("/v1/smrp", get(admin::smrp_spec))
+        .route("/v1/smrp/spec.html", get(admin::smrp_spec_html))
         .route("/stats/public", get(health::public_stats))
         .route("/docs", get(admin::swagger_ui))
         .route("/openapi.yaml", get(admin::openapi_spec))
@@ -522,7 +532,10 @@ async fn main() {
                 .and_then(|p| p.parse::<u32>().ok())
                 .map(|pid| pid == std::process::id())
                 .unwrap_or(false);
-        if activated {
+        // systemd socket activation(fd 3继承) — Windows无此机制, 直接bind(本地开发)
+        // LISTEN_FDS 在非systemd环境不存在, activated恒false, unix分支不可达
+        #[cfg(unix)]
+        let fd_listener: Option<tokio::net::TcpListener> = if activated {
             use std::os::unix::io::FromRawFd;
             tracing::info!(
                 "Epicode Cloud socket-activated: inheriting fd 3 (systemd holds {})",
@@ -531,12 +544,20 @@ async fn main() {
             let std_l = unsafe { std::net::TcpListener::from_raw_fd(3) };
             std_l.set_nonblocking(true).ok();
             match tokio::net::TcpListener::from_std(std_l) {
-                Ok(l) => l,
+                Ok(l) => Some(l),
                 Err(e) => {
                     tracing::error!("FATAL: fd3 -> tokio: {}", e);
                     std::process::exit(1);
                 }
             }
+        } else {
+            None
+        };
+        #[cfg(not(unix))]
+        let fd_listener: Option<tokio::net::TcpListener> = None;
+
+        if let Some(l) = fd_listener {
+            l
         } else {
             match tokio::net::TcpListener::bind(addr).await {
                 Ok(l) => l,

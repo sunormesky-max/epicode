@@ -69,6 +69,18 @@ pub async fn create_subaccount(
             )),
         );
     }
+    // 保留名大小写不敏感拒绝(审计三轮高优): Sunorme 可绕过大小写敏感的
+    // 重名检查, 而 is_privileged_id 比较小写 — 子账户将获得库审批特权
+    if epicode::engine::user_manager::UserManager::is_reserved_id(&req.user_id) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "subaccount_create",
+                403,
+                "this username is reserved",
+            )),
+        );
+    }
     if req.user_id.is_empty() || req.user_id.len() > 64 {
         return (
             StatusCode::BAD_REQUEST,

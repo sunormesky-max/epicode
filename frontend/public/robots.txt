@@ -1,0 +1,41 @@
+# Epicode — AI 访客政策: 全站开放给 AI 爬虫与代理
+# 人类页面与 AI 内容(llms.txt)均在根目录
+
+User-agent: *
+Allow: /
+
+# 显式欢迎主流 AI 爬虫
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+# AI 专用入口
+# llms.txt — 全站机器可读说明(API/基准/协议)
+# /ai.html — 零JS纯静态 AI 专用页
+Sitemap: https://epicode.cn/sitemap.xml

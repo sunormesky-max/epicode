@@ -14,7 +14,8 @@ check() {
     local file="$1"
     local pattern="$2"
     local result
-    result=$(grep -oE "$pattern" "$file" | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+    # grep无匹配返回非零, set -e 下会直接杀脚本(MISMATCH静默) — 发版实踩
+    result=$(grep -oE "$pattern" "$file" | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
     if [ "$result" != "$EXPECTED" ]; then
         echo "MISMATCH: $file has '$result', expected '$EXPECTED'"
         FAIL=1
@@ -37,7 +38,7 @@ check "deploy/helm/epicode/Chart.yaml" '^version: [0-9]+\.[0-9]+\.[0-9]+'
 check "deploy/helm/epicode/Chart.yaml" '^appVersion: "[0-9]+\.[0-9]+\.[0-9]+"'
 
 # Check __init__.py
-result=$(grep -oE '__version__ = "[0-9]+\.[0-9]+\.[0-9]+"' backend/sdk/python/epicode/__init__.py | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+result=$(grep -oE '__version__ = "[0-9]+\.[0-9]+\.[0-9]+"' backend/sdk/python/epicode/__init__.py | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
 if [ "$result" != "$EXPECTED" ]; then
     echo "MISMATCH: backend/sdk/python/epicode/__init__.py has '$result', expected '$EXPECTED'"
     FAIL=1
@@ -46,7 +47,7 @@ else
 fi
 
 # Check openapi.yaml (indented under info:)
-result=$(grep -oE 'version: [0-9]+\.[0-9]+\.[0-9]+' backend/docs/openapi.yaml | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+result=$(grep -oE 'version: [0-9]+\.[0-9]+\.[0-9]+' backend/docs/openapi.yaml | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
 if [ "$result" != "$EXPECTED" ]; then
     echo "MISMATCH: backend/docs/openapi.yaml info.version has '$result', expected '$EXPECTED'"
     FAIL=1

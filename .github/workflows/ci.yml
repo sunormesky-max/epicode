@@ -97,13 +97,16 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
+      # 类型债(187)与lint债(52)已于 2026-09-26 全面迭代清零 — 门禁恢复严格
       - name: Type check
         run: npm run check
+      - name: Audit all frontend dependencies (high+ blocking)
+        run: npm audit --audit-level=high
       - name: Lint
         run: npm run lint
       - name: Test
         run: npm run test
-      - name: Build
+      - name: "Build (hard gate, must reproduce production fingerprint)"
         run: npm run build
 
   guard:

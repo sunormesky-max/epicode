@@ -17,20 +17,20 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-Default exposed ports (审计 2026-09: backend/frontend 仅绑定 127.0.0.1,
-对外唯一入口是网关 — 请勿把 9111/3000 直接发布到公网, 那会绕过网关的
-TLS 终止、限流与请求策略):
+Default exposed ports (backend/frontend remain bound to 127.0.0.1; the gateway
+is HTTP-only and is also bound to loopback. Do not publish these HTTP ports
+directly to the public internet or treat the bundled gateway as a TLS endpoint):
 
 | Service | Internal port | External binding |
 | --- | --- | --- |
-| nginx gateway | 80 | `0.0.0.0:8080`（唯一公网入口） |
+| nginx gateway | 80 | `127.0.0.1:8080`（仅本机；需外置 TLS 代理） |
 | backend | 9111 | `127.0.0.1:9111`（仅本机） |
 | frontend | 3000 | `127.0.0.1:3000`（仅本机） |
 
 After startup:
 
-- unified gateway: `http://localhost:8080`（对外只用这个）
-- Swagger UI through gateway: `http://localhost:8080/docs`
+- unified gateway: `http://127.0.0.1:8080`（仅本机 HTTP）
+- Swagger UI through gateway: `http://127.0.0.1:8080/docs`
 - backend health（本机调试）: `http://localhost:9111/health`
 
 ## Required environment variables
@@ -70,34 +70,37 @@ The ingress routes:
 
 ## Recommended production setup
 
-1. terminate TLS at ingress or a managed load balancer
+1. terminate TLS in a host-level reverse proxy before forwarding to `127.0.0.1:8080`
 2. set `REDIS_URL` when enabling the query cache beyond local memory
 3. persist `/app/data` for the backend
 4. keep frontend and backend on the same public host so `/api/*` works without extra client changes
 
 ## TLS / HTTPS
 
-Terminate TLS at one of these layers (pick one — do not double-terminate):
-
-| Layer | Tool | Notes |
-|-------|------|-------|
-| Load balancer | AWS ALB, GCP HTTPS LB, Cloudflare | Easiest; cert managed by cloud provider |
-| Ingress controller | nginx-ingress, traefik, Caddy | Use `cert-manager` for Let's Encrypt |
-| Nginx gateway | the bundled `deploy/nginx.conf` | Add `listen 443 ssl;` + cert paths |
-
-Minimum config for the bundled nginx:
+The bundled gateway only listens for plaintext HTTP. Compose binds it to
+`127.0.0.1:8080` and does not provision a certificate or publish port 443.
+Before serving public traffic, run a TLS-terminating proxy on the Docker host
+and forward requests to the loopback gateway. For example, a host-level Nginx
+can use:
 
 ```nginx
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
     server_name epicode.example.com;
 
-    ssl_certificate     /etc/ssl/epicode/fullchain.pem;
-    ssl_certificate_key /etc/ssl/epicode/privkey.pem;
+    # Provision these files through your certificate manager; they are not
+    # included in this repository or the Compose deployment.
+    ssl_certificate     /etc/letsencrypt/live/epicode.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/epicode.example.com/privkey.pem;
     ssl_protocols       TLSv1.2 TLSv1.3;
-    ssl_ciphers         HIGH:!aNULL:!MD5;
 
-    # ... existing location blocks ...
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
 }
 
 server {
@@ -106,6 +109,10 @@ server {
     return 301 https://$host$request_uri;
 }
 ```
+
+If the TLS proxy runs on another host or in a separate network namespace, bind
+the gateway to a private interface instead of loopback and restrict that port
+with a firewall. Never expose the gateway's HTTP port publicly.
 
 ## Persistent volumes
 
