@@ -54,6 +54,17 @@ function findNode(nodes: ArchiveNode[], id: number): ArchiveNode | null {
 }
 
 // 递归过滤（用于搜索）
+function findPathTo(id: number, nodes: ArchiveNode[], acc: number[]): number[] | null {
+  for (const n of nodes) {
+    if (n.id === id) return acc;
+    if (n.children?.length) {
+      const found = findPathTo(id, n.children, [...acc, n.id]);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 function filterTree(nodes: ArchiveNode[], q: string): ArchiveNode[] {
   const out: ArchiveNode[] = [];
   for (const n of nodes) {
@@ -137,21 +148,14 @@ export default function DashboardArchive() {
   const selected = useMemo(() => (selectedId ? findNode(tree, selectedId) : null), [tree, selectedId]);
 
   // 自动展开选中节点的祖先路径
-  const expandTo = useCallback((id: number, nodes: ArchiveNode[], acc: number[]) => {
-    for (const n of nodes) {
-      if (n.id === id) {
-        setExpanded(prev => {
-          const next = new Set(prev);
-          acc.forEach(a => next.add(a));
-          return next;
-        });
-        return true;
-      }
-      if (n.children?.length) {
-        if (expandTo(id, n.children, [...acc, n.id])) return true;
-      }
-    }
-    return false;
+  const expandTo = useCallback((id: number, nodes: ArchiveNode[]) => {
+    const path = findPathTo(id, nodes, []);
+    if (!path) return;
+    setExpanded(prev => {
+      const next = new Set(prev);
+      path.forEach(a => next.add(a));
+      return next;
+    });
   }, []);
 
   function toggleExpand(id: number) {
@@ -166,7 +170,7 @@ export default function DashboardArchive() {
   function selectNode(id: number, nodes: ArchiveNode[]) {
     setSelectedId(id);
     setNodeContent('');
-    if (nodes.length) expandTo(id, nodes, []);
+    if (nodes.length) expandTo(id, nodes);
     // 加载节点完整内容(F3修复:取最新请求,避免旧请求覆盖新内容)
     setLoadingContent(true);
     getArchiveNode(id).then((data) => {
