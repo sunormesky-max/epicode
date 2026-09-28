@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use axum::response::IntoResponse;
 use serde::Deserialize;
 
 use epicode::engine::user_manager::UserPlan;
