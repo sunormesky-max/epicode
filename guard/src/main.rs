@@ -394,12 +394,17 @@ fn epicode_remember(content: &str, labels: &[&str]) {
         "labels": labels,
     });
     let resp = ureq::post(&url)
-        .set("X-API-Key", &key)
-        .set("Content-Type", "application/json")
-        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-        .send_string(&body.to_string());
+        .header("X-API-Key", &key)
+        .config()
+        .timeout_global(Some(Duration::from_secs(HTTP_TIMEOUT_SECS)))
+        .build()
+        .send_json(&body);
     let success = match resp {
-        Ok(r) => r.into_string().unwrap_or_default().contains("success"),
+        Ok(r) => r
+            .into_body()
+            .read_to_string()
+            .unwrap_or_default()
+            .contains("success"),
         Err(e) => {
             // Treat transport failures as best-effort (telemetry only); surface to log.
             log_msg(&format!("epicode_remember transport error: {e}"));
