@@ -36,7 +36,7 @@ aes-gcm = "0.10"
 rsa = { version = "0.9", features = ["sha2"] }
 sha2 = "0.10"
 hmac = "0.12"
-base64 = "0.22"
+base64 = "0.23"
 zeroize = { version = "1", features = ["derive"] }
 argon2 = { version = "0.5", features = ["password-hash"] }
 
