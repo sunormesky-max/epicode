@@ -531,7 +531,10 @@ async fn main() {
                 .and_then(|p| p.parse::<u32>().ok())
                 .map(|pid| pid == std::process::id())
                 .unwrap_or(false);
-        if activated {
+        // systemd socket activation(fd 3继承) — Windows无此机制, 直接bind(本地开发)
+        // LISTEN_FDS 在非systemd环境不存在, activated恒false, unix分支不可达
+        #[cfg(unix)]
+        let fd_listener: Option<tokio::net::TcpListener> = if activated {
             use std::os::unix::io::FromRawFd;
             tracing::info!(
                 "Epicode Cloud socket-activated: inheriting fd 3 (systemd holds {})",
@@ -540,12 +543,20 @@ async fn main() {
             let std_l = unsafe { std::net::TcpListener::from_raw_fd(3) };
             std_l.set_nonblocking(true).ok();
             match tokio::net::TcpListener::from_std(std_l) {
-                Ok(l) => l,
+                Ok(l) => Some(l),
                 Err(e) => {
                     tracing::error!("FATAL: fd3 -> tokio: {}", e);
                     std::process::exit(1);
                 }
             }
+        } else {
+            None
+        };
+        #[cfg(not(unix))]
+        let fd_listener: Option<tokio::net::TcpListener> = None;
+
+        if let Some(l) = fd_listener {
+            l
         } else {
             match tokio::net::TcpListener::bind(addr).await {
                 Ok(l) => l,
