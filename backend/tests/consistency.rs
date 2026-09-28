@@ -60,8 +60,7 @@ fn extract_frontend_endpoints(api: &str) -> BTreeSet<String> {
             while j < win_end {
                 if b[j] == 0x27 {
                     // 找配对单引号
-                    if let Some(rel_end) = api[j + 1..win_end]
-                        .as_bytes()
+                    if let Some(rel_end) = api.as_bytes()[j + 1..win_end]
                         .iter()
                         .position(|&c| c == 0x27)
                     {
