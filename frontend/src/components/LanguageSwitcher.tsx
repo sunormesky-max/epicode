@@ -1,4 +1,4 @@
-import { useI18nContext } from '@/i18n/I18nContext';
+import { useI18nContext } from '@/i18n/useI18n';
 
 export default function LanguageSwitcher() {
   const { lang, setLang } = useI18nContext();

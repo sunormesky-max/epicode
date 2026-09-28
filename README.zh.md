@@ -42,12 +42,12 @@ docker compose up --build -d
 然后存储并搜索一条记忆：
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/remember \
+curl -X POST http://127.0.0.1:8080/api/v1/remember \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
   -d '{"content": "Epicode 让 AI 拥有持久化的空间记忆", "labels": ["ai", "memory"]}'
 
-curl -X POST http://localhost:8080/api/v1/search \
+curl -X POST http://127.0.0.1:8080/api/v1/search \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
   -d '{"query": "AI 记忆"}'
@@ -60,8 +60,9 @@ curl -X POST http://localhost:8080/api/v1/search \
 - **空间记忆** — 以三维空间中的正四面体存储记忆，实现自然聚簇。
 - **语义搜索** — BM25 + HNSW 混合搜索，支持自然语言查询。
 - **知识图谱** — 自动关系提取，动态更新图谱。
-- **MCP 集成** — 35 个标准化工具，任何 MCP 兼容的 AI 代理都能使用。
-- **SMRP 协议** — 结构化记忆响应，暴露拓扑与位置元数据。
+- **MCP 集成** — 通过 MCP `tools/list` 发现当前工具目录，涵盖记忆、身份、技能与 L0 意志通道。
+- **L0 主动推理** — 携带证据的意志信号，支持 REST/MCP inbox 与执行回执。
+- **SMRP 协议** — 与传输层正交的结构化记忆响应，包含 tier、检索来源及可选拓扑/安置元数据。
 - **多租户 Cloud** — 用户管理、配额、邀请码和管理员控制。
 - **自托管防御** — `epicode-guard` 监控 SSH/Web/蜜罐流量并自动封禁攻击者。
 
@@ -116,7 +117,7 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-访问 `http://localhost:8080`。生产部署细节见 [docs/deployment.md](docs/deployment.md)（英文）。
+本机 HTTP 网关地址为 `http://127.0.0.1:8080`。公网部署必须在其前方配置 TLS 代理；详见 [docs/deployment.md](docs/deployment.md)（英文）。
 
 ## 文档
 

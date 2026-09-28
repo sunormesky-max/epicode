@@ -1,38 +1,224 @@
 ﻿// ── Epicode API Client ──
 // All API calls go through /api/* (nginx reverse proxy to backend)
-// Authentication: X-API-Key header
+// Authentication: HttpOnly session cookie in the console; X-API-Key for API clients.
+//
+// 安全说明：
+// - Console sessions use the backend's HttpOnly cookie. A legacy API key is kept
+//   only after same-account verification; newly issued keys stay in memory rather
+//   than being persisted in Web Storage.
 
 const API_BASE = '/api';
 
 // ── Auth utilities ──
 const API_KEY_STORAGE = 'epicode_api_key';
+const API_KEY_USER_STORAGE = 'epicode_api_key_user_id';
+// This is only a candidate identity for post-expiry login verification, never authorization.
+const LEGACY_KEY_USER_HINT_STORAGE = 'epicode_legacy_api_key_user_id';
 const USER_ID_STORAGE = 'epicode_user_id';
+export const AUTH_CHANGE_EVENT = 'epicode-auth-change';
+export const AUTH_STORAGE_KEYS = [API_KEY_STORAGE, API_KEY_USER_STORAGE, LEGACY_KEY_USER_HINT_STORAGE, USER_ID_STORAGE] as const;
+let authGeneration = 0;
+let authTransitionInProgress = false;
+const activeRequestControllers = new Set<AbortController>();
+let inMemoryApiKey: string | null = null;
+let inMemoryApiKeyUserId: string | null = null;
+
+function clearInMemoryApiKey(): void {
+  inMemoryApiKey = null;
+  inMemoryApiKeyUserId = null;
+}
+
+function dispatchAuthChange(userId: string | null, transitioning = false): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(AUTH_CHANGE_EVENT, {
+      detail: { userId, transitioning },
+    }));
+  }
+}
+
+function abortActiveRequests(): void {
+  for (const controller of activeRequestControllers) controller.abort();
+}
+
+function beginAuthTransition(userId: string | null): void {
+  authTransitionInProgress = true;
+  authGeneration++;
+  abortActiveRequests();
+  dispatchAuthChange(userId, true);
+}
+
+function finishAuthTransition(userId: string | null): void {
+  authTransitionInProgress = false;
+  authGeneration++;
+  abortActiveRequests();
+  dispatchAuthChange(userId);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== null && !AUTH_STORAGE_KEYS.some((key) => key === event.key)) return;
+    authTransitionInProgress = false;
+    authGeneration++;
+    abortActiveRequests();
+    invalidateCache();
+    const userId = getUserId();
+    if (inMemoryApiKeyUserId !== null && inMemoryApiKeyUserId !== userId) clearInMemoryApiKey();
+    dispatchAuthChange(userId);
+  });
+}
 
 export function getApiKey(): string | null {
-  return localStorage.getItem(API_KEY_STORAGE);
+  if (authTransitionInProgress) return null;
+  const userId = localStorage.getItem(USER_ID_STORAGE);
+  if (!userId) return null;
+
+  if (inMemoryApiKey && inMemoryApiKeyUserId === userId) return inMemoryApiKey;
+  if (inMemoryApiKeyUserId !== null && inMemoryApiKeyUserId !== userId) clearInMemoryApiKey();
+
+  const apiKey = localStorage.getItem(API_KEY_STORAGE);
+  if (!apiKey) return null;
+  const keyUserId = localStorage.getItem(API_KEY_USER_STORAGE);
+  if (keyUserId === null) return null;
+  if (keyUserId !== userId) {
+    localStorage.removeItem(API_KEY_STORAGE);
+    localStorage.removeItem(API_KEY_USER_STORAGE);
+    return null;
+  }
+
+  return apiKey;
+}
+
+export function getApiKeyInfo(): Promise<{ user_id?: string; request_key_matches?: boolean; masked_key: string; hint?: string }> {
+  return request('/v1/api-key', { skipCache: true });
+}
+
+export async function resetApiKey(password: string): Promise<{ api_key: string; warning?: string }> {
+  const requestUserId = getUserId();
+  const requestGeneration = authGeneration;
+  const result = await request<{ api_key: string; warning?: string }>('/v1/api-key/reset', {
+    method: 'POST',
+    body: { password },
+  });
+  if (requestUserId && getUserId() === requestUserId && authGeneration === requestGeneration) {
+    inMemoryApiKey = result.api_key;
+    inMemoryApiKeyUserId = requestUserId;
+  }
+  return result;
+}
+
+export async function revealApiKey(password: string): Promise<{ api_key: string; note?: string }> {
+  const requestUserId = getUserId();
+  const requestGeneration = authGeneration;
+  const result = await request<{ api_key: string; note?: string }>('/v1/api-key/reveal', {
+    method: 'POST',
+    body: { password },
+  });
+  if (requestUserId && getUserId() === requestUserId && authGeneration === requestGeneration) {
+    inMemoryApiKey = result.api_key;
+    inMemoryApiKeyUserId = requestUserId;
+  }
+  return result;
+}
+
+export async function mintStreamTicket(): Promise<string> {
+  const data = await request<{ ticket?: string; expires_in?: number }>('/v1/stream/ticket', { method: 'POST' });
+  if (!data.ticket) throw new Error('Stream ticket response did not include a ticket.');
+  return data.ticket;
 }
 
 export function getUserId(): string | null {
   return localStorage.getItem(USER_ID_STORAGE);
 }
 
-// 2026-09 审计修复(高优 #4): API key 不再持久化到 localStorage(XSS 可读).
-// 认证改为登录时后端下发的 HttpOnly; Secure; SameSite=Strict session cookie,
-// fetch 默认 same-origin 凭据即携带; legacy 存量 key 在下次登录时清除.
-export function setAuth(userId: string): void {
-  localStorage.removeItem(API_KEY_STORAGE); // 清除迁移前的明文存量
+export function setAuth(
+  apiKey: string | null,
+  userId: string,
+  options: { adoptVerifiedLegacyKey?: boolean } = {},
+): void {
+  const previousUserId = getUserId();
+  const previousKeyUserId = localStorage.getItem(API_KEY_USER_STORAGE);
+  const storedApiKey = localStorage.getItem(API_KEY_STORAGE);
+  const identityChanged = previousUserId !== userId;
+  const preserveVerifiedLegacyKey = !!storedApiKey && (
+    (options.adoptVerifiedLegacyKey && storedApiKey === apiKey)
+    || (previousUserId === null
+      && localStorage.getItem(LEGACY_KEY_USER_HINT_STORAGE) === userId
+      && previousKeyUserId === userId)
+  );
+
+  if (
+    (identityChanged || (previousKeyUserId !== null && previousKeyUserId !== previousUserId))
+    && !preserveVerifiedLegacyKey
+  ) {
+    localStorage.removeItem(API_KEY_STORAGE);
+    localStorage.removeItem(API_KEY_USER_STORAGE);
+  }
+
+  if (apiKey) {
+    // Keep newly-issued keys in memory; the HttpOnly cookie persists console sessions.
+    inMemoryApiKey = apiKey;
+    inMemoryApiKeyUserId = userId;
+    if (options.adoptVerifiedLegacyKey && storedApiKey === apiKey) {
+      localStorage.setItem(API_KEY_USER_STORAGE, userId);
+    }
+  } else if (inMemoryApiKeyUserId !== userId) {
+    clearInMemoryApiKey();
+  }
+
+  localStorage.removeItem(LEGACY_KEY_USER_HINT_STORAGE);
   localStorage.setItem(USER_ID_STORAGE, userId);
-  clearCache();
+  if (identityChanged) invalidateCache();
+  finishAuthTransition(userId);
 }
 
-export function clearAuth(): void {
-  localStorage.removeItem(API_KEY_STORAGE);
+export function clearAuth(options: { preserveLegacyApiKey?: boolean } = {}): void {
+  clearInMemoryApiKey();
+  const previousUserId = getUserId();
+  const apiKey = localStorage.getItem(API_KEY_STORAGE);
+  const keyUserId = localStorage.getItem(API_KEY_USER_STORAGE);
+  const preserveLegacyKey = options.preserveLegacyApiKey
+    && previousUserId
+    && apiKey
+    && (keyUserId === null || keyUserId === previousUserId);
+  if (preserveLegacyKey) {
+    // Keep migration possible after expiry, but getApiKey never sends an unowned key.
+    localStorage.setItem(LEGACY_KEY_USER_HINT_STORAGE, previousUserId);
+  } else {
+    localStorage.removeItem(API_KEY_STORAGE);
+    localStorage.removeItem(API_KEY_USER_STORAGE);
+    localStorage.removeItem(LEGACY_KEY_USER_HINT_STORAGE);
+  }
   localStorage.removeItem(USER_ID_STORAGE);
-  clearCache();
+  // P0-CRITICAL: 清除旧的共享 chat_history (不带 user_id 后缀的旧格式)
+  // 新格式: epicode_chat_history_<user_id>, 由各组件按 user_id 管理
+  localStorage.removeItem('epicode_chat_history');
+  // 刀2: 清理所有用户的聊天历史(同机换号可读上一用户历史 — 审计前端P0-7)
+  Object.keys(localStorage)
+    .filter(k => k === 'epicode_chat_history' || k.startsWith('epicode_chat_history_'))
+    .forEach(k => localStorage.removeItem(k));
+  invalidateCache();
+  finishAuthTransition(null);
+}
+
+// B6: 登出 — 调后端清除 HttpOnly cookie + 清 localStorage
+export async function logout(): Promise<void> {
+  beginAuthTransition(getUserId());
+  try {
+    await request('/v1/logout', { method: 'POST', public: true });
+  } catch { /* ignore */ }
+  clearAuth();
 }
 
 export function isAuthenticated(): boolean {
-  return !!getUserId();
+  return !!getUserId(); // cookie会话下key可能不在localStorage
+}
+
+// ── Error utilities ──
+/** 从 catch 块中安全提取错误消息（替代 catch(e:any) → e.message） */
+export function errMsg(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'string') return e;
+  return String(e);
 }
 
 // ── Cache system ──
@@ -42,19 +228,12 @@ interface CacheEntry<T> {
 }
 
 const cache = new Map<string, CacheEntry<unknown>>();
-// cookie 会话已证实有效(首个无 header 成功请求后置位)
-let cookieSessionVerified = false;
 const CACHE_TTL = 30000; // 30 seconds
+const CACHE_MAX_SIZE = 500; // 防止内存无限增长
 
-// 缓存键掺入用户身份: 键只按 URL 时, 同一浏览器换号登录在 TTL 窗口内会
-// 命中前一账号的响应 (审计 2026-09 高优 #3)
 function getCacheKey(endpoint: string, body?: unknown): string {
-  const uid = getUserId() ?? 'anon';
+  const uid = getUserId() || 'anon';
   return `${uid}:${endpoint}:${body ? JSON.stringify(body) : ''}`;
-}
-
-export function clearCache(): void {
-  cache.clear();
 }
 
 function getCached<T>(key: string): T | null {
@@ -68,21 +247,36 @@ function getCached<T>(key: string): T | null {
 }
 
 function setCached<T>(key: string, data: T): void {
+  // 容量上限：超限时清除最旧的过期项
+  if (cache.size >= CACHE_MAX_SIZE) {
+    const now = Date.now();
+    // 先尝试清除过期项
+    for (const [k, v] of cache) {
+      if (now - v.ts > CACHE_TTL) cache.delete(k);
+    }
+    // 如果仍然超限，清除最旧的（Map 保持插入顺序）
+    while (cache.size >= CACHE_MAX_SIZE) {
+      const oldest = cache.keys().next().value;
+      if (oldest) cache.delete(oldest); else break;
+    }
+  }
   cache.set(key, { data, ts: Date.now() });
 }
 
 export function invalidateCache(...prefixes: string[]): void {
+  if (prefixes.length === 0) {
+    cache.clear();
+    return;
+  }
   for (const key of cache.keys()) {
-    // 键格式 `${uid}:${endpoint}:${body}` — 匹配 endpoint 需先剥 uid 前缀
-    // (回归修复: uid 前缀加入后原 startsWith 恒失配, 写入后缓存不失效)
-    const endpoint = key.slice(key.indexOf(':') + 1);
-    if (prefixes.some((p) => endpoint.startsWith(p))) {
+    if (prefixes.some((p) => key.includes(p) || key.includes(`/api${p}`))) {
       cache.delete(key);
     }
   }
 }
 
 // ── Request helper ──
+// F3修复:支持外部 signal,组件卸载时可 abort 避免 setState on unmounted。
 export async function request<T>(
   endpoint: string,
   options: {
@@ -92,13 +286,18 @@ export async function request<T>(
     public?: boolean;
     extraHeaders?: Record<string, string>;
     rawResponse?: boolean;
+    signal?: AbortSignal;
+    timeoutMs?: number;
   } = {}
 ): Promise<T> {
-  const { method = 'GET', body, skipCache = false, public: isPublic = false, extraHeaders, rawResponse } = options;
+  const { method = 'GET', body, skipCache = false, public: isPublic = false, extraHeaders, rawResponse, signal: externalSignal, timeoutMs } = options;
+  if (!isPublic && authTransitionInProgress) {
+    throw new Error('Authentication is changing; retry this request after sign-in completes.');
+  }
+  const requestAuthGeneration = authGeneration;
 
   const url = `${API_BASE}${endpoint}`;
-  // 键用 endpoint(不含 /api 前缀) — 与 invalidateCache("/v1/...") 调用点语义一致
-  const cacheKey = getCacheKey(endpoint, body);
+  const cacheKey = getCacheKey(url, body);
 
   if (method === 'GET' && !skipCache) {
     const cached = getCached<T>(cacheKey);
@@ -109,51 +308,191 @@ export async function request<T>(
     'Content-Type': 'application/json',
   };
 
-  // 认证迁移(审计二轮): legacy 明文 key 只作迁移回退 —
-  // 首个受保护请求先不带 header 验证 cookie; cookie 证实有效即清除明文 key,
-  // 此后会话完全由 HttpOnly cookie 承载; cookie 失效则回退 header 一次并保留
   const apiKey = getApiKey();
-  const wantsAuth = !isPublic;
-  const tryHeaderless = wantsAuth && apiKey && !cookieSessionVerified;
+  if (apiKey && !isPublic) {
+    headers['X-API-Key'] = apiKey;
+  }
 
   if (extraHeaders) {
     Object.assign(headers, extraHeaders);
   }
 
-  const doFetch = (hdrs: Record<string, string>) =>
-    fetch(url, { method, headers: hdrs, body: body ? JSON.stringify(body) : undefined });
+  // ── 带超时的 fetch（默认 30s，可自定义）──
+  const TIMEOUT_MS = timeoutMs ?? 30000;
+  const doFetch = async (attempt = 0): Promise<Response> => {
+    if (requestAuthGeneration !== authGeneration) {
+      throw new Error('Authentication changed while this request was in progress.');
+    }
+    if (!isPublic && authTransitionInProgress) {
+      throw new Error('Authentication is changing; retry this request after sign-in completes.');
+    }
+    const controller = new AbortController();
+    activeRequestControllers.add(controller);
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    // F3修复:外部 signal(组件卸载)abort 时,联动 abort fetch
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+    try {
+      const resp = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+        credentials: 'include',  // B6修复:发送 HttpOnly cookie
+      });
+      if (requestAuthGeneration !== authGeneration) {
+        throw new Error('Authentication changed while this request was in progress.');
+      }
+      // GET 请求遇到 5xx 时自动重试一次（指数退避）
+      if (method === 'GET' && (resp.status === 502 || resp.status === 503 || resp.status >= 500) && attempt < 2) {
+        await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+        return doFetch(attempt + 1);
+      }
+      return resp;
+    } catch (err: unknown) {
+      if (requestAuthGeneration !== authGeneration) {
+        throw new Error('Authentication changed while this request was in progress.');
+      }
+      const errName = err instanceof Error ? err.name : '';
+      // 网络错误（非 abort）：GET 幂等请求重试一次
+      if (method === 'GET' && errName !== 'AbortError' && attempt < 1) {
+        await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+        return doFetch(attempt + 1);
+      }
+      // 超时
+      if (errName === 'AbortError') {
+        throw new Error('请求超时，请检查网络后重试。');
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+      activeRequestControllers.delete(controller);
+    }
+  };
 
-  let response = await doFetch(headers);
-
-  if (response.status === 401 && wantsAuth && apiKey && tryHeaderless) {
-    // 无 header 探针 401 = cookie 失效: 回退 legacy header 认证(迁移期)
-    const retry = { ...headers, 'X-API-Key': apiKey };
-    response = await doFetch(retry);
-  } else if (response.ok && tryHeaderless) {
-    cookieSessionVerified = true;
-    localStorage.removeItem(API_KEY_STORAGE);
-  }
+  const response = await doFetch();
 
   if (response.status === 429) {
-    throw new Error('Rate limit exceeded. Please try again later.');
+    throw new Error('请求过于频繁，请稍后再试。');
+  }
+
+  if (response.status === 401 && !isPublic) {
+    clearAuth({ preserveLegacyApiKey: true });
+    invalidateCache();
+    if (!window.location.hash.includes('/login')) {
+      window.location.hash = '#/login';
+    }
+    throw new Error('登录已过期，请重新登录。');
   }
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => 'Unknown error');
-    throw new Error(errorText || `HTTP ${response.status}`);
+    // 友好解析错误：后端可能返回 SMRP 信封或裸 JSON（如 identity_not_confirmed）
+    try {
+      const errJson = JSON.parse(errorText);
+      // identity_not_confirmed 特殊处理
+      if (errJson.error === 'identity_not_confirmed' || errJson.error === 'identity required') {
+        throw new Error('请先完成身份确认。使用 identity_confirm 或 identity_step 工具设置您的 AI 身份。');
+      }
+      // SMRP 信封错误
+      if (errJson.protocol?.error?.code === 'PERSONA_WARMING_UP' || String(errJson.error || '').toLowerCase().includes('warming')) {
+        throw new Error('人格正在加载，请稍候再试。');
+      }
+      if (errJson.protocol?.error?.message) {
+        throw new Error(errJson.protocol.error.message);
+      }
+      // 通用业务错误
+      if (errJson.message) {
+        throw new Error(errJson.message);
+      }
+      if (errJson.error && typeof errJson.error === 'string') {
+        throw new Error(errJson.error);
+      }
+    } catch (parseErr) {
+      if (parseErr instanceof Error && parseErr.message !== 'Unexpected token') {
+        throw parseErr; // 已被上面 throw 的友好错误
+      }
+    }
+    // 友好的状态码映射
+    const statusMessages: Record<number, string> = {
+      500: '服务暂时不可用，请稍后重试。',
+      502: '网关错误，服务可能正在重启。',
+      503: '系统维护中，请稍后再试。',
+      504: '网关超时，请稍后重试。',
+    };
+    throw new Error(errorText.slice(0, 200) || statusMessages[response.status] || `请求失败 (${response.status})`);
   }
 
   if (rawResponse) {
-    return response.text() as unknown as T;
+    const text = await response.text();
+    if (requestAuthGeneration !== authGeneration) {
+      throw new Error('Authentication changed while this request was in progress.');
+    }
+    return text as unknown as T;
   }
 
-  const data = await response.json() as T;
+  const raw = await response.json() as { protocol?: { ok?: boolean; error?: { message?: string } }; data?: T };
+  if (requestAuthGeneration !== authGeneration) {
+    throw new Error('Authentication changed while this request was in progress.');
+  }
+  // SMRP 信封解包（向后兼容非 SMRP 响应：有 protocol 字段则取 data，否则原样）
+  let data: T;
+  if (raw && typeof raw === 'object' && 'protocol' in raw) {
+    if (raw.protocol?.ok === false) {
+      throw new Error(raw.protocol?.error?.message || 'request failed');
+    }
+    data = raw.data as T;
+  } else {
+    data = raw as T;
+  }
 
   if (method === 'GET') {
     setCached(cacheKey, data);
   }
 
   return data;
+}
+
+// ── MCP JSON-RPC 调用封装（用于 kg_quality 等仅 MCP 暴露的能力）──
+export async function callMcp<T = unknown>(tool: string, args: Record<string, unknown> = {}): Promise<T> {
+  const raw = await request<{
+    result?: { content?: { type: string; text?: string }[] };
+    error?: { message?: string };
+  }>('/mcp', {
+    method: 'POST',
+    body: { jsonrpc: '2.0', method: 'tools/call', params: { name: tool, arguments: args }, id: 1 },
+  });
+  if (raw.error) throw new Error(raw.error.message || `MCP ${tool} error`);
+  // MCP 返回的 content[0].text 是 JSON 字符串，解析后可能再套 SMRP 信封 {data, protocol}
+  const textContent = raw.result?.content?.find(c => c.type === 'text')?.text;
+  if (!textContent) throw new Error(`MCP ${tool}: empty response`);
+  let parsed: unknown;
+  try { parsed = JSON.parse(textContent); } catch { return textContent as unknown as T; }
+  // 解 SMRP 信封：有 data 字段则取 data
+  if (parsed && typeof parsed === 'object' && 'data' in (parsed as Record<string, unknown>)) {
+    return (parsed as { data: T }).data;
+  }
+  return parsed as T;
+}
+
+// ── 图谱质量评估（kg_quality）──
+export interface KgQuality {
+  total_memories: number;
+  sampled: number;
+  total_clusters: number;
+  avg_cluster_size: number;
+  largest_cluster: number;
+  relation_density: { avg_per_memory: number; max: number; min: number; total_sampled: number };
+  orphan_rate_pct: number;
+  strength_distribution: { strong_ge_0_5: number; medium: number; weak_lt_0_2: number; avg_strength: number };
+  density_score: number;
+  assessment: string;
+}
+
+export function getKgQuality(sampleSize = 100): Promise<KgQuality> {
+  return callMcp<KgQuality>('kg_quality', { sample_size: sampleSize });
 }
 
 // ── Types ──
@@ -166,38 +505,48 @@ export interface StatsData {
   energy: number;
   clusters: number;
   invite_code?: string;
+  time_context?: {
+    now: string;
+    timezone: string;
+    date?: string;
+    active_task?: {
+      task_id: string;
+      description?: string;
+      budget_ms: number;
+      elapsed_s: number;
+      remaining_s: number;
+    } | null;
+  };
   is_main_account?: boolean;
   has_sub_accounts?: boolean;
   parent_user?: string;
   identity?: { name: string; mission: string; confirmed: boolean } | null;
-  call_stats?: {
-    total_requests: number;
-    success_requests: number;
-    denied_requests: number;
-    denied_rate: number;
-    search_total: number;
-    search_hits: number;
-    search_hit_ratio: number;
-    search_miss_queries: string[];
-    top_labels: { label: string; count: number }[];
-    hot_memories: { id: number; access_count: number }[];
-    decision_total: number;
-    decision_avg_latency_ms: number;
-    cache_hit_ratio: number;
-    cache_l1_hit_ratio: number;
-    cache_l2_hit_ratio: number;
-    cache_l1_hits: number;
-    cache_l1_misses: number;
-    cache_l2_hits: number;
-    cache_l2_misses: number;
-  };
+  api_calls?: number;
+  api_calls_daily?: { date: string; count: number }[];
 }
+
+export type MemoryTier = 'primary' | 'contextual' | 'experiential' | 'hub';
 
 export interface SearchResult {
   id: number;
   content: string;
   labels: string[];
+  timestamp: number;
+  tier: MemoryTier;
+  source: string[];
   similarity: number;
+  metrics: {
+    importance: number;
+    mass: number;
+    memory_type: string | null;
+    valid: boolean;
+  };
+  topology?: { cluster_id: number; cluster_size: number; is_hub?: boolean };
+  matched_by?: string[];
+  score_notes?: {
+    base?: string;
+    adjustments: Array<{ kind: string; delta: number; applied_to?: number[] }>;
+  };
 }
 
 export interface TimelineEvent {
@@ -205,22 +554,6 @@ export interface TimelineEvent {
   content: string;
   labels: string[];
   timestamp: number;
-}
-
-export interface PublicStats {
-  total_memories: number;
-  total_skills: number;
-  total_users: number;
-}
-
-export interface GraphAnalysis {
-  total_memories: number;
-  relation_count: number;
-  cluster_count: number;
-  concept_count: number;
-  top_labels: { label: string; count: number }[];
-  cluster_analysis: { size: number; top_labels: { label: string; count: number }[] }[];
-  age_distribution: { labels: string[]; values: number[] };
 }
 
 export interface IdentityInfo {
@@ -244,6 +577,36 @@ interface IdentityResponse {
   };
 }
 
+// ═══ S2R2 图书馆(权限v2) ═══
+export interface LibraryHit {
+  chunk_id: number; chunk_no: number; content: string; score: number;
+  item_id: number; title: string; client_ref: string | null;
+  source_meta: string | null; collection_id: number;
+}
+export interface LibraryRequest {
+  id: number; user_id: string; title: string; url: string | null;
+  note: string | null; status: 'pending' | 'accepted' | 'rejected';
+  created_at: number; handled_at: number | null; handler_note: string | null;
+}
+export async function libSearch(query: string, limit?: number): Promise<{ results: LibraryHit[]; count: number }> {
+  return request<{ results: LibraryHit[]; count: number }>('/v1/library/search', {
+    method: 'POST', body: { query, limit },
+  });
+}
+export async function libSubmitRequest(title: string, url?: string, note?: string): Promise<{ request_id: number }> {
+  return request<{ request_id: number }>('/v1/library/requests', {
+    method: 'POST', body: { title, ...(url ? { url } : {}), ...(note ? { note } : {}) },
+  });
+}
+export async function libListRequests(): Promise<{ requests: LibraryRequest[]; pending_total: number; role: 'user' | 'owner' }> {
+  return request<{ requests: LibraryRequest[]; pending_total: number; role: 'user' | 'owner' }>('/v1/library/requests');
+}
+export async function libHandleRequest(request_id: number, action: 'accepted' | 'rejected', note?: string): Promise<{ request_id: number }> {
+  return request<{ request_id: number }>('/v1/library/requests/handle', {
+    method: 'POST', body: { request_id, action, ...(note ? { note } : {}) },
+  });
+}
+
 export interface SkillData {
   id: number;
   name: string;
@@ -259,6 +622,12 @@ export interface SkillData {
   evolved_from: number | null;
   created_at: number;
   updated_at: number;
+  // S2: 触发层(自动触发/曝光转化)
+  description?: string | null;
+  triggers?: string[];
+  surface_impressions?: number;
+  is_system?: boolean;
+  category?: string | null;
 }
 
 export interface CommunitySkill {
@@ -272,6 +641,10 @@ export interface CommunitySkill {
   memory_ids: number[];
   is_public: boolean;
   is_system: boolean;
+  // S2-R2: 触发层同步(社区页展示"何时用")
+  description?: string | null;
+  triggers?: string[];
+  byte_size?: number;
   review_status: string;
   created_at: number;
   updated_at: number;
@@ -291,15 +664,64 @@ interface SubAccountsResponse {
 }
 
 // ── Auth API ──
-// 登录响应不再携带 api_key(后端已改发 HttpOnly cookie); 前端只落 userId
-export async function loginUser(username: string, password: string): Promise<{ user_id: string }> {
-  const data = await request<{ success: boolean; user_id: string; plan: string }>('/v1/login', {
-    method: 'POST',
-    body: { user_id: username, password },
-    public: true,
-  });
-  setAuth(data.user_id);
-  return data;
+export async function loginUser(username: string, password: string): Promise<{ api_key?: string; user_id: string }> {
+  const previousKeyUserHint = localStorage.getItem(LEGACY_KEY_USER_HINT_STORAGE);
+  const previousUserId = getUserId() ?? previousKeyUserHint;
+  const previousMemoryKey = inMemoryApiKey && inMemoryApiKeyUserId === previousUserId
+    ? inMemoryApiKey
+    : null;
+  const previousKeyUserId = previousMemoryKey
+    ? previousUserId
+    : localStorage.getItem(API_KEY_USER_STORAGE);
+  const storedApiKey = localStorage.getItem(API_KEY_STORAGE);
+  const previousApiKey = previousMemoryKey
+    ?? (previousKeyUserId === null || previousKeyUserId === previousUserId ? storedApiKey : getApiKey());
+  beginAuthTransition(previousUserId);
+  const transitionGeneration = authGeneration;
+
+  try {
+    const data = await request<{ success: boolean; api_key?: string; user_id: string; plan: string }>('/v1/login', {
+      method: 'POST',
+      body: { user_id: username, password },
+      public: true,
+    });
+    let sameUserKey: string | null = null;
+    let adoptVerifiedLegacyKey = false;
+    if (previousApiKey && data.user_id === previousUserId) {
+      if (previousKeyUserId === data.user_id) {
+        sameUserKey = previousApiKey;
+      } else if (previousKeyUserId === null) {
+        // Unpartitioned legacy keys have no trustworthy owner; confirm against the newly logged-in account.
+        try {
+          const identity = await request<{ user_id?: string; request_key_matches?: boolean }>('/v1/api-key', {
+            skipCache: true,
+            public: true,
+            extraHeaders: { 'X-API-Key': previousApiKey },
+          });
+          if (identity.user_id === data.user_id && identity.request_key_matches === true) {
+            sameUserKey = previousApiKey;
+            adoptVerifiedLegacyKey = true;
+          } else {
+            localStorage.removeItem(API_KEY_STORAGE);
+            localStorage.removeItem(API_KEY_USER_STORAGE);
+            console.warn('Ignoring an unverified legacy API key after login.');
+          }
+        } catch (error) {
+          if (error instanceof Error
+            && /conflicting authentication credentials|invalid API key/i.test(error.message)) {
+            localStorage.removeItem(API_KEY_STORAGE);
+            localStorage.removeItem(API_KEY_USER_STORAGE);
+          }
+          console.warn('Unable to verify the legacy API key for this account; discarding it.', error);
+        }
+      }
+    }
+    setAuth(data.api_key ?? sameUserKey, data.user_id, { adoptVerifiedLegacyKey });
+    return data;
+  } catch (error) {
+    if (authGeneration === transitionGeneration) finishAuthTransition(getUserId());
+    throw error;
+  }
 }
 
 export async function registerUser(
@@ -317,64 +739,160 @@ export async function registerUser(
     public: true,
     extraHeaders,
   });
-  // 注册仅此一次回显 key(用户需抄录给 SDK 用), 不持久化 — 会话走 cookie
-  setAuth(data.user_id);
+  setAuth(data.api_key, data.user_id);
   return data;
 }
 
-// 登出闭环(审计二轮): 必须调后端 /v1/logout 使 HttpOnly cookie 服务端失效,
-// 只清本地会让服务端会话最长残留 7 天
-export async function logout(): Promise<void> {
-  try {
-    await request('/v1/logout', { method: 'POST', public: true, skipCache: true });
-  } catch {
-    // 后端不可达也要完成本地清理 — 尽力而为
-  }
-  clearAuth();
-}
-
 // ── Stats API ──
-export function getStats(): Promise<StatsData> {
-  return request<StatsData>('/v1/stats');
+export function getStats(signal?: AbortSignal): Promise<StatsData> {
+  return request<StatsData>('/v1/stats', { signal });
 }
 
-export function getPublicStats(): Promise<PublicStats> {
-  return request<PublicStats>('/stats/public', { public: true });
+export interface PublicStats {
+  success: boolean;
+  total_memories: number;
+  total_skills: number;
+  total_users: number;
+  total_mcp_tools?: number;
+}
+
+export function getPublicStats(signal?: AbortSignal): Promise<PublicStats> {
+  return request<PublicStats>('/stats/public', { public: true, signal });
 }
 
 // ── Memory API ──
-export function storeMemory(content: string, labels?: string[]): Promise<{ id: number; labels: string[] }> {
+export interface CreateResult {
+  id: number;
+  status?: 'created' | 'exists' | 'deduped' | 'conflict';
+  content_preview?: string;
+  intake?: { importance: number; memory_type: string | null; rationale: string | null };
+  classification?: { auto_labels: string[]; classified: boolean };
+  dedup?: { checked: boolean; matched_existing: { id: number; similarity: number } | null; conflicts_marked: number[] };
+  relations_formed?: number;
+}
+
+export function storeMemory(content: string, labels?: string[]): Promise<CreateResult> {
   invalidateCache('/v1/stats', '/v1/timeline');
-  return request<{ id: number; labels: string[] }>('/v1/remember', {
+  return request<CreateResult>('/v1/remember', {
     method: 'POST',
     body: { content, labels },
   });
 }
 
-export function searchMemories(
+export type SearchMode = 'exact' | 'hybrid' | 'semantic' | 'graph' | 'auto' | 'fusion';
+
+export async function searchMemories(
   query: string,
-  options: { limit?: number; labels?: string[]; min_importance?: number; project?: string; since_days?: number } = {}
-): Promise<{ results: SearchResult[]; total: number }> {
-  return request<{ results: SearchResult[]; total: number }>('/v1/search', {
+  options: { limit?: number; labels?: string[]; min_importance?: number; project?: string; since_days?: number; mode?: SearchMode; strict_filter?: boolean; signal?: AbortSignal } = {}
+): Promise<{ results: SearchResult[]; total: number; score_notes?: { base?: string; adjustments?: Array<{ kind: string; delta: number; applied_to?: number[] }> } }> {
+  const { signal, ...body } = options;
+  const data = await request<{
+    results: SearchResult[];
+    total: number;
+    score_notes?: { base?: string; adjustments?: Array<{ kind: string; delta: number; applied_to?: number[] }> };
+  }>('/v1/search', {
     method: 'POST',
-    body: { query, ...options },
+    body: { query, ...body },
+    signal,
   });
+  const notes = data.score_notes;
+  const results = (data.results || []).map((r) => {
+    const mb = r.matched_by as unknown;
+    const matched = Array.isArray(mb) ? mb : typeof mb === 'string' && mb ? [mb] : undefined;
+    const adjustments = notes?.adjustments?.filter((a) => !a.applied_to || a.applied_to.includes(r.id));
+    return {
+      ...r,
+      matched_by: matched,
+      score_notes: adjustments && adjustments.length ? { base: notes?.base, adjustments } : r.score_notes,
+    };
+  });
+  return { ...data, results };
 }
 
-export function recallMemories(query: string, depth?: number): Promise<{
+export interface RecallTiers {
+  primary: Array<{ id: number; content: string; score?: number }>;
+  contextual: Array<{ id: number; content: string; score?: number }>;
+  experiential: Array<{ id: number; content: string; score?: number }>;
+  hub: Array<{ id: number; content: string; score?: number }>;
+}
+
+export function recallMemories(query: string, depth?: number, signal?: AbortSignal): Promise<{
   query: string;
-  sections: { label: string; items: { id: number; content: string; score: number }[] }[];
+  tiers: RecallTiers;
+  sections: Record<string, Array<{ id: number; content: string; labels?: string[]; relevance?: number[] }>>;
 }> {
   return request('/v1/recall', {
     method: 'POST',
     body: { query, depth },
+    signal,
   });
 }
 
-export function askQuestion(question: string): Promise<{ answer: string; sources: unknown[] }> {
+export function askQuestion(question: string): Promise<{
+  answer: string;
+  memories?: Array<{ id: number; content: string; labels?: string[]; relevance?: number }>;
+  memory_count?: number;
+}> {
   return request('/v1/ask', {
     method: 'POST',
     body: { question },
+    timeoutMs: 90000, // LLM generation can take 15-30s
+  });
+}
+
+// L0 Drive Channel — poll personality's will signals
+export interface DriveSignal {
+  id: number;
+  timestamp: number;
+  intent_type: string;
+  description: string | null;
+  evidence: number[];
+  urgency: string;
+  target_capability: string | null;
+  emotion?: { pleasure: number; arousal: number; dominance: number; label?: string | null } | null;
+  status: string;
+  feedback?: { responded_at: number; executed: boolean; outcome: string; reflection?: string | null } | null;
+  origin_tick: number;
+  expires_at?: number | null;
+  retry_count?: number;
+  retryable?: boolean;
+  enqueued_at_ms?: number;
+  time_budget_ms?: number | null;
+  description_e2e?: string | null;
+}
+
+export function normalizeDriveEnum(v: string | undefined | null): string {
+  if (!v) return '';
+  return v.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
+}
+
+export function getDriveInbox(): Promise<{ signals: DriveSignal[]; stats: Record<string, number>; empty_reason?: string }> {
+  return request('/v1/drive/inbox');
+}
+
+export function getRuntimeStatus(): Promise<{ bound?: boolean; expired?: boolean; agent_id?: string }> {
+  return request('/v1/runtime/status');
+}
+
+export function registerRuntime(agentId: string): Promise<{ success?: boolean; agent_id?: string }> {
+  return request('/v1/runtime/register', {
+    method: 'POST',
+    body: { agent_id: agentId, capabilities: ['ack'] },
+  });
+}
+
+export function heartbeatRuntime(): Promise<{ success?: boolean }> {
+  return request('/v1/runtime/heartbeat', { method: 'POST' });
+}
+
+export function getDrivePolicy(): Promise<{ policy_version: number; bins: number; suppressed: number; stats: Record<string, number> }> {
+  return request('/v1/drive/policy');
+}
+
+export function ackDrive(driveId: number, executed: boolean, outcome: string, reflection?: string): Promise<{ drive_id: number; acknowledged: boolean; learned: string | boolean }> {
+  return request('/v1/drive/ack', {
+    method: 'POST',
+    body: { drive_id: driveId, executed, outcome, reflection },
   });
 }
 
@@ -401,35 +919,67 @@ export function getTimeline(limit?: number, offset?: number): Promise<{
   return request(`/v1/timeline${qs ? '?' + qs : ''}`);
 }
 
-export function deleteMemory(id: number): Promise<{ success: boolean; deleted: number }> {
+export function deleteMemory(id: number): Promise<{ forgotten: number; mode: string }> {
   invalidateCache('/v1/stats', '/v1/timeline');
-  return request<{ success: boolean; deleted: number }>(`/v1/memories/${id}`, {
+  return request<{ forgotten: number; mode: string }>(`/v1/memories/${id}`, {
     method: 'DELETE',
   });
 }
 
-export function batchDeleteMemories(ids: number[]): Promise<{ success: boolean; deleted_count: number }> {
+export function updateMemoryContent(id: number, content: string): Promise<{ updated: number; fields_updated?: string[] }> {
   invalidateCache('/v1/stats', '/v1/timeline');
-  return request<{ success: boolean; deleted_count: number }>('/v1/memories/batch-delete', {
+  return request<{ updated: number; fields_updated?: string[] }>(`/v1/memories/${id}`, {
+    method: 'PUT',
+    body: { content },
+  });
+}
+
+export function importDocument(name: string, content: string): Promise<{ document: string; sections: number; new: number; deduped: number; chars: number }> {
+  invalidateCache('/v1/stats', '/v1/timeline', '/v1/docs');
+  return request('/v1/docs/import', {
+    method: 'POST',
+    body: { name, content },
+  });
+}
+
+export function listDocuments(): Promise<{ success: boolean; documents: number; docs: { id: number; name: string; chars: number; preview: string }[] }> {
+  return request('/v1/docs');
+}
+
+export function batchDeleteMemories(ids: number[]): Promise<{ forgotten: number[]; forgotten_count: number; mode: string }> {
+  invalidateCache('/v1/stats', '/v1/timeline');
+  return request<{ forgotten: number[]; forgotten_count: number; mode: string }>('/v1/memories/batch-delete', {
     method: 'POST',
     body: { ids },
   });
 }
 
 // ── Graph API ──
-export function getNodeRelations(id: number): Promise<{ success: boolean; id: number; relations: number; details: unknown[] }> {
+export function getNodeRelations(id: number): Promise<{ id: number; count: number; relations: { target: number; type: string; strength: number }[] }> {
   return request('/v1/knowledge', {
     method: 'POST',
     body: { id },
   });
 }
 
-export function getGraphAnalysis(): Promise<GraphAnalysis> {
-  return request<GraphAnalysis>('/v1/graph/analysis');
+export interface GraphAnalysis {
+  total_memories: number;
+  relation_count: number;
+  concept_count: number;
+  cluster_count: number;
+  top_labels: { label: string; count: number }[];
+  top_concepts?: { label: string; count: number }[];
+  cluster_analysis: { size: number; top_labels: { label: string; count: number }[] }[];
+  mass_distribution?: { labels: string[]; values: number[] };
+  age_distribution: { labels: string[]; values: number[] };
+}
+
+export function getGraphAnalysis(signal?: AbortSignal): Promise<GraphAnalysis> {
+  return request<GraphAnalysis>('/v1/graph/analysis', { signal });
 }
 
 export function getGraphExport(): Promise<{
-  nodes: { id: number; content: string; labels: string[]; mass: number; timestamp: number }[];
+  nodes: { id: number; content: string; labels: string[]; mass: number; timestamp: number; core_x: number; core_y: number; core_z: number }[];
   edges: { source: number; target: number; relation_type: string; strength: number }[];
   inter_cluster_edges: { source: number; target: number; relation_type: string; strength: number }[];
   concepts: { id: number; label: string; member_count: number; member_ids: number[] }[];
@@ -437,13 +987,48 @@ export function getGraphExport(): Promise<{
   top_labels: unknown[];
   total_nodes: number;
   total_edges: number;
+  truncated?: boolean;
 }> {
-  return request('/v1/graph/export');
+  return request('/v1/graph/export', { timeoutMs: 90000 });
 }
 
 // ── Identity API ──
 export async function getIdentity(): Promise<IdentityResponse> {
   return request<IdentityResponse>('/v1/identity');
+}
+
+// ── Knowledge Cards (D7.2 参数记忆) ──
+export interface KnowledgeCard {
+    domain: string;
+    summary: string;
+    cluster_ids: number[];
+    updated_at: number;
+}
+
+export function getKnowledgeCards(): Promise<{ cards: KnowledgeCard[] }> {
+    return request('/v1/knowledge/cards');
+}
+
+// ── Personality Export/Import (D9 人格导出) ──
+export interface PersonalityPackage {
+    format: string;
+    identity: { name: string; mission: string; author: string };
+    drive_weights: { dominant: string; weights: Record<string, number>; observe_ticks: number; evolution_history: Array<{ tick: number; drive: string; delta: number }> };
+    knowledge_cards: Array<{ domain: string; summary: string; source_count: number }>;
+    core_memories: Array<{ id: number; importance: number; labels: string[]; enforced: boolean; preview: string }>;
+    drive_history_summary: Record<string, unknown>;
+    checksum_hint: string;
+}
+
+export function exportPersonality(): Promise<PersonalityPackage> {
+  return request<PersonalityPackage>('/v1/personality/export');
+}
+
+export function importPersonality(pkg: Partial<PersonalityPackage>): Promise<{ knowledge_cards_restored: number; core_memories_restored: number }> {
+  return request('/v1/personality/import', {
+    method: 'POST',
+    body: pkg,
+  });
 }
 
 export function confirmIdentity(identity: { name: string; mission: string; author: string; personality?: string; language?: string }): Promise<{ success: boolean; identity: IdentityInfo }> {
@@ -466,11 +1051,11 @@ export async function getMySkills(): Promise<SkillData[]> {
   return data.skills ?? [];
 }
 
-export async function createSkill(name: string, skill_md: string): Promise<SkillData> {
+export async function createSkill(name: string, skill_md: string, description?: string, triggers?: string[]): Promise<SkillData> {
   invalidateCache('/v1/skills');
   const data = await request<{ skill: SkillData }>('/v1/skills', {
     method: 'POST',
-    body: { name, skill_md },
+    body: { name, skill_md, ...(description ? { description } : {}), ...(triggers && triggers.length ? { triggers } : {}) },
   });
   return data.skill;
 }
@@ -478,6 +1063,11 @@ export async function createSkill(name: string, skill_md: string): Promise<Skill
 export async function getPublicSkills(): Promise<CommunitySkill[]> {
   const data = await request<{ skills: CommunitySkill[]; total: number }>('/v1/skills/public');
   return data.skills ?? [];
+}
+
+export async function pullPublicSkill(id: number): Promise<{ success: boolean; message: string }> {
+  invalidateCache('/v1/skills');
+  return request(`/v1/skills/public/${id}/pull`, { method: 'POST' });
 }
 
 export async function exploreSkills(): Promise<CommunitySkill[]> {
@@ -493,6 +1083,30 @@ export async function searchSkills(query: string, limit?: number): Promise<Skill
   return data.skills ?? [];
 }
 
+export async function updateSkill(id: number, _name: string, skill_md: string, description?: string, triggers?: string[]): Promise<SkillData> {
+  // 刀2: 解 {skill} envelope — 曾直接返回顶层, updated.id 恒 undefined(审计前端P0-2)
+  invalidateCache('/v1/skills');
+  const data = await request<{ skill: SkillData }>(`/v1/skills/${id}`, {
+    method: 'PUT',
+    body: { skill_md, ...(description !== undefined ? { description } : {}), ...(triggers !== undefined ? { triggers } : {}) },
+  });
+  return data.skill;
+}
+
+export async function deleteSkill(id: number): Promise<{ status?: string }> {
+  invalidateCache('/v1/skills');
+  return request<{ status?: string }>(`/v1/skills/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function publishSkill(id: number): Promise<{ published: number }> {
+  invalidateCache('/v1/skills');
+  return request<{ published: number }>(`/v1/skills/${id}/publish`, {
+    method: 'POST',
+  });
+}
+
 // ── Sub Accounts API ──
 export async function getSubAccounts(): Promise<SubAccount[]> {
   const data = await request<SubAccountsResponse>('/v1/subaccounts');
@@ -500,6 +1114,8 @@ export async function getSubAccounts(): Promise<SubAccount[]> {
 }
 
 export function createSubAccount(user_id: string, password: string): Promise<{ message: string }> {
+  // P1修复:创建后清缓存,避免30s陈旧数据
+  invalidateCache('/v1/subaccounts');
   return request('/v1/subaccounts/create', {
     method: 'POST',
     body: { user_id, password },
@@ -507,6 +1123,7 @@ export function createSubAccount(user_id: string, password: string): Promise<{ m
 }
 
 export function revokeSubAccount(user_id: string): Promise<{ message: string }> {
+  invalidateCache('/v1/subaccounts');
   return request(`/v1/subaccounts/${user_id}/revoke`, {
     method: 'POST',
   });
@@ -514,11 +1131,81 @@ export function revokeSubAccount(user_id: string): Promise<{ message: string }> 
 
 // ── Health ──
 
-export function checkHealth(): Promise<{ status: string }> {
-  return request<{ status: string }>('/health', { public: true });
+export function checkHealth(): Promise<{ status: string; ready?: boolean }> {
+  return request<{ status: string; ready?: boolean }>('/health', { public: true });
 }
 
 // ── Agent Guide ──
 export function getAgentGuide(): Promise<string> {
   return request<string>('/v1/agent-guide', { public: true, rawResponse: true });
+}
+
+// ── Archive API ──
+export interface ArchiveNode {
+  id: number;
+  type: string;      // root/project/doc/code
+  title: string;
+  category: string;
+  chars: number;
+  timestamp: number;
+  status: string;    // active/archived/merged
+  children_count: number;
+  children: ArchiveNode[];
+  content?: string;  // 编辑时从 getArchiveNode 加载
+}
+
+export async function getArchiveTree(): Promise<ArchiveNode[]> {
+  const data = await request<{ tree: ArchiveNode[] }>('/v1/archive/tree', { skipCache: true });
+  return data?.tree || [];
+}
+
+export async function getArchiveNode(id: number): Promise<{ content?: string }> {
+  return request<{ content?: string }>(`/v1/archive/node/${id}`, { skipCache: true });
+}
+
+export function createArchiveNode(parentId: number, nodeType: string, title: string, content: string, category?: string) {
+  invalidateCache('/v1/archive');
+  return request('/v1/archive/node', {
+    method: 'POST',
+    body: { parent_id: parentId, node_type: nodeType, title, content, category },
+  });
+}
+
+export function editArchiveNode(id: number, title?: string, content?: string, category?: string) {
+  invalidateCache('/v1/archive');
+  return request(`/v1/archive/node/${id}`, {
+    method: 'PUT',
+    body: { title, content, category },
+  });
+}
+
+export function deleteArchiveNode(id: number) {
+  invalidateCache('/v1/archive');
+  return request(`/v1/archive/node/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export function mergeArchiveNodes(sourceIds: number[], title: string, category?: string) {
+  invalidateCache('/v1/archive');
+  return request('/v1/archive/merge', {
+    method: 'POST',
+    body: { source_ids: sourceIds, title, category },
+  });
+}
+
+export function moveArchiveNode(nodeId: number, newParentId: number) {
+  invalidateCache('/v1/archive');
+  return request('/v1/archive/move', {
+    method: 'POST',
+    body: { node_id: nodeId, new_parent_id: newParentId },
+  });
+}
+
+export function importArchive(projectName: string, documents: { title: string; content: string; category: string }[]) {
+  invalidateCache('/v1/archive');
+  return request('/v1/archive/import', {
+    method: 'POST',
+    body: { project_name: projectName, documents },
+  });
 }

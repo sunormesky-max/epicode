@@ -35,6 +35,22 @@ pub enum RelationType {
     SameEntity,
 }
 
+impl RelationType {
+    /// 判别值(去重索引用) — 手写match: 新增variant时编译器强制覆盖(无通配分支)
+    pub fn discriminant(&self) -> u8 {
+        match self {
+            RelationType::SimilarTo => 0,
+            RelationType::Contradicts => 1,
+            RelationType::Precedes => 2,
+            RelationType::Contains => 3,
+            RelationType::Related => 4,
+            RelationType::BelongsTo => 5,
+            RelationType::MergedInto => 6,
+            RelationType::SameEntity => 7,
+        }
+    }
+}
+
 impl std::fmt::Display for RelationType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -67,6 +83,9 @@ pub struct KnowledgeGraph {
     /// 加载期抑制: load_relations重放不得灌爆增量队列
     pub loading: std::sync::atomic::AtomicBool,
     adj_index: RwLock<HashMap<TetraId, Vec<usize>>>,
+    /// 查重索引(生产性能修复 2026-09-27): (min(src,tgt),max(src,tgt),rel_type)集合 —
+    /// 大账户加载曾因 exists 线性扫描 O(n²): 25万关系=31亿次比较=33分钟冷启动
+    rel_dedup: RwLock<HashSet<(TetraId, TetraId, u8)>>,
     concepts: RwLock<Vec<ConceptPrototype>>,
     dirty: std::sync::atomic::AtomicBool,
 }
@@ -85,6 +104,7 @@ impl KnowledgeGraph {
             pending_deletes: Mutex::new(Vec::new()),
             loading: std::sync::atomic::AtomicBool::new(false),
             adj_index: RwLock::new(HashMap::new()),
+            rel_dedup: RwLock::new(HashSet::new()),
             concepts: RwLock::new(Vec::new()),
             dirty: std::sync::atomic::AtomicBool::new(false),
         }
@@ -116,6 +136,15 @@ impl KnowledgeGraph {
             .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
+    fn rebuild_rel_dedup(&self, relations: &[Relation]) -> HashSet<(TetraId, TetraId, u8)> {
+        let mut set = HashSet::with_capacity(relations.len() * 2);
+        for r in relations {
+            let rt = r.relation_type.discriminant();
+            set.insert((r.source, r.target, rt));
+            set.insert((r.target, r.source, rt));
+        }
+        set
+    }
     fn rebuild_adj_index(&self, relations: &[Relation]) -> HashMap<TetraId, Vec<usize>> {
         let mut idx: HashMap<TetraId, Vec<usize>> = HashMap::new();
         for (i, r) in relations.iter().enumerate() {
@@ -146,17 +175,18 @@ impl KnowledgeGraph {
         let mut relations = self.relations.write();
         // 归属关系(BelongsTo/MergedInto)做单向去重——只检查相同方向
         // 其他关系(similar/contradicts等)做双向去重
-        let exists = if rel_type == RelationType::BelongsTo || rel_type == RelationType::MergedInto
-        {
-            relations
-                .iter()
-                .any(|r| r.source == source && r.target == target && r.relation_type == rel_type)
-        } else {
-            relations.iter().any(|r| {
-                (r.source == source && r.target == target
-                    || r.source == target && r.target == source)
-                    && r.relation_type == rel_type
-            })
+        // 性能修复(2026-09-27): 原线性扫描 O(n) → 去重索引 O(1);
+        // 大账户(25万关系)冷启动从33分钟降回秒级
+        let rt = rel_type.discriminant();
+        let (key_fwd, key_rev) =
+            if rel_type == RelationType::BelongsTo || rel_type == RelationType::MergedInto {
+                ((source, target, rt), (source, target, rt)) // 单向: 逆键不用
+            } else {
+                ((source, target, rt), (target, source, rt))
+            };
+        let exists = {
+            let dedup = self.rel_dedup.read();
+            dedup.contains(&key_fwd) || (key_fwd != key_rev && dedup.contains(&key_rev))
         };
         if exists {
             return;
@@ -182,7 +212,20 @@ impl KnowledgeGraph {
             created_tick: tick,
         };
         relations.push(new_rel.clone());
-        *self.adj_index.write() = self.rebuild_adj_index(&relations);
+        {
+            let mut dedup = self.rel_dedup.write();
+            dedup.insert(key_fwd);
+            if key_fwd != key_rev {
+                dedup.insert(key_rev);
+            }
+        }
+        // 增量更新邻接索引(原全量rebuild O(n) — 25万关系时每次插入都重建=又一处平方)
+        {
+            let mut adj = self.adj_index.write();
+            let idx = relations.len() - 1;
+            adj.entry(source).or_default().push(idx);
+            adj.entry(target).or_default().push(idx);
+        }
         if !self.loading.load(std::sync::atomic::Ordering::Relaxed) {
             self.pending_upserts.lock().push(new_rel);
         }
@@ -200,6 +243,7 @@ impl KnowledgeGraph {
         relations.retain(|r| r.source != id && r.target != id);
         if relations.len() < before {
             *self.adj_index.write() = self.rebuild_adj_index(&relations);
+            *self.rel_dedup.write() = self.rebuild_rel_dedup(&relations);
             if !self.loading.load(std::sync::atomic::Ordering::Relaxed) {
                 self.pending_deletes.lock().extend(removed);
             }
@@ -215,6 +259,7 @@ impl KnowledgeGraph {
             .retain(|r| !(r.source == source && r.target == target && r.relation_type == rel_type));
         if relations.len() < before {
             *self.adj_index.write() = self.rebuild_adj_index(&relations);
+            *self.rel_dedup.write() = self.rebuild_rel_dedup(&relations);
             if !self.loading.load(std::sync::atomic::Ordering::Relaxed) {
                 self.pending_deletes.lock().push((source, target, rel_type));
             }
@@ -430,6 +475,7 @@ impl KnowledgeGraph {
         let removed = before - relations.len();
         if removed > 0 {
             *self.adj_index.write() = self.rebuild_adj_index(&relations);
+            *self.rel_dedup.write() = self.rebuild_rel_dedup(&relations);
             self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         removed
@@ -770,6 +816,7 @@ impl KnowledgeGraph {
         {
             let relations = self.relations.read();
             *self.adj_index.write() = self.rebuild_adj_index(&relations);
+            *self.rel_dedup.write() = self.rebuild_rel_dedup(&relations);
         }
         Ok(())
     }

@@ -537,6 +537,10 @@ impl UserManager {
         if sub_user_id.is_empty() || sub_user_id.len() > 64 {
             return Err("user_id must be 1-64 characters".into());
         }
+        // 引擎层同样拒绝保留名(审计三轮): handler 层校验之外的纵深防御
+        if Self::is_reserved_id(sub_user_id) {
+            return Err("this username is reserved".into());
+        }
         if !sub_user_id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')

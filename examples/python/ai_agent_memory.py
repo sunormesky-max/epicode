@@ -42,7 +42,7 @@ This example demonstrates an AI agent named "Aurora" that:
 
 Run this example:
     export EPICODE_API_KEY="your-api-key"
-    export EPICODE_BASE_URL="http://localhost:8080/api/v1"  # or your cloud endpoint
+    export EPICODE_BASE_URL="http://127.0.0.1:8080/api/v1"  # local HTTP; use HTTPS for a public endpoint
     python ai_agent_memory.py
 
 ================================================================================
@@ -60,7 +60,7 @@ from epicode.models import Emotion
 # ---------------------------------------------------------------------------
 
 API_KEY = os.environ.get("EPICODE_API_KEY")
-BASE_URL = os.environ.get("EPICODE_BASE_URL", "http://localhost:8080/api/v1")
+BASE_URL = os.environ.get("EPICODE_BASE_URL", "http://127.0.0.1:8080/api/v1")
 
 if not API_KEY:
     print("❌ Set EPICODE_API_KEY before running this example.")

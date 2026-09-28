@@ -371,10 +371,10 @@ pub async fn search(
     let limit = req.limit.unwrap_or(20).min(200);
     let query = req.query.clone();
     let filters = build_rest_search_filters(&req);
-    let is_exact_mode = filters
+    let search_mode = filters
         .as_ref()
-        .map(|f| f.mode == epicode::engine::search_engine::SearchMode::Exact)
-        .unwrap_or(false);
+        .map(|filters| filters.mode)
+        .unwrap_or_default();
     let scheduler = engine.scheduler.clone();
     let engine_for_cb = engine.clone();
     st.active_tasks
@@ -395,16 +395,14 @@ pub async fn search(
             let mut flat: Vec<serde_json::Value> = Vec::with_capacity(results.len());
             let picked_ids: std::collections::HashSet<u64> =
                 results.iter().map(|(id, _, _, _)| *id).collect();
-            // 审计P1-9收口: 响应级标签只看请求模式 — hybrid碰巧有exact命中不得谎称整包bm25_exact
-            // (per-item matched_by 已诚实附加在每条结果上)
-            let is_exact = is_exact_mode;
-            let source_tag: Vec<&str> = if is_exact {
-                vec!["bm25"]
-            } else {
-                vec!["vector"]
-            };
             for (id, sim, _mass, p) in &results {
-                let tier = epicode::engine::smrp::tier_search(*sim, &p.labels);
+                let matched_by = notes.matched_by_map.get(id).map(Vec::as_slice);
+                let tier = epicode::engine::smrp::tier_search_for_mode(
+                    *sim,
+                    &p.labels,
+                    search_mode,
+                    matched_by,
+                );
                 let mut item = epicode::engine::smrp::memory_item(
                     &engine_for_cb,
                     *id,
@@ -412,7 +410,7 @@ pub async fn search(
                     &p.labels,
                     p.timestamp,
                     tier,
-                    source_tag.clone(),
+                    epicode::engine::smrp::search_sources(search_mode, matched_by),
                     *sim,
                     None,
                 );
@@ -439,7 +437,7 @@ pub async fn search(
                 "results": flat,
                 "count": results.len(), "total": results.len(),
                 "score_notes": {
-                    "base": if is_exact { "bm25_exact (no vector, no rerank)" } else { "vector_similarity + rerank (per-item matched_by 见各条)" },
+                    "base": epicode::engine::smrp::search_score_base(search_mode),
                     "adjustments": [
                         {"kind": "cluster_boost", "delta": 0.08, "applied_to": filter_ids(&notes.cluster_boosted)},
                         {"kind": "importance_boost", "delta": 0.06, "applied_to": filter_ids(&notes.importance_boosted)},
@@ -1617,32 +1615,10 @@ pub async fn drive_inbox(
 ) -> (StatusCode, Json<serde_json::Value>) {
     let polled = engine.scheduler().drive_queue().peek_unacked(50); // P1-6: 返回 Pending+Delivered, 不转状态, 让租户能多次 poll 直到 ack
     let stats = engine.scheduler().drive_queue().stats();
-    // P4-5 Drive Status Semantics: annotate each signal with `retryable`.
-    // retryable = true  -> status is Pending or Delivered (non-terminal, agent may act)
-    // retryable = false -> status is terminal (Executed/Rejected/Expired)
-    use epicode::engine::drive::DriveStatus;
+    let e2e_public_key = engine.scheduler().e2e_pubkey();
     let signals: Vec<serde_json::Value> = polled
         .iter()
-        .map(|s| {
-            let retryable = matches!(s.status, DriveStatus::Pending | DriveStatus::Delivered);
-            let mut v = serde_json::to_value(s).unwrap_or_else(|_| serde_json::json!({"id": s.id}));
-            if let Some(obj) = v.as_object_mut() {
-                obj.insert("retryable".to_string(), serde_json::json!(retryable));
-                // γ2: 传输层 E2E — 有端侧公钥则 description 加密, 私钥只在端侧
-                if let Some(pem) = engine.scheduler().e2e_pubkey() {
-                    match epicode::engine::e2e::encrypt_for(s.description.as_bytes(), &pem) {
-                        Ok(ct) => {
-                            obj.insert("description_e2e".to_string(), serde_json::json!(ct));
-                            obj.insert("description".to_string(), serde_json::Value::Null);
-                        }
-                        Err(e) => {
-                            tracing::warn!("[γ2] encrypt failed, fallback plaintext: {}", e);
-                        }
-                    }
-                }
-            }
-            v
-        })
+        .map(|signal| signal.inbox_value_with_e2e(e2e_public_key.as_deref()))
         .collect();
     // Phase 3 收尾: empty_reason 区分自消费 vs 真无信号
     let empty_reason = if signals.is_empty() {

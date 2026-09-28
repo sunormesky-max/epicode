@@ -63,12 +63,17 @@ class EpicodeClient:
         self._base_url = (base_url or self.DEFAULT_BASE_URL).rstrip("/")
         self._timeout = timeout or self.DEFAULT_TIMEOUT
         self._session = session or requests.Session()
-        self._session.headers.update({"X-API-Key": self._api_key, "Content-Type": "application/json"})
+        # 审计三轮中优: 密钥不写入(可能是调用方共享的) Session 全局 headers —
+        # 否则该 Session 后续请求任何主机都会携带密钥; 改为逐请求注入
+        pass
 
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         url = f"{self._base_url}{path}"
         kwargs.setdefault("timeout", self._timeout)
-        resp = self._session.request(method, url, **kwargs)
+        headers = {"Content-Type": "application/json", "X-API-Key": self._api_key}
+        headers.update(kwargs.pop("headers", {}))
+        # 禁止重定向时携带认证头(跨主机泄漏)
+        resp = self._session.request(method, url, headers=headers, allow_redirects=False, **kwargs)
         return self._handle_response(resp)
 
     @staticmethod
