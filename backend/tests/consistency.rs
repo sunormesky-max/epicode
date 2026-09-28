@@ -136,7 +136,7 @@ fn mcp_tools_list_matches_dispatch() {
     let mut declared = BTreeSet::new();
     let mut rest = tl_body;
     while let Some(pos) = rest.find("\"name\": \"") {
-        let after = &rest[pos + 8..];
+        let after = &rest[pos + 9..];
         if let Some(close) = after.find('"') {
             let name = &after[..close];
             if !name.is_empty() {
@@ -163,13 +163,9 @@ fn mcp_tools_list_matches_dispatch() {
 fn smrp_envelope_shared_fields_present() {
     let smrp = read("backend/src/engine/smrp.rs");
     // 信封关键字段: 成功信封必须携带的结构
-    for (field, alt) in [
-        ("structure_version", "structure_version"),
-        ("status", "status"),
-        ("ttl", "ttlMs"),
-    ] {
+    for field in ["schema_version", "tool", "ok", "data", "status"] {
         assert!(
-            smrp.contains(field) || smrp.contains(alt),
+            smrp.contains(&format!("\"{field}\"")),
             "SMRP信封缺关键字段: {field}"
         );
     }
