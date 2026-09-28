@@ -1,56 +1,193 @@
 ﻿// ── Epicode API Client ──
 // All API calls go through /api/* (nginx reverse proxy to backend)
-// Authentication: X-API-Key header
+// Authentication: HttpOnly session cookie in the console; X-API-Key for API clients.
 //
 // 安全说明：
-// - API Key 存储在 localStorage，存在 XSS 窃取风险。
-// - 当前 React 组件不使用 dangerouslySetInnerHTML，CSP 已在 Nginx 配置，
-//   XSS 注入面较小。
-// - 中期建议：迁移到 HttpOnly Cookie + SameSite=Strict + 后端 /v1/auth/session 端点。
+// - Console sessions use the backend's HttpOnly cookie. A legacy API key is kept
+//   only after same-account verification; newly issued keys stay in memory rather
+//   than being persisted in Web Storage.
 
 const API_BASE = '/api';
 
 // ── Auth utilities ──
 const API_KEY_STORAGE = 'epicode_api_key';
+const API_KEY_USER_STORAGE = 'epicode_api_key_user_id';
+// This is only a candidate identity for post-expiry login verification, never authorization.
+const LEGACY_KEY_USER_HINT_STORAGE = 'epicode_legacy_api_key_user_id';
 const USER_ID_STORAGE = 'epicode_user_id';
+export const AUTH_CHANGE_EVENT = 'epicode-auth-change';
+export const AUTH_STORAGE_KEYS = [API_KEY_STORAGE, API_KEY_USER_STORAGE, LEGACY_KEY_USER_HINT_STORAGE, USER_ID_STORAGE] as const;
+let authGeneration = 0;
+let authTransitionInProgress = false;
+const activeRequestControllers = new Set<AbortController>();
+let inMemoryApiKey: string | null = null;
+let inMemoryApiKeyUserId: string | null = null;
 
-export function getApiKey(): string | null {
-  return localStorage.getItem(API_KEY_STORAGE);
+function clearInMemoryApiKey(): void {
+  inMemoryApiKey = null;
+  inMemoryApiKeyUserId = null;
 }
 
-export function getApiKeyInfo(): Promise<{ masked_key: string; hint?: string }> {
+function dispatchAuthChange(userId: string | null, transitioning = false): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(AUTH_CHANGE_EVENT, {
+      detail: { userId, transitioning },
+    }));
+  }
+}
+
+function abortActiveRequests(): void {
+  for (const controller of activeRequestControllers) controller.abort();
+}
+
+function beginAuthTransition(userId: string | null): void {
+  authTransitionInProgress = true;
+  authGeneration++;
+  abortActiveRequests();
+  dispatchAuthChange(userId, true);
+}
+
+function finishAuthTransition(userId: string | null): void {
+  authTransitionInProgress = false;
+  authGeneration++;
+  abortActiveRequests();
+  dispatchAuthChange(userId);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== null && !AUTH_STORAGE_KEYS.some((key) => key === event.key)) return;
+    authTransitionInProgress = false;
+    authGeneration++;
+    abortActiveRequests();
+    invalidateCache();
+    const userId = getUserId();
+    if (inMemoryApiKeyUserId !== null && inMemoryApiKeyUserId !== userId) clearInMemoryApiKey();
+    dispatchAuthChange(userId);
+  });
+}
+
+export function getApiKey(): string | null {
+  if (authTransitionInProgress) return null;
+  const userId = localStorage.getItem(USER_ID_STORAGE);
+  if (!userId) return null;
+
+  if (inMemoryApiKey && inMemoryApiKeyUserId === userId) return inMemoryApiKey;
+  if (inMemoryApiKeyUserId !== null && inMemoryApiKeyUserId !== userId) clearInMemoryApiKey();
+
+  const apiKey = localStorage.getItem(API_KEY_STORAGE);
+  if (!apiKey) return null;
+  const keyUserId = localStorage.getItem(API_KEY_USER_STORAGE);
+  if (keyUserId === null) return null;
+  if (keyUserId !== userId) {
+    localStorage.removeItem(API_KEY_STORAGE);
+    localStorage.removeItem(API_KEY_USER_STORAGE);
+    return null;
+  }
+
+  return apiKey;
+}
+
+export function getApiKeyInfo(): Promise<{ user_id?: string; request_key_matches?: boolean; masked_key: string; hint?: string }> {
   return request('/v1/api-key', { skipCache: true });
 }
 
-export function resetApiKey(password: string): Promise<{ api_key: string; warning?: string }> {
-  return request('/v1/api-key/reset', { method: 'POST', body: { password } });
-}
-
-export function revealApiKey(password: string): Promise<{ api_key: string; note?: string }> {
-  return request('/v1/api-key/reveal', { method: 'POST', body: { password } });
-}
-
-export async function mintStreamTicket(): Promise<string | null> {
-  try {
-    const data = await request<{ ticket?: string; expires_in?: number }>('/v1/stream/ticket', { method: 'POST' });
-    return data.ticket || null;
-  } catch {
-    return null;
+export async function resetApiKey(password: string): Promise<{ api_key: string; warning?: string }> {
+  const requestUserId = getUserId();
+  const requestGeneration = authGeneration;
+  const result = await request<{ api_key: string; warning?: string }>('/v1/api-key/reset', {
+    method: 'POST',
+    body: { password },
+  });
+  if (requestUserId && getUserId() === requestUserId && authGeneration === requestGeneration) {
+    inMemoryApiKey = result.api_key;
+    inMemoryApiKeyUserId = requestUserId;
   }
+  return result;
+}
+
+export async function revealApiKey(password: string): Promise<{ api_key: string; note?: string }> {
+  const requestUserId = getUserId();
+  const requestGeneration = authGeneration;
+  const result = await request<{ api_key: string; note?: string }>('/v1/api-key/reveal', {
+    method: 'POST',
+    body: { password },
+  });
+  if (requestUserId && getUserId() === requestUserId && authGeneration === requestGeneration) {
+    inMemoryApiKey = result.api_key;
+    inMemoryApiKeyUserId = requestUserId;
+  }
+  return result;
+}
+
+export async function mintStreamTicket(): Promise<string> {
+  const data = await request<{ ticket?: string; expires_in?: number }>('/v1/stream/ticket', { method: 'POST' });
+  if (!data.ticket) throw new Error('Stream ticket response did not include a ticket.');
+  return data.ticket;
 }
 
 export function getUserId(): string | null {
   return localStorage.getItem(USER_ID_STORAGE);
 }
 
-export function setAuth(apiKey: string | null, userId: string): void {
-  // 安全债: 登录不再回传api_key(HttpOnly cookie承载会话); key仅注册时首次落地
-  if (apiKey) localStorage.setItem(API_KEY_STORAGE, apiKey);
+export function setAuth(
+  apiKey: string | null,
+  userId: string,
+  options: { adoptVerifiedLegacyKey?: boolean } = {},
+): void {
+  const previousUserId = getUserId();
+  const previousKeyUserId = localStorage.getItem(API_KEY_USER_STORAGE);
+  const storedApiKey = localStorage.getItem(API_KEY_STORAGE);
+  const identityChanged = previousUserId !== userId;
+  const preserveVerifiedLegacyKey = !!storedApiKey && (
+    (options.adoptVerifiedLegacyKey && storedApiKey === apiKey)
+    || (previousUserId === null
+      && localStorage.getItem(LEGACY_KEY_USER_HINT_STORAGE) === userId
+      && previousKeyUserId === userId)
+  );
+
+  if (
+    (identityChanged || (previousKeyUserId !== null && previousKeyUserId !== previousUserId))
+    && !preserveVerifiedLegacyKey
+  ) {
+    localStorage.removeItem(API_KEY_STORAGE);
+    localStorage.removeItem(API_KEY_USER_STORAGE);
+  }
+
+  if (apiKey) {
+    // Keep newly-issued keys in memory; the HttpOnly cookie persists console sessions.
+    inMemoryApiKey = apiKey;
+    inMemoryApiKeyUserId = userId;
+    if (options.adoptVerifiedLegacyKey && storedApiKey === apiKey) {
+      localStorage.setItem(API_KEY_USER_STORAGE, userId);
+    }
+  } else if (inMemoryApiKeyUserId !== userId) {
+    clearInMemoryApiKey();
+  }
+
+  localStorage.removeItem(LEGACY_KEY_USER_HINT_STORAGE);
   localStorage.setItem(USER_ID_STORAGE, userId);
+  if (identityChanged) invalidateCache();
+  finishAuthTransition(userId);
 }
 
-export function clearAuth(): void {
-  localStorage.removeItem(API_KEY_STORAGE);
+export function clearAuth(options: { preserveLegacyApiKey?: boolean } = {}): void {
+  clearInMemoryApiKey();
+  const previousUserId = getUserId();
+  const apiKey = localStorage.getItem(API_KEY_STORAGE);
+  const keyUserId = localStorage.getItem(API_KEY_USER_STORAGE);
+  const preserveLegacyKey = options.preserveLegacyApiKey
+    && previousUserId
+    && apiKey
+    && (keyUserId === null || keyUserId === previousUserId);
+  if (preserveLegacyKey) {
+    // Keep migration possible after expiry, but getApiKey never sends an unowned key.
+    localStorage.setItem(LEGACY_KEY_USER_HINT_STORAGE, previousUserId);
+  } else {
+    localStorage.removeItem(API_KEY_STORAGE);
+    localStorage.removeItem(API_KEY_USER_STORAGE);
+    localStorage.removeItem(LEGACY_KEY_USER_HINT_STORAGE);
+  }
   localStorage.removeItem(USER_ID_STORAGE);
   // P0-CRITICAL: 清除旧的共享 chat_history (不带 user_id 后缀的旧格式)
   // 新格式: epicode_chat_history_<user_id>, 由各组件按 user_id 管理
@@ -59,14 +196,16 @@ export function clearAuth(): void {
   Object.keys(localStorage)
     .filter(k => k === 'epicode_chat_history' || k.startsWith('epicode_chat_history_'))
     .forEach(k => localStorage.removeItem(k));
+  invalidateCache();
+  finishAuthTransition(null);
 }
 
 // B6: 登出 — 调后端清除 HttpOnly cookie + 清 localStorage
 export async function logout(): Promise<void> {
+  beginAuthTransition(getUserId());
   try {
     await request('/v1/logout', { method: 'POST', public: true });
   } catch { /* ignore */ }
-  invalidateCache();
   clearAuth();
 }
 
@@ -152,6 +291,10 @@ export async function request<T>(
   } = {}
 ): Promise<T> {
   const { method = 'GET', body, skipCache = false, public: isPublic = false, extraHeaders, rawResponse, signal: externalSignal, timeoutMs } = options;
+  if (!isPublic && authTransitionInProgress) {
+    throw new Error('Authentication is changing; retry this request after sign-in completes.');
+  }
+  const requestAuthGeneration = authGeneration;
 
   const url = `${API_BASE}${endpoint}`;
   const cacheKey = getCacheKey(url, body);
@@ -177,7 +320,14 @@ export async function request<T>(
   // ── 带超时的 fetch（默认 30s，可自定义）──
   const TIMEOUT_MS = timeoutMs ?? 30000;
   const doFetch = async (attempt = 0): Promise<Response> => {
+    if (requestAuthGeneration !== authGeneration) {
+      throw new Error('Authentication changed while this request was in progress.');
+    }
+    if (!isPublic && authTransitionInProgress) {
+      throw new Error('Authentication is changing; retry this request after sign-in completes.');
+    }
     const controller = new AbortController();
+    activeRequestControllers.add(controller);
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     // F3修复:外部 signal(组件卸载)abort 时,联动 abort fetch
     if (externalSignal) {
@@ -192,6 +342,9 @@ export async function request<T>(
         signal: controller.signal,
         credentials: 'include',  // B6修复:发送 HttpOnly cookie
       });
+      if (requestAuthGeneration !== authGeneration) {
+        throw new Error('Authentication changed while this request was in progress.');
+      }
       // GET 请求遇到 5xx 时自动重试一次（指数退避）
       if (method === 'GET' && (resp.status === 502 || resp.status === 503 || resp.status >= 500) && attempt < 2) {
         await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
@@ -199,6 +352,9 @@ export async function request<T>(
       }
       return resp;
     } catch (err: unknown) {
+      if (requestAuthGeneration !== authGeneration) {
+        throw new Error('Authentication changed while this request was in progress.');
+      }
       const errName = err instanceof Error ? err.name : '';
       // 网络错误（非 abort）：GET 幂等请求重试一次
       if (method === 'GET' && errName !== 'AbortError' && attempt < 1) {
@@ -212,6 +368,7 @@ export async function request<T>(
       throw err;
     } finally {
       clearTimeout(timer);
+      activeRequestControllers.delete(controller);
     }
   };
 
@@ -222,7 +379,7 @@ export async function request<T>(
   }
 
   if (response.status === 401 && !isPublic) {
-    clearAuth();
+    clearAuth({ preserveLegacyApiKey: true });
     invalidateCache();
     if (!window.location.hash.includes('/login')) {
       window.location.hash = '#/login';
@@ -269,10 +426,17 @@ export async function request<T>(
   }
 
   if (rawResponse) {
-    return response.text() as unknown as T;
+    const text = await response.text();
+    if (requestAuthGeneration !== authGeneration) {
+      throw new Error('Authentication changed while this request was in progress.');
+    }
+    return text as unknown as T;
   }
 
   const raw = await response.json() as { protocol?: { ok?: boolean; error?: { message?: string } }; data?: T };
+  if (requestAuthGeneration !== authGeneration) {
+    throw new Error('Authentication changed while this request was in progress.');
+  }
   // SMRP 信封解包（向后兼容非 SMRP 响应：有 protocol 字段则取 data，否则原样）
   let data: T;
   if (raw && typeof raw === 'object' && 'protocol' in raw) {
@@ -293,14 +457,13 @@ export async function request<T>(
 
 // ── MCP JSON-RPC 调用封装（用于 kg_quality 等仅 MCP 暴露的能力）──
 export async function callMcp<T = unknown>(tool: string, args: Record<string, unknown> = {}): Promise<T> {
-  const apiKey = getApiKey();
-  const response = await fetch('/api/mcp', {
+  const raw = await request<{
+    result?: { content?: { type: string; text?: string }[] };
+    error?: { message?: string };
+  }>('/mcp', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(apiKey ? { 'X-API-Key': apiKey } : {}) }, // cookie兜底
-    body: JSON.stringify({ jsonrpc: '2.0', method: 'tools/call', params: { name: tool, arguments: args }, id: 1 }),
+    body: { jsonrpc: '2.0', method: 'tools/call', params: { name: tool, arguments: args }, id: 1 },
   });
-  if (!response.ok) throw new Error(`MCP ${tool} failed: ${response.status}`);
-  const raw = await response.json() as { result?: { content?: { type: string; text?: string }[] }; error?: { message?: string } };
   if (raw.error) throw new Error(raw.error.message || `MCP ${tool} error`);
   // MCP 返回的 content[0].text 是 JSON 字符串，解析后可能再套 SMRP 信封 {data, protocol}
   const textContent = raw.result?.content?.find(c => c.type === 'text')?.text;
@@ -502,13 +665,63 @@ interface SubAccountsResponse {
 
 // ── Auth API ──
 export async function loginUser(username: string, password: string): Promise<{ api_key?: string; user_id: string }> {
-  const data = await request<{ success: boolean; api_key?: string; user_id: string; plan: string }>('/v1/login', {
-    method: 'POST',
-    body: { user_id: username, password },
-    public: true,
-  });
-  setAuth(data.api_key ?? null, data.user_id); // key缺席时靠HttpOnly cookie
-  return data;
+  const previousKeyUserHint = localStorage.getItem(LEGACY_KEY_USER_HINT_STORAGE);
+  const previousUserId = getUserId() ?? previousKeyUserHint;
+  const previousMemoryKey = inMemoryApiKey && inMemoryApiKeyUserId === previousUserId
+    ? inMemoryApiKey
+    : null;
+  const previousKeyUserId = previousMemoryKey
+    ? previousUserId
+    : localStorage.getItem(API_KEY_USER_STORAGE);
+  const storedApiKey = localStorage.getItem(API_KEY_STORAGE);
+  const previousApiKey = previousMemoryKey
+    ?? (previousKeyUserId === null || previousKeyUserId === previousUserId ? storedApiKey : getApiKey());
+  beginAuthTransition(previousUserId);
+  const transitionGeneration = authGeneration;
+
+  try {
+    const data = await request<{ success: boolean; api_key?: string; user_id: string; plan: string }>('/v1/login', {
+      method: 'POST',
+      body: { user_id: username, password },
+      public: true,
+    });
+    let sameUserKey: string | null = null;
+    let adoptVerifiedLegacyKey = false;
+    if (previousApiKey && data.user_id === previousUserId) {
+      if (previousKeyUserId === data.user_id) {
+        sameUserKey = previousApiKey;
+      } else if (previousKeyUserId === null) {
+        // Unpartitioned legacy keys have no trustworthy owner; confirm against the newly logged-in account.
+        try {
+          const identity = await request<{ user_id?: string; request_key_matches?: boolean }>('/v1/api-key', {
+            skipCache: true,
+            public: true,
+            extraHeaders: { 'X-API-Key': previousApiKey },
+          });
+          if (identity.user_id === data.user_id && identity.request_key_matches === true) {
+            sameUserKey = previousApiKey;
+            adoptVerifiedLegacyKey = true;
+          } else {
+            localStorage.removeItem(API_KEY_STORAGE);
+            localStorage.removeItem(API_KEY_USER_STORAGE);
+            console.warn('Ignoring an unverified legacy API key after login.');
+          }
+        } catch (error) {
+          if (error instanceof Error
+            && /conflicting authentication credentials|invalid API key/i.test(error.message)) {
+            localStorage.removeItem(API_KEY_STORAGE);
+            localStorage.removeItem(API_KEY_USER_STORAGE);
+          }
+          console.warn('Unable to verify the legacy API key for this account; discarding it.', error);
+        }
+      }
+    }
+    setAuth(data.api_key ?? sameUserKey, data.user_id, { adoptVerifiedLegacyKey });
+    return data;
+  } catch (error) {
+    if (authGeneration === transitionGeneration) finishAuthTransition(getUserId());
+    throw error;
+  }
 }
 
 export async function registerUser(
@@ -566,7 +779,7 @@ export function storeMemory(content: string, labels?: string[]): Promise<CreateR
   });
 }
 
-export type SearchMode = 'exact' | 'hybrid' | 'semantic' | 'graph';
+export type SearchMode = 'exact' | 'hybrid' | 'semantic' | 'graph' | 'auto' | 'fusion';
 
 export async function searchMemories(
   query: string,
@@ -603,7 +816,7 @@ export interface RecallTiers {
   hub: Array<{ id: number; content: string; score?: number }>;
 }
 
-export function recallMemories(query: string, depth?: number): Promise<{
+export function recallMemories(query: string, depth?: number, signal?: AbortSignal): Promise<{
   query: string;
   tiers: RecallTiers;
   sections: Record<string, Array<{ id: number; content: string; labels?: string[]; relevance?: number[] }>>;
@@ -611,6 +824,7 @@ export function recallMemories(query: string, depth?: number): Promise<{
   return request('/v1/recall', {
     method: 'POST',
     body: { query, depth },
+    signal,
   });
 }
 
@@ -635,12 +849,16 @@ export interface DriveSignal {
   evidence: number[];
   urgency: string;
   target_capability: string | null;
+  emotion?: { pleasure: number; arousal: number; dominance: number; label?: string | null } | null;
   status: string;
+  feedback?: { responded_at: number; executed: boolean; outcome: string; reflection?: string | null } | null;
   origin_tick: number;
   expires_at?: number | null;
   retry_count?: number;
   retryable?: boolean;
   enqueued_at_ms?: number;
+  time_budget_ms?: number | null;
+  description_e2e?: string | null;
 }
 
 export function normalizeDriveEnum(v: string | undefined | null): string {

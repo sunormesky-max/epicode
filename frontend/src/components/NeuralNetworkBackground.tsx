@@ -1,5 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { getApiKey, mintStreamTicket, isAuthenticated } from '@/lib/api';
+import { AUTH_CHANGE_EVENT, isAuthenticated, mintStreamTicket } from '@/lib/api';
+import { createTicketedEventStream } from '@/lib/cognitive-stream';
+import { publishCognitiveState } from './cognitive-context';
+import type { CognitiveState } from './cognitive-context';
 
 /**
  * 意识地平线 — Consciousness Horizon
@@ -374,85 +377,71 @@ export default function NeuralNetworkBackground() {
     window.addEventListener("mousemove", onM, { passive: true });
     document.addEventListener('visibilitychange', onVis);
 
-    // SSE: 消费完整认知状态 — drive 信号触发意识层爆发点亮
-    // F-SSE修复: SPA内登录不刷新页面, 组件挂载时可能尚未认证(user_id未落localStorage),
-    // 一次性连接会让cookie登录用户的整个会话期观测舱静默死页 — 改为认证感知重试
-    let evtSource: EventSource | null = null;
-    let cancelled = false;
-    let sseRetryTimer: ReturnType<typeof setInterval> | null = null;
-    {
-      const connect = async (): Promise<boolean> => {
-        if (cancelled || evtSource) return true;
-        // 工程性: 未登录直接 ambient 模式 — 不发注定 401 的 ticket 请求(匿名访客控制台零错误)
-        if (!isAuthenticated() && !getApiKey()) return false;
-        const ticket = await mintStreamTicket();
-        if (cancelled) return true;
-        const apiKey = getApiKey();
-        const q = ticket
-          ? `ticket=${encodeURIComponent(ticket)}`
-          : (apiKey ? `key=${encodeURIComponent(apiKey)}` : null);
-        if (!q) return false;
+    // SSE tickets are one-use, so every reconnect mints a fresh ticket.
+    const originalTitle = document.title;
+    const stream = createTicketedEventStream({
+      requestTicket: mintStreamTicket,
+      canConnect: isAuthenticated,
+      onConnectionChange: (connected) => { sysState.current.connected = connected; },
+      onError: (error) => console.warn('[SSE] Unable to open cognitive stream; retrying.', error),
+      onMessage: (ev) => {
         try {
-          evtSource = new EventSource(`/api/v1/stream?${q}`);
-          evtSource.onmessage = (ev) => {
-            try {
-              const d = JSON.parse(ev.data);
-              if (d.type === 'drive' && Array.isArray(d.signals)) {
-                if (d.signals.length > 0) driveFlash.current = 1; // 意志信号 → 地平线闪耀
-                window.dispatchEvent(new CustomEvent('drive-update', { detail: d }));
-              }
-              if (d.energy !== undefined) {
-                sysState.current.energy = d.energy;
-                sysState.current.memories = d.memories || 0;
-                sysState.current.pulseIntensity = 0.1 + (d.energy / 10000) * 0.7;
-                sysState.current.connected = true;
-              }
-              if (d.cognitive_status) {
-                document.title = "epicode :: " + d.cognitive_status + " :: e=" + (d.energy || 0);
-                const cognitiveData = {
-                  energy: d.energy ?? 0,
-                  memories: d.memories ?? 0,
-                  clusters: d.clusters ?? 0,
-                  cognitiveStatus: d.cognitive_status ?? 'unknown',
-                  emotion: d.emotion ?? null,
-                  drive: d.drive ?? null,
-                  decisionCount: d.decision_count ?? 0,
-                  latestThought: d.latest_thought ?? '',
-                  learning: d.learning ?? null,
-                  lastReflection: d.last_reflection ?? null,
-                  timestamp: Date.now(),
-                };
-                (window as unknown as { __cognitiveState?: typeof cognitiveData }).__cognitiveState = cognitiveData;
-                window.dispatchEvent(new CustomEvent('cognitive-update', { detail: cognitiveData }));
-              }
-            } catch { /* ignore parse errors */ }
-          };
-          evtSource.onerror = () => { sysState.current.connected = false; };
-        } catch { /* EventSource not supported */ }
-        return true;
-      };
-      connect();
-      let attempts = 0;
-      sseRetryTimer = setInterval(() => {
-        attempts++;
-        if (evtSource || cancelled || attempts > 150) {
-          if (sseRetryTimer) clearInterval(sseRetryTimer);
-          return;
-        }
-        connect().then((ok) => { if (ok && sseRetryTimer) clearInterval(sseRetryTimer); });
-      }, 2000);
-    }
+          const d = JSON.parse(ev.data);
+          if (d.type === 'drive' && Array.isArray(d.signals)) {
+            if (d.signals.length > 0) driveFlash.current = 1;
+            window.dispatchEvent(new CustomEvent('drive-update', { detail: d }));
+          }
+          if (d.energy !== undefined) {
+            sysState.current.energy = d.energy;
+            sysState.current.memories = d.memories || 0;
+            sysState.current.pulseIntensity = 0.1 + (d.energy / 10000) * 0.7;
+            sysState.current.connected = true;
+          }
+          if (d.cognitive_status) {
+            document.title = "epicode :: " + d.cognitive_status + " :: e=" + (d.energy || 0);
+            const cognitiveData: CognitiveState = {
+              energy: d.energy ?? 0,
+              memories: d.memories ?? 0,
+              clusters: d.clusters ?? 0,
+              cognitiveStatus: d.cognitive_status,
+              emotion: d.emotion ?? null,
+              drive: d.drive ?? null,
+              decisionCount: d.decision_count ?? 0,
+              latestThought: d.latest_thought ?? '',
+              learning: d.learning ?? null,
+              lastReflection: d.last_reflection ?? null,
+              timestamp: Date.now(),
+            };
+            publishCognitiveState(cognitiveData);
+          }
+        } catch { /* ignore malformed SSE frames */ }
+      },
+    });
+
+    const resetUserState = () => {
+      sysState.current = { energy: 1.0, memories: 0, pulseIntensity: 0.25, connected: false };
+      driveFlash.current = 0;
+      document.title = originalTitle;
+      window.dispatchEvent(new CustomEvent('drive-update', { detail: { signals: [] } }));
+    };
+    const onAuthChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ transitioning?: boolean }>).detail;
+      stream.pause();
+      resetUserState();
+      if (!detail?.transitioning) stream.resume();
+    };
+    window.addEventListener(AUTH_CHANGE_EVENT, onAuthChange);
+    stream.resume();
 
     return () => {
-      cancelled = true;
-      if (sseRetryTimer) clearInterval(sseRetryTimer);
+      window.removeEventListener(AUTH_CHANGE_EVENT, onAuthChange);
+      stream.stop();
       cancelAnimationFrame(rafRef.current);
       clearTimeout(resizeTimer);
       window.removeEventListener('resize', onR);
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("mousemove", onM);
       document.removeEventListener('visibilitychange', onVis);
-      if (evtSource) evtSource.close();
     };
   }, []);
 

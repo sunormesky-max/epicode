@@ -405,7 +405,7 @@ function QuickStartSection() {
 {`// Store a memory
 fetch('https://epicode.cn/api/v1/remember', {
   method: 'POST',
-  headers: { 'X-API-Key': 'tm-your-api-key' },
+  headers: { 'Content-Type': 'application/json', 'X-API-Key': 'tm-your-api-key' },
   body: JSON.stringify({
     content: 'User prefers dark mode',
     labels: ['preference']
@@ -415,7 +415,7 @@ fetch('https://epicode.cn/api/v1/remember', {
 // Semantic search
 const res = await fetch('/api/v1/search', {
   method: 'POST',
-  headers: { 'X-API-Key': 'tm-your-api-key' },
+  headers: { 'Content-Type': 'application/json', 'X-API-Key': 'tm-your-api-key' },
   body: JSON.stringify({ query: 'user preferences' })
 });
 const { results } = await res.json();`}

@@ -168,7 +168,7 @@ pub enum SearchMode {
     Exact,
     /// 纯向量(关 BM25), 适合概念相似性查询
     Semantic,
-    /// 语义召回 + 知识图谱关联扩展(Phase 1 先走 Hybrid 召回, KG expand 后续完善)
+    /// Hybrid seed retrieval + knowledge-graph PPR expansion.
     Graph,
     /// D2.2 模式路由器: 按查询形态自动选 semantic 或 graph+PPR
     Auto,
@@ -634,7 +634,7 @@ pub type ScoredWithMatch = (TetraId, f64, f64, MemoryPayload, MatchedBy);
 ///
 /// 路由:
 /// - Exact → search_exact() 纯 BM25, 不向量, 返回 matched_by
-/// - Hybrid/Semantic/Graph → 老 search() 逻辑, matched_by 为空 vec
+/// - Hybrid → legacy hybrid search; Semantic/Graph/Auto/Fusion retain their source projections.
 ///
 /// gateway 层调用此函数; 老 search() 保留向后兼容(内部调本函数丢 matched_by)
 pub fn search_with_mode(
@@ -1806,4 +1806,19 @@ fn score_tetra_exact(
 
     let matched_by = compute_matched_by(query_tokens, &t.data, doc_tokens);
     (t.id, score, t.mass, t.data.clone(), matched_by)
+}
+
+#[cfg(test)]
+mod search_mode_tests {
+    use super::SearchMode;
+
+    #[test]
+    fn public_search_modes_parse_to_their_implemented_variants() {
+        assert_eq!(SearchMode::from_str_lossy("hybrid"), SearchMode::Hybrid);
+        assert_eq!(SearchMode::from_str_lossy("exact"), SearchMode::Exact);
+        assert_eq!(SearchMode::from_str_lossy("semantic"), SearchMode::Semantic);
+        assert_eq!(SearchMode::from_str_lossy("graph"), SearchMode::Graph);
+        assert_eq!(SearchMode::from_str_lossy("auto"), SearchMode::Auto);
+        assert_eq!(SearchMode::from_str_lossy("fusion"), SearchMode::Fusion);
+    }
 }

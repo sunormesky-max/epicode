@@ -29,7 +29,7 @@ const API_SECTIONS: { titleKey: string; descKey: string; endpoints: Endpoint[] }
         method: 'POST', path: '/v1/login', descKey: 'docs.section.auth.ep2.desc',
         auth: false,
         body: '{ "user_id": "alice", "password": "secret" }',
-        response: '{ "success": true, "api_key": "tm-...", "user_id": "alice", "plan": "Free" }',
+        response: 'JSON: { "success": true, "user_id": "alice", "plan": "Free", "max_memories": 100 }\nSet-Cookie: epicode_session=<HttpOnly; Secure; SameSite=Strict>',
       },
     ],
   },
@@ -127,6 +127,71 @@ const API_SECTIONS: { titleKey: string; descKey: string; endpoints: Endpoint[] }
         auth: true,
         body: '{ "id": 42 }',
         response: '{ "success": true, "id": 42, "relations": 5, "details": [...] }',
+      },
+    ],
+  },
+  {
+    titleKey: 'docs.section.realtime.title',
+    descKey: 'docs.section.realtime.desc',
+    endpoints: [
+      {
+        method: 'POST', path: '/v1/stream/ticket', descKey: 'docs.section.realtime.ep1.desc',
+        auth: true,
+        response: '{ "success": true, "ticket": "<one-use-ticket>", "expires_in": 120 }',
+      },
+      {
+        method: 'GET', path: '/v1/stream?ticket=YOUR_ONE_USE_TICKET', descKey: 'docs.section.realtime.ep2.desc',
+        auth: true,
+        response: 'text/event-stream — request a fresh ticket for every reconnect',
+      },
+    ],
+  },
+  {
+    titleKey: 'docs.section.drive.title',
+    descKey: 'docs.section.drive.desc',
+    endpoints: [
+      {
+        method: 'GET', path: '/v1/drive/inbox', descKey: 'docs.section.drive.ep1.desc',
+        auth: true,
+        response: 'SMRP envelope: data = { "signals": [DriveSignal + "retryable"], "stats": {...}, "empty_reason": "has_signals" | "no_signals" | "no_pending" | "self_consumed" }',
+      },
+      {
+        method: 'POST', path: '/v1/drive/ack', descKey: 'docs.section.drive.ep2.desc',
+        auth: true,
+        body: '{ "drive_id": 1, "executed": true, "outcome": "Completed", "reflection": "Optional quality feedback" }',
+        response: 'SMRP envelope: data includes drive_id, acknowledged, first_ack, and learned',
+      },
+      {
+        method: 'POST', path: '/v1/runtime/register', descKey: 'docs.section.drive.ep3.desc',
+        auth: true,
+        body: '{ "agent_id": "my-agent", "capabilities": ["ack"], "e2e_enabled": false }',
+        response: 'SMRP envelope when an engine is loaded; otherwise the registration payload is returned directly.',
+      },
+      {
+        method: 'GET', path: '/v1/runtime/status', descKey: 'docs.section.drive.ep5.desc',
+        auth: true,
+        response: 'SMRP envelope when an engine is loaded; otherwise { "bound": true, "agent_id": "my-agent", "e2e_enabled": false, "capabilities": ["ack"], "expired": false } is returned directly.',
+      },
+      {
+        method: 'POST', path: '/v1/runtime/heartbeat', descKey: 'docs.section.drive.ep4.desc',
+        auth: true,
+        response: 'SMRP envelope when an engine is loaded; otherwise { "success": true, "timestamp": 1780000000 } is returned directly. success is false when no binding exists.',
+      },
+      {
+        method: 'POST', path: '/v1/runtime/unregister', descKey: 'docs.section.drive.ep6.desc',
+        auth: true,
+        response: 'SMRP envelope when an engine is loaded; otherwise { "success": true, "removed": true } is returned directly.',
+      },
+    ],
+  },
+  {
+    titleKey: 'docs.section.protocol.title',
+    descKey: 'docs.section.protocol.desc',
+    endpoints: [
+      {
+        method: 'GET', path: '/v1/smrp', descKey: 'docs.section.protocol.ep1.desc',
+        auth: false,
+        response: 'text/html; charset=utf-8 — canonical SMRP 1.0 specification',
       },
     ],
   },
@@ -254,6 +319,7 @@ function EndpointCard({ ep }: { ep: Endpoint }) {
           <p className="text-sm pt-3 sm:hidden" style={{ color: 'var(--text-secondary)' }}>{t(ep.descKey as TranslationKey)}</p>
           {ep.body && (
             <div>
+              <div className="text-xs font-mono mb-2" style={{ color: 'var(--text-tertiary)' }}>Content-Type: application/json</div>
               <div className="text-xs font-mono mb-2 uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Request</div>
               <pre className="text-xs p-3 rounded-lg overflow-x-auto" style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', lineHeight: 1.7 }}>
                 {ep.body}

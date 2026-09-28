@@ -3,6 +3,7 @@
 //! 所有函数接受 `&Engine`，不持有状态，纯构造。
 use crate::domain::tetra::TetraId;
 use crate::engine::scheduler::CreateReport;
+use crate::engine::search_engine::SearchMode;
 use crate::engine::Engine;
 
 /// 经历性质标签：调用方历史交互产生的痕迹（运维/安全/反馈/事件）。
@@ -50,6 +51,35 @@ pub fn tier_search(sim: f64, labels: &[String]) -> &'static str {
     }
 }
 
+/// RRF scores are ranking scores, not similarities on the search tier threshold's scale.
+pub fn tier_search_for_mode(
+    sim: f64,
+    labels: &[String],
+    mode: SearchMode,
+    matched_by: Option<&[String]>,
+) -> &'static str {
+    if is_experiential(labels) {
+        return "experiential";
+    }
+    if mode == SearchMode::Fusion {
+        if let Some(matched_by) = matched_by {
+            if matched_by
+                .iter()
+                .any(|source| matches!(source.as_str(), "vector" | "bm25" | "hybrid"))
+            {
+                return "primary";
+            }
+            if matched_by
+                .iter()
+                .any(|source| matches!(source.as_str(), "kg" | "kg-ppr"))
+            {
+                return "contextual";
+            }
+        }
+    }
+    tier_search(sim, labels)
+}
+
 /// recall 路径 tier：experiential > hub(双命中) > primary(direct) > contextual(assoc)。
 pub fn tier_recall(direct: f64, assoc: f64, labels: &[String]) -> &'static str {
     if is_experiential(labels) {
@@ -60,6 +90,59 @@ pub fn tier_recall(direct: f64, assoc: f64, labels: &[String]) -> &'static str {
         "primary"
     } else {
         "contextual"
+    }
+}
+
+/// Convert the search engine's result provenance to the source vocabulary in SMRP §5.2.
+pub fn search_sources(mode: SearchMode, matched_by: Option<&[String]>) -> Vec<&'static str> {
+    if mode == SearchMode::Exact {
+        return vec!["bm25"];
+    }
+    if mode == SearchMode::Hybrid {
+        return vec!["hybrid"];
+    }
+
+    let mut sources = Vec::new();
+    if let Some(matched_by) = matched_by {
+        for source in matched_by {
+            let canonical = match source.as_str() {
+                "vector" => Some("vector"),
+                "hybrid" => Some("hybrid"),
+                "kg" | "kg-ppr" => Some("kg"),
+                "bm25" => Some("bm25"),
+                "label" => Some("label"),
+                "temporal" => Some("temporal"),
+                "rerank" => Some("rerank"),
+                "reasoning" => Some("reasoning"),
+                _ => None,
+            };
+            if let Some(canonical) = canonical {
+                if !sources.contains(&canonical) {
+                    sources.push(canonical);
+                }
+            }
+        }
+    }
+    if !sources.is_empty() {
+        return sources;
+    }
+
+    match mode {
+        SearchMode::Exact => vec!["bm25"],
+        SearchMode::Hybrid => vec!["hybrid"],
+        SearchMode::Semantic => vec!["vector"],
+        SearchMode::Graph | SearchMode::Auto | SearchMode::Fusion => Vec::new(),
+    }
+}
+
+pub fn search_score_base(mode: SearchMode) -> &'static str {
+    match mode {
+        SearchMode::Exact => "bm25_exact (no vector, no rerank)",
+        SearchMode::Hybrid => "hybrid_vector_similarity + bm25 + intent_rerank",
+        SearchMode::Semantic => "vector_similarity",
+        SearchMode::Graph => "graph_mode (hybrid seeds + available knowledge_graph_ppr)",
+        SearchMode::Auto => "auto_routed_semantic_or_graph_mode",
+        SearchMode::Fusion => "reciprocal_rank_fusion_semantic_and_graph_ppr",
     }
 }
 
@@ -295,4 +378,102 @@ pub fn recall_data(
         "emotion": emotion,
         "clusters_touched": clusters_touched.iter().map(|cid| serde_json::json!({"cluster_id": cid})).collect::<Vec<_>>(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        search_score_base, search_sources, tier_recall, tier_search, tier_search_for_mode,
+    };
+    use crate::engine::search_engine::SearchMode;
+
+    #[test]
+    fn search_tier_uses_the_shared_threshold_and_experiential_labels() {
+        assert_eq!(tier_search(0.3, &[]), "primary");
+        assert_eq!(tier_search(0.299, &[]), "contextual");
+        assert_eq!(tier_search(0.99, &["drive".to_string()]), "experiential");
+    }
+
+    #[test]
+    fn fusion_search_tiers_use_provenance_instead_of_incomparable_rrf_scores() {
+        let direct = vec!["vector".to_string(), "kg-ppr".to_string()];
+        let associated = vec!["kg-ppr".to_string()];
+        assert_eq!(
+            tier_search_for_mode(0.03, &[], SearchMode::Fusion, Some(&direct)),
+            "primary"
+        );
+        assert_eq!(
+            tier_search_for_mode(0.03, &[], SearchMode::Fusion, Some(&associated)),
+            "contextual"
+        );
+        assert_eq!(
+            tier_search_for_mode(
+                0.03,
+                &["drive".to_string()],
+                SearchMode::Fusion,
+                Some(&associated),
+            ),
+            "experiential"
+        );
+    }
+
+    #[test]
+    fn recall_tier_prioritizes_experience_then_direct_and_association_hits() {
+        assert_eq!(
+            tier_recall(0.0, 0.0, &["feedback".to_string()]),
+            "experiential"
+        );
+        assert_eq!(tier_recall(0.2, 0.1, &[]), "hub");
+        assert_eq!(tier_recall(0.2, 0.0, &[]), "primary");
+        assert_eq!(tier_recall(0.0, 0.2, &[]), "contextual");
+        assert_eq!(tier_recall(0.0, 0.0, &[]), "contextual");
+    }
+
+    #[test]
+    fn search_sources_report_the_actual_search_provenance() {
+        let hybrid = SearchMode::Hybrid;
+        let semantic = SearchMode::Semantic;
+        let graph = SearchMode::Graph;
+        let exact = SearchMode::Exact;
+        let auto = SearchMode::Auto;
+        let fusion = SearchMode::Fusion;
+        let sources = |mode, values: &[&str]| {
+            let values = values
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>();
+            search_sources(mode, Some(&values))
+        };
+
+        assert_eq!(search_sources(hybrid, None), vec!["hybrid"]);
+        assert_eq!(search_sources(semantic, None), vec!["vector"]);
+        assert_eq!(sources(graph, &["hybrid", "kg-ppr"]), vec!["hybrid", "kg"]);
+        assert_eq!(sources(auto, &["vector"]), vec!["vector"]);
+        assert_eq!(
+            sources(fusion, &["vector", "hybrid", "kg-ppr"]),
+            vec!["vector", "hybrid", "kg"]
+        );
+        assert_eq!(sources(exact, &["bm25", "alias", "label"]), vec!["bm25"]);
+        assert_eq!(
+            search_score_base(exact),
+            "bm25_exact (no vector, no rerank)"
+        );
+        assert_eq!(search_score_base(semantic), "vector_similarity");
+        assert_eq!(
+            search_score_base(graph),
+            "graph_mode (hybrid seeds + available knowledge_graph_ppr)"
+        );
+        assert_eq!(
+            search_score_base(auto),
+            "auto_routed_semantic_or_graph_mode"
+        );
+        assert_eq!(
+            search_score_base(fusion),
+            "reciprocal_rank_fusion_semantic_and_graph_ppr"
+        );
+        assert_eq!(
+            search_score_base(hybrid),
+            "hybrid_vector_similarity + bm25 + intent_rerank"
+        );
+    }
 }
