@@ -167,6 +167,7 @@ export type TranslationKey =
   // Dashboard - Graph
   | 'dash.graph.title' | 'dash.graph.stats.nodes' | 'dash.graph.stats.edges'
   | 'dash.graph.stats.clusters' | 'dash.graph.filter.placeholder' | 'dash.graph.retry'
+  | 'dash.graph.stats.highways' | 'dash.graph.lod.label'
   | 'dash.graph.node.title' | 'dash.graph.node.relations' | 'dash.graph.node.mass'
   | 'dash.graph.node.labels' | 'dash.graph.node.content' | 'dash.graph.concepts'
   | 'dash.graph.clusters' | 'dash.graph.edge.similar' | 'dash.graph.edge.related'
@@ -794,6 +795,8 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.graph.stats.nodes': '节点',
     'dash.graph.stats.edges': '关系',
     'dash.graph.stats.clusters': '聚类',
+    'dash.graph.stats.highways': '主干道',
+    'dash.graph.lod.label': '边强度下限: 低于此值的边不渲染(大规模图LOD)',
     'dash.graph.filter.placeholder': '过滤...',
     'dash.graph.retry': '重试',
     'dash.graph.node.title': '节点',
@@ -1692,6 +1695,8 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.graph.stats.nodes': 'nodes',
     'dash.graph.stats.edges': 'edges',
     'dash.graph.stats.clusters': 'clusters',
+    'dash.graph.stats.highways': 'highways',
+    'dash.graph.lod.label': 'edge strength floor: weaker edges hidden (LOD)',
     'dash.graph.filter.placeholder': 'Filter...',
     'dash.graph.retry': 'Retry',
     'dash.graph.node.title': 'Node',

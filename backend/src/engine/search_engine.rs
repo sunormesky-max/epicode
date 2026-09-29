@@ -830,6 +830,16 @@ fn search_graph(
         adj.entry(t).or_default();
     }
 
+    // 检索强化(记忆巩固/时间效性): 本轮扩散实际走过的边回报给KG——
+    // 常被检索的"主干道"在均匀衰减下保持高强度(earned importance)
+    {
+        let pairs: Vec<(u64, u64)> = adj
+            .iter()
+            .flat_map(|(u, es)| es.iter().map(move |(v, _)| (*u, *v)))
+            .collect();
+        ctx.knowledge.reinforce_edges(&pairs);
+    }
+
     // 2) 幂迭代
     let mut rank: HashMap<u64, f64> = seed_dist.clone();
     for _ in 0..PPR_ITER {
