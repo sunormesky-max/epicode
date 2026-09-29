@@ -172,6 +172,9 @@ export type TranslationKey =
   | 'dash.graph.node.labels' | 'dash.graph.node.content' | 'dash.graph.concepts'
   | 'dash.graph.clusters' | 'dash.graph.edge.similar' | 'dash.graph.edge.related'
   | 'dash.graph.edge.contradicts' | 'dash.graph.edge.precedes' | 'dash.graph.edge.contains'
+  | 'dash.graph.mode.overview' | 'dash.graph.mode.observe' | 'dash.graph.mode.hint'
+  | 'dash.graph.kpi.expanded' | 'dash.graph.kpi.collapseAll'
+  | 'dash.graph.super.ungrouped' | 'dash.graph.super.clickToExpand' | 'dash.graph.super.clickToCollapse'
   // Dashboard - Memories
   | 'dash.mem.title' | 'dash.mem.tabAll' | 'dash.mem.tabMemories' | 'dash.mem.tabDocs'
   | 'dash.mem.searchResultSuffix' | 'dash.mem.docSuffix' | 'dash.mem.memorySuffix'
@@ -811,6 +814,14 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.graph.edge.contradicts': '矛盾',
     'dash.graph.edge.precedes': '先于',
     'dash.graph.edge.contains': '包含',
+    'dash.graph.mode.overview': '总览',
+    'dash.graph.mode.observe': '观测',
+    'dash.graph.mode.hint': '总览=聚类折叠为星域, 点击下钻(选择性展示); 观测=全量仪器视图',
+    'dash.graph.kpi.expanded': '展开',
+    'dash.graph.kpi.collapseAll': '收起全部',
+    'dash.graph.super.ungrouped': '未分组',
+    'dash.graph.super.clickToExpand': '点击展开下钻',
+    'dash.graph.super.clickToCollapse': '点击收起',
     // Dashboard - Memories
     'dash.mem.title': '记忆',
     'dash.mem.tabAll': '全部',
@@ -1711,6 +1722,14 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.graph.edge.contradicts': 'Contradicts',
     'dash.graph.edge.precedes': 'Precedes',
     'dash.graph.edge.contains': 'Contains',
+    'dash.graph.mode.overview': 'Overview',
+    'dash.graph.mode.observe': 'Observe',
+    'dash.graph.mode.hint': 'Overview = clusters folded as constellations, click to drill in (selective display); Observe = full instrument view',
+    'dash.graph.kpi.expanded': 'expanded',
+    'dash.graph.kpi.collapseAll': 'Collapse all',
+    'dash.graph.super.ungrouped': 'Ungrouped',
+    'dash.graph.super.clickToExpand': 'Click to drill in',
+    'dash.graph.super.clickToCollapse': 'Click to collapse',
     // Dashboard - Memories
     'dash.mem.title': 'Memories',
     'dash.mem.tabAll': 'All',
