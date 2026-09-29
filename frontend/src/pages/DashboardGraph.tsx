@@ -3,7 +3,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading } from '@/components/DashboardUI';
 import { errMsg, getGraphExport, getGraphAnalysis, getNodeRelations, getKgQuality } from '@/lib/api';
 import type { KgQuality } from '@/lib/api';
-import { Search, ZoomIn, ZoomOut, RotateCcw, X, GitBranch, Tag, Activity, ChevronDown, ChevronUp, Route, Navigation, HeartPulse, Target } from 'lucide-react';
+import { Search, ZoomIn, ZoomOut, RotateCcw, X, GitBranch, Tag, Activity, ChevronDown, ChevronUp, Route, Navigation, HeartPulse, Target, Orbit, Eye, ChevronsDownUp } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
 import type { TranslationKey } from '@/i18n/translations';
 
@@ -34,13 +34,26 @@ interface SNode {
 interface SEdge { s: number; t: number; type: string; strength: number; hits: number; }
 interface ClusterInfo { size: number; top_labels: { label: string; count: number }[]; }
 interface HoverInfo { x: number; y: number; node: SNode; }
+// ── 总览模式(渐进披露): 聚类折叠为超节点星域 ──
+// 借鉴星座式语义放射: 任何时刻屏幕只讲一个故事(刘启航方向: 选择性/筛选性展示)
+type ViewMode = 'overview' | 'observe';
+interface SuperNode {
+  ci: number;                 // 聚类索引(-1 = 未分组伪超节点)
+  members: number[];          // 节点 idx, 按 mass 降序
+  visible: Set<number>;       // 展开时实际渲染的成员(top-K, 渐进披露: 数字徽章代替渲染其余)
+  memberCount: number;
+  totalMass: number;
+  topLabels: string[];
+  intraEdges: SEdge[];        // 簇内边(展开时画)
+}
+interface SuperEdge { a: number; b: number; count: number; strength: number; }
 
 export default function DashboardGraph() {
   const { t } = useI18nContext();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [graphMeta, setGraphMeta] = useState<{ truncated: boolean; total: number }>({ truncated: false, total: 0 });
+  const [graphMeta, setGraphMeta] = useState<{ truncated: boolean; total: number; totalEdges: number }>({ truncated: false, total: 0, totalEdges: 0 });
   const [searchQ, setSearchQ] = useState('');
   const [, setZoom] = useState(1);
   const [, setOffset] = useState({ x: 0, y: 0 });
@@ -78,6 +91,14 @@ export default function DashboardGraph() {
   // 图谱健康评估（能力4）
   const [kgQuality, setKgQuality] = useState<KgQuality | null>(null);
   const [kgLoading, setKgLoading] = useState(false);
+  // ── 总览模式 state（渐进披露三态: L0超节点/L1展开/L2节点焦点）──
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    (typeof localStorage !== 'undefined' && localStorage.getItem('epicode.graph.view') === 'observe') ? 'observe' : 'overview');
+  const viewModeRef = useRef<ViewMode>(viewMode);
+  const [expandedClusters, setExpandedClusters] = useState<Set<number>>(new Set());
+  const expandedRef = useRef<Set<number>>(new Set());
+  const [superHover, setSuperHover] = useState<{ x: number; y: number; sp: SuperNode } | null>(null);
+  const superHoverRef = useRef<number | null>(null);
 
   const dragRef = useRef({ x: 0, y: 0 });
   const nodesRef = useRef<SNode[]>([]);
@@ -94,6 +115,11 @@ export default function DashboardGraph() {
   const rafRef = useRef(0);
   const dimsRef = useRef({ w: 1200, h: 720 }); // 自适应容器尺寸
   const visRef = useRef<{ sq: string; set: Set<number> | null }>({ sq: '', set: null }); // 缓存搜索过滤结果
+  // 总览模式数据(refs, draw循环读)
+  const superNodesRef = useRef<SuperNode[]>([]);
+  const superEdgesRef = useRef<SuperEdge[]>([]);
+  const superByCiRef = useRef<Map<number, SuperNode>>(new Map()); // ci → 超节点(draw/hit-test查)
+  const centsRef = useRef<Map<number, { x: number; y: number }>>(new Map()); // 活体质心(超节点位置, 点击命中用)
 
   useEffect(() => {
     let mounted = true;
@@ -101,7 +127,7 @@ export default function DashboardGraph() {
       try {
         const [data, analysis] = await Promise.all([getGraphExport(), getGraphAnalysis()]);
         if (!mounted) return;
-        setGraphMeta({ truncated: !!data.truncated, total: data.total_nodes || (data.nodes || []).length });
+        setGraphMeta({ truncated: !!data.truncated, total: data.total_nodes || (data.nodes || []).length, totalEdges: data.total_edges || 0 });
         const cMap = new Map<number, number>();
         (data.clusters || []).forEach((c: { member_ids: number[] }, ci: number) => {
           (c.member_ids || []).forEach(id => cMap.set(id, ci));
@@ -177,6 +203,46 @@ export default function DashboardGraph() {
         setTopConcepts((data.concepts || []).slice(0, 12));
         // 缓存 clusters 的 member_ids（能力2：聚类下钻看成员）
         clustersDataRef.current = (data.clusters || []) as { member_ids: number[]; top_labels: unknown[] }[];
+        // ── 总览模式数据构建: 聚类→超节点(成员按mass降序, 簇内边预过滤) + 跨簇边聚合为超边 ──
+        {
+          const byCluster = new Map<number, number[]>();
+          for (const n of ns) {
+            const arr = byCluster.get(n.cluster); if (arr) arr.push(n.idx); else byCluster.set(n.cluster, [n.idx]);
+          }
+          const intraByCluster = new Map<number, SEdge[]>();
+          for (const e of es) {
+            const ca = ns[e.s]?.cluster, cb = ns[e.t]?.cluster;
+            if (ca === undefined || cb === undefined || ca !== cb) continue;
+            const arr = intraByCluster.get(ca); if (arr) arr.push(e); else intraByCluster.set(ca, [e]);
+          }
+          const supers: SuperNode[] = [];
+          const EXPAND_K = 48; // 展开时按mass取top-K(选择性展示: 其余用数字徽章代言)
+          for (const [ci, memberIdxs] of byCluster) {
+            const members = memberIdxs.slice().sort((a, b) => ns[b].mass - ns[a].mass);
+            let totalMass = 0; for (const mi of members) totalMass += ns[mi].mass;
+            const labels = (analysis?.cluster_analysis?.[ci]?.top_labels || []).map((tl: { label: string }) => tl.label);
+            supers.push({
+              ci, members, visible: new Set(members.slice(0, EXPAND_K)),
+              memberCount: members.length, totalMass,
+              topLabels: labels.length > 0 ? labels : (members[0] !== undefined ? ns[members[0]].labels.slice(0, 2) : []),
+              intraEdges: intraByCluster.get(ci) || [],
+            });
+          }
+          // 未分组(-1)也构建超节点, 但空簇跳过
+          superNodesRef.current = supers;
+          superByCiRef.current = new Map(supers.map(sp => [sp.ci, sp]));
+          // 超边: 跨簇边按聚类对聚合(count+总强度, 绘制弧线时用)
+          const seMap = new Map<string, SuperEdge>();
+          for (const e of ies) {
+            const ca = ns[e.s]?.cluster, cb = ns[e.t]?.cluster;
+            if (ca === undefined || cb === undefined || ca === cb) continue;
+            const key = `${Math.min(ca, cb)}|${Math.max(ca, cb)}`;
+            let se = seMap.get(key);
+            if (!se) { se = { a: Math.min(ca, cb), b: Math.max(ca, cb), count: 0, strength: 0 }; seMap.set(key, se); }
+            se.count++; se.strength += e.strength;
+          }
+          superEdgesRef.current = Array.from(seMap.values()).sort((x, y) => y.count - x.count);
+        }
         setDataReady(true);
       } catch (e: unknown) { if (mounted) setError(errMsg(e)); }
       if (mounted) setLoading(false);
@@ -317,6 +383,28 @@ export default function DashboardGraph() {
       }
       const hvNode = hv?.node;
 
+      // ── 总览模式(渐进披露): 超节点星域 + 选择性展示 ──
+      // ov=总览开关; eff=有效展开集合(用户展开 ∪ 搜索命中自动展开=查询即过滤)
+      const ov = viewModeRef.current === 'overview';
+      let eff: Set<number> | null = null;
+      const cents = new Map<number, { x: number; y: number }>();
+      if (ov) {
+        eff = expandedRef.current;
+        if (sq && vis) {
+          // 搜索命中所在簇自动展开 — 借鉴PixVision"查询即过滤"
+          eff = new Set(expandedRef.current);
+          vis.forEach(i => { const ci = ns[i]?.cluster; if (ci !== undefined) eff!.add(ci); });
+        }
+        // 活体质心(跟踪模拟中的节点, 超节点随物理呼吸)
+        const acc = new Map<number, { x: number; y: number; n: number }>();
+        for (const n of ns) {
+          const c = acc.get(n.cluster);
+          if (c) { c.x += n.x; c.y += n.y; c.n++; } else acc.set(n.cluster, { x: n.x, y: n.y, n: 1 });
+        }
+        acc.forEach((v, k) => cents.set(k, { x: v.x / v.n, y: v.y / v.n }));
+        centsRef.current = cents;
+      }
+
       // ── 焦点高亮集合计算（邻居/聚类/路径三种模式）──
       // 模式优先级：pathResult > selectedNode 邻居 > clusterMemberIds > 搜索过滤 vis
       let highlightSet: Set<number> | null = null;
@@ -343,10 +431,48 @@ export default function DashboardGraph() {
       }
       const hasFocus = highlightSet !== null;
 
+      // ── 超边弧线(总览): 聚类对聚合为发光曲线 + 流动光点(PixVision式光弧) ──
+      if (ov && eff) {
+        const arr = superEdgesRef.current;
+        const maxCnt = arr.length ? arr[0].count : 1;
+        for (const se of arr) {
+          const pa = cents.get(se.a), pb = cents.get(se.b);
+          if (!pa || !pb) continue;
+          const dx = pb.x - pa.x, dy = pb.y - pa.y;
+          const d = Math.sqrt(dx * dx + dy * dy) || 1;
+          const bow = Math.min(d * 0.22, 60) * ((se.a * 31 + se.b * 17) % 2 === 0 ? 1 : -1);
+          const cxp = (pa.x + pb.x) / 2 - (dy / d) * bow, cyp = (pa.y + pb.y) / 2 + (dx / d) * bow;
+          const hov = superHoverRef.current === se.a || superHoverRef.current === se.b;
+          const strengthN = se.count / maxCnt;
+          const ca = se.a >= 0 ? CLUSTER_COLORS[se.a % CLUSTER_COLORS.length] : '#6b7280';
+          const cb2 = se.b >= 0 ? CLUSTER_COLORS[se.b % CLUSTER_COLORS.length] : '#6b7280';
+          const grad = ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
+          grad.addColorStop(0, ca + '45'); grad.addColorStop(0.5, '#3ecfae55'); grad.addColorStop(1, cb2 + '45');
+          ctx.globalAlpha = Math.min((0.07 + 0.32 * strengthN) * (hov ? 2.2 : 1), 0.92);
+          ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.quadraticCurveTo(cxp, cyp, pb.x, pb.y);
+          ctx.strokeStyle = grad; ctx.lineWidth = hov ? 2 : 0.8 + strengthN * 1.8; ctx.stroke();
+          // 流动光点(强弧常驻, 弱弧hover时)
+          if (strengthN > 0.6 || hov) {
+            const seed = ((se.a * 73856093) ^ (se.b * 19349663)) >>> 0;
+            const phase = (seed % 1000) / 1000;
+            const p = (t * 0.25 + phase) % 1;
+            const qpx = (1 - p) * (1 - p) * pa.x + 2 * (1 - p) * p * cxp + p * p * pb.x;
+            const qpy = (1 - p) * (1 - p) * pa.y + 2 * (1 - p) * p * cyp + p * p * pb.y;
+            ctx.globalAlpha = 0.32;
+            ctx.beginPath(); ctx.arc(qpx, qpy, 5, 0, Math.PI * 2); ctx.fillStyle = '#3ecfae'; ctx.fill();
+            ctx.globalAlpha = 0.9;
+            ctx.beginPath(); ctx.arc(qpx, qpy, 2.2, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill();
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
+
       // 跨簇边（暗，流动效果）— LOD: 弱于下限的边直接不画
       for (const e of ies) {
         if (e.strength < edgeLodRef.current) continue;
         const a = ns[e.s], b = ns[e.t]; if (!a || !b) continue;
+        // 总览: 跨簇真实边只在双展开簇间显示(其余由超边弧线代言)
+        if (ov && eff && (!eff.has(a.cluster) || !eff.has(b.cluster))) continue;
         if (vis && !vis.has(e.s) && !vis.has(e.t)) continue;
         // 焦点模式下，跨簇边非高亮的全暗
         if (hasFocus && !highlightSet!.has(e.s) && !highlightSet!.has(e.t)) continue;
@@ -365,6 +491,11 @@ export default function DashboardGraph() {
       for (const e of es) {
         if (e.strength < edgeLodRef.current) continue;
         const a = ns[e.s], b = ns[e.t]; if (!a || !b) continue;
+        // 总览: 只画双展开簇内的可见成员(top-K)边
+        if (ov && eff) {
+          const sa2 = superByCiRef.current.get(a.cluster), sb2 = superByCiRef.current.get(b.cluster);
+          if (!sa2 || !sb2 || !eff.has(a.cluster) || !eff.has(b.cluster) || !sa2.visible.has(e.s) || !sb2.visible.has(e.t)) continue;
+        }
         if (vis && !vis.has(e.s) && !vis.has(e.t)) continue;
         if (sc !== null && a.cluster !== sc && b.cluster !== sc) continue;
         const isHv = hvNode && (hvNode.idx === e.s || hvNode.idx === e.t);
@@ -449,6 +580,7 @@ export default function DashboardGraph() {
       // 跨簇边：能量脉冲流（更稀疏，连接不同能量域）
       for (const e of ies) {
         const a = ns[e.s], b = ns[e.t]; if (!a || !b) continue;
+        if (ov && eff && (!eff.has(a.cluster) || !eff.has(b.cluster))) continue;
         if (vis && !vis.has(e.s) && !vis.has(e.t)) continue;
         const ec = EDGE_COLORS[e.type] || '#3ecfae';
         const seed = ((e.s * 73856093) ^ (e.t * 19349663)) >>> 0;
@@ -470,6 +602,11 @@ export default function DashboardGraph() {
 
       // 节点（神经元：双层 glow + 能量核 + mass 映射大小）
       for (const n of ns) {
+        // 总览: 折叠簇成员不画(超节点球体代言); 展开簇只画top-K可见成员
+        if (ov && eff) {
+          const sp = superByCiRef.current.get(n.cluster);
+          if (!sp || !eff.has(n.cluster) || !sp.visible.has(n.idx)) continue;
+        }
         const dim = (vis && !vis.has(n.idx)) || (sc !== null && n.cluster !== sc);
         const color = n.cluster >= 0 ? CLUSTER_COLORS[n.cluster % CLUSTER_COLORS.length] : '#6b7280';
         const isHv = hvNode?.idx === n.idx; const isSel = sel?.idx === n.idx;
@@ -557,6 +694,80 @@ export default function DashboardGraph() {
           }
         }
       }
+      ctx.globalAlpha = 1;
+
+      // ── 超节点绘制(总览) ──
+      // L0 折叠态: 星域球体(呼吸辉光+核心球+粒子环+标签+成员数徽章) — "数字代替渲染"
+      // L1 展开态: 中心枢纽小节点(光环+top-K徽章) — 点击收起
+      if (ov && eff) {
+        for (const sp of superNodesRef.current) {
+          if (sp.memberCount === 0) continue;
+          const c = cents.get(sp.ci); if (!c) continue;
+          const color = sp.ci >= 0 ? CLUSTER_COLORS[sp.ci % CLUSTER_COLORS.length] : '#6b7280';
+          const isExp = eff.has(sp.ci);
+          const isHov = superHoverRef.current === sp.ci;
+          if (!isExp) {
+            const r = Math.max(15, Math.min(42, 12 + Math.sqrt(sp.memberCount) * 3.4));
+            const rr = r * (1 + Math.sin(t * 1.4 + sp.ci * 1.7) * 0.05); // 呼吸
+            // 外层大辉光
+            const glow = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, rr * 2.6);
+            glow.addColorStop(0, color + (isHov ? '55' : '26'));
+            glow.addColorStop(0.5, color + '10');
+            glow.addColorStop(1, color + '00');
+            ctx.globalAlpha = isHov ? 0.95 : 0.8;
+            ctx.beginPath(); ctx.arc(c.x, c.y, rr * 2.6, 0, Math.PI * 2);
+            ctx.fillStyle = glow; ctx.fill();
+            // 核心球(径向渐变=球体感)
+            const core = ctx.createRadialGradient(c.x - rr * 0.3, c.y - rr * 0.3, rr * 0.1, c.x, c.y, rr);
+            core.addColorStop(0, '#ffffff');
+            core.addColorStop(0.28, color);
+            core.addColorStop(1, color + '40');
+            ctx.globalAlpha = isHov ? 1 : 0.9;
+            ctx.beginPath(); ctx.arc(c.x, c.y, rr, 0, Math.PI * 2);
+            ctx.fillStyle = core; ctx.fill();
+            // 环绕粒子(椭圆轨道)
+            ctx.globalAlpha = 0.55;
+            for (let k = 0; k < 3; k++) {
+              const ang = t * 0.5 + (k * Math.PI * 2) / 3 + sp.ci;
+              ctx.beginPath();
+              ctx.arc(c.x + Math.cos(ang) * (rr + 7), c.y + Math.sin(ang) * (rr + 7) * 0.35, 1.6, 0, Math.PI * 2);
+              ctx.fillStyle = '#ffffff'; ctx.fill();
+            }
+            // 标签 + 数字徽章
+            ctx.globalAlpha = 1; ctx.textAlign = 'center';
+            ctx.font = '700 12px JetBrains Mono, monospace';
+            ctx.fillStyle = '#f0f0f5';
+            ctx.shadowColor = color; ctx.shadowBlur = isHov ? 12 : 6;
+            const labelText = sp.topLabels.length > 0 ? sp.topLabels[0] : (sp.ci >= 0 ? `C${sp.ci + 1}` : 'Ungrouped');
+            ctx.fillText(labelText, c.x, c.y - rr - 12);
+            ctx.shadowBlur = 0;
+            ctx.font = '500 10px JetBrains Mono, monospace';
+            ctx.fillStyle = color;
+            ctx.fillText(`${sp.memberCount} · ${sp.totalMass.toFixed(0)}m`, c.x, c.y + rr + 16);
+          } else {
+            // 展开簇枢纽: 小核 + 脉冲环 + top-K徽章
+            const hr = isHov ? 8 : 6;
+            const ring = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, hr * 3);
+            ring.addColorStop(0, color + '50'); ring.addColorStop(1, color + '00');
+            ctx.globalAlpha = 0.7;
+            ctx.beginPath(); ctx.arc(c.x, c.y, hr * 3, 0, Math.PI * 2);
+            ctx.fillStyle = ring; ctx.fill();
+            ctx.globalAlpha = 0.92;
+            ctx.beginPath(); ctx.arc(c.x, c.y, hr, 0, Math.PI * 2);
+            ctx.fillStyle = color; ctx.fill();
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath(); ctx.arc(c.x, c.y, hr + 4 + Math.sin(t * 2 + sp.ci) * 2, 0, Math.PI * 2);
+            ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.stroke();
+            // top-K徽章: 渐进披露数字
+            const shown = Math.min(sp.visible.size, sp.memberCount);
+            ctx.globalAlpha = 0.85; ctx.textAlign = 'center';
+            ctx.font = '500 9px JetBrains Mono, monospace';
+            ctx.fillStyle = color;
+            ctx.fillText(sp.memberCount > shown ? `${shown}/${sp.memberCount}` : `${sp.memberCount}`, c.x, c.y - hr - 7);
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
       ctx.globalAlpha = 1; ctx.restore();
     }
 
@@ -604,6 +815,28 @@ export default function DashboardGraph() {
       if (d < 10 && d < closestD) { closest = n; closestD = d; }
     }
     return closest;
+  }, []);
+  // ── 总览: 超节点命中检测(折叠球体大半径 / 展开枢纽小半径) ──
+  const findSuperAt = useCallback((mx: number, my: number): number | null => {
+    for (const sp of superNodesRef.current) {
+      if (sp.memberCount === 0) continue;
+      const c = centsRef.current.get(sp.ci); if (!c) continue;
+      const expNow = expandedRef.current.has(sp.ci);
+      const r = expNow ? 12 : Math.max(15, Math.min(42, 12 + Math.sqrt(sp.memberCount) * 3.4)) + 6;
+      const d = Math.sqrt((c.x - mx) ** 2 + (c.y - my) ** 2);
+      if (d < r) return sp.ci;
+    }
+    return null;
+  }, []);
+  // 节点在总览下是否可见(用户展开的簇 + top-K成员)
+  const nodeVisibleInOverview = useCallback((n: SNode): boolean => {
+    const sp = superByCiRef.current.get(n.cluster);
+    return !!sp && expandedRef.current.has(n.cluster) && sp.visible.has(n.idx);
+  }, []);
+  const toggleExpand = useCallback((ci: number) => {
+    const next = new Set(expandedRef.current);
+    if (next.has(ci)) next.delete(ci); else next.add(ci);
+    expandedRef.current = next; setExpandedClusters(next);
   }, []);
 
   // ── BFS 路径查找（前端图算法，用已加载的 edges）──
@@ -686,9 +919,31 @@ export default function DashboardGraph() {
     const rect = canvas.getBoundingClientRect();
     const { w: W, h: H } = dimsRef.current;
     const sx = (e.clientX - rect.left) / rect.width * W, sy = (e.clientY - rect.top) / rect.height * H;
-    const node = findNodeAt((sx - offsetRef.current.x) / zoomRef.current, (sy - offsetRef.current.y) / zoomRef.current);
-    if (node) { hoverRef.current = { x: e.clientX, y: e.clientY, node }; setHover(hoverRef.current); canvas.style.cursor = 'pointer'; }
-    else { if (hoverRef.current) { hoverRef.current = null; setHover(null); } canvas.style.cursor = 'grab'; /* else分支dragging恒false(CodeQL) */ }
+    const gx = (sx - offsetRef.current.x) / zoomRef.current, gy = (sy - offsetRef.current.y) / zoomRef.current;
+    let node = findNodeAt(gx, gy);
+    // 总览: 折叠簇/不可见成员不响应hover
+    if (node && viewModeRef.current === 'overview' && !nodeVisibleInOverview(node)) node = null;
+    if (node) {
+      superHoverRef.current = null; setSuperHover(null);
+      hoverRef.current = { x: e.clientX, y: e.clientY, node }; setHover(hoverRef.current); canvas.style.cursor = 'pointer';
+      } else if (viewModeRef.current === 'overview') {
+        const sci = findSuperAt(gx, gy);
+        if (sci !== null) {
+          hoverRef.current = null; setHover(null);
+          const sp = superByCiRef.current.get(sci) || null;
+          superHoverRef.current = sci;
+          setSuperHover(sp ? { x: e.clientX, y: e.clientY, sp } : null);
+          canvas.style.cursor = 'pointer';
+        } else {
+        superHoverRef.current = null; setSuperHover(null);
+        if (hoverRef.current) { hoverRef.current = null; setHover(null); }
+        canvas.style.cursor = 'grab';
+      }
+    } else {
+      superHoverRef.current = null; setSuperHover(null);
+      if (hoverRef.current) { hoverRef.current = null; setHover(null); }
+      canvas.style.cursor = 'grab'; /* else分支dragging恒false(CodeQL) */
+    }
     refresh();
   };
   const handleClick = (e: React.MouseEvent) => {
@@ -696,7 +951,9 @@ export default function DashboardGraph() {
     const rect = canvas.getBoundingClientRect();
     const { w: W, h: H } = dimsRef.current;
     const sx = (e.clientX - rect.left) / rect.width * W, sy = (e.clientY - rect.top) / rect.height * H;
-    const node = findNodeAt((sx - offsetRef.current.x) / zoomRef.current, (sy - offsetRef.current.y) / zoomRef.current);
+    const gx = (sx - offsetRef.current.x) / zoomRef.current, gy = (sy - offsetRef.current.y) / zoomRef.current;
+    let node = findNodeAt(gx, gy);
+    if (node && viewModeRef.current === 'overview' && !nodeVisibleInOverview(node)) node = null;
     if (node) {
       // 路径模式：点第二个节点计算路径
       if (pathModeRef.current && pathStartRef.current !== null) {
@@ -724,6 +981,27 @@ export default function DashboardGraph() {
       clusterMemberIdsRef.current = null; setClusterMembers(null);
       pathResultRef.current = null; setPathResult(null);
       pathStartRef.current = null; setPathStart(null);
+      // 总览"答案画布": 选中节点 → 自动展开最强邻居所在簇(一次只讲一个故事)
+      if (viewModeRef.current === 'overview') {
+        const neighborClusters = new Map<number, number>();
+        for (const ed of edgesRef.current) {
+          let oIdx = -1;
+          if (ed.s === node.idx) oIdx = ed.t; else if (ed.t === node.idx) oIdx = ed.s; else continue;
+          const oci = nodesRef.current[oIdx]?.cluster;
+          if (oci === undefined || oci === node.cluster) continue;
+          if (ed.strength > (neighborClusters.get(oci) || 0)) neighborClusters.set(oci, ed.strength);
+        }
+        const topCis = Array.from(neighborClusters.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3).map(x => x[0]);
+        if (topCis.length > 0 || !expandedRef.current.has(node.cluster)) {
+          const next = new Set(expandedRef.current);
+          next.add(node.cluster); topCis.forEach(ci => next.add(ci));
+          expandedRef.current = next; setExpandedClusters(next);
+        }
+      }
+      refresh();
+    } else if (viewModeRef.current === 'overview' && findSuperAt(gx, gy) !== null) {
+      // 总览: 点超节点 = 展开(L0→L1) / 收起(L1→L0)
+      toggleExpand(findSuperAt(gx, gy)!);
       refresh();
     } else {
       // 点空白：清除所有焦点
@@ -744,6 +1022,14 @@ export default function DashboardGraph() {
     pathModeRef.current = false;
     setZoom(1); setOffset({ x: 0, y: 0 }); setSelectedCluster(null); setSelectedNode(null);
     setClusterMembers(null); setPathResult(null); setPathStart(null); setPathMode(false);
+    // 总览: 重置=回到L0星域(全部收起)
+    if (viewModeRef.current === 'overview') { expandedRef.current = new Set(); setExpandedClusters(new Set()); }
+  };
+  // 模式切换(总览↔观测), localStorage持久化
+  const switchMode = (m: ViewMode) => {
+    viewModeRef.current = m; setViewMode(m);
+    try { localStorage.setItem('epicode.graph.view', m); } catch { /* 私密模式等 */ }
+    refresh();
   };
 
   if (loading) return (
@@ -812,8 +1098,24 @@ export default function DashboardGraph() {
                   )}
                 </span>
               </div>
-              {/* 第二行：搜索 + 缩放 + 重置 */}
+              {/* 第二行：模式切换 + 搜索 + 缩放 + 重置 */}
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                {/* 总览/观测 双模式(渐进披露 vs 全量仪器观) */}
+                <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(62,207,174,0.15)' }} title={t('dash.graph.mode.hint')}>
+                  <button onClick={() => switchMode('overview')} style={{
+                    display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', cursor: 'pointer',
+                    background: viewMode === 'overview' ? 'rgba(62,207,174,0.16)' : 'rgba(62,207,174,0.03)',
+                    border: 'none', color: viewMode === 'overview' ? 'var(--accent-cyan-bright)' : 'var(--text-tertiary)',
+                    fontSize: 11, fontFamily: 'var(--font-heading)', fontWeight: 600, letterSpacing: '0.05em',
+                  }}><Orbit size={12} />{t('dash.graph.mode.overview')}</button>
+                  <button onClick={() => switchMode('observe')} style={{
+                    display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', cursor: 'pointer',
+                    background: viewMode === 'observe' ? 'rgba(62,207,174,0.16)' : 'rgba(62,207,174,0.03)',
+                    border: 'none', borderLeft: '1px solid rgba(62,207,174,0.12)',
+                    color: viewMode === 'observe' ? 'var(--accent-cyan-bright)' : 'var(--text-tertiary)',
+                    fontSize: 11, fontFamily: 'var(--font-heading)', fontWeight: 600, letterSpacing: '0.05em',
+                  }}><Eye size={12} />{t('dash.graph.mode.observe')}</button>
+                </div>
                 <div style={{ position: 'relative', flex: '0 1 160px' }}>
                   <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
                   <input type="text" value={searchQ} onChange={e => { searchQRef.current = e.target.value; setSearchQ(e.target.value); refresh(); }} placeholder={t('dash.graph.filter.placeholder')}
@@ -905,9 +1207,12 @@ export default function DashboardGraph() {
                       const color = EDGE_COLORS[s.type] || '#3ecfae';
                       return (
                         <button key={i} onClick={() => {
-                          // 点击最强关联 → 定位到目标节点
+                          // 点击最强关联 → 定位到目标节点(总览下先展开其所在簇)
                           const targetNode = nodesRef.current.find(n => n.id === s.target);
-                          if (targetNode) focusNode(targetNode.idx);
+                          if (targetNode) {
+                            if (viewModeRef.current === 'overview' && !expandedRef.current.has(targetNode.cluster)) toggleExpand(targetNode.cluster);
+                            focusNode(targetNode.idx);
+                          }
                         }} style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', marginBottom: 3, padding: '4px 6px', background: 'rgba(62,207,174,0.03)', border: '1px solid rgba(62,207,174,0.08)', borderRadius: 6, cursor: 'pointer', textAlign: 'left' }}>
                           <span style={{ color, fontSize: 9, padding: '1px 4px', borderRadius: 3, background: `${color}15` }}>{EDGE_LABEL_KEYS[s.type] ? t(EDGE_LABEL_KEYS[s.type] as TranslationKey) : s.type}</span>
                           <span style={{ color: 'var(--text-secondary)', fontSize: 10, fontFamily: 'var(--font-mono)', flex: 1 }}>#{s.target}</span>
@@ -1083,15 +1388,18 @@ export default function DashboardGraph() {
               </div>
             )}
 
-            {/* ── 右下角聚类选择器（保留浮动，玻璃态升级）── */}
+            {/* ── 右下角聚类芯片（总览=展开/收起下钻, 观测=过滤高亮）── */}
             <div style={{
               ...glassPanel,
               position: 'absolute', bottom: 16, right: 16, zIndex: 10,
               padding: '6px 10px',
             }}>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxWidth: 240 }}>
-                {Array.from({ length: Math.min(stats.clusters, 15) }, (_, i) => (
+                {Array.from({ length: Math.min(stats.clusters, 15) }, (_, i) => {
+                  const isExp = viewMode === 'overview' && expandedClusters.has(i);
+                  return (
                   <button key={i} onClick={() => {
+                    if (viewMode === 'overview') { toggleExpand(i); refresh(); return; }
                     const v = selectedCluster === i ? null : i;
                     selectedClusterRef.current = v; setSelectedCluster(v);
                     setSelectedNode(null); selectedNodeRef.current = null;
@@ -1115,16 +1423,36 @@ export default function DashboardGraph() {
                     }
                     refresh();
                   }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', background: 'none', border: 'none', padding: 0, opacity: selectedCluster !== null && selectedCluster !== i ? 0.3 : 1 }}>
-                    <div style={{ width: 9, height: 9, borderRadius: 2, background: CLUSTER_COLORS[i % CLUSTER_COLORS.length], boxShadow: `0 0 6px ${CLUSTER_COLORS[i % CLUSTER_COLORS.length]}` }} />
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>{i + 1}</span>
+                    style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', background: 'none', border: 'none', padding: 0, opacity: viewMode === 'observe' && selectedCluster !== null && selectedCluster !== i ? 0.3 : (isExp ? 1 : 0.75) }}>
+                    <div style={{ width: isExp ? 11 : 9, height: isExp ? 11 : 9, borderRadius: isExp ? '50%' : 2, background: CLUSTER_COLORS[i % CLUSTER_COLORS.length], boxShadow: isExp ? `0 0 8px ${CLUSTER_COLORS[i % CLUSTER_COLORS.length]}` : 'none' }} />
+                    <span style={{ color: isExp ? 'var(--text-primary)' : 'var(--text-secondary)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>{i + 1}</span>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
-            {/* ── 底部可折叠统计面板（默认收起）── */}
-            {(topConcepts.length > 0 || clusterInfo.length > 0) && (
+            {/* ── 总览KPI缎带(底部): 真实数据徽章 — 借鉴PixVision"数字代替渲染" ── */}
+            {viewMode === 'overview' && (
+              <div style={{
+                ...glassPanel,
+                position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 10,
+                padding: '7px 16px', display: 'flex', alignItems: 'center', gap: 14, maxWidth: 'calc(100vw - 80px)',
+              }}>
+                <Kpi label={t('dash.graph.stats.nodes')} value={graphMeta.truncated ? `${stats.nodes}/${graphMeta.total}` : String(stats.nodes)} />
+                <Kpi label={t('dash.graph.stats.clusters')} value={String(stats.clusters)} />
+                <Kpi label={t('dash.graph.stats.edges')} value={String(graphMeta.totalEdges || stats.edges)} />
+                {stats.highways > 0 && <Kpi label={t('dash.graph.stats.highways')} value={String(stats.highways)} />}
+                <Kpi label={t('dash.graph.kpi.expanded')} value={`${expandedClusters.size}/${stats.clusters}`} />
+                <button onClick={() => { expandedRef.current = new Set(); setExpandedClusters(new Set()); refresh(); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(62,207,174,0.06)', border: '1px solid rgba(62,207,174,0.18)', color: 'var(--accent-cyan-bright)', padding: '4px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 10, fontFamily: 'var(--font-heading)', letterSpacing: '0.05em' }}>
+                  <ChevronsDownUp size={12} />{t('dash.graph.kpi.collapseAll')}
+                </button>
+              </div>
+            )}
+
+            {/* ── 底部可折叠统计面板（默认收起, 观测模式专属）── */}
+            {viewMode === 'observe' && (topConcepts.length > 0 || clusterInfo.length > 0) && (
               <>
                 {/* 展开/收起按钮 */}
                 <button
@@ -1190,6 +1518,29 @@ export default function DashboardGraph() {
               </>
             )}
 
+            {/* ── 总览: 超节点hover tooltip(标签+成员数+操作提示) ── */}
+            {superHover && !dragging && (() => {
+              const sp = superHover.sp;
+              const color = sp.ci >= 0 ? CLUSTER_COLORS[sp.ci % CLUSTER_COLORS.length] : '#6b7280';
+              const isExp = expandedClusters.has(sp.ci);
+              return (
+                <div style={{ position: 'fixed', left: Math.min(superHover.x + 12, window.innerWidth - 280), top: superHover.y - 8, ...glassPanel, padding: '8px 12px', maxWidth: 260, pointerEvents: 'none', zIndex: 100 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}` }} />
+                    <span style={{ color: 'var(--text-primary)', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-heading)' }}>
+                      {sp.topLabels.length > 0 ? sp.topLabels.slice(0, 2).join(' · ') : (sp.ci >= 0 ? `C${sp.ci + 1}` : t('dash.graph.super.ungrouped'))}
+                    </span>
+                  </div>
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
+                    {sp.memberCount} {t('dash.graph.stats.nodes')} · {sp.totalMass.toFixed(0)} mass
+                  </div>
+                  <div style={{ color, fontSize: 10, marginTop: 3 }}>
+                    {isExp ? t('dash.graph.super.clickToCollapse') : t('dash.graph.super.clickToExpand')}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* ── hover 轻量 tooltip（保留）── */}
             {hover && !dragging && (
               <div style={{ position: 'fixed', left: Math.min(hover.x + 12, window.innerWidth - 280), top: hover.y - 8, ...glassPanel, padding: '8px 12px', maxWidth: 260, pointerEvents: 'none', zIndex: 100 }}>
@@ -1216,4 +1567,13 @@ export default function DashboardGraph() {
 const tb: React.CSSProperties = { background: 'rgba(62,207,174,0.05)', border: '1px solid rgba(62,207,174,0.12)', color: 'var(--accent-cyan-bright)', padding: 5, borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 function Metric({ label, value, color }: { label: string; value: string; color: string }) {
   return <div style={{ background: `${color}0d`, border: `1px solid ${color}22`, borderRadius: 8, padding: '6px 8px', textAlign: 'center' }}><div style={{ color: '#6b7280', fontSize: 10, marginBottom: 2 }}>{label}</div><div style={{ color: '#f0f0f5', fontSize: 14, fontWeight: 600 }}>{value}</div></div>;
+}
+// 总览KPI缎带项(数字徽章 — "数字代替渲染")
+function Kpi({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 44 }}>
+      <span style={{ color: 'var(--accent-cyan-bright)', fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, lineHeight: 1.2 }}>{value}</span>
+      <span style={{ color: 'var(--text-tertiary)', fontSize: 9, fontFamily: 'var(--font-heading)', letterSpacing: '0.08em' }}>{label}</span>
+    </div>
+  );
 }
