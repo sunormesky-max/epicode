@@ -31,7 +31,7 @@ interface SNode {
   mass: number; labels: string[]; content: string;
   cluster: number; timestamp: number;
 }
-interface SEdge { s: number; t: number; type: string; strength: number; }
+interface SEdge { s: number; t: number; type: string; strength: number; hits: number; }
 interface ClusterInfo { size: number; top_labels: { label: string; count: number }[]; }
 interface HoverInfo { x: number; y: number; node: SNode; }
 
@@ -45,7 +45,10 @@ export default function DashboardGraph() {
   const [, setZoom] = useState(1);
   const [, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
-  const [stats, setStats] = useState({ nodes: 0, edges: 0, clusters: 0, interCluster: 0 });
+  const [stats, setStats] = useState({ nodes: 0, edges: 0, clusters: 0, interCluster: 0, highways: 0 });
+  // 边强度LOD下限: 大图客户端剔除弱边(渲染循环读ref, 滑杆读写双份=zoom/offset同款模式)
+  const [edgeLod, setEdgeLod] = useState(0);
+  const edgeLodRef = useRef(0);
   const [selectedCluster, setSelectedCluster] = useState<number | null>(null);
   const [clusterInfo, setClusterInfo] = useState<ClusterInfo[]>([]);
   const [selectedNode, setSelectedNode] = useState<SNode | null>(null);
@@ -157,7 +160,7 @@ export default function DashboardGraph() {
           const si = idToIdx.get(re.source), ti = idToIdx.get(re.target);
           if (si !== undefined && ti !== undefined) {
             const rt = (re.relation_type || 'related').toLowerCase();
-            es.push({ s: si, t: ti, type: rt, strength: re.strength });
+            es.push({ s: si, t: ti, type: rt, strength: re.strength, hits: re.hits || 0 });
             tc[rt] = (tc[rt] || 0) + 1;
           }
         }
@@ -165,10 +168,10 @@ export default function DashboardGraph() {
         for (const re of (data.inter_cluster_edges || [])) {
           const si = idToIdx.get(re.source), ti = idToIdx.get(re.target);
           if (si !== undefined && ti !== undefined)
-            ies.push({ s: si, t: ti, type: (re.relation_type || 'related').toLowerCase(), strength: re.strength });
+            ies.push({ s: si, t: ti, type: (re.relation_type || 'related').toLowerCase(), strength: re.strength, hits: 0 });
         }
         nodesRef.current = ns; edgesRef.current = es; interEdgesRef.current = ies;
-        setStats({ nodes: ns.length, edges: es.length, clusters: (data.clusters || []).length, interCluster: ies.length });
+        setStats({ nodes: ns.length, edges: es.length, clusters: (data.clusters || []).length, interCluster: ies.length, highways: es.filter(e => e.hits > 0).length });
         setClusterInfo(analysis?.cluster_analysis || []);
         setEdgeTypeCounts(tc);
         setTopConcepts((data.concepts || []).slice(0, 12));
@@ -340,8 +343,9 @@ export default function DashboardGraph() {
       }
       const hasFocus = highlightSet !== null;
 
-      // 跨簇边（暗，流动效果）
+      // 跨簇边（暗，流动效果）— LOD: 弱于下限的边直接不画
       for (const e of ies) {
+        if (e.strength < edgeLodRef.current) continue;
         const a = ns[e.s], b = ns[e.t]; if (!a || !b) continue;
         if (vis && !vis.has(e.s) && !vis.has(e.t)) continue;
         // 焦点模式下，跨簇边非高亮的全暗
@@ -356,20 +360,23 @@ export default function DashboardGraph() {
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
         ctx.strokeStyle = grad; ctx.lineWidth = 1.5; ctx.stroke();
       }
-      // 簇内边（亮，流动粒子 — 突触放电系统）
+      // 簇内边（亮，流动粒子 — 突触放电系统）— LOD剔除 + 主干道高亮
+      // 主干道 = 检索强化命中的边(hits>0, 后端PPR/multi_hop走过): 更亮更粗
       for (const e of es) {
+        if (e.strength < edgeLodRef.current) continue;
         const a = ns[e.s], b = ns[e.t]; if (!a || !b) continue;
         if (vis && !vis.has(e.s) && !vis.has(e.t)) continue;
         if (sc !== null && a.cluster !== sc && b.cluster !== sc) continue;
         const isHv = hvNode && (hvNode.idx === e.s || hvNode.idx === e.t);
         const isSelEdge = sel && (sel.idx === e.s || sel.idx === e.t);
+        const isHwy = e.hits > 0;
         const ec = EDGE_COLORS[e.type] || '#3ecfae';
         // 焦点模式 dim 逻辑
         const edgeKey = `${Math.min(e.s, e.t)}-${Math.max(e.s, e.t)}`;
         const isPathEdge = pathEdges && pathEdges.has(edgeKey);
         if (hasFocus && !isPathEdge && !highlightSet!.has(e.s)) {
-          // 非高亮边在焦点模式下极暗
-          ctx.globalAlpha = 0.03;
+          // 非高亮边在焦点模式下极暗(主干道略可见——检索巩固过的路不熄灭)
+          ctx.globalAlpha = isHwy ? 0.1 : 0.03;
         } else if (isPathEdge) {
           // 路径边：金色高亮
           ctx.globalAlpha = 0.9;
@@ -389,11 +396,11 @@ export default function DashboardGraph() {
         } else if (hasFocus) {
           ctx.globalAlpha = isHv ? 0.7 : 0.25;
         } else {
-          ctx.globalAlpha = isHv ? 0.6 : 0.12;
+          ctx.globalAlpha = isHv ? 0.6 : (isHwy ? 0.4 : 0.12);
         }
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
         ctx.strokeStyle = ec;
-        ctx.lineWidth = isHv || isSelEdge ? 1.5 : 0.5;
+        ctx.lineWidth = isHv || isSelEdge ? 1.5 : (isHwy ? 1.1 : 0.5);
         ctx.stroke();
 
         // ── 突触能量粒子流 ──
@@ -797,7 +804,7 @@ export default function DashboardGraph() {
                   {t('dash.graph.title')}
                 </span>
                 <span style={{ color: 'var(--accent-cyan-bright)', fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '0.05em', opacity: 0.8 }}>
-                  {stats.nodes} {t('dash.graph.stats.nodes')} · {stats.edges} {t('dash.graph.stats.edges')} · {stats.clusters} {t('dash.graph.stats.clusters')}
+                  {stats.nodes} {t('dash.graph.stats.nodes')} · {stats.edges} {t('dash.graph.stats.edges')} · {stats.clusters} {t('dash.graph.stats.clusters')}{stats.highways > 0 && <> · {stats.highways} {t('dash.graph.stats.highways')}</>}
                   {graphMeta.truncated && (
                     <span style={{ color: '#3ecfae', fontSize: 11, marginLeft: 8 }} title="top by mass">
                       ⦿ 显示前 {stats.nodes} / 共 {graphMeta.total} 节点(按质量)
@@ -815,6 +822,13 @@ export default function DashboardGraph() {
                 <button onClick={() => { zoomRef.current = Math.min(8, zoomRef.current * 1.25); setZoom(zoomRef.current); refresh(); }} style={tb}><ZoomIn size={14} /></button>
                 <button onClick={() => { zoomRef.current = Math.max(0.2, zoomRef.current * 0.8); setZoom(zoomRef.current); refresh(); }} style={tb}><ZoomOut size={14} /></button>
                 <button onClick={resetView} style={tb}><RotateCcw size={14} /></button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} title={t('dash.graph.lod.label')}>
+                  <span style={{ fontSize: 9, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>LOD</span>
+                  <input type="range" min={0} max={1} step={0.05} value={edgeLod}
+                    onChange={e => { const v = parseFloat(e.target.value); edgeLodRef.current = v; setEdgeLod(v); }}
+                    style={{ width: 64, accentColor: 'var(--accent-cyan-bright)' }} />
+                  <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{edgeLod.toFixed(2)}</span>
+                </div>
                 <button
                   onClick={async () => {
                     if (kgQuality) { setKgQuality(null); return; }
