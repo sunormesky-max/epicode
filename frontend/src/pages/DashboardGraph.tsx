@@ -120,6 +120,7 @@ export default function DashboardGraph() {
   const superEdgesRef = useRef<SuperEdge[]>([]);
   const superByCiRef = useRef<Map<number, SuperNode>>(new Map()); // ci → 超节点(draw/hit-test查)
   const centsRef = useRef<Map<number, { x: number; y: number }>>(new Map()); // 活体质心(超节点位置, 点击命中用)
+  const anchorsRef = useRef<Map<number, { x: number; y: number }>>(new Map()); // ci → 总览锚点(网格; 防settled后漂移叠死)
 
   useEffect(() => {
     let mounted = true;
@@ -279,6 +280,24 @@ export default function DashboardGraph() {
     frameRef.current = 0;
     const maxFrames = 250;
 
+    // 总览锚点: 聚类网格按实际画布尺寸计算(与load()同一公式, 但load用的是1200x600虚拟尺寸)。
+    // 必要性: settled后簇间O(n²)斥力永久关闭, 只剩活体质心弱弹簧+布朗抖动,
+    // 而圆形力场(fieldR≈313px)装不下20簇网格跨度 → 外圈簇被持续压向中心,
+    // 十几分钟后全部簇叠死在画布中央(实测)。锚点让总览星域永远稳定。
+    {
+      const numC = superNodesRef.current.filter(sp => sp.ci >= 0).length || 1;
+      const anchors = new Map<number, { x: number; y: number }>();
+      for (const sp of superNodesRef.current) {
+        if (sp.ci < 0) continue;
+        const layer = sp.ci % 6;
+        const layerH = (H - 80) / 6;
+        const inLayer = Math.ceil(numC / 6);
+        const pos = Math.floor(sp.ci / 6);
+        anchors.set(sp.ci, { x: W * (0.15 + 0.7 * (pos + 0.5) / inLayer), y: 40 + layer * layerH + layerH / 2 });
+      }
+      anchorsRef.current = anchors;
+    }
+
     function simulate() {
       const ns = nodesRef.current; const es = edgesRef.current;
       if (!ns.length) return;
@@ -319,23 +338,32 @@ export default function DashboardGraph() {
         c.x += n.x; c.y += n.y; c.n++; centers.set(n.cluster, c);
       }
       // 收敛后加微振荡（呼吸感），让神经网络"活着"
-      const breathe = settled ? 0.0003 : 0.0008;
+      // 总览模式: settled后成员拉向固定网格锚点(替代活体质心) — 斥力已关,
+      // 质心弹簧+圆形力场会让簇漂移叠死(实测)。观测模式保持原样(活体质心+力场)。
+      const ovMode = viewModeRef.current === 'overview';
+      const breathe = settled ? (ovMode ? 0.0012 : 0.0003) : 0.0008;
       const damping = settled ? 0.95 : 0.82;
       for (const n of ns) {
-        const tgt = centers.get(n.cluster);
-        if (tgt) { n.vx += (tgt.x / tgt.n - n.x) * breathe; n.vy += (tgt.y / tgt.n - n.y) * breathe; }
+        const anchor: { x: number; y: number } | null = (settled && ovMode && n.cluster >= 0)
+          ? anchorsRef.current.get(n.cluster) ?? null : null;
+        const cent = centers.get(n.cluster);
+        if (anchor) { n.vx += (anchor.x - n.x) * breathe; n.vy += (anchor.y - n.y) * breathe; }
+        else if (cent) { n.vx += (cent.x / cent.n - n.x) * breathe; n.vy += (cent.y / cent.n - n.y) * breathe; }
         else { n.vx += (cx - n.x) * 0.0004; n.vy += (cy - n.y) * 0.0004; }
         // 收敛后加随机微扰（布朗运动，模拟神经活动）
         if (settled) { n.vx += (Math.random() - 0.5) * 0.01; n.vy += (Math.random() - 0.5) * 0.01; }
         n.vx *= damping; n.vy *= damping; n.x += n.vx; n.y += n.vy;
         // 关键修复：用圆形力场代替矩形 clamp，避免网络被矩形边框"压成长方形"。
         // 节点离中心超过 fieldR 时，施加向心推力（弹性边界），形成自然的圆形/有机团块。
-        const ddx = n.x - cx, ddy = n.y - cy;
-        const distC = Math.sqrt(ddx * ddx + ddy * ddy);
-        if (distC > fieldR) {
-          const k = (distC - fieldR) * 0.18; // 向心弹性
-          n.vx -= (ddx / distC) * k;
-          n.vy -= (ddy / distC) * k;
+        // 总览豁免: 成簇节点锚在网格上(网格跨度大于力场直径), 力场只会把外圈簇往中心挤。
+        if (!(ovMode && n.cluster >= 0)) {
+          const ddx = n.x - cx, ddy = n.y - cy;
+          const distC = Math.sqrt(ddx * ddx + ddy * ddy);
+          if (distC > fieldR) {
+            const k = (distC - fieldR) * 0.18; // 向心弹性
+            n.vx -= (ddx / distC) * k;
+            n.vy -= (ddy / distC) * k;
+          }
         }
       }
       frameRef.current++;
