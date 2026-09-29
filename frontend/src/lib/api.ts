@@ -980,8 +980,8 @@ export function getGraphAnalysis(signal?: AbortSignal): Promise<GraphAnalysis> {
 
 export function getGraphExport(): Promise<{
   nodes: { id: number; content: string; labels: string[]; mass: number; timestamp: number; core_x: number; core_y: number; core_z: number }[];
-  edges: { source: number; target: number; relation_type: string; strength: number }[];
-  inter_cluster_edges: { source: number; target: number; relation_type: string; strength: number }[];
+  edges: { source: number; target: number; relation_type: string; strength: number; hits?: number }[];
+  inter_cluster_edges: { source: number; target: number; relation_type: string; strength: number; hits?: number }[];
   concepts: { id: number; label: string; member_count: number; member_ids: number[] }[];
   clusters: { size: number; member_ids: number[]; top_labels: unknown[] }[];
   top_labels: unknown[];

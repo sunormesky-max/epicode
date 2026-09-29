@@ -18,6 +18,11 @@ pub struct Relation {
     pub relation_type: RelationType,
     pub strength: f64,
     pub created_tick: u64,
+    /// 检索强化计数(记忆巩固/testing effect): 被检索路径(PPR扩散/multi_hop扩展)
+    /// 走过的边累积命中。均匀衰减下高命中"主干道"被持续推回高强度——
+    /// 与时间效性P系列(earned importance)同构: 使用即续命, 不用即流失。
+    #[serde(default)]
+    pub hits: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -210,6 +215,7 @@ impl KnowledgeGraph {
             relation_type: rel_type,
             strength,
             created_tick: tick,
+            hits: 0,
         };
         relations.push(new_rel.clone());
         {
@@ -487,6 +493,8 @@ impl KnowledgeGraph {
         let mut visited: HashSet<TetraId> = seeds.iter().copied().collect();
         let mut scored: HashMap<TetraId, f64> = HashMap::new();
         let mut frontier: Vec<(TetraId, f64)> = seeds.iter().map(|&s| (s, 1.0)).collect();
+        // 检索强化: 记录本轮真正走过的关系(GraphRAG local expansion的主干道)
+        let mut traversed: Vec<usize> = Vec::new();
 
         for _hop in 0..max_hops {
             let mut next_frontier = Vec::new();
@@ -514,6 +522,7 @@ impl KnowledgeGraph {
                             continue;
                         }
 
+                        traversed.push(i);
                         visited.insert(neighbor);
                         let entry = scored.entry(neighbor).or_insert(0.0);
                         *entry = (*entry).max(score);
@@ -522,6 +531,20 @@ impl KnowledgeGraph {
                 }
             }
             frontier = next_frontier;
+        }
+        drop(relations);
+        drop(adj);
+
+        // 走过的边回报强化(读锁已释放, reinforce内部自取写锁)
+        if !traversed.is_empty() {
+            let pairs: Vec<(TetraId, TetraId)> = {
+                let relations = self.relations.read();
+                traversed
+                    .iter()
+                    .filter_map(|&i| relations.get(i).map(|r| (r.source, r.target)))
+                    .collect()
+            };
+            self.reinforce_edges(&pairs);
         }
 
         let mut result: Vec<(TetraId, f64)> = scored.into_iter().collect();
@@ -575,31 +598,266 @@ impl KnowledgeGraph {
         results
     }
 
+    /// 检索强化入口: 把本轮检索实际走过的边(u,v)回报给图谱。
+    /// 每条被走的边 strength += 25%·剩余差距(封顶1.0)、hits+1;
+    /// 批量加载期间跳过(整批载入后的覆写会吞掉强化)。
+    pub fn reinforce_edges(&self, pairs: &[(TetraId, TetraId)]) {
+        if pairs.is_empty() || self.loading.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        // 邻接索引定位: 每个端点扫自己的度(有界), 不碰全表
+        let mut hits_idx: Vec<usize> = Vec::new();
+        {
+            let relations = self.relations.read();
+            let adj = self.adj_index.read();
+            for &(a, b) in pairs {
+                for &i in adj.get(&a).into_iter().flatten() {
+                    if let Some(r) = relations.get(i) {
+                        if (r.source == a && r.target == b) || (r.source == b && r.target == a) {
+                            hits_idx.push(i);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if hits_idx.is_empty() {
+            return;
+        }
+        let mut changed = false;
+        {
+            let mut relations = self.relations.write();
+            for i in hits_idx {
+                if let Some(r) = relations.get_mut(i) {
+                    if r.strength < 1.0 {
+                        r.strength += (1.0 - r.strength) * 0.25;
+                        if r.strength > 1.0 {
+                            r.strength = 1.0;
+                        }
+                    }
+                    r.hits = r.hits.saturating_add(1);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// 异步标签传播社区发现(Raghavan et al. 2007, 近线性)——GraphRAG式社区层的轻量地基。
+    /// 与 space.find_clusters() 的空间聚类互补: 这里是关系边上的拓扑社区。
+    /// 确定性保证: 节点按 TetraId 升序遍历, 平票取最小标签, 投票按边 strength 加权。
+    pub fn detect_communities(&self, max_rounds: usize) -> HashMap<TetraId, TetraId> {
+        let relations = self.relations.read();
+        let adj = self.adj_index.read();
+        let mut nodes: Vec<TetraId> = adj.keys().copied().collect();
+        nodes.sort_unstable();
+        let mut labels: HashMap<TetraId, TetraId> = nodes.iter().copied().map(|n| (n, n)).collect();
+
+        for _round in 0..max_rounds {
+            let mut changed = false;
+            for &n in &nodes {
+                let mut votes: HashMap<TetraId, f64> = HashMap::new();
+                if let Some(indices) = adj.get(&n) {
+                    for &i in indices {
+                        let r = match relations.get(i) {
+                            Some(r) => r,
+                            None => continue,
+                        };
+                        let nb = if r.source == n {
+                            r.target
+                        } else if r.target == n {
+                            r.source
+                        } else {
+                            continue;
+                        };
+                        if let Some(&l) = labels.get(&nb) {
+                            *votes.entry(l).or_insert(0.0) += r.strength.max(0.0);
+                        }
+                    }
+                }
+                if votes.is_empty() {
+                    continue;
+                }
+                // 加权最高票; 平票取最小标签(确定性, 与遍历序解耦)
+                let best = votes
+                    .into_iter()
+                    .max_by(|a, b| {
+                        a.1.partial_cmp(&b.1)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                            .then(b.0.cmp(&a.0))
+                    })
+                    .map(|(l, _)| l)
+                    .expect("votes non-empty");
+                if labels.get(&n) != Some(&best) {
+                    labels.insert(n, best);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        labels
+    }
+
+    /// 加权模块度 Q ∈ [-0.5, 1]: 社区结构强度标准度量(Newman)。
+    /// Q = Σ_c [ w_in(c)/M - (K(c)/2M)² ], M=总边权, K(c)=社区内节点度权和。
+    fn community_modularity(&self, labels: &HashMap<TetraId, TetraId>) -> (usize, usize, f64) {
+        let relations = self.relations.read();
+        let adj = self.adj_index.read();
+        let m_total: f64 = relations.iter().map(|r| r.strength.max(0.0)).sum();
+        if m_total <= 0.0 {
+            let n = labels.len();
+            return (n.max(1), 0, 0.0);
+        }
+        // 社区索引
+        let mut comm_ids: HashMap<TetraId, usize> = HashMap::new();
+        for l in labels.values() {
+            let next = comm_ids.len();
+            comm_ids.entry(*l).or_insert(next);
+        }
+        let n_comm = comm_ids.len();
+        let mut w_in: Vec<f64> = vec![0.0; n_comm];
+        let mut k_sum: Vec<f64> = vec![0.0; n_comm];
+        let mut sizes: Vec<usize> = vec![0; n_comm];
+        for (&n, l) in labels.iter() {
+            let c = comm_ids[l];
+            sizes[c] += 1;
+            if let Some(indices) = adj.get(&n) {
+                for &i in indices {
+                    let r = match relations.get(i) {
+                        Some(r) => r,
+                        None => continue,
+                    };
+                    let w = r.strength.max(0.0);
+                    k_sum[c] += w; // 每条边在两端各计一次度
+                    if let (Some(&ca), Some(&cb)) = (labels.get(&r.source), labels.get(&r.target)) {
+                        if ca == cb {
+                            // 无向边只计一次内部权: 按source侧计入
+                            if r.source == n {
+                                w_in[comm_ids[&ca]] += w;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let q: f64 = (0..n_comm)
+            .map(|c| w_in[c] / m_total - (k_sum[c] / (2.0 * m_total)).powi(2))
+            .sum();
+        let largest = sizes.iter().copied().max().unwrap_or(0);
+        (n_comm, largest, q)
+    }
+
     pub fn update_concepts(&self, tetras: &[(TetraId, Vec<String>)]) {
+        // 性能修复(2026-09-28, #100同族): 原实现每个tetra线性扫全部概念并
+        // 逐一聚合成员标签算Jaccard → O(T×C×M)。批级倒排索引:
+        //   eff_labels[ci] = 概念ci的有效标签集(批次内成员的标签并集)
+        //   postings[label] = 拥有该标签的概念idx列表
+        // 每个tetra只碰自己的标签命中过的概念 → O(C×M + T×|L|×postings)。
+        // 顺序语义与旧实现精确等价(见测试 update_concepts_inverted_matches_reference):
+        // 指派/新建会同步更新索引, 模拟旧实现"后面的tetra看到已变异的概念"。
         let mut concepts = self.concepts.write();
         let labels_map: HashMap<TetraId, &Vec<String>> =
             tetras.iter().map(|(id, l)| (*id, l)).collect();
 
-        for &(id, ref labels) in tetras {
-            let mut best: Option<(usize, f64)> = None;
-            for (i, c) in concepts.iter().enumerate() {
-                let sim = label_jaccard(labels, &c.member_ids, &labels_map);
-                match &best {
-                    None => best = Some((i, sim)),
-                    Some((_, s)) if sim > *s => best = Some((i, sim)),
-                    _ => {}
+        let mut eff_labels: Vec<HashSet<&str>> = Vec::with_capacity(concepts.len());
+        let mut postings: HashMap<&str, Vec<usize>> = HashMap::new();
+        for (ci, c) in concepts.iter().enumerate() {
+            let mut set: HashSet<&str> = HashSet::new();
+            for &mid in &c.member_ids {
+                if let Some(ml) = labels_map.get(&mid) {
+                    for l in ml.iter() {
+                        set.insert(l.as_str());
+                    }
                 }
             }
+            for l in &set {
+                postings.entry(*l).or_default().push(ci);
+            }
+            eff_labels.push(set);
+        }
+        // 概念ci吸收新标签(指派后), 同步入索引
+        // (无捕获, 用内嵌fn统一生命周期参数——闭包的不变性会拒绝混装两个来源的&str)
+        fn absorb<'a>(
+            ci: usize,
+            labels: &'a [String],
+            eff_labels: &mut [HashSet<&'a str>],
+            postings: &mut HashMap<&'a str, Vec<usize>>,
+        ) {
+            let target = &mut eff_labels[ci];
+            for l in labels {
+                let ls = l.as_str();
+                if target.insert(ls) {
+                    postings.entry(ls).or_default().push(ci);
+                }
+            }
+        }
+
+        for &(id, ref labels) in tetras {
+            let label_set: HashSet<&str> = labels.iter().map(|s| s.as_str()).collect();
+            // 交集计数: 每个标签在哪些概念的有效集里
+            let mut shared: HashMap<usize, usize> = HashMap::new();
+            for l in &label_set {
+                if let Some(cis) = postings.get(*l) {
+                    for &ci in cis {
+                        *shared.entry(ci).or_insert(0) += 1;
+                    }
+                }
+            }
+            // 候选排序: sim降序, 平票取最小idx(=旧实现"先见者胜"的确定性等价)
+            let mut cands: Vec<(usize, f64)> = shared
+                .into_iter()
+                .filter_map(|(ci, n)| {
+                    let union = label_set.len() + eff_labels[ci].len() - n;
+                    if union == 0 {
+                        None
+                    } else {
+                        Some((ci, n as f64 / union as f64))
+                    }
+                })
+                .collect();
+            cands.sort_by(|a, b| {
+                b.1.partial_cmp(&a.1)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(a.0.cmp(&b.0))
+            });
+            let best = cands.first().copied();
 
             match best {
                 Some((idx, sim)) if sim > 0.3 => {
                     concepts[idx].member_count += 1;
                     concepts[idx].member_ids.push(id);
                     if concepts[idx].member_ids.len() > 100 {
-                        concepts[idx].member_ids.drain(0..10);
+                        // 驱逐最老成员后重建该概念的有效标签集(与旧实现按当前成员重算等价)
+                        let drained: Vec<TetraId> = concepts[idx].member_ids.drain(0..10).collect();
+                        for l in eff_labels[idx].iter() {
+                            if let Some(v) = postings.get_mut(*l) {
+                                v.retain(|&c| c != idx);
+                            }
+                        }
+                        let mut set: HashSet<&str> = HashSet::new();
+                        for &mid in concepts[idx].member_ids.iter().chain(drained.iter()) {
+                            // drained成员已不在member_ids, 但仍在批次内——旧实现
+                            // jaccard只看当前member_ids, 所以这里排除drained
+                            if drained.contains(&mid) {
+                                continue;
+                            }
+                            if let Some(ml) = labels_map.get(&mid) {
+                                for l in ml.iter() {
+                                    set.insert(l.as_str());
+                                }
+                            }
+                        }
+                        for l in &set {
+                            postings.entry(*l).or_default().push(idx);
+                        }
+                        eff_labels[idx] = set;
+                    } else {
+                        absorb(idx, labels, &mut eff_labels, &mut postings);
                     }
-                    // centroid 在 assign 时无法取 embedding（labels_map 只有标签）
-                    // centroid 改为在 save_concepts 时由外部计算（见 save 时传入 embedding）
                 }
                 _ => {
                     // 修复：不为孤立 tetra 创建 member_count=1 的垃圾 concept_N。
@@ -618,6 +876,15 @@ impl KnowledgeGraph {
                                 .unwrap_or_else(|| format!("cluster_{}", next_id)),
                             member_ids: vec![id],
                         });
+                        let ci = concepts.len() - 1;
+                        let mut set: HashSet<&str> = HashSet::new();
+                        for l in labels {
+                            set.insert(l.as_str());
+                        }
+                        for l in &set {
+                            postings.entry(*l).or_default().push(ci);
+                        }
+                        eff_labels.push(set);
                     }
                     // labels 为空的 tetra：不创建概念（之前会生成 concept_N 垃圾）
                 }
@@ -682,6 +949,7 @@ impl KnowledgeGraph {
                 target: r.target,
                 relation_type: format!("{}", r.relation_type),
                 strength: (r.strength * 100.0).round() / 100.0,
+                hits: r.hits,
             })
             .collect();
 
@@ -768,6 +1036,7 @@ impl KnowledgeGraph {
                     target: clusters[j].tetra_ids.first().copied().unwrap_or(0),
                     relation_type: "inter_cluster".to_string(),
                     strength: count as f64,
+                    hits: 0,
                 });
             }
         }
@@ -970,6 +1239,11 @@ impl KnowledgeGraph {
                 m
             });
 
+        // 关系拓扑社区(标签传播) + 模块度: 与空间聚类互补的结构健康信号
+        let comm_labels = self.detect_communities(5);
+        let (community_count, largest_community, modularity) =
+            self.community_modularity(&comm_labels);
+
         KgAnalysis {
             total_tetras,
             total_relations,
@@ -979,6 +1253,9 @@ impl KnowledgeGraph {
             avg_degree,
             density,
             relation_type_counts: rel_type_counts,
+            community_count,
+            largest_community,
+            modularity,
         }
     }
 }
@@ -1039,36 +1316,6 @@ fn extract_entities(content: &str) -> Vec<String> {
 
     entities.into_iter().collect()
 }
-fn label_jaccard(
-    labels: &[String],
-    concept_member_ids: &[TetraId],
-    labels_map: &HashMap<TetraId, &Vec<String>>,
-) -> f64 {
-    if concept_member_ids.is_empty() || labels.is_empty() {
-        return 0.0;
-    }
-    // 聚合 concept 成员的 labels（kimi #2：之前错误地用 labels 自比导致恒为 1.0）
-    let mut concept_labels: HashSet<&str> = HashSet::new();
-    for &mid in concept_member_ids {
-        if let Some(ml) = labels_map.get(&mid) {
-            for l in ml.iter() {
-                concept_labels.insert(l.as_str());
-            }
-        }
-    }
-    if concept_labels.is_empty() {
-        return 0.0;
-    }
-    let label_set: HashSet<&str> = labels.iter().map(|s| s.as_str()).collect();
-    let intersection = label_set.intersection(&concept_labels).count();
-    let union = label_set.union(&concept_labels).count();
-    if union == 0 {
-        0.0
-    } else {
-        intersection as f64 / union as f64
-    }
-}
-
 #[derive(serde::Serialize, serde::Deserialize)]
 struct KgSnapshot {
     relations: Vec<Relation>,
@@ -1085,6 +1332,11 @@ pub struct KgAnalysis {
     pub avg_degree: f64,
     pub density: f64,
     pub relation_type_counts: HashMap<String, usize>,
+    /// 关系拓扑社区数(异步标签传播, Raghavan 2007)
+    pub community_count: usize,
+    pub largest_community: usize,
+    /// 加权模块度 Q(Newman): >0.3 即显著社区结构
+    pub modularity: f64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1118,6 +1370,9 @@ pub struct GraphEdgeExport {
     pub target: TetraId,
     pub relation_type: String,
     pub strength: f64,
+    /// 检索命中计数: 前端以此高亮"主干道"(被检索巩固的边)
+    #[serde(default)]
+    pub hits: u16,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1133,6 +1388,37 @@ pub struct ClusterExport {
     pub size: usize,
     pub member_ids: Vec<TetraId>,
     pub top_labels: Vec<serde_json::Value>,
+}
+
+#[cfg(test)]
+#[cfg(test)]
+fn label_jaccard(
+    labels: &[String],
+    concept_member_ids: &[TetraId],
+    labels_map: &HashMap<TetraId, &Vec<String>>,
+) -> f64 {
+    if concept_member_ids.is_empty() || labels.is_empty() {
+        return 0.0;
+    }
+    let mut concept_labels: HashSet<&str> = HashSet::new();
+    for &mid in concept_member_ids {
+        if let Some(ml) = labels_map.get(&mid) {
+            for l in ml.iter() {
+                concept_labels.insert(l.as_str());
+            }
+        }
+    }
+    if concept_labels.is_empty() {
+        return 0.0;
+    }
+    let label_set: HashSet<&str> = labels.iter().map(|s| s.as_str()).collect();
+    let intersection = label_set.intersection(&concept_labels).count();
+    let union = label_set.union(&concept_labels).count();
+    if union == 0 {
+        0.0
+    } else {
+        intersection as f64 / union as f64
+    }
 }
 
 #[cfg(test)]
@@ -1242,5 +1528,213 @@ mod tests {
             kg.add_relation(0, i, RelationType::SimilarTo, 0.5);
         }
         assert!(kg.relation_count() <= MAX_RELATIONS_PER_NODE);
+    }
+}
+
+#[cfg(test)]
+mod kg_research_tests {
+    use super::*;
+
+    // ───────── 检索强化衰减 ─────────
+
+    #[test]
+    fn reinforcement_outlives_uniform_decay() {
+        let kg = KnowledgeGraph::new();
+        kg.add_relation(1, 2, RelationType::SimilarTo, 0.5);
+        kg.add_relation(3, 4, RelationType::SimilarTo, 0.5);
+
+        // 检索路径只走 (1,2) 两次
+        kg.reinforce_edges(&[(1, 2)]);
+        kg.reinforce_edges(&[(1, 2)]);
+
+        for _ in 0..500 {
+            kg.decay_relations();
+        }
+        let relations = kg.relations.read();
+        let r12 = relations
+            .iter()
+            .find(|r| r.source == 1 && r.target == 2)
+            .expect("edge 1-2");
+        let r34 = relations
+            .iter()
+            .find(|r| r.source == 3 && r.target == 4)
+            .expect("edge 3-4 (未强化必须存活: 0.5×0.9995^500≈0.39 > 0.05)");
+        let (h12, s12, s34) = (r12.hits, r12.strength, r34.strength);
+        drop(relations);
+
+        assert_eq!(h12, 2, "两次检索命中应记数");
+        assert!(s12 > s34, "强化边({s12})应强于同起点未强化边({s34})");
+        assert!(s34 > 0.3, "未强化边在500轮衰减后仍有0.39左右");
+    }
+
+    #[test]
+    fn multi_hop_reinforces_only_traversed_edges() {
+        let kg = KnowledgeGraph::new();
+        // 链 1—2—3—4 (强度足够过0.1剪枝)
+        kg.add_relation(1, 2, RelationType::SimilarTo, 0.9);
+        kg.add_relation(2, 3, RelationType::SimilarTo, 0.9);
+        kg.add_relation(3, 4, RelationType::SimilarTo, 0.9);
+
+        let reached = kg.multi_hop(&[1], 2);
+        let relations = kg.relations.read();
+        let hits_of = |a: TetraId, b: TetraId| -> u16 {
+            relations
+                .iter()
+                .find(|r| (r.source == a && r.target == b) || (r.source == b && r.target == a))
+                .map(|r| r.hits)
+                .expect("edge exists")
+        };
+        let h12 = hits_of(1, 2);
+        let h23 = hits_of(2, 3);
+        let h34 = hits_of(3, 4);
+        drop(relations);
+
+        assert_eq!(h12, 1, "1跳走过的边");
+        assert_eq!(h23, 1, "2跳走过的边");
+        assert_eq!(h34, 0, "3跳之外的边不被强化");
+        assert!(reached.iter().any(|(id, _)| *id == 3), "2跳应达3");
+        assert!(!reached.iter().any(|(id, _)| *id == 4), "2跳不应达4");
+    }
+
+    // ───────── 标签传播社区 + 模块度 ─────────
+
+    #[test]
+    fn label_propagation_separates_two_communities() {
+        let kg = KnowledgeGraph::new();
+        // 两个三角团 + 一条弱桥
+        for &(a, b) in &[(1u64, 2u64), (2, 3), (3, 1)] {
+            kg.add_relation(a, b, RelationType::SimilarTo, 0.9);
+        }
+        for &(a, b) in &[(10u64, 11u64), (11, 12), (12, 10)] {
+            kg.add_relation(a, b, RelationType::SimilarTo, 0.9);
+        }
+        kg.add_relation(3, 10, RelationType::Related, 0.1);
+
+        let labels = kg.detect_communities(5);
+        assert_eq!(labels.len(), 6, "六个节点都在图上");
+        let l1 = labels[&1];
+        assert_eq!(labels[&2], l1, "三角1同社区");
+        assert_eq!(labels[&3], l1, "三角1同社区");
+        let l10 = labels[&10];
+        assert_eq!(labels[&11], l10, "三角2同社区");
+        assert_eq!(labels[&12], l10, "三角2同社区");
+        assert_ne!(l1, l10, "两个团应分属不同社区");
+
+        let (n_comm, largest, q) = kg.community_modularity(&labels);
+        assert_eq!(n_comm, 2);
+        assert_eq!(largest, 3);
+        assert!(q > 0.3, "双团+弱桥的模块度应显著(实测Q={q})");
+    }
+
+    // ───────── 概念聚合倒排: 与旧实现精确等价 ─────────
+
+    /// 旧实现逐字拷贝(独立操作裸Vec, 作等价性参照)
+    fn update_concepts_reference(
+        concepts: &mut Vec<ConceptPrototype>,
+        tetras: &[(TetraId, Vec<String>)],
+    ) {
+        let labels_map: HashMap<TetraId, &Vec<String>> =
+            tetras.iter().map(|(id, l)| (*id, l)).collect();
+        for &(id, ref labels) in tetras {
+            let mut best: Option<(usize, f64)> = None;
+            for (i, c) in concepts.iter().enumerate() {
+                let sim = label_jaccard(labels, &c.member_ids, &labels_map);
+                match &best {
+                    None => best = Some((i, sim)),
+                    Some((_, s)) if sim > *s => best = Some((i, sim)),
+                    _ => {}
+                }
+            }
+            match best {
+                Some((idx, sim)) if sim > 0.3 => {
+                    concepts[idx].member_count += 1;
+                    concepts[idx].member_ids.push(id);
+                    if concepts[idx].member_ids.len() > 100 {
+                        concepts[idx].member_ids.drain(0..10);
+                    }
+                }
+                _ => {
+                    if !labels.is_empty() {
+                        let next_id = concepts.len() as u64;
+                        concepts.push(ConceptPrototype {
+                            id: next_id,
+                            centroid: vec![],
+                            member_count: 1,
+                            label: labels
+                                .first()
+                                .cloned()
+                                .unwrap_or_else(|| format!("cluster_{}", next_id)),
+                            member_ids: vec![id],
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    fn assert_same_concepts(a: &[ConceptPrototype], b: &[ConceptPrototype], ctx: &str) {
+        assert_eq!(a.len(), b.len(), "{ctx}: 概念数");
+        for (ca, cb) in a.iter().zip(b.iter()) {
+            assert_eq!(ca.id, cb.id, "{ctx}: id");
+            assert_eq!(ca.label, cb.label, "{ctx}: label");
+            assert_eq!(ca.member_count, cb.member_count, "{ctx}: member_count");
+            assert_eq!(ca.member_ids, cb.member_ids, "{ctx}: member_ids");
+        }
+    }
+
+    #[test]
+    fn update_concepts_inverted_matches_reference() {
+        // 批次覆盖: 新概念创建/聚拢/空标签/标签漂移/跨越100成员触发drain/平票
+        let mut batch: Vec<(TetraId, Vec<String>)> = Vec::new();
+        // 105个同标签 → 单概念膨胀跨100触发drain
+        for i in 0..105u64 {
+            batch.push((1000 + i, vec!["rust".into(), "memory".into()]));
+        }
+        // 空标签 ×3 (不建概念)
+        for i in 0..3u64 {
+            batch.push((2000 + i, vec![]));
+        }
+        // 第二族群: 部分重叠标签(会算出<0.3或>0.3的各种sim)
+        for i in 0..30u64 {
+            batch.push((3000 + i, vec!["rust".into(), "search".into()]));
+        }
+        // 孤立标签族
+        for i in 0..5u64 {
+            batch.push((4000 + i, vec![format!("solo{i}")]));
+        }
+        // 交错打入顺序(确定性LCG)
+        let mut seed = 42u64;
+        let mut i = batch.len();
+        while i > 1 {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let j = (seed >> 33) as usize % i;
+            i -= 1;
+            batch.swap(i, j);
+        }
+
+        let kg = KnowledgeGraph::new();
+        kg.update_concepts(&batch);
+        let mut reference: Vec<ConceptPrototype> = Vec::new();
+        update_concepts_reference(&mut reference, &batch);
+
+        assert_same_concepts(&kg.get_concepts(), &reference, "首批");
+
+        // 第二批(已有概念状态下的指派/drain再触发): 语义等价的真正考验
+        let batch2: Vec<(TetraId, Vec<String>)> = (0..40u64)
+            .map(|i| {
+                if i % 3 == 0 {
+                    (5000 + i, vec!["rust".into()])
+                } else if i % 3 == 1 {
+                    (5000 + i, vec!["search".into(), "rust".into()])
+                } else {
+                    (5000 + i, vec![])
+                }
+            })
+            .collect();
+        kg.update_concepts(&batch2);
+        update_concepts_reference(&mut reference, &batch2);
+        assert_same_concepts(&kg.get_concepts(), &reference, "次批");
     }
 }
