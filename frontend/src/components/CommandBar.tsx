@@ -59,7 +59,12 @@ export default function CommandBar() {
         id: 'copy-key', label: 'Copy API Key', hint: copyMsg || '复制密钥', group: 'ACTION', icon: copyMsg ? Check : Copy,
         run: async () => {
           const k = getApiKey();
-          if (!k) { setCopyMsg('未找到密钥'); return; }
+          if (!k) {
+            // 安全设计: 控制台会话(HttpOnly cookie)不持有持久化密钥 → 带用户去总览页身份区显示完整密钥
+            setCopyMsg('会话未存密钥 · 前往总览');
+            setTimeout(() => { window.location.hash = '#/dashboard'; setOpen(false); }, 800);
+            return;
+          }
           const ok = await copyText(k);
           if (ok) { setCopyMsg('已复制 ✓'); setTimeout(() => setOpen(false), 550); }
           else setCopyMsg('复制失败 · 请用侧栏按钮');
