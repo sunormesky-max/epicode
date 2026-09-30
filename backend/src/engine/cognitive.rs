@@ -2313,6 +2313,7 @@ mod strip_think_tests {
     #[test]
     fn multiple_think_blocks() {
         let raw = "<think>a</think>prefix<think>b</think>{\"v\": 9}";
-        assert_eq!(strip_think_json(raw), "prefix{\"v\": 9}");
+        // 前缀杂文本随平衡块提取一并清除 — LLM响应清洗场景纯JSON更可直接parse
+        assert_eq!(strip_think_json(raw), "{\"v\": 9}");
     }
 }
