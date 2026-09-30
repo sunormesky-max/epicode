@@ -39,6 +39,56 @@ fn extract_json_response(raw: &str) -> String {
     String::new()
 }
 
+/// 剥离推理模型的 <think>...</think> 块并提取首个平衡 JSON 对象文本。
+/// 生产病灶(2026-10-01 00:16 WARN): 推理模型在 response_format=json_object 下
+/// 仍可能先输出思考块, serde_json::from_str 解析整串即整批丢弃认知产物。
+pub fn strip_think_json(raw: &str) -> String {
+    let mut s = raw.to_string();
+    // 循环剥除可能存在的多段 <think>…</think>(含未闭合的残段: 截到串尾)
+    while let Some(start) = s.find("<think>") {
+        match s[start..].find("</think>") {
+            Some(end_rel) => {
+                let end = start + end_rel + "</think>".len();
+                s.replace_range(start..end, "");
+            }
+            None => {
+                s.truncate(start);
+                break;
+            }
+        }
+    }
+    let t = s.trim();
+    // 兜底: 若仍有杂文本, 提取首个平衡 {…} 块
+    if t.starts_with('{') {
+        return t.to_string();
+    }
+    let mut depth = 0i32;
+    let mut out: Option<String> = None;
+    let bytes: Vec<char> = t.chars().collect();
+    let mut buf = String::new();
+    for c in bytes {
+        buf.push(c);
+        match c {
+            '{' => {
+                depth += 1;
+                if depth == 1 {
+                    buf.clear();
+                    buf.push(c);
+                }
+            }
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    out = Some(buf.clone());
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    out.unwrap_or_else(|| t.to_string())
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DecisionRecord {
     pub tick: u64,
@@ -1110,8 +1160,9 @@ impl CognitiveEngine {
             .as_str()
             .ok_or("no content in alias response")?;
 
-        let parsed: serde_json::Value = serde_json::from_str(content)
-            .map_err(|e| format!("parse alias: {} | raw: {}", e, truncate_str(content, 200)))?;
+        let cleaned = strip_think_json(content);
+        let parsed: serde_json::Value = serde_json::from_str(&cleaned)
+            .map_err(|e| format!("parse alias: {} | raw: {}", e, truncate_str(&cleaned, 200)))?;
 
         let items = parsed["aliases"].as_array().ok_or("no aliases array")?;
 
@@ -1178,8 +1229,9 @@ impl CognitiveEngine {
             .as_str()
             .ok_or("no content in entity response")?;
 
-        let parsed: serde_json::Value = serde_json::from_str(content)
-            .map_err(|e| format!("parse entity: {} | raw: {}", e, truncate_str(content, 200)))?;
+        let cleaned = strip_think_json(content);
+        let parsed: serde_json::Value = serde_json::from_str(&cleaned)
+            .map_err(|e| format!("parse entity: {} | raw: {}", e, truncate_str(&cleaned, 200)))?;
 
         let items = parsed["items"]
             .as_array()
@@ -2228,5 +2280,39 @@ impl Drop for CognitiveEngine {
     fn drop(&mut self) {
         use zeroize::Zeroize;
         self.api_key.zeroize();
+    }
+}
+
+#[cfg(test)]
+mod strip_think_tests {
+    use super::strip_think_json;
+
+    #[test]
+    fn strips_single_think_block() {
+        let raw = "<think>Let me analyze...</think>{\"aliases\": []}";
+        assert_eq!(strip_think_json(raw), "{\"aliases\": []}");
+    }
+
+    #[test]
+    fn strips_unclosed_think_residual() {
+        let raw = "{\"ok\": 1}<think>trailing garbage";
+        assert_eq!(strip_think_json(raw), "{\"ok\": 1}");
+    }
+
+    #[test]
+    fn extracts_balanced_json_from_noise() {
+        let raw = "Here you go: {\"a\": {\"b\": 2}} hope it helps";
+        assert_eq!(strip_think_json(raw), "{\"a\": {\"b\": 2}}");
+    }
+
+    #[test]
+    fn plain_json_passthrough() {
+        assert_eq!(strip_think_json("  {\"x\": 1}  "), "{\"x\": 1}");
+    }
+
+    #[test]
+    fn multiple_think_blocks() {
+        let raw = "<think>a</think>prefix<think>b</think>{\"v\": 9}";
+        assert_eq!(strip_think_json(raw), "prefix{\"v\": 9}");
     }
 }
