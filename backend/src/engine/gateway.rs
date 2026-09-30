@@ -33,6 +33,8 @@ pub struct GatewayCenter {
     search: SearchEngineState,
     index: IndexManager,
     pipeline: LayerPipeline,
+    /// O-B 矛盾感知: Mem0 UPDATE路径检测到的矛盾对(旧id, sim) — 新tetra插入后建Contradicts边
+    pending_contradictions: parking_lot::Mutex<Vec<(TetraId, f32)>>,
 }
 
 impl GatewayCenter {
@@ -75,6 +77,7 @@ impl GatewayCenter {
             search: SearchEngineState::new(hnsw),
             index: IndexManager::new(label_idx, chash_idx),
             pipeline: LayerPipeline::new(space),
+            pending_contradictions: parking_lot::Mutex::new(Vec::new()),
         }
     }
 
@@ -300,6 +303,35 @@ impl GatewayCenter {
                         self.mark_dirty(*dup_id);
                     }
                 } else if sim > 0.75 {
+                    // O-B 矛盾感知器官(推演v2病灶B: Contradicts仅0.2%且最弱0.236):
+                    // 相似但含更新/否定信号词 → 旧记忆双时序失效 + 延迟建Contradicts边。
+                    // 规则版先行(女娲换心后升级LLM判定)。
+                    let contradicts = content.contains("不再")
+                        || content.contains("已改")
+                        || content.contains("obsolete")
+                        || content.contains("deprecated")
+                        || content.contains("no longer")
+                        || content.contains("replaced by")
+                        || content.contains("instead of")
+                        || content.contains("switched to");
+                    if contradicts {
+                        if let Some(mut old_tetra) = self.space.get_tetrahedron(*dup_id) {
+                            old_tetra.data.expired_at = Some(ts);
+                            if old_tetra.data.valid_to.is_none() {
+                                old_tetra.data.valid_to = Some(ts);
+                            }
+                            let _ = self.space.update_payload(*dup_id, old_tetra.data);
+                            self.mark_dirty(*dup_id);
+                            self.pending_contradictions
+                                .lock()
+                                .push((*dup_id, sim as f32));
+                            tracing::info!(
+                                "[Gateway] O-B contradiction detected: new memory contradicts tetra {} (sim={:.3})",
+                                dup_id,
+                                sim
+                            );
+                        }
+                    }
                     // UPDATE 操作：中等相似度 → 旧记忆补充新标签（Mem0 调和）
                     if let Some(mut old_tetra) = self.space.get_tetrahedron(*dup_id) {
                         let mut added = Vec::new();
@@ -383,6 +415,19 @@ impl GatewayCenter {
                 }
                 self.knowledge
                     .auto_link_one(id, &self.space, &self.index.label_index.lock());
+                // O-B: flush 矛盾对 → Contradicts 边(矛盾感知器官的突触)
+                {
+                    let pending: Vec<(TetraId, f32)> =
+                        std::mem::take(&mut *self.pending_contradictions.lock());
+                    for (old_id, csim) in pending {
+                        self.knowledge.add_relation(
+                            id,
+                            old_id,
+                            crate::engine::knowledge::RelationType::Contradicts,
+                            (csim as f64).clamp(0.35, 0.85),
+                        );
+                    }
+                }
                 let created_labels = self
                     .space
                     .get_tetrahedron(id)
