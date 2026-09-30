@@ -4481,6 +4481,14 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
     /// pub: ack 处理器在成功后立即调用 — ack 只改内存, 依赖周期保存时
     /// 重启会回滚 ack 状态(#105187 曾复活为 Pending)
     pub fn save_drive_queue(&self) {
+        // O-C 信号墓园: 终态且入队>7天的信号 drain → archive表(不再进active)
+        {
+            let cutoff_ms = 7 * 86400 * 1000;
+            let drained = self.drive_queue().drain_archivable(cutoff_ms);
+            if !drained.is_empty() {
+                let _ = self.storage.save_archived_signals(&drained);
+            }
+        }
         self.save_tick_state();
         let signals = self.drive_queue.snapshot();
         if let Err(e) = self.storage.save_drive_signals(&signals) {
