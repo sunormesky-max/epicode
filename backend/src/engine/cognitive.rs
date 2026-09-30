@@ -45,10 +45,7 @@ fn extract_json_response(raw: &str) -> String {
 pub fn strip_think_json(raw: &str) -> String {
     let mut s = raw.to_string();
     // 循环剥除可能存在的多段 <think>…</think>(含未闭合的残段: 截到串尾)
-    loop {
-        let Some(start) = s.find("<think>") else {
-            break;
-        };
+    while let Some(start) = s.find("<think>") {
         match s[start..].find("</think>") {
             Some(end_rel) => {
                 let end = start + end_rel + "</think>".len();
