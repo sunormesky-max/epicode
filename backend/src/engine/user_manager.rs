@@ -93,24 +93,19 @@ pub enum Permission {
 }
 
 /// 子账户角色分级(主账户不取值本枚举, 天然全权)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// #[default] Developer: 存量 users.json 无 role 字段时的迁移默认值(与旧版子账户功能面一致)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UserRole {
     /// 全权代理运维: 数据全功能 + 子账户管理
     Admin,
     /// 全数据功能: 记忆读写删/技能库/图书馆/密钥, 无子账户管理
+    #[default]
     Developer,
     /// 写+读: 可记忆可检索, 不可删除/不可人格导入/不可库管理
     Tester,
     /// 只读: 检索/图谱/统计
     Viewer,
-}
-
-impl Default for UserRole {
-    fn default() -> Self {
-        // 存量 users.json 无 role 字段时的迁移默认值: 与旧版子账户功能面一致
-        UserRole::Developer
-    }
 }
 
 impl UserRole {
