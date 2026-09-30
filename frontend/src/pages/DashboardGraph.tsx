@@ -728,12 +728,12 @@ export default function DashboardGraph() {
           if (!isExp) {
             const r = Math.max(15, Math.min(42, 12 + Math.sqrt(sp.memberCount) * 3.4));
             const rr = r * (1 + Math.sin(t * 1.4 + sp.ci * 1.7) * 0.05); // 呼吸
-            // 外层大辉光
+            // 外层大辉光(0.8→0.5: 给z-order上层的超边弧线留对比度, 光晕海洋淹没弧线的教训)
             const glow = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, rr * 2.6);
             glow.addColorStop(0, color + (isHov ? '55' : '26'));
             glow.addColorStop(0.5, color + '10');
             glow.addColorStop(1, color + '00');
-            ctx.globalAlpha = isHov ? 0.95 : 0.8;
+            ctx.globalAlpha = isHov ? 0.8 : 0.5;
             ctx.beginPath(); ctx.arc(c.x, c.y, rr * 2.6, 0, Math.PI * 2);
             ctx.fillStyle = glow; ctx.fill();
             // 核心球(径向渐变=球体感)
@@ -817,11 +817,18 @@ export default function DashboardGraph() {
           const cb2 = se.b >= 0 ? CLUSTER_COLORS[se.b % CLUSTER_COLORS.length] : '#6b7280';
           const grad = ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
           grad.addColorStop(0, ca + '80'); grad.addColorStop(0.5, '#3ecfaeaa'); grad.addColorStop(1, cb2 + '80');
-          ctx.globalAlpha = Math.min((0.16 + 0.45 * strengthN) * (hov ? 2.2 : 1), 0.92);
+          const lw = hov ? 3.4 : 2 + strengthN * 3.5;
+          // 底层彩色宽线(光缆皮)
+          ctx.globalAlpha = Math.min((0.2 + 0.5 * strengthN) * (hov ? 2 : 1), 0.92);
           ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.quadraticCurveTo(cxp, cyp, pb.x, pb.y);
-          ctx.strokeStyle = grad; ctx.lineWidth = hov ? 2.8 : 1.1 + strengthN * 2.4;
-          // 发光描边 — 让弧线从球体辉光里"浮"出来
+          ctx.strokeStyle = grad; ctx.lineWidth = lw;
           ctx.shadowColor = '#3ecfae'; ctx.shadowBlur = hov ? 14 : 6 + strengthN * 6;
+          ctx.stroke();
+          // 上层白色芯线(光缆芯) — 在任何辉光背景上仍可读
+          ctx.globalAlpha = Math.min((0.3 + 0.35 * strengthN) * (hov ? 1.6 : 1), 0.85);
+          ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.quadraticCurveTo(cxp, cyp, pb.x, pb.y);
+          ctx.strokeStyle = '#dffff4'; ctx.lineWidth = Math.max(0.8, lw * 0.38);
+          ctx.shadowColor = '#ffffff'; ctx.shadowBlur = hov ? 10 : 4;
           ctx.stroke();
           ctx.shadowBlur = 0;
           // 流动光点(较强弧常驻, 弱弧hover时)
