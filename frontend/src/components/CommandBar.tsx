@@ -3,9 +3,10 @@ import { useLocation } from 'react-router';
 import {
   LayoutDashboard, Brain, GitBranch, Wrench, Users, Archive, Activity, MessageSquare,
   Home, BookOpen, Compass, UsersRound, BarChart3, Network, Sparkles,
-  LogOut, Copy, CornerDownLeft, Search, Radio,
+  LogOut, Copy, Check, CornerDownLeft, Search, Radio,
 } from 'lucide-react';
 import { getApiKey, logout } from '@/lib/api';
+import { copyText } from '@/lib/clipboard';
 
 /**
  * 命令条 — ⌘K / Ctrl+K
@@ -25,6 +26,7 @@ export default function CommandBar() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
+  const [copyMsg, setCopyMsg] = useState(''); // 复制密钥反馈: '' | '已复制 ✓' | '复制失败' | '未找到密钥'
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
@@ -54,8 +56,14 @@ export default function CommandBar() {
     ];
     const actions: Cmd[] = [
       {
-        id: 'copy-key', label: 'Copy API Key', hint: '复制密钥', group: 'ACTION', icon: Copy,
-        run: () => { const k = getApiKey(); if (k) navigator.clipboard.writeText(k); setOpen(false); },
+        id: 'copy-key', label: 'Copy API Key', hint: copyMsg || '复制密钥', group: 'ACTION', icon: copyMsg ? Check : Copy,
+        run: async () => {
+          const k = getApiKey();
+          if (!k) { setCopyMsg('未找到密钥'); return; }
+          const ok = await copyText(k);
+          if (ok) { setCopyMsg('已复制 ✓'); setTimeout(() => setOpen(false), 550); }
+          else setCopyMsg('复制失败 · 请用侧栏按钮');
+        },
       },
       {
         id: 'logout', label: 'Log Out', hint: '退出', group: 'ACTION', icon: LogOut,
@@ -63,7 +71,7 @@ export default function CommandBar() {
       },
     ];
     return [...nav, ...pub, ...actions];
-  }, [go]);
+  }, [go, copyMsg]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -86,7 +94,7 @@ export default function CommandBar() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setOpen(o => { setQ(''); setSel(0); return !o; });
+        setOpen(o => { setQ(''); setSel(0); setCopyMsg(''); return !o; });
       }
       if (e.key === 'Escape') setOpen(false);
     };
