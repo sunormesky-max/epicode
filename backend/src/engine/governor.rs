@@ -2,6 +2,11 @@ use crate::domain::space::Space;
 use crate::domain::tetra::MemoryPayload;
 use crate::engine::knowledge::KnowledgeGraph;
 
+/// 重要性下限宪法(O-A, 推演v2病灶A): 所有自动降权路径的统一地板。
+/// 生产实证: supersede(×0.15)/quarantine(min 0.1)/自探索(0.3)曾绕过 governor 的 0.3,
+/// 66% 记忆塌缩到 ≈0 → 检索重要性信号失声。地板含义: 记忆可被降籍, 不可被检索除名。
+pub const IMPORTANCE_FLOOR: f64 = 0.3;
+
 pub struct GovernorResult {
     pub recurrent_ids: Vec<u64>,
     /// S3修复: evaluate 中被修改的记忆 id (调用方负责持久化)
@@ -286,7 +291,7 @@ impl LifecycleGovernor {
         // 0.3 是搜索评分中 importance 因子仍能贡献正信号的最低值
         if (data.importance - decayed).abs() > 0.05 && decayed < data.importance {
             let mut updated = data.clone();
-            updated.importance = decayed.max(0.3);
+            updated.importance = decayed.max(IMPORTANCE_FLOOR);
             tracing::info!(
                 "[Governor] decayed #{}: importance {:.2} -> {:.2} (age={}d)",
                 id,

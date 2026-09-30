@@ -290,7 +290,8 @@ impl GatewayCenter {
                         if !old_tetra.data.labels.iter().any(|l| l == "superseded") {
                             old_tetra.data.labels.push("superseded".into());
                         }
-                        old_tetra.data.importance = (old_tetra.data.importance * 0.15).max(0.01);
+                        old_tetra.data.importance = (old_tetra.data.importance * 0.15)
+                            .max(super::governor::IMPORTANCE_FLOOR); // 重要性下限宪法(O-A): supersede是社会性死亡, 不是检索除名
                         old_tetra.data.valid_to = Some(ts);
                         // 能力B：双时序——记录失效得知时间
                         old_tetra.data.invalidated_at = Some(ts);

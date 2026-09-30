@@ -4111,7 +4111,8 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                             updated.labels.push("superseded".to_string());
                         }
                         updated.valid_to = Some(now);
-                        updated.importance *= 0.15;
+                        updated.importance =
+                            (updated.importance * 0.15).max(super::governor::IMPORTANCE_FLOOR); // O-A
                         if let Err(e) = self.space.update_payload(id, updated) {
                             tracing::warn!("[Scheduler] update_payload {} failed: {}", id, e);
                         }
@@ -4348,7 +4349,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             }
             let now = chrono::Utc::now().timestamp();
             data.valid_to = Some(now);
-            data.importance = data.importance.min(0.1);
+            data.importance = data.importance.min(super::governor::IMPORTANCE_FLOOR); // O-A
             let new_labels = data.labels.clone();
             if let Err(e) = self.space.update_payload(id, data) {
                 tracing::warn!("[Scheduler] update_payload {} failed: {}", id, e);
