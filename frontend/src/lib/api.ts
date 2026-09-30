@@ -280,7 +280,7 @@ export function invalidateCache(...prefixes: string[]): void {
 export async function request<T>(
   endpoint: string,
   options: {
-    method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+    method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
     body?: unknown;
     skipCache?: boolean;
     public?: boolean;

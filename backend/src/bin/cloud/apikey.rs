@@ -49,7 +49,16 @@ pub async fn api_key_masked(
     let (role, permissions): (&str, serde_json::Value) = if user.parent.is_none() {
         (
             "owner",
-            serde_json::json!(["memory_read", "memory_write", "memory_delete", "persona_import", "skill_manage", "library_manage", "subaccount_manage", "apikey_manage"]),
+            serde_json::json!([
+                "memory_read",
+                "memory_write",
+                "memory_delete",
+                "persona_import",
+                "skill_manage",
+                "library_manage",
+                "subaccount_manage",
+                "apikey_manage"
+            ]),
         )
     } else {
         (
@@ -87,7 +96,10 @@ pub async fn api_key_reveal(
     axum::extract::Extension(user): axum::extract::Extension<UserInfo>,
     Json(req): Json<PasswordRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-        if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::ApiKeyManage) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::ApiKeyManage,
+    ) {
         return r;
     }
     if st.user_mgr.login(&user.user_id, &req.password).is_err() {
@@ -118,7 +130,10 @@ pub async fn api_key_reset(
     axum::extract::Extension(user): axum::extract::Extension<UserInfo>,
     Json(req): Json<PasswordRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-        if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::ApiKeyManage) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::ApiKeyManage,
+    ) {
         return r;
     }
     if st.user_mgr.login(&user.user_id, &req.password).is_err() {

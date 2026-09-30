@@ -125,7 +125,16 @@ impl UserRole {
     }
     pub fn permissions(&self) -> Vec<Permission> {
         use Permission::*;
-        let all = [MemoryRead, MemoryWrite, MemoryDelete, PersonaImport, SkillManage, LibraryManage, SubaccountManage, ApiKeyManage];
+        let all = [
+            MemoryRead,
+            MemoryWrite,
+            MemoryDelete,
+            PersonaImport,
+            SkillManage,
+            LibraryManage,
+            SubaccountManage,
+            ApiKeyManage,
+        ];
         all.iter().copied().filter(|p| self.can(*p)).collect()
     }
     pub fn parse(s: &str) -> Option<UserRole> {
@@ -723,9 +732,7 @@ impl UserManager {
         if actor.parent.is_some() && actor.role != UserRole::Admin {
             return Err("insufficient role to manage sub-accounts".into());
         }
-        let sub = db
-            .get_mut(sub_user_id)
-            .ok_or("sub-account not found")?;
+        let sub = db.get_mut(sub_user_id).ok_or("sub-account not found")?;
         if sub.parent.is_none() {
             return Err("cannot change role of a main account".into());
         }
@@ -1523,7 +1530,14 @@ mod rbac_tests {
             (UserRole::Viewer, ApiKeyManage, false),
         ];
         for (role, perm, expect) in cases {
-            assert_eq!(role.can(*perm), *expect, "{:?}.can({:?}) should be {}", role, perm, expect);
+            assert_eq!(
+                role.can(*perm),
+                *expect,
+                "{:?}.can({:?}) should be {}",
+                role,
+                perm,
+                expect
+            );
         }
     }
 
@@ -1549,7 +1563,12 @@ mod rbac_tests {
     /// 角色序列化往返 + parse
     #[test]
     fn role_serde_roundtrip() {
-        for r in [UserRole::Admin, UserRole::Developer, UserRole::Tester, UserRole::Viewer] {
+        for r in [
+            UserRole::Admin,
+            UserRole::Developer,
+            UserRole::Tester,
+            UserRole::Viewer,
+        ] {
             let s = serde_json::to_string(&r).unwrap();
             assert_eq!(UserRole::parse(r.as_str()), Some(r), "parse {}", s);
         }
@@ -1560,7 +1579,12 @@ mod rbac_tests {
     /// permissions() 与 can() 一致
     #[test]
     fn permissions_list_matches_can() {
-        for r in [UserRole::Admin, UserRole::Developer, UserRole::Tester, UserRole::Viewer] {
+        for r in [
+            UserRole::Admin,
+            UserRole::Developer,
+            UserRole::Tester,
+            UserRole::Viewer,
+        ] {
             let ps = r.permissions();
             for p in ps {
                 assert!(r.can(p), "{:?} listed {:?} but can()=false", r, p);

@@ -124,7 +124,10 @@ pub async fn create_subaccount(
     };
     // admin 角色是代理全权 — 仅主账户可授予(owner 亲自点名, admin 不能再造 admin)
     if role == UserRole::Admin && user.parent.is_some() {
-        return forbidden("subaccount_create", "only the main account can grant the admin role");
+        return forbidden(
+            "subaccount_create",
+            "only the main account can grant the admin role",
+        );
     }
     match st
         .user_mgr

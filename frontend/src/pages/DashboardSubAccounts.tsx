@@ -4,6 +4,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading } from '@/components/DashboardUI';
 import { Users, Plus, Trash2, Shield, Brain, Crown, AlertTriangle, UserCheck, Lock, X, Check, Minus } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
+import type { TranslationKey } from '@/i18n/translations';
 
 /** 前端权限矩阵展示(与后端 UserRole::can 黄金表一致; 真闸在后端) */
 const ROLE_MATRIX: Record<SubRole | 'owner', boolean[]> = {
@@ -71,11 +72,12 @@ export default function DashboardSubAccounts() {
   }
 
   async function handleRoleChange(user_id: string, role: SubRole) {
-    if (!confirm(t('dash.sub.changeRoleConfirm').replace('{user}', user_id).replace('{role}', t(`dash.sub.role${role[0].toUpperCase()}${role.slice(1)}`)))) return;
+    const roleKeyMap: Record<SubRole, TranslationKey> = { admin: 'dash.sub.roleAdmin', developer: 'dash.sub.roleDeveloper', tester: 'dash.sub.roleTester', viewer: 'dash.sub.roleViewer' };
+    if (!confirm(t('dash.sub.changeRoleConfirm').replace('{user}', user_id).replace('{role}', t(roleKeyMap[role])))) return;
     try {
       await setSubAccountRole(user_id, role);
       setAccounts(prev => prev.map(a => a.user_id === user_id ? { ...a, role } : a));
-      setNotice(`${t('dash.sub.roleChanged')}: ${user_id} → ${t(`dash.sub.role${role[0].toUpperCase()}${role.slice(1)}`)}`);
+      setNotice(`${t('dash.sub.roleChanged')}: ${user_id} → ${t(roleKeyMap[role])}`);
     } catch (e: unknown) {
       setError(errMsg(e));
     }

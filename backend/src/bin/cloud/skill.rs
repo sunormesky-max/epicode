@@ -48,7 +48,10 @@ pub async fn create_skill(
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<CreateSkillRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::SkillManage) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::SkillManage,
+    ) {
         return r;
     }
     let name_raw = req
@@ -150,7 +153,10 @@ pub async fn update_skill(
     Path(id): Path<u64>,
     Json(req): Json<UpdateSkillRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::SkillManage) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::SkillManage,
+    ) {
         return r;
     }
     match engine.skills.update(id, req.skill_md, req.version) {
@@ -192,7 +198,10 @@ pub async fn delete_skill(
     AuthedEngine(engine): AuthedEngine,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::SkillManage) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::SkillManage,
+    ) {
         return r;
     }
     match engine.skills.delete(id) {
@@ -222,7 +231,10 @@ pub async fn publish_skill(
     AuthedEngine(engine): AuthedEngine,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::SkillManage) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::SkillManage,
+    ) {
         return r;
     }
     let source = match engine.skills.get(id) {
@@ -304,7 +316,10 @@ pub async fn link_skill_memory(
     Path(id): Path<u64>,
     Json(req): Json<LinkMemoryRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::SkillManage) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::SkillManage,
+    ) {
         return r;
     }
     match engine.skills.link_memory(id, req.memory_id) {

@@ -33,7 +33,10 @@ pub async fn create_collection(
     axum::extract::Extension(user): axum::extract::Extension<UserInfo>,
     Json(req): Json<CreateCollectionRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
         return r;
     }
     if req.name.trim().is_empty() || req.name.len() > 128 {
@@ -100,7 +103,10 @@ pub async fn set_acl(
     axum::extract::Extension(user): axum::extract::Extension<UserInfo>,
     Json(req): Json<SetAclRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::LibraryManage) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::LibraryManage,
+    ) {
         return r;
     }
     match st.library.collection_owner(req.collection_id) {
@@ -161,7 +167,10 @@ pub async fn ingest(
     axum::extract::Extension(user): axum::extract::Extension<UserInfo>,
     Json(req): Json<LibraryIngestRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
         return r;
     }
     if req.items.is_empty() || req.items.len() > 8 {
@@ -354,7 +363,10 @@ pub async fn handle_request(
     axum::extract::Extension(user): axum::extract::Extension<UserInfo>,
     Json(req): Json<HandleRequestIn>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::LibraryManage) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::LibraryManage,
+    ) {
         return r;
     }
     // owner 判定走集中式名单(可配置, 含抢注防护) — 审计 2026-09 中优 #9
@@ -414,7 +426,10 @@ pub async fn set_visibility(
     axum::extract::Extension(user): axum::extract::Extension<UserInfo>,
     Json(req): Json<SetVisibilityIn>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::LibraryManage) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::LibraryManage,
+    ) {
         return r;
     }
     match st.library.collection_owner(req.collection_id) {

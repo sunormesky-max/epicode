@@ -42,7 +42,10 @@ pub async fn digest_content(
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<DigestRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
         return r;
     }
     if req.content.trim().is_empty() {
@@ -181,7 +184,10 @@ pub async fn ingest_batch(
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<BatchIngestRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
         return r;
     }
     let n = req.items.len();
@@ -277,7 +283,10 @@ pub async fn remember(
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<RememberRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
         return r;
     }
     if let Err(e) = validate_content(&req.content) {
@@ -631,7 +640,10 @@ pub async fn create_node(
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<CreateNodeRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
         return r;
     }
     if let Err(e) = validate_content(&req.content) {
@@ -924,7 +936,10 @@ pub async fn import_personality(
     user: axum::extract::Extension<UserInfo>,
     axum::extract::Json(pkg): axum::extract::Json<serde_json::Value>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::PersonaImport) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::PersonaImport,
+    ) {
         return r;
     }
     let engine = match get_engine(&st, &user) {
@@ -1498,7 +1513,10 @@ pub async fn import_doc(
     AuthedEngine(engine): AuthedEngine,
     Json(body): Json<ImportDocRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
         return r;
     }
     if body.name.trim().is_empty() || body.content.trim().is_empty() {
@@ -1682,7 +1700,10 @@ pub async fn drive_ingested(
     AuthedEngine(engine): AuthedEngine,
     Json(body): Json<IngestedRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
         return r;
     }
     engine.scheduler.drive_queue().record_ingested(&body.ids);
@@ -1900,7 +1921,10 @@ pub async fn bulk_restore(
     AuthedEngine(engine): AuthedEngine,
     Json(body): Json<BulkQuarantineRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryDelete) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryDelete,
+    ) {
         return r;
     }
     // P0 门禁: bulk_restore 也需要 token（恢复是写操作）
@@ -2134,7 +2158,10 @@ pub async fn forget_memory(
     AuthedEngine(engine): AuthedEngine,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryDelete) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryDelete,
+    ) {
         return r;
     }
     let sched = engine.scheduler.clone();
@@ -2837,7 +2864,10 @@ pub async fn learn_rule(
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<RuleLearnRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
         return r;
     }
     if let Err(e) = validate_content(&req.content) {
@@ -3025,7 +3055,10 @@ pub async fn revoke_rule(
     AuthedEngine(engine): AuthedEngine,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryDelete) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryDelete,
+    ) {
         return r;
     }
     let engine_inner = engine.clone();
@@ -3656,7 +3689,10 @@ pub async fn operations_confirm(
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<ConfirmRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryDelete) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryDelete,
+    ) {
         return r;
     }
     // Pop the pending op (single-use token).
