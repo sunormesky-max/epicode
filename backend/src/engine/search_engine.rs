@@ -1637,6 +1637,11 @@ fn score_tetra(
     score += recency * 0.04;
     score += access_bonus;
     score += exact_substring_boost;
+    // O-E 复习反马太: 终身零复习且>7天的记忆给微小探索分(curiosity采样) —
+    // 生产实证: 88%记忆从未被检索, access/recency正反馈形成复习贵族制
+    if t.data.last_reviewed_ts.is_none() && age_days > 7.0 {
+        score += 0.03;
+    }
 
     // 惩罚项改为减法（而非乘法），避免归零
     let penalty = if t.data.labels.iter().any(|l| l.starts_with("meta-")) {
