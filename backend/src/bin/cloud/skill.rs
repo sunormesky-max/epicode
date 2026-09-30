@@ -44,9 +44,16 @@ pub struct CreateSkillRequest {
 }
 
 pub async fn create_skill(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<CreateSkillRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::SkillManage,
+    ) {
+        return r;
+    }
     let name_raw = req
         .name
         .unwrap_or_else(|| format!("skill-{}", chrono::Utc::now().timestamp()));
@@ -141,10 +148,17 @@ pub struct UpdateSkillRequest {
 }
 
 pub async fn update_skill(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Path(id): Path<u64>,
     Json(req): Json<UpdateSkillRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::SkillManage,
+    ) {
+        return r;
+    }
     match engine.skills.update(id, req.skill_md, req.version) {
         Ok(skill) => {
             if let Some(d) = req.description.as_ref() {
@@ -180,9 +194,16 @@ pub async fn update_skill(
 }
 
 pub async fn delete_skill(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::SkillManage,
+    ) {
+        return r;
+    }
     match engine.skills.delete(id) {
         Ok(()) => (
             StatusCode::OK,
@@ -206,9 +227,16 @@ pub async fn delete_skill(
 
 pub async fn publish_skill(
     State(st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::SkillManage,
+    ) {
+        return r;
+    }
     let source = match engine.skills.get(id) {
         Some(s) => s,
         None => {
@@ -283,10 +311,17 @@ pub struct LinkMemoryRequest {
 }
 
 pub async fn link_skill_memory(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Path(id): Path<u64>,
     Json(req): Json<LinkMemoryRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::SkillManage,
+    ) {
+        return r;
+    }
     match engine.skills.link_memory(id, req.memory_id) {
         Ok(()) => (
             StatusCode::OK,
