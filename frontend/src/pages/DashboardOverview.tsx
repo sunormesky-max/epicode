@@ -26,7 +26,7 @@ export default function DashboardOverview() {
   const { t } = useI18nContext();
   const [copied, setCopied] = useState(false);
   const isMobile = useIsMobile();
-  const [keyInfo, setKeyInfo] = useState<{ masked_key: string } | null>(null);
+  const [keyInfo, setKeyInfo] = useState<{ masked_key: string; role?: string; permissions?: string[] } | null>(null);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [newKeyCopyMsg, setNewKeyCopyMsg] = useState(''); // '' | '已复制 ✓' | '复制失败' — 一次性密钥必须给反馈
   const [keyFromReset, setKeyFromReset] = useState(false);
@@ -215,6 +215,12 @@ export default function DashboardOverview() {
               <Shield size={10} style={{ verticalAlign: -1, marginRight: 6 }} />
               {stats?.is_main_account ? t('dash.overview.main_account') : t('dash.overview.sub_account')}
               {stats?.has_sub_accounts ? ` · ${t('dash.overview.enabled')}` : ''}
+              {/* 分级权限角色: owner(主账户)或被赋予的子账户角色 */}
+              {keyInfo?.role && (
+                <span title={(keyInfo.permissions || []).join(' · ')} style={{ marginLeft: 8, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--accent-cyan)', border: '1px solid rgba(62,207,174,0.3)', borderRadius: 12, padding: '1px 8px' }}>
+                  {keyInfo.role}
+                </span>
+              )}
             </p>
             <p style={{ ...HUD_VAL, marginTop: 3, display: 'flex', alignItems: 'center', gap: 6 }}>
               <Terminal size={10} style={{ verticalAlign: -1 }} />
