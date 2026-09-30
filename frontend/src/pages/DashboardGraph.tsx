@@ -478,41 +478,8 @@ export default function DashboardGraph() {
       }
       const hasFocus = highlightSet !== null;
 
-      // ── 超边弧线(总览): 聚类对聚合为发光曲线 + 流动光点(PixVision式光弧) ──
-      if (ov && eff) {
-        const arr = superEdgesRef.current;
-        const maxCnt = arr.length ? arr[0].count : 1;
-        for (const se of arr) {
-          const pa = cents.get(se.a), pb = cents.get(se.b);
-          if (!pa || !pb) continue;
-          const dx = pb.x - pa.x, dy = pb.y - pa.y;
-          const d = Math.sqrt(dx * dx + dy * dy) || 1;
-          const bow = Math.min(d * 0.22, 60) * ((se.a * 31 + se.b * 17) % 2 === 0 ? 1 : -1);
-          const cxp = (pa.x + pb.x) / 2 - (dy / d) * bow, cyp = (pa.y + pb.y) / 2 + (dx / d) * bow;
-          const hov = superHoverRef.current === se.a || superHoverRef.current === se.b;
-          const strengthN = se.count / maxCnt;
-          const ca = se.a >= 0 ? CLUSTER_COLORS[se.a % CLUSTER_COLORS.length] : '#6b7280';
-          const cb2 = se.b >= 0 ? CLUSTER_COLORS[se.b % CLUSTER_COLORS.length] : '#6b7280';
-          const grad = ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
-          grad.addColorStop(0, ca + '80'); grad.addColorStop(0.5, '#3ecfae99'); grad.addColorStop(1, cb2 + '80');
-          ctx.globalAlpha = Math.min((0.16 + 0.45 * strengthN) * (hov ? 2.2 : 1), 0.92);
-          ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.quadraticCurveTo(cxp, cyp, pb.x, pb.y);
-          ctx.strokeStyle = grad; ctx.lineWidth = hov ? 2.4 : 1 + strengthN * 2.2; ctx.stroke();
-          // 流动光点(较强弧常驻, 弱弧hover时)
-          if (strengthN > 0.35 || hov) {
-            const seed = ((se.a * 73856093) ^ (se.b * 19349663)) >>> 0;
-            const phase = (seed % 1000) / 1000;
-            const p = (t * 0.25 + phase) % 1;
-            const qpx = (1 - p) * (1 - p) * pa.x + 2 * (1 - p) * p * cxp + p * p * pb.x;
-            const qpy = (1 - p) * (1 - p) * pa.y + 2 * (1 - p) * p * cyp + p * p * pb.y;
-            ctx.globalAlpha = 0.45;
-            ctx.beginPath(); ctx.arc(qpx, qpy, 6, 0, Math.PI * 2); ctx.fillStyle = '#3ecfae'; ctx.fill();
-            ctx.globalAlpha = 0.95;
-            ctx.beginPath(); ctx.arc(qpx, qpy, 2.6, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill();
-          }
-        }
-        ctx.globalAlpha = 1;
-      }
+      // ── 超边弧线(总览)已移至超节点绘制之后(z-order上层) — 画在下层时20个球体辉光(半径rr*2.6)
+      //    会把弧线整体淹没(实测像素扫描弧线在画但视觉0条), 上层+发光才能"浮"出来 ──
 
       // 跨簇边（暗，流动效果）— LOD: 弱于下限的边直接不画
       for (const e of ies) {
@@ -827,6 +794,49 @@ export default function DashboardGraph() {
             ctx.font = '500 9px JetBrains Mono, monospace';
             ctx.fillStyle = color;
             ctx.fillText(sp.memberCount > shown ? `${shown}/${sp.memberCount}` : `${sp.memberCount}`, c.x, c.y - hr - 7);
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      // ── 超边弧线(总览, z-order上层): 聚类对聚合为发光曲线 + 流动光点(PixVision式光弧) ──
+      // 画在超节点之后: 下层时被球体辉光(半径rr*2.6)整体淹没(实测在画但视觉0条)
+      if (ov && eff) {
+        const arr = superEdgesRef.current;
+        const maxCnt = arr.length ? arr[0].count : 1;
+        for (const se of arr) {
+          const pa = cents.get(se.a), pb = cents.get(se.b);
+          if (!pa || !pb) continue;
+          const dx = pb.x - pa.x, dy = pb.y - pa.y;
+          const d = Math.sqrt(dx * dx + dy * dy) || 1;
+          const bow = Math.min(d * 0.22, 60) * ((se.a * 31 + se.b * 17) % 2 === 0 ? 1 : -1);
+          const cxp = (pa.x + pb.x) / 2 - (dy / d) * bow, cyp = (pa.y + pb.y) / 2 + (dx / d) * bow;
+          const hov = superHoverRef.current === se.a || superHoverRef.current === se.b;
+          const strengthN = se.count / maxCnt;
+          const ca = se.a >= 0 ? CLUSTER_COLORS[se.a % CLUSTER_COLORS.length] : '#6b7280';
+          const cb2 = se.b >= 0 ? CLUSTER_COLORS[se.b % CLUSTER_COLORS.length] : '#6b7280';
+          const grad = ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
+          grad.addColorStop(0, ca + '80'); grad.addColorStop(0.5, '#3ecfaeaa'); grad.addColorStop(1, cb2 + '80');
+          ctx.globalAlpha = Math.min((0.16 + 0.45 * strengthN) * (hov ? 2.2 : 1), 0.92);
+          ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.quadraticCurveTo(cxp, cyp, pb.x, pb.y);
+          ctx.strokeStyle = grad; ctx.lineWidth = hov ? 2.8 : 1.1 + strengthN * 2.4;
+          // 发光描边 — 让弧线从球体辉光里"浮"出来
+          ctx.shadowColor = '#3ecfae'; ctx.shadowBlur = hov ? 14 : 6 + strengthN * 6;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+          // 流动光点(较强弧常驻, 弱弧hover时)
+          if (strengthN > 0.35 || hov) {
+            const seed = ((se.a * 73856093) ^ (se.b * 19349663)) >>> 0;
+            const phase = (seed % 1000) / 1000;
+            const p = (t * 0.25 + phase) % 1;
+            const qpx = (1 - p) * (1 - p) * pa.x + 2 * (1 - p) * p * cxp + p * p * pb.x;
+            const qpy = (1 - p) * (1 - p) * pa.y + 2 * (1 - p) * p * cyp + p * p * pb.y;
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath(); ctx.arc(qpx, qpy, 6.5, 0, Math.PI * 2); ctx.fillStyle = '#3ecfae'; ctx.fill();
+            ctx.globalAlpha = 0.95;
+            ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 8;
+            ctx.beginPath(); ctx.arc(qpx, qpy, 2.6, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill();
+            ctx.shadowBlur = 0;
           }
         }
         ctx.globalAlpha = 1;
