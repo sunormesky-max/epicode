@@ -906,6 +906,71 @@ impl SchedulerCenter {
     }
 
     /// 清道夫系统：扫描全库，诊断并 supersede 垃圾记忆（不删除）
+    /// O-A+O1 记忆自愈(推演v2病灶A/F): 重要性塌缩回滚 + 隔离池再消化。
+    /// 由 POST /admin/heal-memory 触发(平台管理员), 幂等可重放。
+    /// - importance < floor 的记忆回滚到 floor(检索除名 → 降籍复权)
+    /// - quarantine 标签且内容非垃圾(≥20字符)的记忆: 摘标签 + mass恢复 + 复权
+    ///   (打破"quarantine条件imp<0.3 → 每轮体检re-quarantine"的永久隔离循环)
+    pub fn heal_memory(&self, floor: f64) -> serde_json::Value {
+        use super::governor::IMPORTANCE_FLOOR;
+        let floor = if floor <= 0.0 {
+            IMPORTANCE_FLOOR
+        } else {
+            floor
+        };
+        let tetras = self.space.all_tetrahedrons();
+        let mut rolled_back = 0usize;
+        let mut unquarantined = 0usize;
+        let mut still_quarantined = 0usize;
+        for t in &tetras {
+            let mut data = t.data.clone();
+            let mut changed = false;
+            if data.importance < floor {
+                data.importance = floor;
+                changed = true;
+                rolled_back += 1;
+            }
+            // 隔离池再消化: 有实质内容(≥20字符)且非junk/superseded的quarantine记忆
+            // 摘牌恢复公民权; 真垃圾(junk标签或空内容)保留隔离
+            let is_quarantined = data.labels.iter().any(|l| l == "quarantine");
+            if is_quarantined {
+                let is_junk = data.labels.iter().any(|l| l == "junk");
+                let substantial = data.content.chars().count() >= 20;
+                if !is_junk && substantial {
+                    data.labels.retain(|l| l != "quarantine");
+                    if data.importance < floor {
+                        data.importance = floor;
+                    }
+                    let _ = self.space.update_mass(t.id, 0.5);
+                    unquarantined += 1;
+                    changed = true;
+                } else {
+                    still_quarantined += 1;
+                }
+            }
+            if changed {
+                let _ = self.space.update_payload(t.id, data);
+                if let Some(updated) = self.space.get_tetrahedron(t.id) {
+                    let _ = self.storage.upsert_tetra(&updated);
+                }
+            }
+        }
+        tracing::info!(
+            "[Heal] floor={}: rolled_back={} unquarantined={} still_quarantined={}",
+            floor,
+            rolled_back,
+            unquarantined,
+            still_quarantined
+        );
+        serde_json::json!({
+            "rolled_back": rolled_back,
+            "unquarantined": unquarantined,
+            "still_quarantined": still_quarantined,
+            "total": tetras.len(),
+            "floor": floor,
+        })
+    }
+
     pub fn api_scavenge(&self) -> serde_json::Value {
         let all = self.space.all_tetrahedrons();
         let now = chrono::Utc::now().timestamp();

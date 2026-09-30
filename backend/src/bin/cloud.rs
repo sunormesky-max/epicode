@@ -422,6 +422,7 @@ async fn main() {
             post(admin::admin_generate_invites),
         )
         .route("/admin/invites/list", get(admin::admin_list_invites))
+        .route("/admin/heal-memory", post(admin::admin_heal_memory))
         .route("/admin/backup", post(admin::admin_backup_all))
         .route("/admin/backup/:user_id", post(admin::admin_backup_user))
         .route(
