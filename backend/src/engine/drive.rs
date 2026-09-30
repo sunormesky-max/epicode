@@ -752,7 +752,7 @@ impl DriveQueue {
     /// 被 drain 的信号不再进入 active 持久化, 由调用方写入 archive 表。
     /// 生产实证: 1969 条信号 archive=0 — save 全量重写刷新 updated_at, 7天窗口永不满足。
     pub fn drain_archivable(&self, cutoff_ms: i64) -> Vec<DriveSignal> {
-        let now = Self::now_ts() as i64 * 1000;
+        let now = Self::now_ts() * 1000;
         let mut signals = self.signals.lock();
         let mut drained = Vec::new();
         signals.retain(|s| {
