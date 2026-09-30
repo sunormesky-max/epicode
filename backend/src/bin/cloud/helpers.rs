@@ -250,10 +250,8 @@ pub fn require_perm(
     user: &UserInfo,
     perm: epicode::engine::user_manager::Permission,
 ) -> Option<(StatusCode, Json<serde_json::Value>)> {
-    if user.parent.is_none() {
-        return None; // 主账户 = Owner, 全权
-    }
-    if user.role.can(perm) {
+    // 主账户(parent.is_none())= Owner 天然全权; 子账户按角色判定
+    if user.parent.is_none() || user.role.can(perm) {
         return None;
     }
     tracing::warn!(
