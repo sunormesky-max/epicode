@@ -343,11 +343,30 @@ export default function DashboardGraph() {
       const ovMode = viewModeRef.current === 'overview';
       const breathe = settled ? (ovMode ? 0.0012 : 0.0003) : 0.0008;
       const damping = settled ? 0.95 : 0.82;
+      // 展开簇形态收紧: settled后仍保留簇内局部斥力(O(k²)仅展开簇成员, ≤48²很便宜) —
+      // 否则锚点拉力会把可见成员拉叠成一坨; 局部斥力×加强拉力平衡 = 紧凑晕圈
+      if (settled && ovMode && expandedRef.current.size > 0) {
+        for (const ci of expandedRef.current) {
+          const arr: typeof ns = [];
+          for (const n of ns) if (n.cluster === ci) arr.push(n);
+          for (let i = 0; i < arr.length; i++) {
+            for (let j = i + 1; j < arr.length; j++) {
+              const dx = arr[j].x - arr[i].x, dy = arr[j].y - arr[i].y;
+              const d2 = dx * dx + dy * dy; if (d2 < 1) continue;
+              const d = Math.sqrt(d2);
+              const rep = Math.min(300 / d2, 0.6);
+              const fx = (dx / d) * rep, fy = (dy / d) * rep;
+              arr[i].vx -= fx; arr[i].vy -= fy; arr[j].vx += fx; arr[j].vy += fy;
+            }
+          }
+        }
+      }
       for (const n of ns) {
         const anchor: { x: number; y: number } | null = (settled && ovMode && n.cluster >= 0)
           ? anchorsRef.current.get(n.cluster) ?? null : null;
         const cent = centers.get(n.cluster);
-        if (anchor) { n.vx += (anchor.x - n.x) * breathe; n.vy += (anchor.y - n.y) * breathe; }
+        const pull = anchor && n.cluster >= 0 && expandedRef.current.has(n.cluster) ? 0.0028 : breathe;
+        if (anchor) { n.vx += (anchor.x - n.x) * pull; n.vy += (anchor.y - n.y) * pull; }
         else if (cent) { n.vx += (cent.x / cent.n - n.x) * breathe; n.vy += (cent.y / cent.n - n.y) * breathe; }
         else { n.vx += (cx - n.x) * 0.0004; n.vy += (cy - n.y) * 0.0004; }
         // 收敛后加随机微扰（布朗运动，模拟神经活动）
@@ -475,21 +494,21 @@ export default function DashboardGraph() {
           const ca = se.a >= 0 ? CLUSTER_COLORS[se.a % CLUSTER_COLORS.length] : '#6b7280';
           const cb2 = se.b >= 0 ? CLUSTER_COLORS[se.b % CLUSTER_COLORS.length] : '#6b7280';
           const grad = ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
-          grad.addColorStop(0, ca + '45'); grad.addColorStop(0.5, '#3ecfae55'); grad.addColorStop(1, cb2 + '45');
-          ctx.globalAlpha = Math.min((0.07 + 0.32 * strengthN) * (hov ? 2.2 : 1), 0.92);
+          grad.addColorStop(0, ca + '80'); grad.addColorStop(0.5, '#3ecfae99'); grad.addColorStop(1, cb2 + '80');
+          ctx.globalAlpha = Math.min((0.16 + 0.45 * strengthN) * (hov ? 2.2 : 1), 0.92);
           ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.quadraticCurveTo(cxp, cyp, pb.x, pb.y);
-          ctx.strokeStyle = grad; ctx.lineWidth = hov ? 2 : 0.8 + strengthN * 1.8; ctx.stroke();
-          // 流动光点(强弧常驻, 弱弧hover时)
-          if (strengthN > 0.6 || hov) {
+          ctx.strokeStyle = grad; ctx.lineWidth = hov ? 2.4 : 1 + strengthN * 2.2; ctx.stroke();
+          // 流动光点(较强弧常驻, 弱弧hover时)
+          if (strengthN > 0.35 || hov) {
             const seed = ((se.a * 73856093) ^ (se.b * 19349663)) >>> 0;
             const phase = (seed % 1000) / 1000;
             const p = (t * 0.25 + phase) % 1;
             const qpx = (1 - p) * (1 - p) * pa.x + 2 * (1 - p) * p * cxp + p * p * pb.x;
             const qpy = (1 - p) * (1 - p) * pa.y + 2 * (1 - p) * p * cyp + p * p * pb.y;
-            ctx.globalAlpha = 0.32;
-            ctx.beginPath(); ctx.arc(qpx, qpy, 5, 0, Math.PI * 2); ctx.fillStyle = '#3ecfae'; ctx.fill();
-            ctx.globalAlpha = 0.9;
-            ctx.beginPath(); ctx.arc(qpx, qpy, 2.2, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill();
+            ctx.globalAlpha = 0.45;
+            ctx.beginPath(); ctx.arc(qpx, qpy, 6, 0, Math.PI * 2); ctx.fillStyle = '#3ecfae'; ctx.fill();
+            ctx.globalAlpha = 0.95;
+            ctx.beginPath(); ctx.arc(qpx, qpy, 2.6, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill();
           }
         }
         ctx.globalAlpha = 1;
@@ -710,14 +729,19 @@ export default function DashboardGraph() {
             ? n.labels[0]
             : (n.content || '').slice(0, 12);
           if (labelText) {
-            ctx.globalAlpha = isHv ? 1 : 0.7;
             ctx.font = `600 ${Math.min(11, 8 + n.mass / 8)}px JetBrains Mono, var(--font-mono), monospace`;
             ctx.textAlign = 'left';
+            // 半透明底pill — 提升交叉重叠时的可读性
+            const tw = ctx.measureText(labelText).width;
+            const ty = n.y + 3;
+            ctx.globalAlpha = isHv ? 0.85 : 0.62;
+            ctx.beginPath(); ctx.roundRect(n.x + r + 2, ty - 9, tw + 8, 13, 4);
+            ctx.fillStyle = 'rgba(8,10,18,0.8)'; ctx.fill();
+            ctx.globalAlpha = isHv ? 1 : 0.88;
             ctx.fillStyle = isHv ? '#f0f0f5' : color;
-            // 标签微光
             ctx.shadowColor = color;
             ctx.shadowBlur = isHv ? 8 : 4;
-            ctx.fillText(labelText, n.x + r + 4, n.y + 3);
+            ctx.fillText(labelText, n.x + r + 6, ty);
             ctx.shadowBlur = 0;
           }
         }
@@ -761,17 +785,28 @@ export default function DashboardGraph() {
               ctx.arc(c.x + Math.cos(ang) * (rr + 7), c.y + Math.sin(ang) * (rr + 7) * 0.35, 1.6, 0, Math.PI * 2);
               ctx.fillStyle = '#ffffff'; ctx.fill();
             }
-            // 标签 + 数字徽章
+            // 标签 + 数字徽章(半透明底pill, 遮挡时仍可读)
             ctx.globalAlpha = 1; ctx.textAlign = 'center';
             ctx.font = '700 12px JetBrains Mono, monospace';
+            const labelText = sp.topLabels.length > 0 ? sp.topLabels[0] : (sp.ci >= 0 ? `C${sp.ci + 1}` : 'Ungrouped');
+            const ltw = ctx.measureText(labelText).width;
+            ctx.globalAlpha = 0.85;
+            ctx.beginPath(); ctx.roundRect(c.x - ltw / 2 - 7, c.y - rr - 12 - 10, ltw + 14, 15, 5);
+            ctx.fillStyle = 'rgba(8,10,18,0.82)'; ctx.fill();
+            ctx.globalAlpha = 1;
             ctx.fillStyle = '#f0f0f5';
             ctx.shadowColor = color; ctx.shadowBlur = isHov ? 12 : 6;
-            const labelText = sp.topLabels.length > 0 ? sp.topLabels[0] : (sp.ci >= 0 ? `C${sp.ci + 1}` : 'Ungrouped');
             ctx.fillText(labelText, c.x, c.y - rr - 12);
             ctx.shadowBlur = 0;
+            const badge = `${sp.memberCount} · ${sp.totalMass.toFixed(0)}m`;
             ctx.font = '500 10px JetBrains Mono, monospace';
+            const btw = ctx.measureText(badge).width;
+            ctx.globalAlpha = 0.72;
+            ctx.beginPath(); ctx.roundRect(c.x - btw / 2 - 6, c.y + rr + 16 - 9, btw + 12, 13, 4);
+            ctx.fillStyle = 'rgba(8,10,18,0.82)'; ctx.fill();
+            ctx.globalAlpha = 0.95;
             ctx.fillStyle = color;
-            ctx.fillText(`${sp.memberCount} · ${sp.totalMass.toFixed(0)}m`, c.x, c.y + rr + 16);
+            ctx.fillText(badge, c.x, c.y + rr + 16);
           } else {
             // 展开簇枢纽: 小核 + 脉冲环 + top-K徽章
             const hr = isHov ? 8 : 6;
