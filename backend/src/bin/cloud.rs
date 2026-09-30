@@ -459,6 +459,10 @@ async fn main() {
             post(subaccount::revoke_subaccount),
         )
         .route(
+            "/v1/subaccounts/:user_id/role",
+            axum::routing::patch(subaccount::set_subaccount_role),
+        )
+        .route(
             "/v1/skills",
             get(skill::list_skills).post(skill::create_skill),
         )

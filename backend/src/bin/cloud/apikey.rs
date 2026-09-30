@@ -45,6 +45,25 @@ pub async fn api_key_masked(
     let presented_key = headers
         .get("X-API-Key")
         .and_then(|value| value.to_str().ok());
+    // 分级权限自我描述: 主账户=owner(全权); 子账户=被赋予的分级角色
+    let (role, permissions): (&str, serde_json::Value) = if user.parent.is_none() {
+        (
+            "owner",
+            serde_json::json!(["memory_read", "memory_write", "memory_delete", "persona_import", "skill_manage", "library_manage", "subaccount_manage", "apikey_manage"]),
+        )
+    } else {
+        (
+            user.role.as_str(),
+            serde_json::to_value(
+                user.role
+                    .permissions()
+                    .iter()
+                    .map(|p| format!("{:?}", p).to_lowercase())
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap_or_default(),
+        )
+    };
     (
         StatusCode::OK,
         Json(epicode::engine::smrp::envelope_ok_plain(
@@ -54,6 +73,8 @@ pub async fn api_key_masked(
                 "user_id": user.user_id,
                 "request_key_matches": request_key_matches(&user.api_key, presented_key),
                 "masked_key": mask_key(&user.api_key),
+                "role": role,
+                "permissions": permissions,
                 "hint": "完整密钥需密码确认: 显示(非破坏)或重置(破坏性, 现有连接立即失效)",
             }),
         )),
@@ -66,6 +87,9 @@ pub async fn api_key_reveal(
     axum::extract::Extension(user): axum::extract::Extension<UserInfo>,
     Json(req): Json<PasswordRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+        if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::ApiKeyManage) {
+        return r;
+    }
     if st.user_mgr.login(&user.user_id, &req.password).is_err() {
         return (
             StatusCode::UNAUTHORIZED,
@@ -94,6 +118,9 @@ pub async fn api_key_reset(
     axum::extract::Extension(user): axum::extract::Extension<UserInfo>,
     Json(req): Json<PasswordRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+        if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::ApiKeyManage) {
+        return r;
+    }
     if st.user_mgr.login(&user.user_id, &req.password).is_err() {
         return (
             StatusCode::UNAUTHORIZED,

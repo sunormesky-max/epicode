@@ -75,6 +75,78 @@ fn verify_password_legacy(password: &str, stored: &str) -> bool {
 const MAX_USERS: usize = 1000;
 const IDLE_TIMEOUT_SECS: u64 = 3600;
 
+// ── 分级权限控制系统 ──────────────────────────────────────────────
+// 主账户天然 Owner(parent.is_none()); 子账户可被赋予四级角色。
+// 存量迁移: serde default = Developer(保持子账户原有全数据功能, 平滑降险)。
+
+/// 功能权限点 — handler 层检查的最小单位
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+pub enum Permission {
+    MemoryRead,
+    MemoryWrite,
+    MemoryDelete,
+    PersonaImport,
+    SkillManage,
+    LibraryManage,
+    SubaccountManage,
+    ApiKeyManage,
+}
+
+/// 子账户角色分级(主账户不取值本枚举, 天然全权)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UserRole {
+    /// 全权代理运维: 数据全功能 + 子账户管理
+    Admin,
+    /// 全数据功能: 记忆读写删/技能库/图书馆/密钥, 无子账户管理
+    Developer,
+    /// 写+读: 可记忆可检索, 不可删除/不可人格导入/不可库管理
+    Tester,
+    /// 只读: 检索/图谱/统计
+    Viewer,
+}
+
+impl Default for UserRole {
+    fn default() -> Self {
+        // 存量 users.json 无 role 字段时的迁移默认值: 与旧版子账户功能面一致
+        UserRole::Developer
+    }
+}
+
+impl UserRole {
+    pub fn can(&self, p: Permission) -> bool {
+        use Permission::*;
+        match self {
+            UserRole::Admin => true,
+            UserRole::Developer => !matches!(p, SubaccountManage),
+            UserRole::Tester => matches!(p, MemoryRead | MemoryWrite | ApiKeyManage),
+            UserRole::Viewer => matches!(p, MemoryRead),
+        }
+    }
+    pub fn permissions(&self) -> Vec<Permission> {
+        use Permission::*;
+        let all = [MemoryRead, MemoryWrite, MemoryDelete, PersonaImport, SkillManage, LibraryManage, SubaccountManage, ApiKeyManage];
+        all.iter().copied().filter(|p| self.can(*p)).collect()
+    }
+    pub fn parse(s: &str) -> Option<UserRole> {
+        match s {
+            "admin" => Some(UserRole::Admin),
+            "developer" => Some(UserRole::Developer),
+            "tester" => Some(UserRole::Tester),
+            "viewer" => Some(UserRole::Viewer),
+            _ => None,
+        }
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            UserRole::Admin => "admin",
+            UserRole::Developer => "developer",
+            UserRole::Tester => "tester",
+            UserRole::Viewer => "viewer",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserInfo {
     pub user_id: String,
@@ -89,6 +161,9 @@ pub struct UserInfo {
     pub parent: Option<String>,
     #[serde(default)]
     pub sub_accounts: Vec<String>,
+    /// 子账户角色(主账户忽略此字段; 存量默认 developer 平滑迁移)
+    #[serde(default)]
+    pub role: UserRole,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -439,6 +514,7 @@ impl UserManager {
             created_at: chrono::Utc::now().timestamp(),
             parent: None,
             sub_accounts: Vec::new(),
+            role: UserRole::Admin, // 主账户字段忽略; Admin 仅表意"全权"
         };
         db.insert(user_id.to_string(), info.clone());
         let snapshot = db.clone();
@@ -527,6 +603,7 @@ impl UserManager {
         parent_id: &str,
         sub_user_id: &str,
         password: &str,
+        role: UserRole,
     ) -> Result<UserInfo, String> {
         if password.len() < 6 {
             return Err("password must be at least 6 characters".into());
@@ -552,8 +629,9 @@ impl UserManager {
             return Err("user already exists".into());
         }
         let parent_info = db.get(parent_id).ok_or("parent user not found")?.clone();
-        if parent_info.parent.is_some() {
-            return Err("sub-accounts cannot create their own sub-accounts".into());
+        // 分级权限: 仅主账户(owner)或 admin 角色子账户可创建子账户
+        if parent_info.parent.is_some() && parent_info.role != UserRole::Admin {
+            return Err("insufficient role to manage sub-accounts".into());
         }
         if parent_info.sub_accounts.len() >= 10 {
             return Err("maximum 10 sub-accounts per main account".into());
@@ -572,6 +650,7 @@ impl UserManager {
             created_at: chrono::Utc::now().timestamp(),
             parent: Some(parent_id.to_string()),
             sub_accounts: Vec::new(),
+            role,
         };
         db.insert(sub_user_id.to_string(), sub_info.clone());
         if let Some(p) = db.get_mut(parent_id) {
@@ -630,6 +709,42 @@ impl UserManager {
             parent_id
         );
         Ok(())
+    }
+
+    /// 分级权限: 变更子账户角色(仅主账户/admin 可调; actor 自身权限由 handler 层检查)
+    pub fn set_subaccount_role(
+        &self,
+        actor_id: &str,
+        sub_user_id: &str,
+        role: UserRole,
+    ) -> Result<UserInfo, String> {
+        let mut db = self.users_db.write();
+        let actor = db.get(actor_id).ok_or("actor not found")?.clone();
+        if actor.parent.is_some() && actor.role != UserRole::Admin {
+            return Err("insufficient role to manage sub-accounts".into());
+        }
+        let sub = db
+            .get_mut(sub_user_id)
+            .ok_or("sub-account not found")?;
+        if sub.parent.is_none() {
+            return Err("cannot change role of a main account".into());
+        }
+        if sub.parent.as_deref() != Some(actor_id) && actor.parent.is_some() {
+            return Err("not your sub-account".into());
+        }
+        sub.role = role;
+        let updated = sub.clone();
+        let snapshot = db.clone();
+        drop(db);
+        self.save_users_db(&snapshot)
+            .map_err(|e| format!("failed to persist: {}", e))?;
+        tracing::info!(
+            "[UserManager] sub-account {} role -> {} (by {})",
+            sub_user_id,
+            role.as_str(),
+            actor_id
+        );
+        Ok(updated)
     }
 
     pub fn get_engine(&self, user_id: &str) -> Result<Arc<Engine>, String> {
@@ -1363,5 +1478,95 @@ impl UserManager {
             let _ = std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod rbac_tests {
+    use super::*;
+
+    /// 权限矩阵黄金表: 角色 × 权限点 → 允许?
+    /// 任何 can() 映射调整都必须有意识地更新此表并过审。
+    #[test]
+    fn permission_matrix_golden() {
+        use Permission::*;
+        let cases: &[(UserRole, Permission, bool)] = &[
+            (UserRole::Admin, MemoryRead, true),
+            (UserRole::Admin, MemoryWrite, true),
+            (UserRole::Admin, MemoryDelete, true),
+            (UserRole::Admin, PersonaImport, true),
+            (UserRole::Admin, SkillManage, true),
+            (UserRole::Admin, LibraryManage, true),
+            (UserRole::Admin, SubaccountManage, true),
+            (UserRole::Admin, ApiKeyManage, true),
+            (UserRole::Developer, MemoryDelete, true),
+            (UserRole::Developer, PersonaImport, true),
+            (UserRole::Developer, SkillManage, true),
+            (UserRole::Developer, LibraryManage, true),
+            (UserRole::Developer, SubaccountManage, false),
+            (UserRole::Developer, ApiKeyManage, true),
+            (UserRole::Tester, MemoryRead, true),
+            (UserRole::Tester, MemoryWrite, true),
+            (UserRole::Tester, MemoryDelete, false),
+            (UserRole::Tester, PersonaImport, false),
+            (UserRole::Tester, SkillManage, false),
+            (UserRole::Tester, LibraryManage, false),
+            (UserRole::Tester, SubaccountManage, false),
+            (UserRole::Tester, ApiKeyManage, true),
+            (UserRole::Viewer, MemoryRead, true),
+            (UserRole::Viewer, MemoryWrite, false),
+            (UserRole::Viewer, MemoryDelete, false),
+            (UserRole::Viewer, PersonaImport, false),
+            (UserRole::Viewer, SkillManage, false),
+            (UserRole::Viewer, LibraryManage, false),
+            (UserRole::Viewer, SubaccountManage, false),
+            (UserRole::Viewer, ApiKeyManage, false),
+        ];
+        for (role, perm, expect) in cases {
+            assert_eq!(role.can(*perm), *expect, "{:?}.can({:?}) should be {}", role, perm, expect);
+        }
+    }
+
+    /// 存量迁移: 旧 users.json 无 role 字段 → 反序列化默认 developer(保持子账户原有功能面)
+    #[test]
+    fn legacy_userinfo_defaults_to_developer() {
+        let legacy = serde_json::json!({
+            "user_id": "agent-kimi".to_string(),
+            "api_key": "tm-x".to_string(),
+            "plan": "Free",
+            "max_memories": 0,
+            "memories_used": 0,
+            "created_at": 1_i64,
+            "parent": "sunorme".to_string(),
+            "sub_accounts": []
+        });
+        let u: UserInfo = serde_json::from_value(legacy).expect("legacy json must parse");
+        assert_eq!(u.role, UserRole::Developer);
+        assert!(u.role.can(Permission::MemoryDelete));
+        assert!(!u.role.can(Permission::SubaccountManage));
+    }
+
+    /// 角色序列化往返 + parse
+    #[test]
+    fn role_serde_roundtrip() {
+        for r in [UserRole::Admin, UserRole::Developer, UserRole::Tester, UserRole::Viewer] {
+            let s = serde_json::to_string(&r).unwrap();
+            assert_eq!(UserRole::parse(r.as_str()), Some(r), "parse {}", s);
+        }
+        assert_eq!(UserRole::parse("owner"), None);
+        assert_eq!(UserRole::parse("bogus"), None);
+    }
+
+    /// permissions() 与 can() 一致
+    #[test]
+    fn permissions_list_matches_can() {
+        for r in [UserRole::Admin, UserRole::Developer, UserRole::Tester, UserRole::Viewer] {
+            let ps = r.permissions();
+            for p in ps {
+                assert!(r.can(p), "{:?} listed {:?} but can()=false", r, p);
+            }
+        }
+        assert_eq!(UserRole::Admin.permissions().len(), 8);
+        assert_eq!(UserRole::Viewer.permissions().len(), 1);
     }
 }

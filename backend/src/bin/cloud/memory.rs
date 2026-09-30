@@ -38,9 +38,13 @@ fn default_chunk_size() -> usize {
 
 pub async fn digest_content(
     State(st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<DigestRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+        return r;
+    }
     if req.content.trim().is_empty() {
         return error_response(StatusCode::BAD_REQUEST, "content must not be empty");
     }
@@ -173,9 +177,13 @@ pub struct BatchIngestRequest {
 
 pub async fn ingest_batch(
     State(st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<BatchIngestRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+        return r;
+    }
     let n = req.items.len();
     if n == 0 || n > 64 {
         return error_response(StatusCode::BAD_REQUEST, "items must be 1-64 per batch");
@@ -265,9 +273,13 @@ pub async fn ingest_batch(
 
 pub async fn remember(
     State(st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<RememberRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+        return r;
+    }
     if let Err(e) = validate_content(&req.content) {
         return error_response(StatusCode::BAD_REQUEST, &e);
     }
@@ -615,9 +627,13 @@ pub struct CreateNodeRequest {
 
 pub async fn create_node(
     State(st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<CreateNodeRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+        return r;
+    }
     if let Err(e) = validate_content(&req.content) {
         return error_response(StatusCode::BAD_REQUEST, &e);
     }
@@ -908,6 +924,9 @@ pub async fn import_personality(
     user: axum::extract::Extension<UserInfo>,
     axum::extract::Json(pkg): axum::extract::Json<serde_json::Value>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::PersonaImport) {
+        return r;
+    }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => {
@@ -1475,9 +1494,13 @@ pub struct ImportDocRequest {
 
 pub async fn import_doc(
     State(st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(body): Json<ImportDocRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+        return r;
+    }
     if body.name.trim().is_empty() || body.content.trim().is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -1655,9 +1678,13 @@ pub struct IngestedRequest {
 }
 
 pub async fn drive_ingested(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(body): Json<IngestedRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+        return r;
+    }
     engine.scheduler.drive_queue().record_ingested(&body.ids);
     engine.scheduler.save_drive_queue();
     let stored = engine.scheduler.drive_queue().ingested_ids();
@@ -1869,9 +1896,13 @@ pub async fn bulk_quarantine(
 /// 批量移除 quarantine 标签 + 恢复 importance 到合理值
 pub async fn bulk_restore(
     State(_st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(body): Json<BulkQuarantineRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryDelete) {
+        return r;
+    }
     // P0 门禁: bulk_restore 也需要 token（恢复是写操作）
     let token = match &body.confirm_token {
         Some(t) => t.clone(),
@@ -2099,9 +2130,13 @@ pub async fn get_memory(
 
 /// POST /v1/memories/:id/forget — D5 REST forget
 pub async fn forget_memory(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryDelete) {
+        return r;
+    }
     let sched = engine.scheduler.clone();
     let eng = engine.clone();
     let result = tokio::task::spawn_blocking(move || sched.api_forget_memory(id)).await;
@@ -2798,9 +2833,13 @@ fn default_rule_strength() -> f64 {
 /// 返回新记忆 id。同时追加一条 "rule_audit" 审计记忆。
 pub async fn learn_rule(
     State(st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<RuleLearnRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryWrite) {
+        return r;
+    }
     if let Err(e) = validate_content(&req.content) {
         return (
             StatusCode::BAD_REQUEST,
@@ -2982,9 +3021,13 @@ pub async fn list_rules(
 /// DELETE /v1/rules/:id
 /// 撤销一条 rule（加 "revoked" 标签 + 关闭 enforced）。不删除记忆，保留审计。
 pub async fn revoke_rule(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryDelete) {
+        return r;
+    }
     let engine_inner = engine.clone();
     let result = tokio::task::spawn_blocking(move || {
         // 1. 加 revoked 标签
@@ -3609,9 +3652,13 @@ pub struct ConfirmRequest {
 /// refused. Each successful execution is recorded as an "op_audit" memory.
 pub async fn operations_confirm(
     State(st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<ConfirmRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryDelete) {
+        return r;
+    }
     // Pop the pending op (single-use token).
     let now = chrono::Utc::now().timestamp();
     let pending = {

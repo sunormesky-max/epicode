@@ -243,6 +243,37 @@ pub fn error_response(status: StatusCode, msg: &str) -> (StatusCode, Json<serde_
     )
 }
 
+// ── 分级权限控制: handler 层守卫 ──
+// 主账户(parent.is_none())天然全权放行; 子账户按 role 判定。
+// 用法: `if let Some(r) = require_perm(&user, Permission::MemoryDelete) { return r; }`
+pub fn require_perm(
+    user: &UserInfo,
+    perm: epicode::engine::user_manager::Permission,
+) -> Option<(StatusCode, Json<serde_json::Value>)> {
+    if user.parent.is_none() {
+        return None; // 主账户 = Owner, 全权
+    }
+    if user.role.can(perm) {
+        return None;
+    }
+    tracing::warn!(
+        "[RBAC] denied user={} role={} perm={:?} path-check",
+        user.user_id,
+        user.role.as_str(),
+        perm
+    );
+    Some((
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({
+            "success": false,
+            "error": "insufficient role",
+            "code": "FORBIDDEN_ROLE",
+            "required_permission": format!("{:?}", perm).to_lowercase(),
+            "your_role": user.role.as_str(),
+        })),
+    ))
+}
+
 // ── H5: AuthedEngine extractor ──
 // 消除 41 处 `let engine = match get_engine(&st,&user) {...}; if let Err(r) = require_identity(&engine) {return r;}` 样板。
 // axum 0.7: FromRequestParts<CloudState> 直接访问 state(不需要 FromRef)。
