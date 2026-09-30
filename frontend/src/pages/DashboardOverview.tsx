@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { errMsg, getStats, getTimeline, getGraphAnalysis, getApiKeyInfo, resetApiKey, revealApiKey, type StatsData, type TimelineEvent, type GraphAnalysis } from '@/lib/api';
 import { checkHealth } from '@/lib/api';
+import { copyText } from '@/lib/clipboard';
 import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading } from '@/components/DashboardUI';
 import {
@@ -27,6 +28,7 @@ export default function DashboardOverview() {
   const isMobile = useIsMobile();
   const [keyInfo, setKeyInfo] = useState<{ masked_key: string } | null>(null);
   const [newKey, setNewKey] = useState<string | null>(null);
+  const [newKeyCopyMsg, setNewKeyCopyMsg] = useState(''); // '' | '已复制 ✓' | '复制失败' — 一次性密钥必须给反馈
   const [keyFromReset, setKeyFromReset] = useState(false);
   const [stats, setStats] = useState<StatsData | null>(null);
   // 刀2: 健康不再写死 Online — 真实探测, 失败显示错误状态(审计前端P0-4)
@@ -236,7 +238,7 @@ export default function DashboardOverview() {
               <div style={{ marginTop: 8, padding: '6px 8px', border: '1px solid var(--accent-orange)', borderRadius: 6, fontSize: 11 }}>
                 <p style={{ margin: 0, color: 'var(--accent-orange)', fontWeight: 600 }}>{keyFromReset ? '新密钥(仅此一次显示， 旧密钥已失效):' : '完整密钥(仅本次显示， 此操作不影响现有智能体连接):'}</p>
                 <p style={{ margin: '4px 0', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', color: 'var(--text-primary)' }}>{newKey}</p>
-                <button onClick={() => { navigator.clipboard.writeText(newKey); }} style={{ background: 'none', border: '1px solid var(--line)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 10, color: 'var(--text-secondary)' }}>复制</button>
+                <button onClick={async () => { if (!newKey) return; setNewKeyCopyMsg((await copyText(newKey)) ? '已复制 ✓' : '复制失败'); }} style={{ background: 'none', border: '1px solid var(--line)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 10, color: 'var(--text-secondary)' }}>{newKeyCopyMsg || '复制'}</button>
               </div>
             )}
             <p style={{ ...HUD_VAL, marginTop: 3, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -251,7 +253,7 @@ export default function DashboardOverview() {
               </button>
               {stats?.invite_code && (
                 <button
-                  onClick={() => { navigator.clipboard.writeText(stats.invite_code || ''); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                  onClick={() => { copyText(stats.invite_code || '').then(ok => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000); } }); }}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', color: copied ? '#3ecfae' : 'var(--text-tertiary)' }}
                 >
                   {copied ? <Check size={11} /> : <Copy size={11} />}

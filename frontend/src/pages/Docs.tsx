@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import Layout from '@/components/Layout';
 import { ArrowRight, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
+import { copyText } from '@/lib/clipboard';
 import type { TranslationKey } from '@/i18n/translations';
 
 interface Endpoint {
@@ -276,9 +277,7 @@ function EndpointCard({ ep }: { ep: Endpoint }) {
   const fullUrl = `https://epicode.cn/api${ep.path}`;
 
   function handleCopy() {
-    navigator.clipboard.writeText(fullUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    copyText(fullUrl).then(ok => { if (!ok) return; setCopied(true); setTimeout(() => setCopied(false), 2000); });
   }
 
   const mc = METHOD_COLORS[ep.method] || METHOD_COLORS.GET;
