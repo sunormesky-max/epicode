@@ -354,7 +354,7 @@ export default function DashboardGraph() {
               const dx = arr[j].x - arr[i].x, dy = arr[j].y - arr[i].y;
               const d2 = dx * dx + dy * dy; if (d2 < 1) continue;
               const d = Math.sqrt(d2);
-              const rep = Math.min(300 / d2, 0.6);
+              const rep = Math.min(400 / d2, 0.32); // 斥力cap压到0.32: 平衡点≈0.32/0.007≈46px → 紧凑晕圈
               const fx = (dx / d) * rep, fy = (dy / d) * rep;
               arr[i].vx -= fx; arr[i].vy -= fy; arr[j].vx += fx; arr[j].vy += fy;
             }
@@ -365,12 +365,14 @@ export default function DashboardGraph() {
         const anchor: { x: number; y: number } | null = (settled && ovMode && n.cluster >= 0)
           ? anchorsRef.current.get(n.cluster) ?? null : null;
         const cent = centers.get(n.cluster);
-        const pull = anchor && n.cluster >= 0 && expandedRef.current.has(n.cluster) ? 0.0028 : breathe;
+        const inExpanded = n.cluster >= 0 && expandedRef.current.has(n.cluster);
+        const pull = anchor && inExpanded ? 0.007 : breathe; // ×2.5: 压住局部斥力cap → 晕圈收紧
         if (anchor) { n.vx += (anchor.x - n.x) * pull; n.vy += (anchor.y - n.y) * pull; }
         else if (cent) { n.vx += (cent.x / cent.n - n.x) * breathe; n.vy += (cent.y / cent.n - n.y) * breathe; }
         else { n.vx += (cx - n.x) * 0.0004; n.vy += (cy - n.y) * 0.0004; }
-        // 收敛后加随机微扰（布朗运动，模拟神经活动）
-        if (settled) { n.vx += (Math.random() - 0.5) * 0.01; n.vy += (Math.random() - 0.5) * 0.01; }
+        // 收敛后加随机微扰（布朗运动，模拟神经活动）— 展开簇成员减半防扩散晕
+        const jit = settled ? (inExpanded ? 0.004 : 0.01) : 0;
+        if (jit) { n.vx += (Math.random() - 0.5) * jit; n.vy += (Math.random() - 0.5) * jit; }
         n.vx *= damping; n.vy *= damping; n.x += n.vx; n.y += n.vy;
         // 关键修复：用圆形力场代替矩形 clamp，避免网络被矩形边框"压成长方形"。
         // 节点离中心超过 fieldR 时，施加向心推力（弹性边界），形成自然的圆形/有机团块。
