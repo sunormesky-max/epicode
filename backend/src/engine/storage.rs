@@ -1259,11 +1259,11 @@ impl StorageManager {
             if conn
                 .execute(
                     "INSERT OR REPLACE INTO drive_signals_archive (id, data, updated_at) VALUES (?1, ?2, ?3)",
-                    rusqlite::params![s.id as i64, data, updated],
+                    rusqlite::params![s.id, data, updated],
                 )
                 .is_ok()
             {
-                let _ = conn.execute("DELETE FROM drive_signals WHERE id=?1", rusqlite::params![s.id as i64]);
+                let _ = conn.execute("DELETE FROM drive_signals WHERE id=?1", rusqlite::params![s.id]);
                 moved += 1;
             }
         }

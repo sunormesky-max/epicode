@@ -760,7 +760,7 @@ impl DriveQueue {
                 s.status,
                 DriveStatus::Executed | DriveStatus::Rejected | DriveStatus::Expired
             );
-            let old = now.saturating_sub(s.enqueued_at_ms as i64) > cutoff_ms;
+            let old = now.saturating_sub(s.enqueued_at_ms) > cutoff_ms;
             if terminal && old {
                 drained.push(s.clone());
                 false
