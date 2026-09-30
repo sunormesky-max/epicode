@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { useI18nContext } from '@/i18n/useI18n';
 import { registerUser, loginUser } from '@/lib/api';
+import { copyText } from '@/lib/clipboard';
 import { Loader2, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 
 function getPasswordStrength(password: string): { strength: number; label: string; color: string } {
@@ -31,6 +32,7 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
   const [issuedKey, setIssuedKey] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [copyMsg, setCopyMsg] = useState(''); // '' | '已复制 ✓' | '复制失败, 请手动选中复制'
 
   const pwdStrength = useMemo(() => getPasswordStrength(password), [password]);
   const passwordsMatch = !confirmPassword || password === confirmPassword;
@@ -78,7 +80,7 @@ export default function Register() {
           <p style={{ margin: '12px 0', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', borderRadius: 8, fontFamily: 'var(--font-mono, monospace)', wordBreak: 'break-all', fontSize: 14 }}>{issuedKey || '(注册响应未含密钥, 登录后在总览-身份区获取)'}</p>
           {error && <p role="alert" style={{ margin: '8px 0', color: 'var(--warning-orange, #ec8)', fontSize: 12 }}>{error}</p>}
           <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-            <button onClick={() => { navigator.clipboard.writeText(issuedKey); }} style={{ flex: 1, padding: '9px 0', background: 'transparent', border: '1px solid var(--line, #333)', borderRadius: 8, cursor: 'pointer', color: 'inherit' }}>复制密钥</button>
+            <button onClick={async () => { if (!issuedKey) return; setCopyMsg((await copyText(issuedKey)) ? '已复制 ✓' : '复制失败, 请手动选中复制'); }} style={{ flex: 1, padding: '9px 0', background: 'transparent', border: '1px solid var(--line, #333)', borderRadius: 8, cursor: 'pointer', color: 'inherit' }}>{copyMsg || '复制密钥'}</button>
             <button onClick={() => navigate('/dashboard')} style={{ flex: 1, padding: '9px 0', background: 'var(--accent-cyan-bright, #3ecfae)', border: 'none', borderRadius: 8, cursor: 'pointer', color: '#04121a', fontWeight: 600 }}>进入控制台</button>
           </div>
           <p style={{ margin: '14px 0 0', fontSize: 11, opacity: 0.65 }}>智能体接入: MCP 端点 https://epicode.cn/mcp + X-API-Key 头携带此密钥</p>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router';
 import { useI18nContext } from '@/i18n/useI18n';
 import { getApiKey, getStats, logout } from '@/lib/api';
+import { copyText } from '@/lib/clipboard';
 import CommandBar from '@/components/CommandBar';
 import {
   LayoutDashboard, Brain, GitBranch, Wrench, Users,
@@ -92,6 +93,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const location = useLocation();
   const path = location.pathname;
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   // 保守默认false: 子账户用户不再闪现"子账户管理"入口, 主账户在stats确认后出现(UX债修复)
   const [isMain, setIsMain] = useState(false);
@@ -119,7 +121,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   ];
 
   function handleCopyKey() {
-    if (apiKey) { navigator.clipboard.writeText(apiKey); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    if (!apiKey) return;
+    // clipboard API 在微信内置浏览器等环境静默失败 — copyText 带 execCommand 兜底
+    copyText(apiKey).then(ok => {
+      if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000); }
+      else { setCopyFailed(true); setTimeout(() => setCopyFailed(false), 2000); }
+    });
   }
 
   function handleLogout() { logout(); window.location.hash = '#/'; }
@@ -194,7 +201,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               className="flex items-center justify-center"
               style={{ width: 40, height: 32, borderRadius: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)' }}
               title={maskedKey}>
-              {copied ? <Check size={14} style={{ color: 'var(--success-green)' }} /> : <Zap size={14} style={{ color: 'var(--accent-gold)' }} />}
+              {copied ? <Check size={14} style={{ color: 'var(--success-green)' }} /> : copyFailed ? <X size={14} style={{ color: 'var(--warning-orange, #ec8)' }} /> : <Zap size={14} style={{ color: 'var(--accent-gold)' }} />}
             </button>
           )}
           <button onClick={handleLogout} aria-label={t('nav.logout')}

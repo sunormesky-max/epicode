@@ -5,6 +5,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading } from '@/components/DashboardUI';
 import { Search, Plus, Filter, X, ChevronDown, Calendar, Tag, Hash, Pencil, FileText, Brain, Loader2, Sparkles } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
+import { copyText } from '@/lib/clipboard';
 
 // ── 搜索关键词高亮 ──
 function highlightText(text: string, query: string): React.ReactNode {
@@ -259,9 +260,7 @@ export default function DashboardMemories() {
   }
 
   function handleCopy(content: string, id: number) {
-    navigator.clipboard.writeText(content);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+    copyText(content).then(ok => { if (!ok) return; setCopiedId(id); setTimeout(() => setCopiedId(null), 2000); });
   }
 
   function toggleLabel(label: string) {

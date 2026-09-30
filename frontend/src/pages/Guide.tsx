@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import Layout from '@/components/Layout';
 import { getAgentGuide } from '@/lib/api';
 import { useI18nContext } from '@/i18n/useI18n';
+import { copyText } from '@/lib/clipboard';
 import {
   Compass, Key, ArrowRight, Copy, Check,
   Terminal, BookOpen, Shield, Clock, Sparkles
@@ -107,9 +108,7 @@ function CodeBlock({ code, title, copyLabel, copiedLabel }: { code: string; titl
   const [copied, setCopied] = useState(false);
 
   function handleCopy() {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    copyText(code).then(ok => { if (!ok) return; setCopied(true); setTimeout(() => setCopied(false), 2000); });
   }
 
   return (
