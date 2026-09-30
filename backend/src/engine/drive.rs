@@ -748,6 +748,29 @@ impl DriveQueue {
         (result, first_ack)
     }
 
+    /// O-C 信号墓园: 从队列取出终态(Executed/Rejected/Expired)且入队超 cutoff_ms 的信号。
+    /// 被 drain 的信号不再进入 active 持久化, 由调用方写入 archive 表。
+    /// 生产实证: 1969 条信号 archive=0 — save 全量重写刷新 updated_at, 7天窗口永不满足。
+    pub fn drain_archivable(&self, cutoff_ms: i64) -> Vec<DriveSignal> {
+        let now = Self::now_ts() as i64 * 1000;
+        let mut signals = self.signals.lock();
+        let mut drained = Vec::new();
+        signals.retain(|s| {
+            let terminal = matches!(
+                s.status,
+                DriveStatus::Executed | DriveStatus::Rejected | DriveStatus::Expired
+            );
+            let old = now.saturating_sub(s.enqueued_at_ms) > cutoff_ms;
+            if terminal && old {
+                drained.push(s.clone());
+                false
+            } else {
+                true
+            }
+        });
+        drained
+    }
+
     pub fn stats(&self) -> serde_json::Value {
         self.sweep_expired();
         let signals = self.signals.lock();

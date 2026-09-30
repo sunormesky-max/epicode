@@ -1239,6 +1239,40 @@ impl StorageManager {
 
     /// L0: Load drive signals from SQLite on startup.
     /// P6优化: executed信号归档 — >7天的终态信号移入archive
+    /// O-C: 内存drain出的终态信号直接落archive表(不再经active表7天窗口)
+    pub fn save_archived_signals(
+        &self,
+        signals: &[super::drive::DriveSignal],
+    ) -> Result<usize, String> {
+        if signals.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn.lock();
+        conn.execute("CREATE TABLE IF NOT EXISTS drive_signals_archive AS SELECT * FROM drive_signals WHERE 1=0", []).map_err(|e| e.to_string())?;
+        let mut moved = 0;
+        for s in signals {
+            let data = serde_json::to_string(&s).unwrap_or_default();
+            let updated = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            if conn
+                .execute(
+                    "INSERT OR REPLACE INTO drive_signals_archive (id, data, updated_at) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![s.id, data, updated],
+                )
+                .is_ok()
+            {
+                let _ = conn.execute("DELETE FROM drive_signals WHERE id=?1", rusqlite::params![s.id]);
+                moved += 1;
+            }
+        }
+        if moved > 0 {
+            tracing::info!("[O-C] archived {} terminal drive signals", moved);
+        }
+        Ok(moved)
+    }
+
     pub fn archive_old_drive_signals(&self) -> Result<usize, String> {
         let cutoff = chrono::Utc::now().timestamp() - 7 * 86400;
         let conn = self.conn.lock();

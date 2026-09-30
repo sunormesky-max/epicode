@@ -360,7 +360,11 @@ pub fn evict_low_quality(
             let is_test = t.content.chars().count() < 20  // P1-24修复:字节长度→字符长度(CJK安全)
                 || t.content.starts_with("test ")
                 || t.content.starts_with("persistence-test")
-                || t.content.starts_with("[session] accomplished: test");
+                || t.content.starts_with("[session] accomplished: test")
+                // O2 认知异物: RBAC/权限测试类残留(2026-09-30实测入过主库管线)
+                || t.content.starts_with("rbac")
+                || t.content.contains("write test memory")
+                || t.content.contains("permission matrix verification");
             is_junk || (is_auto && low_mass) || (low_mass && is_test)
         })
         .take(20)

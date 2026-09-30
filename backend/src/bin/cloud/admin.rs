@@ -393,6 +393,33 @@ pub async fn admin_list_invites(
     }
 }
 
+/// POST /admin/heal-memory — 记忆自愈(O-A塌缩回滚 + O1隔离池再消化)
+/// Body: {"floor": 0.3}(可选, 缺省 IMPORTANCE_FLOOR); 对所有用户引擎执行。
+pub async fn admin_heal_memory(
+    State(st): State<CloudState>,
+    headers: axum::http::HeaderMap,
+    body: Option<Json<serde_json::Value>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if let Err(resp) = super::helpers::require_admin(&st.admin_key, &headers) {
+        return resp;
+    }
+    let floor = body
+        .and_then(|Json(v)| v.get("floor").and_then(|f| f.as_f64()))
+        .unwrap_or(0.0);
+    let users = st.user_mgr.list_users();
+    let mut results = Vec::new();
+    for u in &users {
+        if let Ok(engine) = st.user_mgr.get_engine(&u.user_id) {
+            let r = engine.scheduler.heal_memory(floor);
+            results.push(serde_json::json!({"user_id": u.user_id, "result": r}));
+        }
+    }
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "success": true, "healed": results })),
+    )
+}
+
 pub async fn admin_backup_all(
     State(st): State<CloudState>,
 ) -> (StatusCode, Json<serde_json::Value>) {

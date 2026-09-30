@@ -144,7 +144,7 @@ impl DreamEngine {
                     if !updated.labels.iter().any(|l| l == "quarantine") {
                         updated.labels.push("quarantine".to_string());
                     }
-                    updated.importance = updated.importance.min(0.1);
+                    updated.importance = updated.importance.min(super::governor::IMPORTANCE_FLOOR); // O-A: 隔离是降籍不是除名(0.1曾致66%塌缩)
                     let _ = space.update_payload(t.id, updated);
                     let _ = space.update_mass(t.id, 0.05);
                 }
@@ -262,7 +262,8 @@ impl DreamEngine {
                         data.labels.push("superseded".to_string());
                     }
                     data.valid_to = Some(now_ts as i64);
-                    data.importance = (data.importance * 0.15).max(0.01);
+                    data.importance =
+                        (data.importance * 0.15).max(super::governor::IMPORTANCE_FLOOR); // O-A
                     let _ = space.update_payload(remove_id, data);
                     let _ = space.update_mass(remove_id, 0.05);
                     let _ = space.update_validity(remove_id, Some(now_ts as i64));
