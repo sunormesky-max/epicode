@@ -1,9 +1,21 @@
 ﻿import { useState, useEffect, useMemo } from 'react';
-import { errMsg, getStats, getSubAccounts, createSubAccount, revokeSubAccount, type SubAccount, type StatsData } from '@/lib/api';
+import { errMsg, getStats, getSubAccounts, createSubAccount, revokeSubAccount, setSubAccountRole, SUB_ROLES, type SubAccount, type SubRole, type StatsData } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading } from '@/components/DashboardUI';
-import { Users, Plus, Trash2, Shield, Brain, Crown, AlertTriangle, UserCheck, Lock, X } from 'lucide-react';
+import { Users, Plus, Trash2, Shield, Brain, Crown, AlertTriangle, UserCheck, Lock, X, Check, Minus } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
+
+/** 前端权限矩阵展示(与后端 UserRole::can 黄金表一致; 真闸在后端) */
+const ROLE_MATRIX: Record<SubRole | 'owner', boolean[]> = {
+  owner:     [true, true, true, true, true, true, true, true],
+  admin:     [true, true, true, true, true, true, true, true],
+  developer: [true, true, true, true, true, true, false, true],
+  tester:    [true, true, false, false, false, false, false, true],
+  viewer:    [true, false, false, false, false, false, false, false],
+};
+const ROLE_COLORS: Record<string, string> = {
+  admin: '#f59e0b', developer: '#3ecfae', tester: '#8b7ec8', viewer: '#6b7280',
+};
 
 export default function DashboardSubAccounts() {
   const { t } = useI18nContext();
@@ -17,6 +29,8 @@ export default function DashboardSubAccounts() {
   const [newId, setNewId] = useState('');
   const [newPwd, setNewPwd] = useState('');
   const [creating, setCreating] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [newRole, setNewRole] = useState<SubRole>('developer');
 
   useEffect(() => {
     let mounted = true;
@@ -47,13 +61,24 @@ export default function DashboardSubAccounts() {
     if (!newId.trim() || !newPwd.trim()) return;
     setCreating(true);
     try {
-      await createSubAccount(newId.trim(), newPwd.trim());
-      setAccounts(prev => [...prev, { user_id: newId.trim(), created_at: Date.now() / 1000, memories_used: 0, plan: myStats?.plan || 'Free' }]);
+      await createSubAccount(newId.trim(), newPwd.trim(), newRole);
+      setAccounts(prev => [...prev, { user_id: newId.trim(), created_at: Date.now() / 1000, memories_used: 0, plan: myStats?.plan || 'Free', role: newRole }]);
       setNewId(''); setNewPwd(''); setShowCreate(false);
     } catch (e: unknown) {
       setError(errMsg(e));
     }
     setCreating(false);
+  }
+
+  async function handleRoleChange(user_id: string, role: SubRole) {
+    if (!confirm(t('dash.sub.changeRoleConfirm').replace('{user}', user_id).replace('{role}', t(`dash.sub.role${role[0].toUpperCase()}${role.slice(1)}`)))) return;
+    try {
+      await setSubAccountRole(user_id, role);
+      setAccounts(prev => prev.map(a => a.user_id === user_id ? { ...a, role } : a));
+      setNotice(`${t('dash.sub.roleChanged')}: ${user_id} → ${t(`dash.sub.role${role[0].toUpperCase()}${role.slice(1)}`)}`);
+    } catch (e: unknown) {
+      setError(errMsg(e));
+    }
   }
 
   async function handleRevoke(user_id: string) {
@@ -67,6 +92,8 @@ export default function DashboardSubAccounts() {
   }
 
   const totalSubMemories = useMemo(() => accounts.reduce((sum, a) => sum + (a.memories_used || 0), 0), [accounts]);
+  const roleLabel = (r?: string) => r === 'admin' ? t('dash.sub.roleAdmin') : r === 'tester' ? t('dash.sub.roleTester') : r === 'viewer' ? t('dash.sub.roleViewer') : t('dash.sub.roleDeveloper');
+  const roleDesc = (r: SubRole) => r === 'admin' ? t('dash.sub.roleAdminDesc') : r === 'tester' ? t('dash.sub.roleTesterDesc') : r === 'viewer' ? t('dash.sub.roleViewerDesc') : t('dash.sub.roleDeveloperDesc');
 
   if (loading) {
     return (
@@ -115,6 +142,13 @@ export default function DashboardSubAccounts() {
         </div>
       )}
 
+      {notice && (
+        <div style={{ background: 'rgba(62,207,174,0.08)', color: '#3ecfae', border: '1px solid rgba(62,207,174,0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          {notice}
+          <button onClick={() => setNotice('')} style={{ color: '#3ecfae', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
+        </div>
+      )}
+
       {/* 主账户 Banner */}
       <div style={{ borderLeft: '2px solid var(--accent-purple)', paddingLeft: 16, marginBottom: 20, display: 'flex', gap: 12, alignItems: 'center' }}>
         <Crown size={18} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
@@ -149,6 +183,37 @@ export default function DashboardSubAccounts() {
         </div>
       </div>
 
+      {/* 权限矩阵 — 分级权限一览(真闸在后端) */}
+      <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-light)', borderRadius: 14, padding: 16, marginBottom: 20, overflowX: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <Shield size={14} style={{ color: 'var(--accent-cyan)' }} />
+          <span style={{ color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{t('dash.sub.matrixTitle')}</span>
+        </div>
+        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 11.5, minWidth: 560 }}>
+          <thead>
+            <tr>
+              {['', t('dash.sub.matrixOwnerCol'), t('dash.sub.roleAdmin'), t('dash.sub.roleDeveloper'), t('dash.sub.roleTester'), t('dash.sub.roleViewer')].map((h, i) => (
+                <th key={i} style={{ textAlign: i === 0 ? 'left' : 'center', padding: '6px 10px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.06em', borderBottom: '1px solid var(--border-medium)' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {([['matrixPermRead', 0], ['matrixPermWrite', 1], ['matrixPermDelete', 2], ['matrixPermPersona', 3], ['matrixPermSkill', 4], ['matrixPermLibrary', 5], ['matrixPermSubaccount', 6], ['matrixPermApikey', 7]] as const).map(([key, idx]) => (
+              <tr key={key}>
+                <td style={{ padding: '5px 10px', color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-light)' }}>{t(`dash.sub.${key}`)}</td>
+                {(['owner', 'admin', 'developer', 'tester', 'viewer'] as const).map(r => (
+                  <td key={r} style={{ textAlign: 'center', padding: '5px 10px', borderBottom: '1px solid var(--border-light)' }}>
+                    {ROLE_MATRIX[r][idx]
+                      ? <Check size={12} style={{ color: '#3ecfae', display: 'inline-block' }} />
+                      : <Minus size={12} style={{ color: 'var(--text-tertiary)', opacity: 0.5, display: 'inline-block' }} />}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
       {/* 创建 */}
       <button onClick={() => setShowCreate(!showCreate)} style={{ background: 'transparent', color: 'var(--accent-purple)', border: '1px solid rgba(139,126,200,0.4)', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-mono)', marginBottom: 16 }}>
         <Plus size={15} style={{ verticalAlign: -3, marginRight: 4 }} /> {t('dash.sub.createAction')}
@@ -169,7 +234,26 @@ export default function DashboardSubAccounts() {
               {creating ? t('dash.sub.creating') : t('dash.sub.create')}
             </button>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, color: '#8b7ec8', fontSize: 11 }}>
+          {/* 分级角色选择 */}
+          <div style={{ marginTop: 12 }}>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.14em', marginBottom: 8 }}>{t('dash.sub.roleSelectLabel').toUpperCase()}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 8 }}>
+              {SUB_ROLES.map(r => (
+                <button key={r} onClick={() => setNewRole(r)} style={{
+                  textAlign: 'left', background: newRole === r ? 'rgba(139,126,200,0.12)' : 'rgba(0,0,0,0.2)',
+                  border: `1px solid ${newRole === r ? ROLE_COLORS[r] : 'rgba(255,255,255,0.08)'}`,
+                  borderRadius: 10, padding: '9px 12px', cursor: 'pointer',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: ROLE_COLORS[r], display: 'inline-block' }} />
+                    <span style={{ color: 'var(--text-primary)', fontSize: 12.5, fontWeight: 600 }}>{roleLabel(r)}</span>
+                  </div>
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: 10.5, lineHeight: 1.5 }}>{roleDesc(r)}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, color: '#8b7ec8', fontSize: 11 }}>
             <AlertTriangle size={12} /> {t('dash.sub.inheritNotice')}
           </div>
         </div>
@@ -184,12 +268,12 @@ export default function DashboardSubAccounts() {
       ) : (
         <div>
           {/* Header */}
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px 120px 120px 120px 60px', padding: '10px 4px', fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: 'var(--font-mono)', borderBottom: '1px solid var(--border-medium)' }}>
-            <span>{t('dash.sub.colUser')}</span><span>{t('dash.sub.colPlan')}</span><span>{t('dash.sub.colMemories')}</span><span>{t('dash.sub.colBelongTo')}</span><span>{t('dash.sub.colCreatedAt')}</span><span></span>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px 110px 160px 100px 60px', padding: '10px 4px', fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: 'var(--font-mono)', borderBottom: '1px solid var(--border-medium)' }}>
+            <span>{t('dash.sub.colUser')}</span><span>{t('dash.sub.colPlan')}</span><span>{t('dash.sub.colMemories')}</span><span>{t('dash.sub.colRole')}</span><span>{t('dash.sub.colCreatedAt')}</span><span></span>
           </div>
           {/* Rows */}
           {accounts.map(acc => (
-            <div key={acc.user_id} style={{ display: 'grid', gridTemplateColumns: '2fr 100px 120px 120px 120px 60px', padding: '13px 4px', borderBottom: '1px solid var(--border-light)', alignItems: 'center' }}>
+            <div key={acc.user_id} style={{ display: 'grid', gridTemplateColumns: '2fr 100px 110px 160px 100px 60px', padding: '13px 4px', borderBottom: '1px solid var(--border-light)', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(139,126,200,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <UserCheck size={14} style={{ color: '#8b7ec8' }} />
@@ -211,15 +295,23 @@ export default function DashboardSubAccounts() {
                   </div>
                 )}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Lock size={9} style={{ color: '#8b7ec8' }} />
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{t('dash.sub.belongTo')} {myStats?.user_id}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Shield size={9} style={{ color: 'var(--text-tertiary)' }} />
-                  <span style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>{t('dash.sub.noSubAccountPermission')}</span>
-                </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 20,
+                  background: `${ROLE_COLORS[acc.role || 'developer']}1a`, border: `1px solid ${ROLE_COLORS[acc.role || 'developer']}55`,
+                  color: ROLE_COLORS[acc.role || 'developer'], fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: ROLE_COLORS[acc.role || 'developer'] }} />
+                  {roleLabel(acc.role)}
+                </span>
+                <select
+                  value={acc.role || 'developer'}
+                  onChange={e => handleRoleChange(acc.user_id, e.target.value as SubRole)}
+                  aria-label={`role-${acc.user_id}`}
+                  style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--text-secondary)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, padding: '3px 6px', fontSize: 11, cursor: 'pointer' }}
+                >
+                  {SUB_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
               </div>
               <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{new Date(acc.created_at * 1000).toLocaleDateString()}</span>
               <div style={{ textAlign: 'right' }}>

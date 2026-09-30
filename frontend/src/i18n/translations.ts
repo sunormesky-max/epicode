@@ -95,7 +95,8 @@ export type TranslationKey =
   // Dashboard (partial for Phase 1)
   | 'dash.totalMemories' | 'dash.thisWeek' | 'dash.activeClusters' | 'dash.library.title' | 'dash.library.subtitle'
   | 'dash.energy' | 'dash.avgQuery' | 'dash.apiCalls'
-  | 'dash.quickStore' | 'dash.quickSearch' | 'dash.quickDigest' | 'dash.quickDocs' | 'dash.skills.loadFailed'
+  | 'dash.quickStore' | 'dash.quickSearch' | 'dash.quickDigest' | 'dash.quickDocs'
+ | 'dash.skills.loadFailed'
   // Dashboard - Skills
   | 'dash.skills.title' | 'dash.skills.private' | 'dash.skills.edit' | 'dash.skills.publishToCommunity'
   | 'dash.skills.publish' | 'dash.skills.delete' | 'dash.skills.collapse' | 'dash.skills.viewContent'
@@ -147,6 +148,13 @@ export type TranslationKey =
   | 'dash.sub.colMemories' | 'dash.sub.colBelongTo' | 'dash.sub.colCreatedAt'
   | 'dash.sub.rowSubAccountLabel' | 'dash.sub.noSubAccountPermission'
   | 'dash.sub.revokeConfirmPrefix' | 'dash.sub.revokeConfirmSuffix'
+  // Dashboard - Sub Accounts RBAC
+  | 'dash.sub.colRole' | 'dash.sub.roleAdmin' | 'dash.sub.roleDeveloper' | 'dash.sub.roleTester' | 'dash.sub.roleViewer'
+  | 'dash.sub.roleAdminDesc' | 'dash.sub.roleDeveloperDesc' | 'dash.sub.roleTesterDesc' | 'dash.sub.roleViewerDesc'
+  | 'dash.sub.roleSelectLabel' | 'dash.sub.changeRoleConfirm' | 'dash.sub.roleChanged'
+  | 'dash.sub.matrixTitle' | 'dash.sub.matrixPermRead' | 'dash.sub.matrixPermWrite' | 'dash.sub.matrixPermDelete'
+  | 'dash.sub.matrixPermPersona' | 'dash.sub.matrixPermSkill' | 'dash.sub.matrixPermLibrary'
+  | 'dash.sub.matrixPermSubaccount' | 'dash.sub.matrixPermApikey' | 'dash.sub.matrixOwnerCol'
   // Dashboard - Overview
   | 'dash.loadingSync'
   | 'dash.overview.title' | 'dash.overview.welcome' | 'dash.overview.welcome_comma'
@@ -737,6 +745,28 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.sub.creating': '创建中...',
     'dash.sub.create': '创建',
     'dash.sub.inheritNotice': '子账户继承您的套餐配额，且无法创建自己的子账户。',
+    'dash.sub.colRole': '角色',
+    'dash.sub.roleAdmin': '管理员',
+    'dash.sub.roleDeveloper': '开发者',
+    'dash.sub.roleTester': '测试者',
+    'dash.sub.roleViewer': '观察者',
+    'dash.sub.roleAdminDesc': '全权代理运维 · 含子账户管理与角色分配',
+    'dash.sub.roleDeveloperDesc': '全数据功能 · 记忆读写删/技能/图书馆/密钥',
+    'dash.sub.roleTesterDesc': '可写可读 · 不可删除/导入/管理',
+    'dash.sub.roleViewerDesc': '只读 · 检索/图谱/统计',
+    'dash.sub.roleSelectLabel': '分配角色',
+    'dash.sub.changeRoleConfirm': '确认将 "{user}" 的角色改为 {role}？权限将立即生效。',
+    'dash.sub.roleChanged': '角色已更新',
+    'dash.sub.matrixTitle': '权限矩阵',
+    'dash.sub.matrixPermRead': '记忆读取',
+    'dash.sub.matrixPermWrite': '记忆写入',
+    'dash.sub.matrixPermDelete': '记忆删除',
+    'dash.sub.matrixPermPersona': '人格导入',
+    'dash.sub.matrixPermSkill': '技能管理',
+    'dash.sub.matrixPermLibrary': '图书馆管理',
+    'dash.sub.matrixPermSubaccount': '子账户管理',
+    'dash.sub.matrixPermApikey': '密钥管理',
+    'dash.sub.matrixOwnerCol': '主账户',
     'dash.sub.emptyHint': '暂无子账户。为您的团队成员创建一个。',
     'dash.sub.colUser': '用户',
     'dash.sub.colPlan': '套餐',
@@ -1645,6 +1675,28 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.sub.creating': 'Creating...',
     'dash.sub.create': 'Create',
     'dash.sub.inheritNotice': 'Sub-accounts inherit your plan quota and cannot create their own sub-accounts.',
+    'dash.sub.colRole': 'Role',
+    'dash.sub.roleAdmin': 'Admin',
+    'dash.sub.roleDeveloper': 'Developer',
+    'dash.sub.roleTester': 'Tester',
+    'dash.sub.roleViewer': 'Viewer',
+    'dash.sub.roleAdminDesc': 'Full ops delegate · incl. sub-account & role management',
+    'dash.sub.roleDeveloperDesc': 'Full data access · memory CRUD / skills / library / keys',
+    'dash.sub.roleTesterDesc': 'Read & write · no delete / import / management',
+    'dash.sub.roleViewerDesc': 'Read-only · search / graph / stats',
+    'dash.sub.roleSelectLabel': 'Assign role',
+    'dash.sub.changeRoleConfirm': 'Change role of "{user}" to {role}? Takes effect immediately.',
+    'dash.sub.roleChanged': 'Role updated',
+    'dash.sub.matrixTitle': 'Permission Matrix',
+    'dash.sub.matrixPermRead': 'Memory Read',
+    'dash.sub.matrixPermWrite': 'Memory Write',
+    'dash.sub.matrixPermDelete': 'Memory Delete',
+    'dash.sub.matrixPermPersona': 'Persona Import',
+    'dash.sub.matrixPermSkill': 'Skill Manage',
+    'dash.sub.matrixPermLibrary': 'Library Manage',
+    'dash.sub.matrixPermSubaccount': 'Sub-account Manage',
+    'dash.sub.matrixPermApikey': 'API Key Manage',
+    'dash.sub.matrixOwnerCol': 'Owner',
     'dash.sub.emptyHint': 'No sub-accounts yet. Create one for your team.',
     'dash.sub.colUser': 'User',
     'dash.sub.colPlan': 'Plan',

@@ -88,7 +88,7 @@ export function getApiKey(): string | null {
   return apiKey;
 }
 
-export function getApiKeyInfo(): Promise<{ user_id?: string; request_key_matches?: boolean; masked_key: string; hint?: string }> {
+export function getApiKeyInfo(): Promise<{ user_id?: string; request_key_matches?: boolean; masked_key: string; hint?: string; role?: string; permissions?: string[] }> {
   return request('/v1/api-key', { skipCache: true });
 }
 
@@ -653,9 +653,14 @@ export interface CommunitySkill {
 export interface SubAccount {
   user_id: string;
   plan: string;
+  role?: string; // 分级角色: admin/developer/tester/viewer
   memories_used: number;
   created_at: number;
 }
+
+/** 子账户可分配的角色(主账户=owner 不可分配) */
+export const SUB_ROLES = ['admin', 'developer', 'tester', 'viewer'] as const;
+export type SubRole = (typeof SUB_ROLES)[number];
 
 interface SubAccountsResponse {
   success: boolean;
@@ -1113,12 +1118,21 @@ export async function getSubAccounts(): Promise<SubAccount[]> {
   return data.subaccounts ?? [];
 }
 
-export function createSubAccount(user_id: string, password: string): Promise<{ message: string }> {
+export function createSubAccount(user_id: string, password: string, role: SubRole = 'developer'): Promise<{ message: string }> {
   // P1修复:创建后清缓存,避免30s陈旧数据
   invalidateCache('/v1/subaccounts');
   return request('/v1/subaccounts/create', {
     method: 'POST',
-    body: { user_id, password },
+    body: { user_id, password, role },
+  });
+}
+
+/** 分级权限: 变更子账户角色(仅主账户/admin) */
+export function setSubAccountRole(user_id: string, role: SubRole): Promise<{ user_id: string; role: string }> {
+  invalidateCache('/v1/subaccounts');
+  return request(`/v1/subaccounts/${encodeURIComponent(user_id)}/role`, {
+    method: 'PATCH',
+    body: { role },
   });
 }
 
