@@ -150,7 +150,7 @@ fn handle_tcp_connection(stream: std::net::TcpStream, state: &CloudState, peer: 
         }
 
         // A09: 会话验活 — 每消息重验key(密钥重置/撤销即断), O(1)哈希查
-        if let (Some(ref sk), Some(uid)) = (session_key.as_ref(), authenticated_user.as_ref()) {
+        if let (Some(sk), Some(uid)) = (session_key.as_ref(), authenticated_user.as_ref()) {
             let still_valid = state
                 .user_mgr
                 .authenticate(sk)
