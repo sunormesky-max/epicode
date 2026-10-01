@@ -307,8 +307,7 @@ impl FromRequestParts<CloudState> for AuthedEngine {
 
                 // P0-2b: 在 async 路径 once-start quiet loop（Tester-Q契约 #1658）
                 // 只在 Ready 后、在 async 线程启动，不在 spawn_blocking 里
-                if !state.user_mgr.is_loop_started(&user.user_id) {
-                    state.user_mgr.mark_loop_started(&user.user_id);
+                if state.user_mgr.try_mark_loop_started(&user.user_id) {
                     let engine_clone = engine.clone();
                     let uid = user.user_id.clone();
                     tokio::spawn(async move {

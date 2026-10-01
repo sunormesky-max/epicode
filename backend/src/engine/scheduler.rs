@@ -1,6 +1,6 @@
 use parking_lot::Mutex as ParkMutex;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -37,6 +37,28 @@ pub struct SearchScoreNotes {
 struct CognitiveThought {
     tick: u64,
     state: SystemState,
+}
+
+#[derive(Default)]
+struct SingleFlightGate {
+    in_flight: AtomicBool,
+}
+
+impl SingleFlightGate {
+    fn try_acquire(self: &Arc<Self>) -> Option<SingleFlightPermit> {
+        self.in_flight
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| SingleFlightPermit(Arc::clone(self)))
+    }
+}
+
+struct SingleFlightPermit(Arc<SingleFlightGate>);
+
+impl Drop for SingleFlightPermit {
+    fn drop(&mut self) {
+        self.0.in_flight.store(false, Ordering::Release);
+    }
 }
 
 /// SMRP §7.2 — scheduler 层完整创建报告（gateway 安置 + scheduler 录入副产物）。
@@ -79,6 +101,8 @@ pub struct SchedulerCenter {
     cognitive: Arc<CognitiveEngine>,
     gateway: Arc<super::gateway::GatewayCenter>,
     queue: ParkMutex<VecDeque<ScheduledTask>>,
+    loop_gate: Arc<SingleFlightGate>,
+    cycle_gate: Arc<SingleFlightGate>,
     tx: EventSender,
     tick_interval: parking_lot::RwLock<Duration>,
     tick_count: AtomicU64,
@@ -162,6 +186,8 @@ impl SchedulerCenter {
             cognitive,
             gateway,
             queue: ParkMutex::new(VecDeque::new()),
+            loop_gate: Arc::new(SingleFlightGate::default()),
+            cycle_gate: Arc::new(SingleFlightGate::default()),
             tx,
             tick_interval: parking_lot::RwLock::new(Duration::from_millis(tick_interval_ms)),
             tick_count: AtomicU64::new(0),
@@ -1556,15 +1582,10 @@ impl SchedulerCenter {
     /// This is the personality acting on its own will — thinking to itself,
     /// "I'm curious about X. Let me reason about what I know and record my conclusion."
     fn process_drive_signals(&self) {
-        // Use peek_pending (not poll) so signals stay visible to external agents.
-        // Self-driving only consumes Explore intents. Warn/Suggest/etc stay Pending
-        // for external agents to pick up via drive_inbox.
-        let all_pending = self.drive_queue.peek_pending(10);
-        let signals: Vec<_> = all_pending
-            .into_iter()
-            .filter(|s| matches!(s.intent_type, super::drive::DriveIntent::Explore))
-            .take(3)
-            .collect();
+        // Peek without changing status so non-Explore signals stay visible to external agents.
+        let signals = self.drive_queue.peek_pending_matching(3, |signal| {
+            matches!(signal.intent_type, super::drive::DriveIntent::Explore)
+        });
         if signals.is_empty() {
             return;
         }
@@ -5640,14 +5661,24 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
         mut rx: broadcast::Receiver<EngineEvent>,
         cognitive: bool,
     ) {
+        let Some(_loop_permit) = self.loop_gate.try_acquire() else {
+            tracing::warn!("[Scheduler] duplicate loop start ignored");
+            return;
+        };
+
         loop {
             // 先克隆 interval 值再 drop 读锁，避免 select! 分支持锁跨整个 sleep 周期
             let tick_interval = *self.tick_interval.read();
             tokio::select! {
                 _ = tokio::time::sleep(tick_interval) => {
                     if cognitive {
+                        let Some(cycle_permit) = self.cycle_gate.try_acquire() else {
+                            tracing::debug!("[Scheduler] skipping tick while the previous scheduler cycle is still running");
+                            continue;
+                        };
                         let me = self.clone();
                         let handle = tokio::task::spawn_blocking(move || {
+                            let _cycle_permit = cycle_permit;
                             let thought = me.tick_and_maybe_think();
                             if let Some(ct) = thought {
                                 // 批次C：注入自适应参数+行动效果到认知引擎（断裂点5+6）
@@ -5692,6 +5723,10 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                             }
                         });
                     } else {
+                        let Some(_cycle_permit) = self.cycle_gate.try_acquire() else {
+                            tracing::debug!("[Scheduler] skipping quiet tick while the previous scheduler cycle is still running");
+                            continue;
+                        };
                         let count = self.tick_count.fetch_add(1, Ordering::SeqCst);
                         self.energy.replenish(12.0);
                         let tasks: Vec<ScheduledTask> = self.queue.lock().drain(..).collect();
@@ -5783,6 +5818,47 @@ mod tests {
     use crate::engine::GatewayCenter;
     use crate::engine::StorageManager;
     use std::sync::Arc;
+
+    #[test]
+    fn single_flight_gate_skips_overlapping_work_and_reopens_after_completion() {
+        const WORKERS: usize = 12;
+
+        let gate = Arc::new(SingleFlightGate::default());
+        let barrier = Arc::new(std::sync::Barrier::new(WORKERS + 1));
+        let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let peak_active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let workers: Vec<_> = (0..WORKERS)
+            .map(|_| {
+                let gate = Arc::clone(&gate);
+                let barrier = Arc::clone(&barrier);
+                let active = Arc::clone(&active);
+                let peak_active = Arc::clone(&peak_active);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let permit = gate.try_acquire();
+                    if permit.is_some() {
+                        let current = active.fetch_add(1, Ordering::Relaxed) + 1;
+                        peak_active.fetch_max(current, Ordering::Relaxed);
+                    }
+                    barrier.wait();
+                    if permit.is_some() {
+                        active.fetch_sub(1, Ordering::Relaxed);
+                    }
+                    drop(permit);
+                })
+            })
+            .collect();
+
+        barrier.wait();
+        barrier.wait();
+        for worker in workers {
+            worker.join().expect("worker should finish");
+        }
+
+        assert_eq!(peak_active.load(Ordering::Relaxed), 1);
+        assert_eq!(active.load(Ordering::Relaxed), 0);
+        assert!(gate.try_acquire().is_some());
+    }
 
     fn add_tetra_to_space(
         space: &Space,
