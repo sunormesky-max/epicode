@@ -172,3 +172,35 @@ fn smrp_envelope_shared_fields_present() {
     // REST与MCP共用层存在(§1.3 承诺)
     assert!(smrp.contains("envelope_ok"), "SMRP共用信封构造缺失");
 }
+
+#[test]
+fn cloud_mcp_transports_share_handler_and_access_gates() {
+    let http = read("backend/src/bin/cloud/mcp_endpoint.rs");
+    let tcp = read("backend/src/bin/cloud/tcp.rs");
+    for (transport, source) in [("HTTP", http.as_str()), ("TCP", tcp.as_str())] {
+        for contract in [
+            "McpHandler::with_pub_skills",
+            "QuotaContext",
+            "guard_mcp_request",
+            "start_cognitive_loop_if_needed",
+            "process_json",
+        ] {
+            assert!(
+                source.contains(contract),
+                "{transport} MCP transport is missing shared contract {contract}"
+            );
+        }
+    }
+    assert!(
+        tcp.contains("read_mcp_line"),
+        "TCP must use bounded MCP line reads"
+    );
+    assert!(
+        http.contains("MAX_MCP_REQUEST_BYTES"),
+        "HTTP must use the shared MCP request-size limit"
+    );
+    assert!(
+        http.contains("is_notification") && http.contains("StatusCode::ACCEPTED"),
+        "HTTP notifications must be acknowledged without a JSON-RPC response body"
+    );
+}

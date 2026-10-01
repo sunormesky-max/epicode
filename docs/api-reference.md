@@ -11,8 +11,9 @@ Online deployments typically expose endpoints under the `/api/v1` public prefix.
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/remember` | Store a new memory. Accepts content, labels, and optional metadata. Computes embeddings and places the memory in 3D space. |
-| `POST` | `/search` | Semantic search across memories. Uses BM25 + HNSW hybrid search to return contextually relevant results for natural language queries. |
+| `POST` | `/search` | Search memories with BM25, HNSW, graph, or fusion routing. Supports filters and `offset`/`limit` pagination. |
 | `POST` | `/recall` | Deep recall operation. Combines semantic search with knowledge graph expansion to retrieve richly connected memories. |
+| `POST` | `/ask` | Return an answer grounded in retrieved memories, plus structured source memories and any matched knowledge card. |
 | `GET` | `/stats` | Retrieve spatial statistics. Returns tetrahedron count, vertex count, cluster count, energy levels, and other system metrics. |
 | `GET` | `/graph/analysis` | Knowledge graph analysis. Returns node/edge counts, centrality metrics, and community structure of the relationship graph. |
 | `GET` | `/health` | Health check endpoint. Returns system status and basic liveness information. |
@@ -28,6 +29,8 @@ curl -X POST https://epicode.cn/api/v1/remember \
 ```
 
 The `mode` property accepts `hybrid` (default vector+BM25), `exact` (BM25 token match), `semantic` (vector), `graph` (hybrid-search seeds with KG-PPR expansion), `auto` (temporal/aggregation queries use graph; other queries use semantic), and `fusion` (reciprocal-rank fusion of semantic and graph results). REST and MCP search use the same mode routing.
+
+REST search defaults to 20 results; native MCP `memory_search` defaults to 10. Both support up to 200 results and use `offset` for pagination.
 
 ### Example: Search Memories
 
@@ -66,6 +69,17 @@ The MCP `drive_inbox` tool returns the same inbox data and defaults to a limit o
 
 Epicode exposes tools through the Model Context Protocol (MCP). The live `tools/list` response is authoritative because the catalog changes over time. Any MCP-compatible agent can discover and invoke the available tools without custom integration.
 
+The production HTTP endpoint is `POST https://epicode.cn/api/mcp` with `X-API-Key`; the backend route is `POST /mcp`. The response/request limit is 1 MiB. See [MCP Protocol](mcp-protocol.md) for the optional TCP, local stdio, and Python bridge differences.
+
+```bash
+curl -X POST https://epicode.cn/api/mcp \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+For a grounded answer, call `memory_ask` with `question` and optional `depth`; use `memory_search` or `memory_recall` when the agent needs to inspect evidence without synthesis.
+
 ### Memory Operations
 
 | Tool | Description |
@@ -73,6 +87,7 @@ Epicode exposes tools through the Model Context Protocol (MCP). The live `tools/
 | `memory_create` | Store a new memory into the system. |
 | `memory_search` | Search for memories using semantic or keyword queries. |
 | `memory_recall` | Deep recall with knowledge graph expansion. |
+| `memory_ask` | Synthesize a memory-grounded answer with structured source memories. |
 | `memory_get` | Retrieve a specific memory by ID. |
 | `memory_list` | List memories with optional filtering and pagination. |
 | `memory_update` | Update an existing memory's content or metadata. |
@@ -132,7 +147,7 @@ Epicode exposes tools through the Model Context Protocol (MCP). The live `tools/
 
 ## SMRP Structured Response
 
-SMRP (Structured Memory Response Protocol) is the transport-independent response schema used by memory REST endpoints and MCP memory tools. REST returns the SMRP object directly; MCP returns its JSON serialization in `result.content[0].text`. See the canonical [SMRP specification](../backend/docs/smrp-spec.html).
+SMRP (Structured Memory Response Protocol) is the transport-independent response schema used by memory REST endpoints and MCP memory tools. REST returns the SMRP object directly. Native MCP returns the same object in `result.structuredContent` and preserves its JSON serialization in `result.content[0].text` for existing clients. Tool-level SMRP failures also set MCP `isError: true`; JSON-RPC protocol errors remain in the top-level `error` field. See the canonical [SMRP specification](../backend/docs/smrp-spec.html).
 
 ### Response Envelope Structure
 

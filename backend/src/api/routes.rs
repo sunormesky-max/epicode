@@ -437,9 +437,9 @@ pub async fn reasoning_patterns(State(engine): State<Arc<Engine>>) -> Json<serde
 // ── MCP ──
 
 pub async fn mcp(State(engine): State<Arc<Engine>>, body: String) -> Json<serde_json::Value> {
-    if body.len() > 100_000 {
+    if body.len() > crate::engine::mcp::MAX_MCP_REQUEST_BYTES {
         return Json(
-            serde_json::json!({"jsonrpc":"2.0","error":{"code":-32000,"message":"request too large, max 100KB"}}),
+            serde_json::json!({"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"request too large; maximum is 1048576 bytes"}}),
         );
     }
     let handler = crate::engine::mcp::McpHandler::new(engine);

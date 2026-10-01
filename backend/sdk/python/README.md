@@ -17,13 +17,13 @@ from epicode import EpicodeClient
 client = EpicodeClient("your-api-key")
 
 # Store a memory
-mem = client.remember("The project deadline is June 15.")
+mem = client.remember("The project deadline is June 15.", labels=["project"])
 print(mem.id, mem.labels)
 
 # Search memories
-results = client.search("deadline", limit=5)
+results = client.search("deadline", limit=5, offset=0, mode="hybrid")
 for r in results.results:
-    print(r.content, r.similarity)
+    print(r.content, r.similarity, r.tier, r.source)
 
 # Recall associative memories
 recall = client.recall("project timeline", depth=3)
@@ -32,6 +32,9 @@ print(recall.seed_count, recall.emotion.pleasure)
 # Ask a question
 answer = client.ask("When is the deadline?")
 print(answer.answer)
+for memory in answer.memories:
+    if not isinstance(memory, str):
+        print(memory.id, memory.content, memory.relevance)
 
 # Get account stats
 stats = client.stats()
@@ -103,6 +106,8 @@ client = EpicodeClient(
     timeout=60,                                      # seconds, default 30
 )
 ```
+
+The SDK's memory methods accept the current SMRP REST envelope and continue to expose the existing convenience fields (`results`, `answer`, and so on). The original structured response is available as `response.smrp`; successful search results also retain tier, source, metrics, and topology where returned. An SMRP `protocol.ok: false` response raises `EpicodeError` instead of appearing as a successful empty result. Legacy flat responses remain supported.
 
 ## Requirements
 

@@ -1,43 +1,51 @@
 # Epicode MCP Bridge
 
-A lightweight [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that exposes the [Epicode](https://epicode.cn) spatial AI memory cloud service as MCP tools.
+A lightweight stdio [Model Context Protocol](https://modelcontextprotocol.io) (MCP) adapter for the [Epicode](https://epicode.cn) REST API. It intentionally exposes a small memory-focused subset; use the cloud `/mcp` endpoint for the full native tool catalog, including identity, skills, projects, and L0 drive tools.
 
 ## Tools
 
-| Tool           | Endpoint                | Description                                  |
-|----------------|-------------------------|----------------------------------------------|
-| `memory_create`| `POST /api/v1/remember` | Store a new memory                           |
-| `memory_search`| `POST /api/v1/search`   | Semantic search over memories                |
-| `memory_recall`| `POST /api/v1/recall`   | Associative recall via SMRP                  |
-| `memory_ask`   | `POST /api/v1/ask`      | Ask a question grounded in stored memories   |
-| `health`       | `GET /health`           | Check Epicode cloud connectivity             |
+| Tool | Endpoint | Description |
+|------|----------|-------------|
+| `memory_create(content, labels?)` | `POST /api/v1/remember` | Store a memory and return its SMRP placement result. |
+| `memory_search(query, limit?, offset?, filters...)` | `POST /api/v1/search` | Inspect ranked memory evidence, tiers, and provenance. REST default is 20 results. |
+| `memory_recall(query, depth?)` | `POST /api/v1/recall` | Retrieve associative context using SMRP tiers. |
+| `memory_ask(question, depth?)` | `POST /api/v1/ask` | Return the existing memory-grounded answer and structured source memories. |
+| `health()` | `GET /health` | Check Epicode cloud connectivity. |
+
+Object results expose `structuredContent` through FastMCP and retain JSON text content for hosts that only consume text. The memory operations return the REST SMRP envelope without flattening its `protocol`, `data`, or `status` fields. The bridge requires `mcp>=1.26.0` for this structured return behavior.
 
 ## Install
 
-1. Create the virtual environment:
+1. Create and activate a virtual environment:
 
    ```bash
-   /Users/sunorme/.workbuddy/binaries/python/versions/3.13.12/bin/python3 -m venv /Users/sunorme/.workbuddy/binaries/python/envs/epicode-mcp
+   python -m venv .venv
+   # macOS/Linux
+   source .venv/bin/activate
+   # Windows PowerShell
+   # .venv\Scripts\Activate.ps1
    ```
 
-2. Activate it and install dependencies:
+2. Install dependencies:
 
    ```bash
-   source /Users/sunorme/.workbuddy/binaries/python/envs/epicode-mcp/bin/activate
-   pip install -r mcp-bridge/requirements.txt
+   python -m pip install -r mcp-bridge/requirements.txt
    ```
 
-3. Copy the example environment file and set your key:
+3. Set the API key and optional base URL in the environment:
 
    ```bash
-   cp mcp-bridge/.env.example mcp-bridge/.env
-   # Edit mcp-bridge/.env and add EPICODE_API_KEY=tm-...
+   # macOS/Linux
+   export EPICODE_API_KEY=tm-...
+   export EPICODE_BASE_URL=https://epicode.cn
+   # Windows PowerShell
+   # $env:EPICODE_API_KEY = "tm-..."
+   # $env:EPICODE_BASE_URL = "https://epicode.cn"
    ```
 
 ## Run
 
 ```bash
-source /Users/sunorme/.workbuddy/binaries/python/envs/epicode-mcp/bin/activate
 python mcp-bridge/epicode_mcp_server.py
 ```
 
@@ -47,16 +55,16 @@ The server runs in `stdio` mode and is meant to be launched by an MCP host such 
 
 1. Open Claude Desktop → Settings → Developer → Edit Config.
 2. Merge the contents of `mcp-bridge/claude_desktop_config.json.example` into your `claude_desktop_config.json`.
-3. Replace `your_api_key_here` with your real Epicode API key.
-4. The example already points to the venv interpreter (`/Users/sunorme/.workbuddy/binaries/python/envs/epicode-mcp/bin/python3`), so no path changes are needed if you created the venv above.
+3. Replace the command and script placeholders with the absolute paths to your Python interpreter and this repository's `mcp-bridge/epicode_mcp_server.py`.
+4. Set `EPICODE_API_KEY` to your real key and `EPICODE_BASE_URL` to your deployment URL.
 5. Restart Claude Desktop.
 
 ## Configure Cursor
 
 1. Open Cursor → Settings → MCP.
 2. Add a new MCP server and paste the contents of `mcp-bridge/cursor_mcp_config.json.example`.
-3. Replace `your_api_key_here` with your real Epicode API key.
-4. The example already points to the venv interpreter (`/Users/sunorme/.workbuddy/binaries/python/envs/epicode-mcp/bin/python3`), so no path changes are needed if you created the venv above.
+3. Replace the command and script placeholders with the absolute paths to your Python interpreter and this repository's `mcp-bridge/epicode_mcp_server.py`.
+4. Set `EPICODE_API_KEY` to your real key and `EPICODE_BASE_URL` to your deployment URL.
 5. Save and reload the window (`Cmd/Ctrl + Shift + P` → "Developer: Reload Window").
 
 ## Security note
