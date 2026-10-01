@@ -3173,8 +3173,15 @@ Should this signal be executed? Answer with just 'execute' or 'ignore' and one s
             }
         }
         let mut generated = 0;
+        // O-D 知识卡复活(推演v2病灶D: 159概念仅13卡):
+        // 门槛 50→20 — 中等知识域(20-49条)值得成卡; 每轮上限3张防LLM洪峰。
+        const CARDS_MIN_MEMORIES: usize = 20;
+        const CARDS_PER_ROUND: usize = 3;
         for (domain, items) in domain_tetras.iter() {
-            if items.len() < 50 || existing.contains(domain) {
+            if items.len() < CARDS_MIN_MEMORIES
+                || existing.contains(domain)
+                || generated >= CARDS_PER_ROUND
+            {
                 continue;
             }
             let sample: Vec<String> = items
