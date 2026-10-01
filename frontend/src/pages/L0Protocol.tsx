@@ -41,8 +41,21 @@ const DRIVE_SIGNAL = `{
   "id": 1,
   "timestamp": 1790000000,
   "intent_type": "explore",
-  "description": "Knowledge gaps detected from 3 miss queries",
-  "evidence": [474, 892, 1203],
+  "description": "Knowledge gap from memory #474: search miss; this is not proof that no answer exists.",
+  "evidence": [474],
+  "grounding": {
+    "reason": "Recent knowledge-gap memory within the existing 60-minute window.",
+    "evidence": [{
+      "id": 474,
+      "revision": "0000000000001ff6",
+      "recorded_at": 1790000000,
+      "last_reviewed_at": null,
+      "importance": 1.0
+    }],
+    "uncertainty": ["single_memory_source", "not_reviewed"],
+    "fresh_until": 1790003600,
+    "complete": true
+  },
   "urgency": "low",
   "target_capability": null,
   "emotion": { "pleasure": 0.15, "arousal": 0.39, "dominance": 0.11, "label": null },
@@ -53,6 +66,7 @@ const DRIVE_SIGNAL = `{
   "expires_at": 1791209600,
   "enqueued_at_ms": 1790000000123,
   "time_budget_ms": null,
+  "terminal_reason": null,
   "retryable": true
 }`;
 
@@ -66,9 +80,23 @@ const DRIVE_SSE_EVENT = `{
     "intent_type": "explore",
     "status": "pending",
     "urgency": "low",
-    "description": "Knowledge gaps detected from 3 miss queries",
+    "description": "Knowledge gap from memory #474: search miss; this is not proof that no answer exists.",
     "description_e2e": null,
-    "evidence": [474, 892, 1203],
+    "evidence": [474],
+    "grounding": {
+      "reason": "Recent knowledge-gap memory within the existing 60-minute window.",
+      "evidence": [{
+        "id": 474,
+        "revision": "0000000000001ff6",
+        "recorded_at": 1790000000,
+        "last_reviewed_at": null,
+        "importance": 1.0
+      }],
+      "uncertainty": ["single_memory_source", "not_reviewed"],
+      "fresh_until": 1790003600,
+      "complete": true
+    },
+    "grounding_e2e": null,
     "enqueued_at_ms": 1790000000123
   }]
 }`;
@@ -174,6 +202,9 @@ export default function L0Protocol() {
             </p>
             <CodeBlock code={DRIVE_SIGNAL} label={t('l0.driveCodeLabel')} />
             <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, margin: '20px 0' }}>
+              {t('l0.driveGroundingDesc')}
+            </p>
+            <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, margin: '20px 0' }}>
               {t('l0.driveSseDesc')}
             </p>
             <CodeBlock code={DRIVE_SSE_EVENT} label={t('l0.driveSseCodeLabel')} />
@@ -181,6 +212,9 @@ export default function L0Protocol() {
               {t('l0.driveAckDesc')}
             </p>
             <CodeBlock code={DRIVE_ACK} label={t('l0.driveAckCodeLabel')} />
+            <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, margin: '20px 0' }}>
+              {t('l0.driveSafetyDesc')}
+            </p>
           </motion.div>
 
           {/* Evolution Loop */}

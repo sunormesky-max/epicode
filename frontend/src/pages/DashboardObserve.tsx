@@ -1,10 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
 import { AUTH_CHANGE_EVENT } from '@/lib/api';
-import { presentDriveDescription } from '@/lib/drive-signals';
+import {
+  presentDriveDescription,
+  presentDriveGrounding,
+  type DriveGrounding,
+  type PresentedDriveGrounding,
+} from '@/lib/drive-signals';
 // 历史火花线: 会话级状态环存(最近120个认知采样), 观测舱的心电图
 import DashboardLayout from '@/components/DashboardLayout';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useI18nContext } from '@/i18n/useI18n';
+import type { TranslationKey } from '@/i18n/translations';
 
 /**
  * 观测舱 — Observation Deck
@@ -29,6 +35,8 @@ interface DriveSignal {
   intent: string;
   urgency: string;
   desc: string;
+  evidence: number[];
+  grounding: PresentedDriveGrounding | null;
   at: number;
 }
 
@@ -133,11 +141,29 @@ export default function DashboardObserve() {
       setTimeout(() => setPulses(p => p.filter(x => x.id !== id)), 2600);
     };
     const onDrive = (e: Event) => {
-      const d = (e as CustomEvent).detail as { signals?: { id: number; intent_type: string; urgency: string; description?: string | null; description_e2e?: string | null }[] };
+      const d = (e as CustomEvent).detail as { signals?: {
+        id: number;
+        intent_type: string;
+        urgency: string;
+        description?: string | null;
+        description_e2e?: string | null;
+        evidence?: number[];
+        grounding?: DriveGrounding | null;
+        grounding_e2e?: string | null;
+      }[] };
       if (Array.isArray(d.signals)) {
         setWills(prev => [...d.signals!.map(s => {
           const description = presentDriveDescription(s, t('dash.cog.driveEncrypted'), s.intent_type);
-          return { id: s.id, intent: s.intent_type, urgency: s.urgency, desc: description.text, at: Date.now() };
+          const grounding = presentDriveGrounding(s, t('dash.cog.driveEncrypted'));
+          return {
+            id: s.id,
+            intent: s.intent_type,
+            urgency: s.urgency,
+            desc: description.text,
+            evidence: s.evidence ?? [],
+            grounding,
+            at: Date.now(),
+          };
         }), ...prev].slice(0, 6));
       }
     };
@@ -218,14 +244,44 @@ export default function DashboardObserve() {
           <p style={HUD_LABEL}>WILL STREAM</p>
           {wills.length === 0 ? (
             <p style={{ ...HUD_VAL, marginTop: 6, opacity: 0.5 }}>no signals — the system is quiet</p>
-          ) : wills.map(w => (
-            <p key={w.id} style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, marginTop: 5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              <span style={{ color: 'var(--accent-cyan)' }}>#{w.id}</span>{' '}
-              <span style={{ color: 'var(--text-secondary)' }}>{w.intent}</span>{' '}
-              <span style={{ opacity: 0.6 }}>{w.urgency}</span>{' '}
-              {w.desc.slice(0, 60)}
-            </p>
-          ))}
+          ) : wills.map(w => {
+            const uncertaintyLabel = (uncertainty: string) => {
+              const keys: Record<string, TranslationKey> = {
+                single_memory_source: 'dash.cog.driveUncertainty.singleMemorySource',
+                not_reviewed: 'dash.cog.driveUncertainty.notReviewed',
+                known_conflict: 'dash.cog.driveUncertainty.knownConflict',
+                unresolved_evidence: 'dash.cog.driveUncertainty.unresolvedEvidence',
+              };
+              const key = keys[uncertainty];
+              return key ? t(key) : uncertainty;
+            };
+            const sources = w.grounding?.evidence.length
+              ? w.grounding.evidence.map(source => {
+                const recordedAt = new Date(source.recorded_at * 1000).toISOString().slice(0, 16);
+                return `#${source.id} @${recordedAt}`;
+              }).join(', ')
+              : w.evidence.map(id => `#${id}`).join(', ');
+            const groundingTitle = w.grounding
+              ? `${t('dash.cog.driveReason')}: ${w.grounding.reason}\n${t('dash.cog.driveEvidence')}: ${sources}\n${t('dash.cog.driveUncertainty')}: ${w.grounding.uncertainty.map(uncertaintyLabel).join(', ')}`
+              : `${t('dash.cog.driveEvidence')}: ${sources || t('dash.cog.driveEvidence.none')}`;
+            return (
+              <div key={w.id} title={`${w.desc}\n${groundingTitle}`}>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, marginTop: 5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ color: 'var(--accent-cyan)' }}>#{w.id}</span>{' '}
+                  <span style={{ color: 'var(--text-secondary)' }}>{w.intent}</span>{' '}
+                  <span style={{ opacity: 0.6 }}>{w.urgency}</span>{' '}
+                  {w.desc.slice(0, 60)}
+                </p>
+                {(w.evidence.length > 0 || w.grounding) && (
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: 10, marginTop: 2, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {w.grounding?.encrypted
+                      ? w.grounding.reason
+                      : `${w.grounding?.reason ? `${t('dash.cog.driveReason')}: ${w.grounding.reason} · ` : ''}${t('dash.cog.driveEvidence')}: ${sources || t('dash.cog.driveEvidence.none')}${w.grounding?.uncertainty.length ? ` · ${t('dash.cog.driveUncertainty')}: ${w.grounding.uncertainty.map(uncertaintyLabel).join(', ')}` : ''}`}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* HUD 右下: 最新思维 — 系统此刻在想什么 */}

@@ -7,6 +7,8 @@
 //   only after same-account verification; newly issued keys stay in memory rather
 //   than being persisted in Web Storage.
 
+import type { DriveGrounding } from './drive-signals';
+
 const API_BASE = '/api';
 
 // ── Auth utilities ──
@@ -864,6 +866,9 @@ export interface DriveSignal {
   enqueued_at_ms?: number;
   time_budget_ms?: number | null;
   description_e2e?: string | null;
+  grounding?: DriveGrounding | null;
+  grounding_e2e?: string | null;
+  terminal_reason?: 'ttl_expired' | 'evidence_stale' | 'retries_exhausted' | null;
 }
 
 export function normalizeDriveEnum(v: string | undefined | null): string {
