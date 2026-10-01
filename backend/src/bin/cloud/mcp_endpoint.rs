@@ -245,6 +245,29 @@ pub async fn mcp_endpoint(
             user_id: user_info.user_id.clone(),
         },
     );
+
+    // MCP规范(basic/transports): notification = 不含 id 字段的JSON-RPC请求,
+    // 服务器MUST NOT返回JSON-RPC响应对象 — HTTP层应为 202 Accepted + 空body。
+    // 曾返回 200+{"id":null,"result":{}} → 严格客户端(如Codex)按协议违规断连,
+    // 表现为"发送notifications/initialized时连接关闭"→工具加载失败(2026-10-01刘启航实测)。
+    let is_notification = req_parsed
+        .as_ref()
+        .map(|v| v.get("id").is_none() && v.get("method").is_some())
+        .unwrap_or(false);
+    if is_notification {
+        // 通知仍交handler执行副作用(如initialized标记), 但按规范丢弃响应体
+        let _ = handler.process_json(&raw_body);
+        let method = req_parsed
+            .as_ref()
+            .and_then(|v| v["method"].as_str())
+            .unwrap_or("");
+        tracing::info!(
+            "[MCP] notification {} accepted (202, no body per spec)",
+            method
+        );
+        return StatusCode::ACCEPTED.into_response();
+    }
+
     let t_start = std::time::Instant::now();
     let resp = handler.process_json(&raw_body);
     let elapsed = t_start.elapsed();
