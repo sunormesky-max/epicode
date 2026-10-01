@@ -95,7 +95,7 @@ Expired memories are filtered at retrieval time with **zero additional I/O** (in
 | Letta | 3–10 ms | 4–15 ms | Partial | ❌ | ❌ |
 | Redis (raw) | 0.2 ms | 0.3 ms | ❌ | ❌ | ❌ |
 
-*Epicode's advantage: native spatial indexing via tetrahedral geometry gives sub-linear cluster lookups at scale.*
+*These rows are not a like-for-like comparison. Epicode numbers are single-node measurements from 2026-07-10; other rows are vendor-published ranges. Search in this build is HNSW + BM25. Tetrahedral placement is not the retrieval index, and no ablation shows it improves recall.*
 
 ---
 
