@@ -693,18 +693,33 @@ async fn main() {
                             )
                         })
                         .collect();
-                    // 清空内存（已 flush，下次从 db 读）
+                    // Take the snapshot, but put back anything that cannot be
+                    // attributed or written. Clearing first dropped anonymous
+                    // and failed flushes permanently.
                     m.clear();
                     drop(m);
-                    // 异步 flush 到用户 db（spawn_blocking 避免 blocking I/O 在 async 里）
                     let mgr2 = mgr.clone();
+                    let daily_back = dc.clone();
                     tokio::task::spawn_blocking(move || {
+                        let mut failed: Vec<(String, Vec<(String, u64)>)> = Vec::new();
                         for (api_key, daily) in &entries {
-                            if let Some(info) = mgr2.authenticate(api_key) {
-                                if let Ok(engine) = mgr2.get_engine(&info.user_id) {
+                            let saved = mgr2.authenticate(api_key).and_then(|info| {
+                                mgr2.get_engine(&info.user_id).ok().map(|engine| {
                                     for (date, count) in daily {
                                         let _ = engine.storage.api_stats_add(date, *count as i64);
                                     }
+                                })
+                            });
+                            if saved.is_none() {
+                                failed.push((api_key.clone(), daily.clone()));
+                            }
+                        }
+                        if !failed.is_empty() {
+                            let mut back = daily_back.lock();
+                            for (api_key, daily) in failed {
+                                let slot = back.entry(api_key).or_default();
+                                for (date, count) in daily {
+                                    *slot.entry(date).or_insert(0) += count;
                                 }
                             }
                         }

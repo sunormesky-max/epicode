@@ -12,26 +12,35 @@ use epicode::engine::user_manager::UserInfo;
 // P0 隔离修复: runtime 控制面必须用【当前用户】的 engine 填 envelope,
 // 之前误用 first_engine(任意用户) 导致 status.identity 显示别人的身份
 
-/// ── α1fix: primary binding 持久化 (重启不丢绑定关系; 激活仍靠心跳) ──
-const BINDINGS_FILE: &str = "/var/lib/tetramem/runtime_bindings.json";
+/// Primary binding persistence. Path follows the data dir so the default
+/// non-root image can write it and Compose can keep it on the data volume.
+/// Activation still depends on heartbeat.
+fn bindings_path() -> std::path::PathBuf {
+    let data_dir = std::env::var("EPICODE_DATA_DIR")
+        .or_else(|_| std::env::var("TETRAMEM_DATA_DIR"))
+        .unwrap_or_else(|_| "data".into());
+    std::path::PathBuf::from(data_dir).join("runtime_bindings.json")
+}
 
-fn save_bindings(executors: &HashMap<String, super::state::ExecutorBinding>) {
-    let path = std::path::Path::new(BINDINGS_FILE);
+fn save_bindings(
+    executors: &HashMap<String, super::state::ExecutorBinding>,
+) -> Result<(), String> {
+    let path = bindings_path();
     if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
+        std::fs::create_dir_all(dir).map_err(|e| format!("create {:?}: {e}", dir))?;
     }
-    match serde_json::to_string_pretty(executors) {
-        Ok(s) => {
-            if std::fs::write(path, s).is_err() {
-                tracing::warn!("[D2] bindings persist write failed");
-            }
-        }
-        Err(e) => tracing::warn!("[D2] bindings serialize failed: {}", e),
-    }
+    let body = serde_json::to_string_pretty(executors).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, &body).map_err(|e| format!("write {:?}: {e}", tmp))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("rename {:?}: {e}", path))?;
+    Ok(())
 }
 
 pub fn load_bindings() -> HashMap<String, super::state::ExecutorBinding> {
-    match std::fs::read_to_string(BINDINGS_FILE) {
+    let path = bindings_path();
+    let legacy = std::path::PathBuf::from("/var/lib/tetramem/runtime_bindings.json");
+    let chosen = if path.exists() { path } else { legacy };
+    match std::fs::read_to_string(&chosen) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
         Err(_) => HashMap::new(),
     }
@@ -99,7 +108,17 @@ pub async fn register(
             }
         }
         executors.insert(user.user_id.clone(), binding);
-        save_bindings(&executors);
+        if let Err(e) = save_bindings(&executors) {
+            executors.remove(&user.user_id);
+            tracing::error!("[D2] bindings persist failed: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": "runtime binding could not be persisted",
+                })),
+            );
+        }
         drop(executors);
         st.user_mgr.set_has_primary_executor(&user.user_id, true);
         if let Ok(e) = st.user_mgr.get_engine_strict(&user.user_id) {
@@ -171,8 +190,21 @@ pub async fn unregister(
 ) -> (StatusCode, Json<serde_json::Value>) {
     let removed = {
         let mut executors = st.primary_executors.write();
+        let previous = executors.get(&user.user_id).cloned();
         let r = executors.remove(&user.user_id).is_some();
-        save_bindings(&executors);
+        if let Err(e) = save_bindings(&executors) {
+            if let Some(prev) = previous {
+                executors.insert(user.user_id.clone(), prev);
+            }
+            tracing::error!("[D2] bindings persist failed on unregister: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": "runtime binding could not be persisted",
+                })),
+            );
+        }
         drop(executors);
         r
     };
@@ -250,7 +282,16 @@ pub async fn heartbeat(
             false
         };
         if u {
-            save_bindings(&executors);
+            if let Err(e) = save_bindings(&executors) {
+                tracing::error!("[D2] bindings persist failed on heartbeat: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "success": false,
+                        "error": "runtime binding could not be persisted",
+                    })),
+                );
+            }
         }
         u
     };

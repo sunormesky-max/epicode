@@ -77,29 +77,10 @@ pub async fn auth_middleware(
         }
     }
 
-    // 累计 API 调用次数（非公开端点才计）+ 按日按用户统计
-    let is_public = path.starts_with("/health")
-        || path == "/ready"
-        || path == "/"
-        || path == "/docs"
-        || path == "/openapi.yaml"
-        || path == "/v1/login"
-        || path == "/v1/skills/explore"
-        || path == "/stats/public"
-        || path == "/v1/agent-guide"
-        || path == "/v1/smrp";
-    if !is_public {
-        let mut counts = st.api_call_counts.lock();
-        *counts.entry(client_id.clone()).or_insert(0) += 1;
-        drop(counts);
-        // 按日按用户统计（api_key → date → count），用于前端曲线图 + 异步 flush 到用户 db
-        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-        let mut daily = st.api_calls_daily.lock();
-        let user_daily = daily.entry(client_id.clone()).or_insert_with(HashMap::new);
-        *user_daily.entry(today).or_insert(0) += 1;
-    }
-
     // Public/static endpoints + auth endpoints (already rate-limited above) bypass API-key auth.
+    // API call stats are recorded after authentication, keyed by api_key.
+    // Counting here used client_id=anonymous, which user_stats never reads
+    // and the flush cannot authenticate.
     if path.starts_with("/health")
         || path == "/v1/health"
         || path == "/ready"
@@ -226,6 +207,7 @@ pub async fn auth_middleware(
     };
 
     st.user_mgr.touch(&user_info.user_id);
+    record_api_call(&st, &user_info.api_key);
     // 认证后限流: 统一按真实用户身份键(套餐分级 Free=60/Pro=300/Ent=1000 每分钟)
     let plan_limit = match user_info.plan {
         UserPlan::Free => 60,
@@ -287,4 +269,17 @@ mod tests {
         assert!(!has_conflicting_user_ids(&["user-a"]));
         assert!(!has_conflicting_user_ids(&[]));
     }
+}
+
+fn record_api_call(st: &CloudState, api_key: &str) {
+    if api_key.is_empty() {
+        return;
+    }
+    let mut counts = st.api_call_counts.lock();
+    *counts.entry(api_key.to_string()).or_insert(0) += 1;
+    drop(counts);
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let mut daily = st.api_calls_daily.lock();
+    let user_daily = daily.entry(api_key.to_string()).or_insert_with(HashMap::new);
+    *user_daily.entry(today).or_insert(0) += 1;
 }
