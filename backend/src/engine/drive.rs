@@ -1672,12 +1672,11 @@ mod tests {
     #[test]
     fn existing_recency_fixture_excludes_temporally_invalid_memory() {
         let now = 1_800_000_000;
-        let memory = |timestamp, importance| {
-            let mut value = MemoryPayload::default();
-            value.timestamp = timestamp;
-            value.valid_from = timestamp;
-            value.importance = importance;
-            value
+        let memory = |timestamp, importance| MemoryPayload {
+            timestamp,
+            valid_from: timestamp,
+            importance,
+            ..MemoryPayload::default()
         };
         let mut fresh = memory(now - 60, 3.0);
         let stale = memory(now - 3_600, 3.0);
