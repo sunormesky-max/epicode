@@ -109,6 +109,20 @@ fn migrate_items_unique_scope(conn: &Connection) -> Result<(), String> {
 }
 
 impl LibraryStore {
+    pub fn open_in_data_dir(
+        data_dir: &std::path::Path,
+        vector: Option<Arc<VectorLayer>>,
+    ) -> Result<Self, String> {
+        std::fs::create_dir_all(data_dir).map_err(|e| {
+            format!(
+                "create library data directory {}: {}",
+                data_dir.display(),
+                e
+            )
+        })?;
+        Self::open(&data_dir.join("library.db"), vector)
+    }
+
     pub fn open(
         db_path: &std::path::Path,
         vector: Option<Arc<VectorLayer>>,
@@ -737,5 +751,72 @@ impl LibraryStore {
             .lock()
             .query_row("SELECT COUNT(*) FROM library_chunks", [], |r| r.get(0))
             .unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn temp_dir() -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("epicode_library_{}_{}", std::process::id(), nonce))
+    }
+
+    #[test]
+    fn data_directory_store_survives_reopen_and_restores_hnsw() {
+        let root = temp_dir();
+        let data_dir = root.join("data");
+        let embedding = VectorLayer::embedding_to_blob(&vec![0.25; EMBEDDING_DIM]);
+
+        let collection_id = {
+            let library = LibraryStore::open_in_data_dir(&data_dir, None).unwrap();
+            let collection_id = library
+                .create_collection("owner", "shared", "private", None)
+                .unwrap();
+            let conn = library.conn.lock();
+            conn.execute(
+                "INSERT INTO library_items(client_ref, collection_id, title, source_meta, added_by, created_at)
+                 VALUES(NULL, ?1, ?2, NULL, ?3, 1)",
+                params![collection_id, "persisted item", "owner"],
+            )
+            .unwrap();
+            let item_id = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO library_chunks(item_id, chunk_no, content, content_hash, embedding)
+                 VALUES(?1, 0, ?2, 1, ?3)",
+                params![item_id, "persisted chunk", embedding],
+            )
+            .unwrap();
+            collection_id
+        };
+
+        assert!(data_dir.join("library.db").is_file());
+        let reopened = LibraryStore::open_in_data_dir(&data_dir, None).unwrap();
+        assert_eq!(
+            reopened.collection_owner(collection_id).as_deref(),
+            Some("owner")
+        );
+        assert_eq!(reopened.chunk_count(), 1);
+        assert_eq!(reopened.hnsw.read().len(), 1);
+
+        drop(reopened);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn data_directory_open_reports_unavailable_directory() {
+        let root = temp_dir();
+        std::fs::create_dir_all(&root).unwrap();
+        let not_a_directory = root.join("not-a-directory");
+        std::fs::write(&not_a_directory, b"file").unwrap();
+
+        assert!(LibraryStore::open_in_data_dir(&not_a_directory, None).is_err());
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

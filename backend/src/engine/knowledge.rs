@@ -40,6 +40,20 @@ pub enum RelationType {
     SameEntity,
 }
 
+type RelationKey = (TetraId, TetraId, RelationType);
+
+enum PendingRelationChange {
+    Upsert(Relation),
+    Delete,
+}
+
+#[derive(Default)]
+struct PersistenceState {
+    revision: u64,
+    dirty: bool,
+    full_save_required: bool,
+}
+
 impl RelationType {
     /// 判别值(去重索引用) — 手写match: 新增variant时编译器强制覆盖(无通配分支)
     pub fn discriminant(&self) -> u8 {
@@ -82,9 +96,7 @@ pub struct ConceptPrototype {
 
 pub struct KnowledgeGraph {
     relations: RwLock<Vec<Relation>>,
-    /// F4增量持久化: 待写/待删关系 — auto_save只写增量, 全量重写仅final_save
-    pending_upserts: Mutex<Vec<Relation>>,
-    pending_deletes: Mutex<Vec<(TetraId, TetraId, RelationType)>>,
+    pending_relations: Mutex<HashMap<RelationKey, PendingRelationChange>>,
     /// 加载期抑制: load_relations重放不得灌爆增量队列
     pub loading: std::sync::atomic::AtomicBool,
     adj_index: RwLock<HashMap<TetraId, Vec<usize>>>,
@@ -92,7 +104,7 @@ pub struct KnowledgeGraph {
     /// 大账户加载曾因 exists 线性扫描 O(n²): 25万关系=31亿次比较=33分钟冷启动
     rel_dedup: RwLock<HashSet<(TetraId, TetraId, u8)>>,
     concepts: RwLock<Vec<ConceptPrototype>>,
-    dirty: std::sync::atomic::AtomicBool,
+    persistence: Mutex<PersistenceState>,
 }
 
 impl Default for KnowledgeGraph {
@@ -105,40 +117,82 @@ impl KnowledgeGraph {
     pub fn new() -> Self {
         Self {
             relations: RwLock::new(Vec::new()),
-            pending_upserts: Mutex::new(Vec::new()),
-            pending_deletes: Mutex::new(Vec::new()),
+            pending_relations: Mutex::new(HashMap::new()),
             loading: std::sync::atomic::AtomicBool::new(false),
             adj_index: RwLock::new(HashMap::new()),
             rel_dedup: RwLock::new(HashSet::new()),
             concepts: RwLock::new(Vec::new()),
-            dirty: std::sync::atomic::AtomicBool::new(false),
+            persistence: Mutex::new(PersistenceState::default()),
         }
     }
 
-    /// F4: 取增量(并把队列还给调用方) — 空返回时调用方应回退全量
+    /// Take the coalesced final change for each directed edge.
     pub fn drain_pending_relations(
         &self,
     ) -> (Vec<Relation>, Vec<(TetraId, TetraId, RelationType)>) {
-        let ups = std::mem::take(&mut *self.pending_upserts.lock());
-        let dels = std::mem::take(&mut *self.pending_deletes.lock());
+        let pending = std::mem::take(&mut *self.pending_relations.lock());
+        let mut ups = Vec::new();
+        let mut dels = Vec::new();
+        for ((source, target, relation_type), change) in pending {
+            match change {
+                PendingRelationChange::Upsert(relation) => ups.push(relation),
+                PendingRelationChange::Delete => dels.push((source, target, relation_type)),
+            }
+        }
         (ups, dels)
     }
     pub fn set_loading(&self, v: bool) {
         self.loading.store(v, std::sync::atomic::Ordering::Relaxed);
         if !v {
             // 加载结束: 清空加载期误入队的残留
-            self.pending_upserts.lock().clear();
-            self.pending_deletes.lock().clear();
+            self.pending_relations.lock().clear();
         }
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.dirty.load(std::sync::atomic::Ordering::Relaxed)
+        self.persistence.lock().dirty
     }
 
-    pub fn clear_dirty(&self) {
-        self.dirty
-            .store(false, std::sync::atomic::Ordering::Relaxed);
+    pub fn persistence_snapshot(&self) -> Option<(u64, bool)> {
+        let state = self.persistence.lock();
+        state
+            .dirty
+            .then_some((state.revision, state.full_save_required))
+    }
+
+    pub fn mark_saved_if_unchanged(&self, revision: u64) -> bool {
+        let mut state = self.persistence.lock();
+        if state.revision != revision {
+            return false;
+        }
+        state.dirty = false;
+        state.full_save_required = false;
+        true
+    }
+
+    fn mark_dirty(&self, full_save_required: bool) {
+        let mut state = self.persistence.lock();
+        state.revision = state.revision.wrapping_add(1);
+        state.dirty = true;
+        state.full_save_required |= full_save_required;
+    }
+
+    fn queue_relation_upsert(&self, relation: Relation) {
+        let key = (
+            relation.source,
+            relation.target,
+            relation.relation_type.clone(),
+        );
+        self.pending_relations
+            .lock()
+            .insert(key, PendingRelationChange::Upsert(relation));
+    }
+
+    fn queue_relation_delete(&self, source: TetraId, target: TetraId, relation_type: RelationType) {
+        self.pending_relations.lock().insert(
+            (source, target, relation_type),
+            PendingRelationChange::Delete,
+        );
     }
 
     fn rebuild_rel_dedup(&self, relations: &[Relation]) -> HashSet<(TetraId, TetraId, u8)> {
@@ -146,7 +200,11 @@ impl KnowledgeGraph {
         for r in relations {
             let rt = r.relation_type.discriminant();
             set.insert((r.source, r.target, rt));
-            set.insert((r.target, r.source, rt));
+            if r.relation_type != RelationType::BelongsTo
+                && r.relation_type != RelationType::MergedInto
+            {
+                set.insert((r.target, r.source, rt));
+            }
         }
         set
     }
@@ -233,9 +291,9 @@ impl KnowledgeGraph {
             adj.entry(target).or_default().push(idx);
         }
         if !self.loading.load(std::sync::atomic::Ordering::Relaxed) {
-            self.pending_upserts.lock().push(new_rel);
+            self.queue_relation_upsert(new_rel);
         }
-        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.mark_dirty(false);
     }
 
     pub fn remove_relations_for(&self, id: TetraId) {
@@ -251,10 +309,12 @@ impl KnowledgeGraph {
             *self.adj_index.write() = self.rebuild_adj_index(&relations);
             *self.rel_dedup.write() = self.rebuild_rel_dedup(&relations);
             if !self.loading.load(std::sync::atomic::Ordering::Relaxed) {
-                self.pending_deletes.lock().extend(removed);
+                for (source, target, relation_type) in removed {
+                    self.queue_relation_delete(source, target, relation_type);
+                }
             }
+            self.mark_dirty(false);
         }
-        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// 精确删除：只删 source→target 且类型匹配的关系
@@ -267,19 +327,23 @@ impl KnowledgeGraph {
             *self.adj_index.write() = self.rebuild_adj_index(&relations);
             *self.rel_dedup.write() = self.rebuild_rel_dedup(&relations);
             if !self.loading.load(std::sync::atomic::Ordering::Relaxed) {
-                self.pending_deletes.lock().push((source, target, rel_type));
+                self.queue_relation_delete(source, target, rel_type.clone());
             }
+            self.mark_dirty(false);
         }
-        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// 计算/更新所有 concept 的 centroid（成员 embedding 均值）。
     /// 之前断联：centroid 永远 vec![]，概念聚类只能靠标签 Jaccard。
     pub fn recompute_centroids(&self, space: &crate::domain::space::Space) {
         let mut concepts = self.concepts.write();
+        let mut changed = false;
         for c in concepts.iter_mut() {
             if c.member_ids.is_empty() {
-                c.centroid.clear();
+                if !c.centroid.is_empty() {
+                    c.centroid.clear();
+                    changed = true;
+                }
                 continue;
             }
             let mut sum = vec![0.0_f64; 1024]; // bge-m3 1024 dim
@@ -295,8 +359,16 @@ impl KnowledgeGraph {
                 }
             }
             if count > 0 {
-                c.centroid = sum.iter().map(|v| v / count as f64).collect();
+                let centroid: Vec<f64> = sum.iter().map(|v| v / count as f64).collect();
+                if c.centroid != centroid {
+                    c.centroid = centroid;
+                    changed = true;
+                }
             }
+        }
+        drop(concepts);
+        if changed {
+            self.mark_dirty(false);
         }
     }
 
@@ -482,7 +554,9 @@ impl KnowledgeGraph {
         if removed > 0 {
             *self.adj_index.write() = self.rebuild_adj_index(&relations);
             *self.rel_dedup.write() = self.rebuild_rel_dedup(&relations);
-            self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        if before > 0 {
+            self.mark_dirty(true);
         }
         removed
     }
@@ -624,7 +698,7 @@ impl KnowledgeGraph {
         if hits_idx.is_empty() {
             return;
         }
-        let mut changed = false;
+        let mut updated_relations = Vec::with_capacity(hits_idx.len());
         {
             let mut relations = self.relations.write();
             for i in hits_idx {
@@ -636,12 +710,15 @@ impl KnowledgeGraph {
                         }
                     }
                     r.hits = r.hits.saturating_add(1);
-                    changed = true;
+                    updated_relations.push(r.clone());
                 }
             }
         }
-        if changed {
-            self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        if !updated_relations.is_empty() {
+            for relation in updated_relations {
+                self.queue_relation_upsert(relation);
+            }
+            self.mark_dirty(false);
         }
     }
 
@@ -890,7 +967,7 @@ impl KnowledgeGraph {
                 }
             }
         }
-        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.mark_dirty(false);
     }
 
     pub fn get_concepts(&self) -> Vec<ConceptPrototype> {
@@ -1158,7 +1235,7 @@ impl KnowledgeGraph {
         }
 
         if merged_count > 0 {
-            self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.mark_dirty(false);
             tracing::info!(
                 "[KG] merged {} duplicate concepts, {} remaining",
                 merged_count,
@@ -1528,6 +1605,34 @@ mod tests {
             kg.add_relation(0, i, RelationType::SimilarTo, 0.5);
         }
         assert!(kg.relation_count() <= MAX_RELATIONS_PER_NODE);
+    }
+
+    #[test]
+    fn structural_relation_direction_survives_dedup_rebuild() {
+        let kg = KnowledgeGraph::new();
+        for relation_type in [RelationType::BelongsTo, RelationType::MergedInto] {
+            kg.add_relation(1, 2, relation_type.clone(), 0.8);
+            kg.add_relation(3, 4, RelationType::SimilarTo, 0.7);
+            kg.remove_relation(3, 4, RelationType::SimilarTo);
+            kg.add_relation(2, 1, relation_type, 0.6);
+        }
+
+        assert_eq!(kg.relation_count(), 4);
+    }
+
+    #[test]
+    fn pending_relation_delta_coalesces_remove_and_readd() {
+        let kg = KnowledgeGraph::new();
+        kg.add_relation(1, 2, RelationType::SimilarTo, 0.5);
+        kg.drain_pending_relations();
+
+        kg.remove_relation(1, 2, RelationType::SimilarTo);
+        kg.add_relation(1, 2, RelationType::SimilarTo, 0.8);
+        let (upserts, deletes) = kg.drain_pending_relations();
+
+        assert_eq!(upserts.len(), 1);
+        assert_eq!(upserts[0].strength, 0.8);
+        assert!(deletes.is_empty());
     }
 }
 
