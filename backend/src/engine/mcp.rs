@@ -1235,11 +1235,17 @@ impl McpHandler {
             if let Some(obj) = result.as_object_mut() {
                 obj.insert("data".into(), merged);
             }
+            // 统一契约(PR#133主题): 身份门也走 tools_call 通用响应形态 —
+            // SMRP ok=false ⇒ isError:true + structuredContent 同步携带(测试6328断言)
+            let text = serde_json::to_string(&result).unwrap_or_default();
             return McpResponse {
                 jsonrpc: "2.0".into(),
                 id,
                 result: Some(serde_json::json!({
-                    "content": [{ "type": "text", "text": serde_json::to_string(&result).unwrap_or_default() }]
+                    "content": [{ "type": "text", "text": text }],
+                    "structuredContent": result,
+                    "isError": true,
+                    "resultType": "complete"
                 })),
                 error: None,
             };
