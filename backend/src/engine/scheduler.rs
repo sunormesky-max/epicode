@@ -2732,8 +2732,16 @@ impl SchedulerCenter {
 
         // 构建新内容
         let new_content_str = if let Some(t) = title {
-            let c = content.unwrap_or("");
-            format!("# {}\n\n{}", t, c)
+            if let Some(c) = content {
+                format!("# {}\n\n{}", t, c)
+            } else {
+                // A title-only patch must preserve everything after the old heading,
+                // including blank lines and the body's original line endings.
+                match tetra.data.content.split_once('\n') {
+                    Some((_, body)) => format!("# {}\n{}", t, body),
+                    None => format!("# {}", t),
+                }
+            }
         } else if let Some(c) = content {
             // 保持原标题，只替换内容部分
             let old_first_line = tetra.data.content.lines().next().unwrap_or("");
