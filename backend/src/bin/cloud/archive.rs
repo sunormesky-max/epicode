@@ -477,3 +477,7 @@ pub async fn archive_import(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "archive_tests.rs"]
+mod tests;
