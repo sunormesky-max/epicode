@@ -131,11 +131,11 @@ async fn main() {
     let shared_vector = Engine::load_shared_vector();
     // L1 图书馆: 全局库(独立SQLite, 复用共享VectorLayer — 零额外模型内存)
     let library_state = {
-        let lib_db = std::path::PathBuf::from(
-            std::env::var("TETRAMEM_DATA_DIR").unwrap_or_else(|_| "/var/lib/tetramem".to_string()),
-        )
-        .join("library.db");
-        match epicode::engine::library::LibraryStore::open(&lib_db, shared_vector.clone()) {
+        let lib_db = data_dir.join("library.db");
+        match epicode::engine::library::LibraryStore::open_in_data_dir(
+            &data_dir,
+            shared_vector.clone(),
+        ) {
             Ok(ls) => {
                 tracing::info!(
                     "[Library] store ready ({} chunks): {}",
@@ -145,14 +145,11 @@ async fn main() {
                 std::sync::Arc::new(ls)
             }
             Err(e) => {
-                tracing::error!("[Library] open failed: {} — degraded memory mode", e);
-                std::sync::Arc::new(
-                    epicode::engine::library::LibraryStore::open(
-                        std::path::Path::new(":memory:"),
-                        shared_vector.clone(),
-                    )
-                    .expect("memory library"),
-                )
+                tracing::error!(
+                    "[Library] persistent store initialization failed: {} — refusing startup rather than accepting volatile writes",
+                    e
+                );
+                std::process::exit(1);
             }
         }
     };

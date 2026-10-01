@@ -117,6 +117,12 @@ Long-running and periodic work is executed via `tokio::task`:
 - Tasks are cooperative and yield control to the async runtime.
 - CPU-intensive work (ONNX embedding inference) runs on dedicated threads to avoid blocking the async executor.
 
+### Graph and Library Persistence
+
+Each user's knowledge graph is stored with that user's memory database. Incremental edge changes are coalesced by directed edge and relation type, then saved transactionally with the current concept snapshot. Bulk relation decay uses a full graph snapshot so changed strengths are not lost when no edge is removed.
+
+The Cloud L1 library database is stored as `library.db` in the configured data directory. Its shared HNSW index is rebuilt from persisted chunk embeddings during startup. Cloud startup fails if the persistent library cannot be opened; it does not accept writes into a volatile in-memory substitute.
+
 ## Related Documentation
 
 - [API Reference](api-reference.md) — HTTP endpoints and MCP tools.

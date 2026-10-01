@@ -395,6 +395,7 @@ impl StorageManager {
         &self,
         upserts: &[super::knowledge::Relation],
         deletes: &[(TetraId, TetraId, super::knowledge::RelationType)],
+        kg: &KnowledgeGraph,
     ) -> Result<(usize, usize), String> {
         let conn = self.conn.lock();
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
@@ -424,6 +425,7 @@ impl StorageManager {
                     .map_err(|e| e.to_string())?;
             }
         }
+        self.save_concepts_tx(&tx, kg)?;
         tx.commit().map_err(|e| e.to_string())?;
         Ok((upserts.len(), deletes.len()))
     }
