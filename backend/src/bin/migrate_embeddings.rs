@@ -81,7 +81,7 @@ fn main() {
         };
 
         let rows: Vec<(u64, String)> = match stmt.query_map([], |row| {
-            let id: u64 = row.get(0)?;
+            let id: u64 = row.get::<_, i64>(0)? as u64;
             let content: String = row.get(1)?;
             Ok((id, content))
         }) {
@@ -108,7 +108,7 @@ fn main() {
                     let blob = epicode::engine::vector::VectorLayer::embedding_to_blob(&embedding);
                     match conn.execute(
                         "UPDATE tetrahedrons SET embedding = ?1 WHERE id = ?2",
-                        rusqlite::params![&blob[..], id],
+                        rusqlite::params![&blob[..], *id as i64],
                     ) {
                         Ok(_) => updated += 1,
                         Err(e) => {
