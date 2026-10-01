@@ -23,8 +23,8 @@ EPICODE_BASE_URL : str, optional
 
 from __future__ import annotations
 
-import json
 import os
+from enum import Enum
 from typing import Any
 
 import requests
@@ -47,6 +47,15 @@ class EpicodeClientError(Exception):
         super().__init__(message)
         self.status_code = status_code
         self.response_body = response_body
+
+
+class SearchModeOption(str, Enum):
+    HYBRID = "hybrid"
+    EXACT = "exact"
+    SEMANTIC = "semantic"
+    GRAPH = "graph"
+    AUTO = "auto"
+    FUSION = "fusion"
 
 
 class EpicodeClient:
@@ -132,15 +141,42 @@ class EpicodeClient:
         """Check Epicode cloud health."""
         return self._request("GET", "/health", authenticated=False)
 
-    def remember(self, content: str) -> dict[str, Any]:
+    def remember(
+        self, content: str, labels: list[str] | None = None
+    ) -> dict[str, Any]:
         """Store a new memory."""
-        return self._request("POST", "/api/v1/remember", json_payload={"content": content})
+        payload: dict[str, Any] = {"content": content}
+        if labels is not None:
+            payload["labels"] = labels
+        return self._request("POST", "/api/v1/remember", json_payload=payload)
 
-    def search(self, query: str, limit: int | None = None) -> dict[str, Any]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        labels: list[str] | None = None,
+        min_importance: float | None = None,
+        project: str | None = None,
+        since_days: int | None = None,
+        mode: str | None = None,
+        strict_filter: bool | None = None,
+    ) -> dict[str, Any]:
         """Search memories by semantic similarity."""
         payload: dict[str, Any] = {"query": query}
-        if limit is not None:
-            payload["limit"] = limit
+        for key, value in (
+            ("limit", limit),
+            ("offset", offset),
+            ("labels", labels),
+            ("min_importance", min_importance),
+            ("project", project),
+            ("since_days", since_days),
+            ("mode", mode),
+            ("strict_filter", strict_filter),
+        ):
+            if value is not None:
+                payload[key] = value
         return self._request("POST", "/api/v1/search", json_payload=payload)
 
     def recall(self, query: str, depth: int | None = None) -> dict[str, Any]:
@@ -156,11 +192,6 @@ class EpicodeClient:
         if depth is not None:
             payload["depth"] = depth
         return self._request("POST", "/api/v1/ask", json_payload=payload)
-
-
-def _format_result(result: dict[str, Any]) -> str:
-    """Return a compact JSON representation of an API result."""
-    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -183,52 +214,83 @@ def _get_client() -> EpicodeClient:
 
 
 @mcp.tool()
-def health() -> str:
+def health() -> dict[str, Any]:
     """Check Epicode cloud connectivity and service health."""
-    return _format_result(_get_client().health())
+    return _get_client().health()
 
 
 @mcp.tool()
-def memory_create(content: str) -> str:
+def memory_create(content: str, labels: list[str] | None = None) -> dict[str, Any]:
     """Create a new memory in the Epicode spatial memory system.
 
     Args:
         content: The text content of the memory to store.
+        labels: Optional category tags to attach to the memory.
     """
-    return _format_result(_get_client().remember(content))
+    return _get_client().remember(content, labels=labels)
 
 
 @mcp.tool()
-def memory_search(query: str, limit: int | None = None) -> str:
-    """Search stored memories by semantic similarity.
+def memory_search(
+    query: str,
+    limit: int | None = None,
+    offset: int | None = None,
+    labels: list[str] | None = None,
+    min_importance: float | None = None,
+    project: str | None = None,
+    since_days: int | None = None,
+    mode: SearchModeOption | None = None,
+    strict_filter: bool | None = None,
+) -> dict[str, Any]:
+    """Search memories and inspect ranked evidence with tier and provenance.
 
     Args:
         query: The search query.
-        limit: Maximum number of results (optional).
+        limit: Maximum number of results (REST default 20, maximum 200).
+        offset: Number of ranked results to skip (default 0).
+        labels: Optional OR filter for memory labels.
+        min_importance: Optional minimum importance filter.
+        project: Optional project filter.
+        since_days: Optional age filter in days.
+        mode: hybrid, exact, semantic, graph, auto, or fusion.
+        strict_filter: Disable semantic backfill when applying filters.
     """
-    return _format_result(_get_client().search(query, limit=limit))
+    return _get_client().search(
+        query,
+        limit=limit,
+        offset=offset,
+        labels=labels,
+        min_importance=min_importance,
+        project=project,
+        since_days=since_days,
+        mode=mode.value if isinstance(mode, SearchModeOption) else mode,
+        strict_filter=strict_filter,
+    )
 
 
 @mcp.tool()
-def memory_recall(query: str, depth: int | None = None) -> str:
+def memory_recall(query: str, depth: int | None = None) -> dict[str, Any]:
     """Recall associative memories for a query using SMRP.
 
     Args:
         query: The recall query.
         depth: Associative recall depth (optional).
     """
-    return _format_result(_get_client().recall(query, depth=depth))
+    return _get_client().recall(query, depth=depth)
 
 
 @mcp.tool()
-def memory_ask(question: str, depth: int | None = None) -> str:
-    """Ask a question and receive an answer grounded in stored memories.
+def memory_ask(question: str, depth: int | None = None) -> dict[str, Any]:
+    """Synthesize an answer from memories and return structured source evidence.
 
     Args:
         question: The question to ask.
         depth: Recall depth used to ground the answer (optional).
+
+    Use memory_search or memory_recall when the caller needs to inspect evidence
+    without synthesis. A zero memory_count means no relevant memory evidence was found.
     """
-    return _format_result(_get_client().ask(question, depth=depth))
+    return _get_client().ask(question, depth=depth)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node --test test/epicode.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

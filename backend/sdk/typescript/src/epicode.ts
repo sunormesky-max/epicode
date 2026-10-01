@@ -11,6 +11,32 @@ export class EpicodeError extends Error {
   }
 }
 
+export interface SmrpError {
+  code: number | string;
+  message: string;
+  retryable?: boolean;
+  retry_after_ms?: number;
+}
+
+export interface SmrpProtocol {
+  schema_version: string;
+  tool: string;
+  ok: boolean;
+  error: SmrpError | null;
+}
+
+export interface SmrpStatus {
+  identity?: Record<string, unknown>;
+  space?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface SmrpEnvelope<T = Record<string, unknown>> {
+  protocol: SmrpProtocol;
+  data: T | null;
+  status: SmrpStatus;
+}
+
 export interface HealthResponse {
   status: string;
   version: string;
@@ -19,12 +45,14 @@ export interface HealthResponse {
 
 export interface RememberRequest {
   content: string;
+  labels?: string[];
 }
 
 export interface RememberResponse {
   success: boolean;
   id: string;
   labels: string[];
+  smrp?: SmrpEnvelope;
 }
 
 export interface SearchResult {
@@ -32,17 +60,39 @@ export interface SearchResult {
   content: string;
   labels: string[];
   similarity: number;
+  tier?: string;
+  source?: string[];
+  timestamp?: number;
+  metrics?: Record<string, unknown>;
+  topology?: Record<string, unknown> | null;
+  matched_by?: string[];
 }
+
+export type SearchMode = "hybrid" | "exact" | "semantic" | "graph" | "auto" | "fusion";
 
 export interface SearchRequest {
   query: string;
   limit?: number;
+  offset?: number;
+  labels?: string[];
+  min_importance?: number;
+  project?: string;
+  since_days?: number;
+  mode?: SearchMode;
+  strict_filter?: boolean;
 }
+
+export type SearchOptions = Omit<SearchRequest, "query">;
 
 export interface SearchResponse {
   success: boolean;
   results: SearchResult[];
   total: number;
+  offset?: number;
+  limit?: number;
+  tiers?: Record<string, SearchResult[]>;
+  score_notes?: Record<string, unknown>;
+  smrp?: SmrpEnvelope;
 }
 
 export interface RecallRequest {
@@ -64,6 +114,7 @@ export interface RecallResponse {
   associated_count: number;
   emotion: Emotion;
   memory_file: string;
+  smrp?: SmrpEnvelope;
 }
 
 export interface AskRequest {
@@ -71,12 +122,21 @@ export interface AskRequest {
   depth?: number;
 }
 
+export interface AskMemory {
+  id: string | number;
+  labels: string[];
+  content: string;
+  relevance: number;
+}
+
 export interface AskResponse {
   success: boolean;
   question: string;
   answer: string;
   memory_count: number;
-  memories: unknown[];
+  memories: Array<AskMemory | string>;
+  knowledge_card_used?: string | null;
+  smrp?: SmrpEnvelope;
 }
 
 export interface CreateNodeRequest {
@@ -250,6 +310,92 @@ async function request<T>(
   return data as T;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSmrpEnvelope(
+  value: unknown
+): value is SmrpEnvelope<Record<string, unknown>> {
+  return (
+    isRecord(value) &&
+    isRecord(value.protocol) &&
+    typeof value.protocol.ok === "boolean" &&
+    "data" in value &&
+    isRecord(value.status)
+  );
+}
+
+function unwrapSmrpResponse(response: unknown): {
+  data: Record<string, unknown>;
+  smrp?: SmrpEnvelope<Record<string, unknown>>;
+} {
+  if (isSmrpEnvelope(response)) {
+    if (!response.protocol.ok) {
+      throw new EpicodeError(
+        200,
+        response.protocol.error?.message ?? "SMRP operation failed",
+        response
+      );
+    }
+    if (!isRecord(response.data)) {
+      throw new EpicodeError(
+        200,
+        "Invalid SMRP response: successful data must be an object",
+        response
+      );
+    }
+    return { data: response.data, smrp: response };
+  }
+  if (!isRecord(response)) {
+    throw new EpicodeError(0, "Invalid Epicode API response", response);
+  }
+  return { data: response };
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function searchResult(value: unknown): SearchResult | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const id = value.id;
+  const metrics = isRecord(value.metrics) ? value.metrics : undefined;
+  const topology = isRecord(value.topology) ? value.topology : undefined;
+  return {
+    id: typeof id === "string" || typeof id === "number" ? String(id) : "",
+    content: typeof value.content === "string" ? value.content : "",
+    labels: stringList(value.labels),
+    similarity: typeof value.similarity === "number" ? value.similarity : 0,
+    tier: typeof value.tier === "string" ? value.tier : undefined,
+    source: stringList(value.source),
+    timestamp: typeof value.timestamp === "number" ? value.timestamp : undefined,
+    metrics,
+    topology,
+    matched_by: stringList(value.matched_by),
+  };
+}
+
+function askMemory(value: unknown): AskMemory | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const id = value.id;
+  if (typeof id !== "string" && typeof id !== "number") {
+    return undefined;
+  }
+  return {
+    id,
+    labels: stringList(value.labels),
+    content: typeof value.content === "string" ? value.content : "",
+    relevance: typeof value.relevance === "number" ? value.relevance : 0,
+  };
+}
+
 /**
  * High-level client for the Epicode API.
  *
@@ -276,44 +422,140 @@ export class EpicodeClient {
     return request<HealthResponse>(this.baseUrl, "/health", "GET");
   }
 
-  remember(content: string): Promise<RememberResponse> {
-    return request<RememberResponse>(
+  async remember(content: string, labels?: string[]): Promise<RememberResponse> {
+    const response = await request<unknown>(
       this.baseUrl,
       "/remember",
       "POST",
-      { content },
+      { content, labels },
       this.authHeaders()
     );
+    const { data, smrp } = unwrapSmrpResponse(response);
+    return {
+      success: smrp?.protocol.ok ?? data.success === true,
+      id:
+        typeof data.id === "string" || typeof data.id === "number"
+          ? String(data.id)
+          : "",
+      labels: stringList(data.labels),
+      smrp,
+    };
   }
 
-  search(query: string, limit?: number): Promise<SearchResponse> {
-    return request<SearchResponse>(
+  async search(
+    query: string,
+    limitOrOptions?: number | SearchOptions,
+    offset?: number
+  ): Promise<SearchResponse> {
+    const options: SearchOptions =
+      typeof limitOrOptions === "number"
+        ? { limit: limitOrOptions, offset }
+        : limitOrOptions ?? {};
+    const response = await request<unknown>(
       this.baseUrl,
       "/search",
       "POST",
-      { query, limit },
+      { query, ...options },
       this.authHeaders()
     );
+    const { data, smrp } = unwrapSmrpResponse(response);
+    const results = Array.isArray(data.results)
+      ? data.results
+          .map(searchResult)
+          .filter((item): item is SearchResult => item !== undefined)
+      : [];
+    const tiers: Record<string, SearchResult[]> = {};
+    if (isRecord(data.tiers)) {
+      for (const [name, items] of Object.entries(data.tiers)) {
+        if (Array.isArray(items)) {
+          tiers[name] = items
+            .map(searchResult)
+            .filter((item): item is SearchResult => item !== undefined);
+        }
+      }
+    }
+    const total =
+      typeof data.total_found === "number"
+        ? data.total_found
+        : typeof data.total === "number"
+          ? data.total
+          : typeof data.count === "number"
+            ? data.count
+            : 0;
+    return {
+      success: smrp?.protocol.ok ?? data.success === true,
+      results,
+      total,
+      offset:
+        typeof data.offset === "number" ? data.offset : options.offset ?? 0,
+      limit: typeof data.limit === "number" ? data.limit : options.limit ?? 0,
+      tiers,
+      score_notes: isRecord(data.score_notes) ? data.score_notes : {},
+      smrp,
+    };
   }
 
-  recall(query: string, depth?: number): Promise<RecallResponse> {
-    return request<RecallResponse>(
+  async recall(query: string, depth?: number): Promise<RecallResponse> {
+    const response = await request<unknown>(
       this.baseUrl,
       "/recall",
       "POST",
       { query, depth },
       this.authHeaders()
     );
+    const { data, smrp } = unwrapSmrpResponse(response);
+    const rawEmotion = isRecord(data.emotion) ? data.emotion : {};
+    return {
+      success: smrp?.protocol.ok ?? data.success === true,
+      query: typeof data.query === "string" ? data.query : "",
+      seed_count: typeof data.seed_count === "number" ? data.seed_count : 0,
+      total_fragments:
+        typeof data.total_fragments === "number" ? data.total_fragments : 0,
+      associated_count:
+        typeof data.associated_count === "number" ? data.associated_count : 0,
+      emotion: {
+        pleasure:
+          typeof rawEmotion.pleasure === "number" ? rawEmotion.pleasure : 0,
+        arousal: typeof rawEmotion.arousal === "number" ? rawEmotion.arousal : 0,
+        dominance:
+          typeof rawEmotion.dominance === "number" ? rawEmotion.dominance : 0,
+      },
+      memory_file:
+        typeof data.memory_file === "string" ? data.memory_file : "",
+      smrp,
+    };
   }
 
-  ask(question: string, depth?: number): Promise<AskResponse> {
-    return request<AskResponse>(
+  async ask(question: string, depth?: number): Promise<AskResponse> {
+    const response = await request<unknown>(
       this.baseUrl,
       "/ask",
       "POST",
       { question, depth },
       this.authHeaders()
     );
+    const { data, smrp } = unwrapSmrpResponse(response);
+    const memories = Array.isArray(data.memories)
+      ? data.memories
+          .map((item) =>
+            typeof item === "string" ? item : askMemory(item)
+          )
+          .filter((item): item is AskMemory | string => item !== undefined)
+      : [];
+    const knowledgeCard = data.knowledge_card_used;
+    return {
+      success: smrp?.protocol.ok ?? data.success === true,
+      question: typeof data.question === "string" ? data.question : "",
+      answer: typeof data.answer === "string" ? data.answer : "",
+      memory_count:
+        typeof data.memory_count === "number" ? data.memory_count : 0,
+      memories,
+      knowledge_card_used:
+        typeof knowledgeCard === "string" || knowledgeCard === null
+          ? knowledgeCard
+          : undefined,
+      smrp,
+    };
   }
 
   createNode(

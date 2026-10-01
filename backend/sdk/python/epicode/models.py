@@ -14,10 +14,26 @@ class HealthResponse:
 
 
 @dataclass(frozen=True)
+class SmrpProtocol:
+    schema_version: str
+    tool: str
+    ok: bool
+    error: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class SmrpEnvelope:
+    protocol: SmrpProtocol
+    data: dict[str, Any] | None
+    status: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class RememberResponse:
     success: bool
     id: str
     labels: list[str] = field(default_factory=list)
+    smrp: SmrpEnvelope | None = None
 
 
 @dataclass(frozen=True)
@@ -26,6 +42,11 @@ class SearchResult:
     content: str
     labels: list[str] = field(default_factory=list)
     similarity: float = 0.0
+    tier: str | None = None
+    source: list[str] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
+    topology: dict[str, Any] | None = None
+    matched_by: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -33,6 +54,11 @@ class SearchResponse:
     success: bool
     results: list[SearchResult] = field(default_factory=list)
     total: int = 0
+    offset: int = 0
+    limit: int = 0
+    tiers: dict[str, list[SearchResult]] = field(default_factory=dict)
+    score_notes: dict[str, Any] = field(default_factory=dict)
+    smrp: SmrpEnvelope | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +77,15 @@ class RecallResponse:
     associated_count: int = 0
     emotion: Emotion = field(default_factory=Emotion)
     memory_file: str = ""
+    smrp: SmrpEnvelope | None = None
+
+
+@dataclass(frozen=True)
+class AskMemory:
+    id: int | str | None = None
+    labels: list[str] = field(default_factory=list)
+    content: str = ""
+    relevance: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -59,7 +94,9 @@ class AskResponse:
     question: str = ""
     answer: str = ""
     memory_count: int = 0
-    memories: list[str] = field(default_factory=list)
+    memories: list[AskMemory | str] = field(default_factory=list)
+    knowledge_card_used: str | None = None
+    smrp: SmrpEnvelope | None = None
 
 
 @dataclass(frozen=True)
@@ -202,4 +239,3 @@ class KnowledgeGraphResponse:
     nodes: list[KnowledgeGraphNode] = field(default_factory=list)
     edges: list[KnowledgeGraphEdge] = field(default_factory=list)
     clusters: list[dict[str, Any]] = field(default_factory=list)
-

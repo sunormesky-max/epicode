@@ -8,10 +8,168 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 
-use epicode::engine::mcp::McpHandler;
+use epicode::engine::mcp::{McpHandler, MAX_MCP_REQUEST_BYTES};
 
 use super::helpers::truncate_str;
-use super::state::CloudState;
+use super::state::{CloudState, ExecutorBinding};
+
+pub(super) struct McpGateRejection {
+    pub status: StatusCode,
+    pub response: serde_json::Value,
+}
+
+pub(super) fn persona_readiness_response(
+    id: Option<serde_json::Value>,
+    code: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": {
+            "protocol": {
+                "ok": false,
+                "error": {
+                    "code": code,
+                    "message": "persona runtime loading; retry later",
+                    "retryable": true,
+                    "retry_after_ms": 5000
+                }
+            },
+            "data": null,
+            "status": {
+                "persona": {"state": "warming_up", "phase": "restore"}
+            }
+        }
+    })
+}
+
+fn mcp_gate_error(
+    status: StatusCode,
+    request: &serde_json::Value,
+    code: i64,
+    message: &str,
+) -> McpGateRejection {
+    McpGateRejection {
+        status,
+        response: serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request.get("id").cloned().unwrap_or(serde_json::Value::Null),
+            "error": {"code": code, "message": message}
+        }),
+    }
+}
+
+fn check_mcp_request_access(
+    engine: &epicode::engine::Engine,
+    binding: Option<ExecutorBinding>,
+    has_binding: bool,
+    request: &serde_json::Value,
+) -> Option<McpGateRejection> {
+    if request["method"].as_str() != Some("tools/call") {
+        return None;
+    }
+
+    let name = request["params"]["name"].as_str().unwrap_or("");
+    if name == "identity_finalize" {
+        let require_binding = std::env::var("REQUIRE_BINDING_FOR_IDENTITY")
+            .map(|value| value != "0")
+            .unwrap_or(true);
+        if require_binding
+            && engine.space.identity_info().is_some()
+            && !binding
+                .as_ref()
+                .is_some_and(|binding| !binding.is_expired())
+        {
+            return Some(mcp_gate_error(
+                StatusCode::FORBIDDEN,
+                request,
+                -32004,
+                "identity already sealed: re-finalize requires assembled executor. First-time finalize is always allowed.",
+            ));
+        }
+    }
+
+    if name != "drive_ack" {
+        return None;
+    }
+
+    let binding = binding.filter(|binding| !binding.is_expired());
+    let binding = match binding {
+        Some(binding) => binding,
+        None => {
+            return Some(mcp_gate_error(
+                StatusCode::FORBIDDEN,
+                request,
+                -32002,
+                if has_binding {
+                    "primary_executor expired (heartbeat >120s): heartbeat revives, no re-register needed"
+                } else {
+                    "not primary_executor: register first via POST /v1/runtime/register"
+                },
+            ));
+        }
+    };
+
+    let drive_id = request["params"]["arguments"]["drive_id"]
+        .as_u64()
+        .unwrap_or(0);
+    let signal = engine
+        .scheduler()
+        .drive_queue()
+        .peek_unacked(200)
+        .into_iter()
+        .find(|signal| signal.id == drive_id);
+    if signal.is_some_and(|signal| {
+        matches!(
+            signal.urgency,
+            epicode::engine::drive::DriveUrgency::High
+                | epicode::engine::drive::DriveUrgency::Critical
+        ) && !binding.e2e_enabled
+    }) {
+        return Some(mcp_gate_error(
+            StatusCode::FORBIDDEN,
+            request,
+            -32003,
+            "e2e=false: high/critical signal requires e2e registration",
+        ));
+    }
+    None
+}
+
+pub(super) fn guard_mcp_request(
+    state: &CloudState,
+    user_id: &str,
+    engine: &epicode::engine::Engine,
+    request: &serde_json::Value,
+) -> Option<McpGateRejection> {
+    let (binding, has_binding) = {
+        let executors = state.primary_executors.read();
+        (
+            executors.get(user_id).cloned(),
+            executors.contains_key(user_id),
+        )
+    };
+    check_mcp_request_access(engine, binding, has_binding, request)
+}
+
+pub(super) fn start_cognitive_loop_if_needed(
+    state: &CloudState,
+    user_id: &str,
+    engine: Arc<epicode::engine::Engine>,
+) {
+    if !state.user_mgr.is_loop_started(user_id) {
+        state.user_mgr.mark_loop_started(user_id);
+        let uid = user_id.to_string();
+        tokio::spawn(async move {
+            if std::env::var("ENABLE_COGNITIVE").as_deref() == Ok("1") {
+                engine.start_full_arc(120000);
+            } else {
+                engine.start_quiet_arc(120000);
+            }
+            tracing::info!("[MCP] cognitive loop started for user {} (async once)", uid);
+        });
+    }
+}
 
 pub async fn mcp_endpoint(
     State(st): State<CloudState>,
@@ -41,14 +199,20 @@ pub async fn mcp_endpoint(
         }
     };
 
-    let bytes = match body::to_bytes(body_parts, 1024 * 1024).await {
+    let bytes = match body::to_bytes(body_parts, MAX_MCP_REQUEST_BYTES).await {
         Ok(b) => b,
         Err(e) => {
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
                     "jsonrpc": "2.0", "id": null,
-                    "error": {"code": -32700, "message": format!("read body failed: {}", e)}
+                    "error": {
+                        "code": -32000,
+                        "message": format!(
+                            "request body exceeds {} bytes or could not be read: {}",
+                            MAX_MCP_REQUEST_BYTES, e
+                        )
+                    }
                 })),
             )
                 .into_response();
@@ -86,6 +250,17 @@ pub async fn mcp_endpoint(
             .into_response();
     }
 
+    let req_parsed: Option<serde_json::Value> =
+        serde_json::from_slice::<serde_json::Value>(&bytes).ok();
+    let request_id = req_parsed
+        .as_ref()
+        .and_then(|request| request.get("id").cloned());
+    let notification_method = req_parsed.as_ref().and_then(|request| {
+        (request.get("id").is_none())
+            .then(|| request.get("method").and_then(serde_json::Value::as_str))
+            .flatten()
+    });
+    let is_notification = notification_method.is_some();
     let engine = match st.user_mgr.get_engine_strict(&user_info.user_id) {
         Ok(e) => e,
         Err(e) => {
@@ -96,35 +271,22 @@ pub async fn mcp_endpoint(
                 } else {
                     "PERSONA_DEGRADED"
                 };
+                if is_notification {
+                    return StatusCode::ACCEPTED.into_response();
+                }
                 return (
                     StatusCode::OK,
-                    Json(serde_json::json!({
-                        "jsonrpc": "2.0", "id": null,
-
-
-                        "result": {
-                            "protocol": {
-                                "ok": false,
-                                "error": {
-                                    "code": code,
-                                    "message": "persona runtime loading; retry later",
-                                    "retryable": true,
-                                    "retry_after_ms": 5000
-                                }
-                            },
-                            "data": null,
-                            "status": {
-                                "persona": {"state": "warming_up", "phase": "restore"}
-                            }
-                        }
-                    })),
+                    Json(persona_readiness_response(request_id.clone(), code)),
                 )
                     .into_response();
+            }
+            if is_notification {
+                return StatusCode::ACCEPTED.into_response();
             }
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
-                    "jsonrpc": "2.0", "id": null,
+                    "jsonrpc": "2.0", "id": request_id.clone(),
                     "error": {"code": -32603, "message": e}
                 })),
             )
@@ -133,111 +295,22 @@ pub async fn mcp_endpoint(
     };
 
     let engine_for_guard = engine.clone();
-    // D §14.1 (MCP): drive_ack requires primary_executor binding (与 REST 对齐)
-    let req_parsed: Option<serde_json::Value> =
-        serde_json::from_slice::<serde_json::Value>(&bytes).ok();
-    let is_drive_ack = req_parsed
-        .as_ref()
-        .map(|v| {
-            v["method"].as_str() == Some("tools/call")
-                && v["params"]["name"].as_str() == Some("drive_ack")
-        })
-        .unwrap_or(false);
-
-    // α0.3 (MCP): identity_finalize 出生流程门禁 (防身份抢注, 与 REST 对齐)
-    let is_finalize = req_parsed
-        .as_ref()
-        .map(|v| {
-            v["method"].as_str() == Some("tools/call")
-                && v["params"]["name"].as_str() == Some("identity_finalize")
-        })
-        .unwrap_or(false);
-    if is_finalize {
-        let require_binding = std::env::var("REQUIRE_BINDING_FOR_IDENTITY")
-            .map(|v| v != "0")
-            .unwrap_or(true);
-        if require_binding {
-            // 语义修正: 仅已确认身份后的 re-finalize 需 binding; 首次放行(先名后手)
-            let already_confirmed = engine_for_guard.space.identity_info().is_some();
-            if already_confirmed {
-                let bound = st
-                    .primary_executors
-                    .read()
-                    .get(&user_info.user_id)
-                    .filter(|b| !b.is_expired())
-                    .is_some();
-                if !bound {
-                    return (StatusCode::FORBIDDEN, Json(serde_json::json!({
-                        "jsonrpc": "2.0", "id": req_parsed.as_ref().and_then(|v| v["id"].as_i64()),
-                        "error": {"code": -32004, "message": "identity already sealed: re-finalize requires assembled executor. First-time finalize is always allowed."}
-                    }))).into_response();
-                }
+    if let Some(request) = req_parsed.as_ref() {
+        if let Some(rejection) =
+            guard_mcp_request(&st, &user_info.user_id, &engine_for_guard, request)
+        {
+            if is_notification {
+                tracing::warn!(
+                    "[MCP] notification {} rejected by access gate",
+                    notification_method.unwrap_or("unknown")
+                );
+                return StatusCode::ACCEPTED.into_response();
             }
+            return (rejection.status, Json(rejection.response)).into_response();
         }
     }
 
-    if is_drive_ack {
-        let binding = st
-            .primary_executors
-            .read()
-            .get(&user_info.user_id)
-            .filter(|b| !b.is_expired())
-            .cloned();
-        match binding {
-            None => {
-                return (StatusCode::FORBIDDEN, Json(serde_json::json!({
-                    "jsonrpc": "2.0", "id": req_parsed.and_then(|v| v["id"].as_i64()),
-                    "error": {"code": -32002, "message": if st.primary_executors.read().get(&user_info.user_id).is_some() {
-                        "primary_executor expired (heartbeat >120s): heartbeat revives, no re-register needed"
-                    } else {
-                        "not primary_executor: register first via POST /v1/runtime/register"
-                    }}
-                }))).into_response();
-            }
-            Some(b) => {
-                // D §14.5: e2e=false blocks high/critical auto-execute
-                let drive_id = req_parsed
-                    .as_ref()
-                    .and_then(|v| v["params"]["arguments"]["drive_id"].as_u64())
-                    .unwrap_or(0);
-                let sig = engine_for_guard
-                    .scheduler()
-                    .drive_queue()
-                    .peek_unacked(200)
-                    .into_iter()
-                    .find(|s| s.id == drive_id);
-                if let Some(ref s) = sig {
-                    let is_high = matches!(
-                        s.urgency,
-                        epicode::engine::drive::DriveUrgency::High
-                            | epicode::engine::drive::DriveUrgency::Critical
-                    );
-                    if is_high && !b.e2e_enabled {
-                        return (StatusCode::FORBIDDEN, Json(serde_json::json!({
-                            "jsonrpc": "2.0", "id": req_parsed.and_then(|v| v["id"].as_i64()),
-                            "error": {"code": -32003, "message": "e2e=false: high/critical signal requires e2e registration"}
-                        }))).into_response();
-                    }
-                }
-            }
-        }
-    }
-
-    // P1-6 CRITICAL: MCP 路径也触发 cognitive loop once-start
-    // 否则只用 MCP 的租户（如Tester-Q）永远不会启动 tick → 不会生成 drive signal
-    if !st.user_mgr.is_loop_started(&user_info.user_id) {
-        st.user_mgr.mark_loop_started(&user_info.user_id);
-        let engine_clone = engine.clone();
-        let uid = user_info.user_id.clone();
-        tokio::spawn(async move {
-            if std::env::var("ENABLE_COGNITIVE").as_deref() == Ok("1") {
-                engine_clone.start_full_arc(120000);
-            } else {
-                engine_clone.start_quiet_arc(120000);
-            }
-            tracing::info!("[MCP] cognitive loop started for user {} (async once)", uid);
-        });
-    }
+    start_cognitive_loop_if_needed(&st, &user_info.user_id, engine.clone());
 
     let handler = McpHandler::with_pub_skills(engine, st.pub_skills.clone()).with_quota(
         epicode::engine::mcp::QuotaContext {
@@ -269,18 +342,45 @@ pub async fn mcp_endpoint(
     }
 
     let t_start = std::time::Instant::now();
-    let resp = handler.process_json(&raw_body);
+    let resp = match tokio::task::spawn_blocking(move || handler.process_json(&raw_body)).await {
+        Ok(response) => response,
+        Err(e) => {
+            tracing::error!("[MCP] request worker failed: {}", e);
+            if is_notification {
+                return StatusCode::ACCEPTED.into_response();
+            }
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": req_parsed.as_ref().and_then(|request| request.get("id").cloned()),
+                    "error": {"code": -32603, "message": "internal error"}
+                })),
+            )
+                .into_response();
+        }
+    };
+    if let Some(method) = notification_method {
+        tracing::info!(
+            "[MCP] notification {} accepted (202, no body per spec)",
+            method
+        );
+        return StatusCode::ACCEPTED.into_response();
+    }
     let elapsed = t_start.elapsed();
-    let tool_name: String = match serde_json::from_slice::<serde_json::Value>(&bytes) {
-        Ok(v) => {
-            let method = v["method"].as_str().unwrap_or("");
+    let tool_name: String = match req_parsed.as_ref() {
+        Some(request) => {
+            let method = request["method"].as_str().unwrap_or("");
             if method == "tools/call" {
-                v["params"]["name"].as_str().unwrap_or(method).to_string()
+                request["params"]["name"]
+                    .as_str()
+                    .unwrap_or(method)
+                    .to_string()
             } else {
                 method.to_string()
             }
         }
-        Err(_) => "parse_error".to_string(),
+        None => "parse_error".to_string(),
     };
     tracing::info!(
         "[MCP] user={} tool={} elapsed={}ms",
@@ -312,5 +412,60 @@ pub async fn mcp_endpoint(
             )
                 .into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_mcp_gate_requires_executor_for_drive_ack_and_preserves_id() {
+        let engine = epicode::engine::Engine::new();
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "drive-ack-request",
+            "method": "tools/call",
+            "params": {
+                "name": "drive_ack",
+                "arguments": {"drive_id": 1, "executed": true, "outcome": "done"}
+            }
+        });
+
+        let rejection = check_mcp_request_access(&engine, None, false, &request).unwrap();
+        assert_eq!(rejection.status, StatusCode::FORBIDDEN);
+        assert_eq!(rejection.response["id"], "drive-ack-request");
+        assert_eq!(rejection.response["error"]["code"], -32002);
+    }
+
+    #[test]
+    fn shared_mcp_gate_keeps_memory_ask_available_without_executor_binding() {
+        let engine = epicode::engine::Engine::new();
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "memory_ask", "arguments": {"question": "What happened?"}}
+        });
+
+        assert!(check_mcp_request_access(&engine, None, false, &request).is_none());
+    }
+
+    #[test]
+    fn persona_readiness_response_is_retryable_and_preserves_request_id() {
+        let response = persona_readiness_response(
+            Some(serde_json::json!("initialize-1")),
+            "PERSONA_WARMING_UP",
+        );
+        assert_eq!(response["id"], "initialize-1");
+        assert_eq!(response["result"]["protocol"]["ok"], false);
+        assert_eq!(
+            response["result"]["protocol"]["error"]["code"],
+            "PERSONA_WARMING_UP"
+        );
+        assert_eq!(
+            response["result"]["protocol"]["error"]["retry_after_ms"],
+            5000
+        );
     }
 }

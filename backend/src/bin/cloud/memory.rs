@@ -372,6 +372,7 @@ pub async fn remember(
 pub struct SearchRequest {
     pub query: String,
     pub limit: Option<usize>,
+    pub offset: Option<usize>,
     pub labels: Option<Vec<String>>,
     pub min_importance: Option<f64>,
     pub project: Option<String>,
@@ -390,6 +391,8 @@ pub async fn search(
         return error_response(StatusCode::BAD_REQUEST, &e);
     }
     let limit = req.limit.unwrap_or(20).min(200);
+    let offset = req.offset.unwrap_or(0);
+    let fetch = limit.saturating_add(offset).min(200);
     let query = req.query.clone();
     let filters = build_rest_search_filters(&req);
     let search_mode = filters
@@ -402,7 +405,7 @@ pub async fn search(
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let at = st.active_tasks.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let r = scheduler.api_search_scored(&query, limit, filters.as_ref());
+        let r = scheduler.api_search_scored(&query, fetch, filters.as_ref());
         at.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         r
     })
@@ -410,13 +413,15 @@ pub async fn search(
     match result {
         Ok(Ok((results, notes))) => {
             // SMRP 信封 + tier 分桶 + score_notes（与 MCP 端一致，兑现传输正交承诺 §1.3）
+            let (total_found, picked) =
+                epicode::engine::smrp::paginate_search_results(results, offset, limit);
             let mut primary: Vec<serde_json::Value> = Vec::new();
             let mut contextual: Vec<serde_json::Value> = Vec::new();
             let mut experiential: Vec<serde_json::Value> = Vec::new();
-            let mut flat: Vec<serde_json::Value> = Vec::with_capacity(results.len());
+            let mut flat: Vec<serde_json::Value> = Vec::with_capacity(picked.len());
             let picked_ids: std::collections::HashSet<u64> =
-                results.iter().map(|(id, _, _, _)| *id).collect();
-            for (id, sim, _mass, p) in &results {
+                picked.iter().map(|(id, _, _, _)| *id).collect();
+            for (id, sim, _mass, p) in &picked {
                 let matched_by = notes.matched_by_map.get(id).map(Vec::as_slice);
                 let tier = epicode::engine::smrp::tier_search_for_mode(
                     *sim,
@@ -456,7 +461,8 @@ pub async fn search(
                 "query": req.query,
                 "tiers": {"primary": primary, "contextual": contextual, "experiential": experiential, "hub": []},
                 "results": flat,
-                "count": results.len(), "total": results.len(),
+                "count": picked.len(), "total": total_found, "total_found": total_found,
+                "offset": offset, "limit": limit,
                 "score_notes": {
                     "base": epicode::engine::smrp::search_score_base(search_mode),
                     "adjustments": [
@@ -594,7 +600,7 @@ pub async fn ask(
             StatusCode::OK,
             Json(epicode::engine::smrp::envelope_ok(
                 &engine_for_cb,
-                "ask",
+                "memory_ask",
                 result,
             )),
         ),
@@ -604,7 +610,7 @@ pub async fn ask(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(epicode::engine::smrp::envelope_err(
                     &engine_for_cb,
-                    "ask",
+                    "memory_ask",
                     500,
                     "internal error",
                 )),
@@ -616,7 +622,7 @@ pub async fn ask(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(epicode::engine::smrp::envelope_err(
                     &engine_for_cb,
-                    "ask",
+                    "memory_ask",
                     500,
                     "internal error",
                 )),

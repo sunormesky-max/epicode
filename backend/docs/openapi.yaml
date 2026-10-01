@@ -185,7 +185,8 @@ paths:
         the scheduler's reranking/boost pipeline), exact (BM25), semantic (vector
         similarity), graph (hybrid-search seeds with KG-PPR when relations are available),
         auto (routes temporal/aggregation queries to graph, others to semantic), and
-        fusion (reciprocal-rank fusion of semantic and graph results).
+        fusion (reciprocal-rank fusion of semantic and graph results). Results can be
+        paginated with offset and limit; the public REST default limit remains 20.
       requestBody:
         required: true
         content:
@@ -204,6 +205,11 @@ paths:
                   minimum: 1
                   maximum: 200
                   default: 20
+                offset:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                  description: Number of ranked results to skip before returning this page
                 mode:
                   type: string
                   enum: [hybrid, exact, semantic, graph, auto, fusion]
@@ -445,7 +451,7 @@ paths:
     post:
       tags: [Q&A]
       summary: Ask a question about your memories
-      description: Uses DeepSeek LLM to generate an answer based on relevant memories
+      description: Returns an SMRP envelope containing the existing memory-grounded answer and its structured source memories. The protocol tool identifier is memory_ask.
       requestBody:
         required: true
         content:
@@ -461,25 +467,15 @@ paths:
                   example: "What security measures were implemented?"
                 depth:
                   type: integer
-                  minimum: 1
+                  minimum: 0
                   maximum: 10
                   default: 2
       responses:
         "200":
-          description: Answer generated
+          description: SMRP envelope with answer, source memories, and any matched knowledge card
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean }
-                  question: { type: string }
-                  answer: { type: string, description: "LLM-generated answer" }
-                  memory_count: { type: integer, description: "Number of memories used" }
-                  memories:
-                    type: array
-                    items:
-                      type: object
+              schema: { $ref: "#/components/schemas/SmrpEnvelope" }
 
   /v1/nodes:
     post:
@@ -660,8 +656,10 @@ paths:
       description: |
         Model Context Protocol endpoint for AI agent integration.
         Discover the current tool catalog with the MCP tools/list method. The catalog
-        includes memory, identity, skill, project, and L0 drive operations.
-        Authentication via X-API-Key header.
+        includes memory, identity, skill, project, and L0 drive operations. HTTP callers
+        authenticate with X-API-Key and send one JSON-RPC request per POST. Request and
+        response messages are limited to 1 MiB. Successful tool results include the SMRP
+        envelope as structuredContent and retain its JSON text in content[0].text.
       security:
         - ApiKeyAuth: []
       requestBody:
@@ -672,10 +670,15 @@ paths:
               type: object
               properties:
                 jsonrpc: { type: string, example: "2.0" }
-                id: { type: integer }
+                id:
+                  oneOf:
+                    - { type: integer }
+                    - { type: string }
                 method: { type: string, example: "tools/call" }
                 params: { type: object }
       responses:
+        "202":
+          description: JSON-RPC notification accepted; response body is empty
         "200":
           description: JSON-RPC response
 
@@ -797,7 +800,7 @@ components:
           properties:
             data:
               type: object
-              required: [query, tiers, results, count, total, score_notes]
+              required: [query, tiers, results, count, total, total_found, offset, limit, score_notes]
               properties:
                 query: { type: string }
                 tiers:
@@ -811,7 +814,14 @@ components:
                     hub: { type: array, items: { $ref: "#/components/schemas/SmrpMemoryItem" } }
                 results: { type: array, items: { $ref: "#/components/schemas/SmrpMemoryItem" } }
                 count: { type: integer }
-                total: { type: integer, description: Number of returned matches in this REST response. }
+                total:
+                  type: integer
+                  description: Candidate count retrieved by the bounded search window; it is not an absolute total across all matching memories.
+                total_found:
+                  type: integer
+                  description: Alias for the bounded candidate count, aligned with native MCP search.
+                offset: { type: integer }
+                limit: { type: integer }
                 score_notes:
                   type: object
                   description: The base label is mode-specific. Hybrid includes the vector/BM25 score and intent reranking; Fusion identifies reciprocal-rank-fusion scores.

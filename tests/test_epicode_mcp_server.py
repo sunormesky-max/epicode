@@ -1,5 +1,7 @@
 """Unit tests for the Epicode MCP server bridge."""
 
+import asyncio
+import json
 import sys
 from pathlib import Path
 from unittest import mock
@@ -10,7 +12,7 @@ import pytest
 BRIDGE_DIR = Path(__file__).resolve().parent.parent / "mcp-bridge"
 sys.path.insert(0, str(BRIDGE_DIR))
 
-import epicode_mcp_server as server
+import epicode_mcp_server as server  # noqa: E402
 
 
 @pytest.fixture
@@ -50,7 +52,7 @@ class TestMCPHealth:
             ) as mock_health:
                 result = server.health()
                 mock_health.assert_called_once()
-                assert '"status": "ok"' in result
+                assert result["status"] == "ok"
 
 
 class TestMCPMemoryCreate:
@@ -61,9 +63,9 @@ class TestMCPMemoryCreate:
                 "remember",
                 return_value={"id": 1, "status": "created"},
             ) as mock_remember:
-                result = server.memory_create("hello")
-                mock_remember.assert_called_once_with("hello")
-                assert '"id": 1' in result
+                result = server.memory_create("hello", labels=["test"])
+                mock_remember.assert_called_once_with("hello", labels=["test"])
+                assert result["id"] == 1
 
 
 class TestMCPMemorySearch:
@@ -73,7 +75,42 @@ class TestMCPMemorySearch:
                 server.EpicodeClient, "search", return_value={"results": []}
             ) as mock_search:
                 server.memory_search("query", limit=5)
-                mock_search.assert_called_once_with("query", limit=5)
+                mock_search.assert_called_once_with(
+                    "query",
+                    limit=5,
+                    offset=None,
+                    labels=None,
+                    min_importance=None,
+                    project=None,
+                    since_days=None,
+                    mode=None,
+                    strict_filter=None,
+                )
+
+    def test_memory_search_tool_passes_filters_and_offset(self, api_key):
+        with mock.patch.dict("os.environ", {"EPICODE_API_KEY": api_key}):
+            with mock.patch.object(
+                server.EpicodeClient, "search", return_value={"results": []}
+            ) as mock_search:
+                server.memory_search(
+                    "query",
+                    limit=5,
+                    offset=10,
+                    labels=["ops"],
+                    mode="exact",
+                    strict_filter=True,
+                )
+                mock_search.assert_called_once_with(
+                    "query",
+                    limit=5,
+                    offset=10,
+                    labels=["ops"],
+                    min_importance=None,
+                    project=None,
+                    since_days=None,
+                    mode="exact",
+                    strict_filter=True,
+                )
 
     def test_memory_search_tool_default_limit(self, api_key):
         with mock.patch.dict("os.environ", {"EPICODE_API_KEY": api_key}):
@@ -81,7 +118,17 @@ class TestMCPMemorySearch:
                 server.EpicodeClient, "search", return_value={"results": []}
             ) as mock_search:
                 server.memory_search("query")
-                mock_search.assert_called_once_with("query", limit=None)
+                mock_search.assert_called_once_with(
+                    "query",
+                    limit=None,
+                    offset=None,
+                    labels=None,
+                    min_importance=None,
+                    project=None,
+                    since_days=None,
+                    mode=None,
+                    strict_filter=None,
+                )
 
 
 class TestMCPMemoryRecall:
@@ -105,9 +152,52 @@ class TestMCPMemoryAsk:
 
 
 class TestMCPToolRegistration:
-    @pytest.mark.asyncio
-    async def test_at_least_five_tools_registered(self):
-        tools = await server.mcp.list_tools()
+    def test_at_least_five_tools_registered(self):
+        tools = asyncio.run(server.mcp.list_tools())
         tool_names = {t.name for t in tools}
         required = {"health", "memory_create", "memory_search", "memory_recall", "memory_ask"}
         assert required.issubset(tool_names), f"Missing tools: {required - tool_names}"
+
+        search_tool = next(tool for tool in tools if tool.name == "memory_search")
+        assert {"offset", "labels", "mode", "strict_filter"}.issubset(
+            search_tool.inputSchema["properties"]
+        )
+        mode_ref = search_tool.inputSchema["properties"]["mode"]["anyOf"][0]["$ref"]
+        mode_schema_name = mode_ref.rsplit("/", maxsplit=1)[-1]
+        assert search_tool.inputSchema["$defs"][mode_schema_name]["enum"] == [
+            "hybrid",
+            "exact",
+            "semantic",
+            "graph",
+            "auto",
+            "fusion",
+        ]
+        assert search_tool.outputSchema["type"] == "object"
+
+    def test_memory_ask_returns_structured_smrp_and_legacy_text(self, api_key):
+        envelope = {
+            "protocol": {
+                "schema_version": "1.0",
+                "tool": "memory_ask",
+                "ok": True,
+                "error": None,
+            },
+            "data": {
+                "question": "What happened?",
+                "answer": "A grounded answer.",
+                "memory_count": 1,
+                "memories": [{"id": 7, "labels": ["test"], "content": "Evidence", "relevance": 0.8}],
+            },
+            "status": {"identity": {"system": "Epicode"}, "space": {"memories": 1}},
+        }
+        with mock.patch.dict("os.environ", {"EPICODE_API_KEY": api_key}):
+            with mock.patch.object(
+                server.EpicodeClient, "ask", return_value=envelope
+            ) as mock_ask:
+                content, structured = asyncio.run(
+                    server.mcp.call_tool("memory_ask", {"question": "What happened?"})
+                )
+
+        mock_ask.assert_called_once_with("What happened?", depth=None)
+        assert structured == envelope
+        assert json.loads(content[0].text) == envelope

@@ -1,15 +1,18 @@
 //! TCP MCP 服务器：独立于 HTTP 的 JSON-RPC over TCP 入口。
 
-use std::io::BufRead;
 use std::io::Write as IoWrite;
 use std::sync::Arc;
 
-use epicode::engine::mcp::McpHandler;
-use epicode::engine::user_manager::UserManager;
+use epicode::engine::mcp::{read_mcp_line, McpHandler};
+
+use super::mcp_endpoint::{
+    guard_mcp_request, persona_readiness_response, start_cognitive_loop_if_needed,
+};
+use super::state::CloudState;
 
 pub fn run_tcp_server(
     addr: &str,
-    user_mgr: &Arc<UserManager>,
+    state: &CloudState,
     shutdown: &Arc<std::sync::atomic::AtomicBool>,
 ) {
     let listener = match std::net::TcpListener::bind(addr) {
@@ -25,6 +28,7 @@ pub fn run_tcp_server(
     // 并发连接上限（防止 Slowloris 式线程耗尽）
     const MAX_TCP_CONNECTIONS: usize = 64;
     let active_connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let runtime = tokio::runtime::Handle::current();
 
     while !shutdown.load(std::sync::atomic::Ordering::Relaxed) {
         match listener.accept() {
@@ -46,10 +50,12 @@ pub fn run_tcp_server(
                 }
                 active_connections.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 tracing::info!("TCP client connected: {} (active={})", peer, cur + 1);
-                let mgr = user_mgr.clone();
+                let state = state.clone();
                 let ac = active_connections.clone();
+                let runtime = runtime.clone();
                 std::thread::spawn(move || {
-                    handle_tcp_connection(stream, &mgr, &peer);
+                    let _runtime_guard = runtime.enter();
+                    handle_tcp_connection(stream, &state, &peer);
                     ac.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                     tracing::info!("TCP client disconnected: {}", peer);
                 });
@@ -66,7 +72,7 @@ pub fn run_tcp_server(
     tracing::info!("TCP server shut down gracefully.");
 }
 
-fn handle_tcp_connection(stream: std::net::TcpStream, user_mgr: &Arc<UserManager>, peer: &str) {
+fn handle_tcp_connection(stream: std::net::TcpStream, state: &CloudState, peer: &str) {
     use std::io::{BufReader, BufWriter};
 
     stream.set_nonblocking(false).ok();
@@ -80,83 +86,93 @@ fn handle_tcp_connection(stream: std::net::TcpStream, user_mgr: &Arc<UserManager
             return;
         }
     };
-    let reader = BufReader::with_capacity(64 * 1024, stream_clone); // 限制缓冲区64KB
+    let mut reader = BufReader::with_capacity(64 * 1024, stream_clone);
     let mut writer = BufWriter::new(stream);
 
     let mut handler: Option<Arc<McpHandler>> = None;
     let mut authenticated_user: Option<String> = None;
+    let mut line = Vec::new();
+    loop {
+        match read_mcp_line(&mut reader, &mut line) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("[TCP] rejecting input from {}: {}", peer, e);
+                break;
+            }
+        }
+        let message = match std::str::from_utf8(&line) {
+            Ok(message) => message,
+            Err(e) => {
+                tracing::debug!("[TCP] invalid UTF-8 from {}: {}", peer, e);
+                break;
+            }
+        };
+        let trimmed = message.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
 
-    const MAX_LINE_LEN: usize = 1024 * 1024; // 1MB 单行上限
-    for line in reader.lines() {
-        match line {
-            Ok(l) => {
-                // 防止超大行导致内存耗尽
-                if l.len() > MAX_LINE_LEN {
-                    tracing::warn!(
-                        "[TCP] {} sent oversized line ({} bytes), dropping",
-                        peer,
-                        l.len()
-                    );
-                    break;
-                }
-                let trimmed = l.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-
-                if handler.is_none() {
-                    match tcp_try_authenticate(trimmed, user_mgr) {
-                        Ok((user_id, h)) => {
-                            authenticated_user = Some(user_id.clone());
-                            handler = Some(h);
-                            let resp = serde_json::json!({
-                                "jsonrpc": "2.0", "id": tcp_extract_id(trimmed),
-                                "result": {"status": "authenticated", "user_id": user_id}
-                            });
-                            if writeln!(writer, "{}", resp).is_err() {
-                                break;
-                            }
-                            if writer.flush().is_err() {
-                                break;
-                            }
-                            continue;
-                        }
-                        Err(resp_str) => {
-                            if writeln!(writer, "{}", resp_str).is_err() {
-                                break;
-                            }
-                            if writer.flush().is_err() {
-                                break;
-                            }
-                            continue;
-                        }
-                    }
-                }
-
-                if let Some(ref h) = handler {
-                    if let Some(ref uid) = authenticated_user {
-                        user_mgr.touch(uid);
-                    }
-                    let t = std::time::Instant::now();
-                    let response = h.process_json(trimmed);
-                    if t.elapsed().as_millis() > 100 {
-                        tracing::warn!(
-                            "slow TCP request from {} ({}): {}ms",
-                            peer,
-                            authenticated_user.as_deref().unwrap_or("?"),
-                            t.elapsed().as_millis()
-                        );
-                    }
-                    if writeln!(writer, "{}", response).is_err() {
+        if handler.is_none() {
+            match tcp_try_authenticate(trimmed, state) {
+                Ok((user_id, h)) => {
+                    authenticated_user = Some(user_id.clone());
+                    handler = Some(h);
+                    let resp = serde_json::json!({
+                        "jsonrpc": "2.0", "id": tcp_extract_id(trimmed),
+                        "result": {"status": "authenticated", "user_id": user_id}
+                    });
+                    if writeln!(writer, "{}", resp).is_err() {
                         break;
                     }
                     if writer.flush().is_err() {
                         break;
                     }
+                    continue;
+                }
+                Err(resp_str) => {
+                    if writeln!(writer, "{}", resp_str).is_err() {
+                        break;
+                    }
+                    if writer.flush().is_err() {
+                        break;
+                    }
+                    continue;
                 }
             }
-            Err(e) => {
-                tracing::debug!("TCP read error from {}: {}", peer, e);
+        }
+
+        if let Some(ref handler) = handler {
+            if let Some(ref user_id) = authenticated_user {
+                state.user_mgr.touch(user_id);
+            }
+            let request = serde_json::from_str::<serde_json::Value>(trimmed).ok();
+            if let (Some(user_id), Some(request)) = (authenticated_user.as_deref(), request) {
+                let engine = handler.engine();
+                if let Some(rejection) = guard_mcp_request(state, user_id, &engine, &request) {
+                    if writeln!(writer, "{}", rejection.response).is_err() {
+                        break;
+                    }
+                    if writer.flush().is_err() {
+                        break;
+                    }
+                    continue;
+                }
+            }
+            let t = std::time::Instant::now();
+            let response = handler.process_json(trimmed);
+            if t.elapsed().as_millis() > 100 {
+                tracing::warn!(
+                    "slow TCP request from {} ({}): {}ms",
+                    peer,
+                    authenticated_user.as_deref().unwrap_or("?"),
+                    t.elapsed().as_millis()
+                );
+            }
+            if writeln!(writer, "{}", response).is_err() {
+                break;
+            }
+            if writer.flush().is_err() {
                 break;
             }
         }
@@ -170,7 +186,7 @@ fn handle_tcp_connection(stream: std::net::TcpStream, user_mgr: &Arc<UserManager
 
 pub fn tcp_try_authenticate(
     msg: &str,
-    user_mgr: &Arc<UserManager>,
+    state: &CloudState,
 ) -> Result<(String, Arc<McpHandler>), String> {
     let parsed: serde_json::Value = serde_json::from_str(msg)
         .map_err(|_| tcp_auth_error(tcp_extract_id(msg), "invalid JSON"))?;
@@ -189,24 +205,40 @@ pub fn tcp_try_authenticate(
                 "api_key required in initialize params",
             ));
         }
-        let user_info = user_mgr
+        let user_info = state
+            .user_mgr
             .authenticate(api_key)
             .ok_or_else(|| tcp_auth_error(tcp_extract_id(msg), "authentication failed"))?;
 
-        let engine = user_mgr
-            .get_engine(&user_info.user_id)
-            .map_err(|e| tcp_auth_error(tcp_extract_id(msg), &e))?;
+        let engine = state
+            .user_mgr
+            .get_engine_strict(&user_info.user_id)
+            .map_err(|e| {
+                if e == "PERSONA_WARMING_UP" || e == "PERSONA_DEGRADED" {
+                    persona_readiness_response(
+                        tcp_extract_id(msg),
+                        if e == "PERSONA_WARMING_UP" {
+                            "PERSONA_WARMING_UP"
+                        } else {
+                            "PERSONA_DEGRADED"
+                        },
+                    )
+                    .to_string()
+                } else {
+                    tcp_auth_error(tcp_extract_id(msg), &e)
+                }
+            })?;
 
-        let handler = Arc::new(McpHandler::new(engine).with_quota(
-            epicode::engine::mcp::QuotaContext {
-                user_mgr: Arc::clone(user_mgr),
-                user_id: user_info.user_id.clone(),
-            },
-        ));
-        tracing::info!(
-            "TCP user '{}' authenticated (pub_skills not available via TCP)",
-            user_info.user_id
+        start_cognitive_loop_if_needed(state, &user_info.user_id, engine.clone());
+        let handler = Arc::new(
+            McpHandler::with_pub_skills(engine, state.pub_skills.clone()).with_quota(
+                epicode::engine::mcp::QuotaContext {
+                    user_mgr: Arc::clone(&state.user_mgr),
+                    user_id: user_info.user_id.clone(),
+                },
+            ),
         );
+        tracing::info!("TCP user '{}' authenticated", user_info.user_id);
         Ok((user_info.user_id, handler))
     } else {
         Err(tcp_auth_error(
@@ -216,7 +248,7 @@ pub fn tcp_try_authenticate(
     }
 }
 
-fn tcp_auth_error(id: Option<u64>, msg: &str) -> String {
+fn tcp_auth_error(id: Option<serde_json::Value>, msg: &str) -> String {
     serde_json::json!({
         "jsonrpc": "2.0", "id": id,
         "error": {"code": -32001, "message": msg}
@@ -224,8 +256,8 @@ fn tcp_auth_error(id: Option<u64>, msg: &str) -> String {
     .to_string()
 }
 
-fn tcp_extract_id(msg: &str) -> Option<u64> {
+fn tcp_extract_id(msg: &str) -> Option<serde_json::Value> {
     serde_json::from_str::<serde_json::Value>(msg)
         .ok()
-        .and_then(|v| v.get("id")?.as_u64())
+        .and_then(|v| v.get("id").cloned())
 }

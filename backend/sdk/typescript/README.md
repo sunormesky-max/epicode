@@ -20,9 +20,13 @@ const mem = await client.remember("Deployed v2.3 to production");
 console.log(mem.id, mem.labels);
 
 // Search memories
-const results = await client.search("production deploy", 5);
+const results = await client.search("production deploy", {
+  limit: 5,
+  offset: 0,
+  mode: "hybrid",
+});
 for (const r of results.results) {
-  console.log(r.content, r.similarity);
+  console.log(r.content, r.similarity, r.tier, r.source);
 }
 
 // Recall with associative expansion
@@ -32,6 +36,7 @@ console.log(recall.total_fragments, recall.emotion);
 // Ask a question over your memories
 const answer = await client.ask("What was the last version deployed?");
 console.log(answer.answer);
+console.log(answer.memories);
 
 // Create a graph node
 const node = await client.createNode("Kubernetes cluster", ["infra"]);
@@ -80,6 +85,8 @@ try {
 }
 ```
 
+The SDK's memory methods normalize the current SMRP REST envelope into the existing convenience fields. The original envelope is available as `response.smrp`; search results also retain tier, source, metrics, and topology where returned. An SMRP `protocol.ok: false` response throws `EpicodeError` instead of appearing as a successful empty result. Legacy flat responses remain supported.
+
 ## Custom Base URL
 
 The default base URL uses the public API prefix served by the included Nginx reverse proxy:
@@ -99,8 +106,8 @@ const client = new EpicodeClient("key", "http://localhost:9111/v1");
 | Method | Endpoint | Client Method |
 |--------|----------|---------------|
 | GET | `/health` | `client.health()` |
-| POST | `/remember` | `client.remember(content)` |
-| POST | `/search` | `client.search(query, limit?)` |
+| POST | `/remember` | `client.remember(content, labels?)` |
+| POST | `/search` | `client.search(query, limitOrOptions?, offset?)` |
 | POST | `/recall` | `client.recall(query, depth?)` |
 | POST | `/ask` | `client.ask(question, depth?)` |
 | POST | `/nodes` | `client.createNode(content, labels?, timestamp?)` |

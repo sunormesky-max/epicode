@@ -1,8 +1,8 @@
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use epicode::engine::mcp::McpHandler;
+use epicode::engine::mcp::{read_mcp_line, McpHandler};
 use epicode::engine::user_manager::UserManager;
 use epicode::engine::Engine;
 
@@ -46,22 +46,28 @@ fn run_single_user(data_dir: PathBuf) {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut locked = stdin.lock();
-    let mut line = String::new();
+    let mut line = Vec::new();
 
     loop {
-        line.clear();
-        match locked.read_line(&mut line) {
+        match read_mcp_line(&mut locked, &mut line) {
             Ok(0) => {
                 tracing::info!("stdin EOF, shutting down");
                 break;
             }
             Ok(_) => {}
             Err(e) => {
-                tracing::error!("stdin read error: {}", e);
+                tracing::error!("stdin MCP input rejected: {}", e);
                 break;
             }
         }
-        let trimmed = line.trim();
+        let message = match std::str::from_utf8(&line) {
+            Ok(message) => message,
+            Err(e) => {
+                tracing::error!("stdin contains invalid UTF-8: {}", e);
+                break;
+            }
+        };
+        let trimmed = message.trim();
         if trimmed.is_empty() {
             continue;
         }
@@ -155,7 +161,7 @@ fn handle_authenticated_connection(
     use std::io::{BufReader, BufWriter};
 
     stream.set_nonblocking(false).ok();
-    let reader = BufReader::new(
+    let mut reader = BufReader::new(
         stream
             .try_clone()
             .unwrap_or_else(|_| stream.try_clone().expect("failed to clone stream")),
@@ -164,61 +170,49 @@ fn handle_authenticated_connection(
 
     let mut handler: Option<Arc<McpHandler>> = None;
     let mut authenticated_user: Option<String> = None;
+    let mut line = Vec::new();
 
-    for line in reader.lines() {
-        match line {
-            Ok(l) => {
-                let trimmed = l.trim();
-                if trimmed.is_empty() {
+    loop {
+        match read_mcp_line(&mut reader, &mut line) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("input from {} rejected: {}", peer, e);
+                break;
+            }
+        }
+        let message = match std::str::from_utf8(&line) {
+            Ok(message) => message,
+            Err(e) => {
+                tracing::debug!("invalid UTF-8 from {}: {}", peer, e);
+                break;
+            }
+        };
+        let trimmed = message.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if handler.is_none() {
+            match try_authenticate(trimmed, user_mgr) {
+                Ok((user_id, h)) => {
+                    authenticated_user = Some(user_id.clone());
+                    handler = Some(h);
+                    let resp = serde_json::json!({
+                        "jsonrpc": "2.0", "id": extract_id(trimmed),
+                        "result": {"status": "authenticated", "user_id": user_id}
+                    });
+                    if let Err(e) = writeln!(writer, "{}", resp) {
+                        tracing::warn!("write error to {}: {}", peer, e);
+                        break;
+                    }
+                    if writer.flush().is_err() {
+                        break;
+                    }
                     continue;
                 }
-
-                if handler.is_none() {
-                    match try_authenticate(trimmed, user_mgr) {
-                        Ok((user_id, h)) => {
-                            authenticated_user = Some(user_id.clone());
-                            handler = Some(h);
-                            let resp = serde_json::json!({
-                                "jsonrpc": "2.0", "id": extract_id(trimmed),
-                                "result": {"status": "authenticated", "user_id": user_id}
-                            });
-                            if let Err(e) = writeln!(writer, "{}", resp) {
-                                tracing::warn!("write error to {}: {}", peer, e);
-                                break;
-                            }
-                            if writer.flush().is_err() {
-                                break;
-                            }
-                            continue;
-                        }
-                        Err(resp_str) => {
-                            if let Err(_e) = writeln!(writer, "{}", resp_str) {
-                                break;
-                            }
-                            if writer.flush().is_err() {
-                                break;
-                            }
-                            continue;
-                        }
-                    }
-                }
-
-                if let Some(ref h) = handler {
-                    if let Some(ref uid) = authenticated_user {
-                        user_mgr.touch(uid);
-                    }
-                    let t = std::time::Instant::now();
-                    let response = h.process_json(trimmed);
-                    if t.elapsed().as_millis() > 100 {
-                        tracing::warn!(
-                            "slow request from {} ({}): {}ms",
-                            peer,
-                            authenticated_user.as_deref().unwrap_or("?"),
-                            t.elapsed().as_millis()
-                        );
-                    }
-                    if let Err(e) = writeln!(writer, "{}", response) {
-                        tracing::warn!("write error to {}: {}", peer, e);
+                Err(resp_str) => {
+                    if let Err(_e) = writeln!(writer, "{}", resp_str) {
                         break;
                     }
                     if writer.flush().is_err() {
@@ -226,8 +220,27 @@ fn handle_authenticated_connection(
                     }
                 }
             }
-            Err(e) => {
-                tracing::debug!("read error from {}: {}", peer, e);
+        }
+
+        if let Some(ref h) = handler {
+            if let Some(ref uid) = authenticated_user {
+                user_mgr.touch(uid);
+            }
+            let t = std::time::Instant::now();
+            let response = h.process_json(trimmed);
+            if t.elapsed().as_millis() > 100 {
+                tracing::warn!(
+                    "slow request from {} ({}): {}ms",
+                    peer,
+                    authenticated_user.as_deref().unwrap_or("?"),
+                    t.elapsed().as_millis()
+                );
+            }
+            if let Err(e) = writeln!(writer, "{}", response) {
+                tracing::warn!("write error to {}: {}", peer, e);
+                break;
+            }
+            if writer.flush().is_err() {
                 break;
             }
         }
