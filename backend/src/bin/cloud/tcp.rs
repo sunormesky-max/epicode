@@ -91,6 +91,9 @@ fn handle_tcp_connection(stream: std::net::TcpStream, state: &CloudState, peer: 
 
     let mut handler: Option<Arc<McpHandler>> = None;
     let mut authenticated_user: Option<String> = None;
+    // A09(审计#134 P1): 认证时缓存key原文 — 每消息重新验活,
+    // 密钥重置/账户撤销后旧连接立即失效(不再只靠首条消息的终身凭据)
+    let mut session_key: Option<String> = None;
     let mut line = Vec::new();
     loop {
         match read_mcp_line(&mut reader, &mut line) {
@@ -117,6 +120,10 @@ fn handle_tcp_connection(stream: std::net::TcpStream, state: &CloudState, peer: 
             match tcp_try_authenticate(trimmed, state) {
                 Ok((user_id, h)) => {
                     authenticated_user = Some(user_id.clone());
+                    // A09: 提取首条消息里的key备验活
+                    if let Some(k) = tcp_extract_key(trimmed) {
+                        session_key = Some(k);
+                    }
                     handler = Some(h);
                     let resp = serde_json::json!({
                         "jsonrpc": "2.0", "id": tcp_extract_id(trimmed),
@@ -139,6 +146,28 @@ fn handle_tcp_connection(stream: std::net::TcpStream, state: &CloudState, peer: 
                     }
                     continue;
                 }
+            }
+        }
+
+        // A09: 会话验活 — 每消息重验key(密钥重置/撤销即断), O(1)哈希查
+        if let (Some(ref sk), Some(uid)) = (session_key.as_ref(), authenticated_user.as_ref()) {
+            let still_valid = state
+                .user_mgr
+                .authenticate(sk)
+                .map(|u| u.user_id == *uid)
+                .unwrap_or(false);
+            if !still_valid {
+                tracing::warn!(
+                    "[TCP] session invalidated for user '{}' (key rotated/revoked) — closing",
+                    uid
+                );
+                let resp = serde_json::json!({
+                    "jsonrpc": "2.0", "id": tcp_extract_id(trimmed),
+                    "error": {"code": -32001, "message": "session invalidated: credential rotated or revoked"}
+                });
+                let _ = writeln!(writer, "{}", resp);
+                let _ = writer.flush();
+                break;
             }
         }
 
@@ -230,14 +259,22 @@ pub fn tcp_try_authenticate(
             })?;
 
         start_cognitive_loop_if_needed(state, &user_info.user_id, engine.clone());
-        let handler = Arc::new(
+        // A01: 子账户注入角色门(主账户全权)
+        let handler = Arc::new(if user_info.parent.is_some() {
+            McpHandler::with_pub_skills(engine, state.pub_skills.clone())
+                .with_quota(epicode::engine::mcp::QuotaContext {
+                    user_mgr: Arc::clone(&state.user_mgr),
+                    user_id: user_info.user_id.clone(),
+                })
+                .with_role_gate(user_info.role)
+        } else {
             McpHandler::with_pub_skills(engine, state.pub_skills.clone()).with_quota(
                 epicode::engine::mcp::QuotaContext {
                     user_mgr: Arc::clone(&state.user_mgr),
                     user_id: user_info.user_id.clone(),
                 },
-            ),
-        );
+            )
+        });
         tracing::info!("TCP user '{}' authenticated", user_info.user_id);
         Ok((user_info.user_id, handler))
     } else {
@@ -254,6 +291,11 @@ fn tcp_auth_error(id: Option<serde_json::Value>, msg: &str) -> String {
         "error": {"code": -32001, "message": msg}
     })
     .to_string()
+}
+
+fn tcp_extract_key(msg: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+    v["params"]["api_key"].as_str().map(|s| s.to_string())
 }
 
 fn tcp_extract_id(msg: &str) -> Option<serde_json::Value> {

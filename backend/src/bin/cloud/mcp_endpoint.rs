@@ -312,12 +312,16 @@ pub async fn mcp_endpoint(
 
     start_cognitive_loop_if_needed(&st, &user_info.user_id, engine.clone());
 
-    let handler = McpHandler::with_pub_skills(engine, st.pub_skills.clone()).with_quota(
+    let mut handler = McpHandler::with_pub_skills(engine, st.pub_skills.clone()).with_quota(
         epicode::engine::mcp::QuotaContext {
             user_mgr: Arc::clone(&st.user_mgr),
             user_id: user_info.user_id.clone(),
         },
     );
+    // A01(审计#134): 子账户注入角色门 — 主账户不设(全权)
+    if user_info.parent.is_some() {
+        handler = handler.with_role_gate(user_info.role);
+    }
 
     // MCP规范(basic/transports): notification = 不含 id 字段的JSON-RPC请求,
     // 服务器MUST NOT返回JSON-RPC响应对象 — HTTP层应为 202 Accepted + 空body。

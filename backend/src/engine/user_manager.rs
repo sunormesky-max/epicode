@@ -852,10 +852,16 @@ impl UserManager {
         self.evict_idle();
 
         let user_data_dir = self.base_data_dir.join("users").join(user_id);
+        // A11: 共享向量不可用的降级路径也必须携带真实 user_id —
+        // 曾退回 mcp-default, Engine.user_id/owner/存储加密上下文全部错位
         let engine = if let Some(sv) = &self.shared_vector {
             Engine::with_shared_vector(user_data_dir, sv.clone(), user_id)
         } else {
-            Engine::with_data_dir(user_data_dir)
+            tracing::warn!(
+                "[UserManager] shared vector unavailable — engine for '{}' built WITHOUT shared embedding (identity preserved)",
+                user_id
+            );
+            Engine::with_data_dir_and_user(user_data_dir, user_id)
         };
 
         // P0-1 修复(Tester-Q契约 #1658): 删除 handle.enter() + start_with_interval

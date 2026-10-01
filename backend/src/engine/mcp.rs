@@ -82,6 +82,9 @@ pub struct McpHandler {
     pub_skills: Option<Arc<super::skills::SkillEngine>>,
     /// 配额上下文:None 时跳过配额检查(本地 MCP / mcp_server 二进制)。
     quota: Option<QuotaContext>,
+    /// A01(审计#134): 子账户角色门 — None=主账户/本地全权; Some(role)时
+    /// tools_call 按工具→权限映射拒无权调用。HTTP/TCP入口注入。
+    role_gate: Option<crate::engine::user_manager::UserRole>,
 }
 
 impl McpHandler {
@@ -90,6 +93,7 @@ impl McpHandler {
             engine,
             pub_skills: None,
             quota: None,
+            role_gate: None,
         }
     }
 
@@ -368,10 +372,38 @@ impl McpHandler {
             engine,
             pub_skills: Some(pub_skills),
             quota: None,
+            role_gate: None,
         }
     }
 
     /// 设置配额上下文(cloud.rs 的 mcp_endpoint / TCP 认证后调用)。
+    /// A01: 工具→权限映射(读类/身份仪式/任务/意志/诊断类放行=None)
+    fn tool_permission(name: &str) -> Option<crate::engine::user_manager::Permission> {
+        use crate::engine::user_manager::Permission as P;
+        match name {
+            // 记忆写入
+            "memory_create" | "memory_update" | "memory_improve" | "doc_import"
+            | "pattern_learn" => Some(P::MemoryWrite),
+            // 记忆删除/恢复(restore=从quarantine移除)
+            "memory_delete" | "memory_forget" | "memory_restore" => Some(P::MemoryDelete),
+            // 技能管理(写侧)
+            "skill_auto_extract" | "skills_sync" | "skill_feedback" => Some(P::SkillManage),
+            // 图书馆写
+            "library_ingest" => Some(P::LibraryManage),
+            // 梦循环(改变记忆空间结构)
+            "dream_cycle" => Some(P::MemoryDelete),
+            // 嵌入迁移(批量改写存储)
+            "embedding_migrate" => Some(P::PersonaImport),
+            _ => None,
+        }
+    }
+
+    /// A01: 注入子账户角色门(主账户/本地不调用=全权)
+    pub fn with_role_gate(mut self, role: crate::engine::user_manager::UserRole) -> Self {
+        self.role_gate = Some(role);
+        self
+    }
+
     pub fn with_quota(mut self, quota: QuotaContext) -> Self {
         self.quota = Some(quota);
         self
@@ -1201,6 +1233,28 @@ impl McpHandler {
             .get("arguments")
             .cloned()
             .unwrap_or(serde_json::Value::Null);
+
+        // A01(审计#134 P1): 子账户角色门 — 工具→权限映射拒无权调用。
+        // 主账户(role_gate=None)与本地构造不设门; 读类/仪式/任务/意志工具放行。
+        if let Some(role) = self.role_gate {
+            if let Some(perm) = Self::tool_permission(name) {
+                if !role.can(perm) {
+                    let denied = self.smrp_err(name, 403, "insufficient role for this tool");
+                    let text = serde_json::to_string(&denied).unwrap_or_default();
+                    return McpResponse {
+                        jsonrpc: "2.0".into(),
+                        id,
+                        result: Some(serde_json::json!({
+                            "content": [{ "type": "text", "text": text }],
+                            "structuredContent": denied,
+                            "isError": true,
+                            "resultType": "complete"
+                        })),
+                        error: None,
+                    };
+                }
+            }
+        }
 
         // 统一身分检查（kimi2.7 #27）：除身份仪式本身外，所有操作需确认身份
         if !matches!(
