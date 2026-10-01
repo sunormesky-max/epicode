@@ -6,6 +6,7 @@ use axum::Json;
 use serde::Deserialize;
 
 use super::helpers::AuthedEngine;
+use epicode::engine::user_manager::UserInfo;
 
 // ============================================================
 // 档案库 API — 大型记忆聚合的操作入口
@@ -52,8 +53,16 @@ pub struct ArchiveNodeRequest {
 
 pub async fn archive_create_node(
     AuthedEngine(engine): AuthedEngine,
+    user: axum::extract::Extension<UserInfo>,
     Json(req): Json<ArchiveNodeRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
+        return r;
+    }
+
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || {
         scheduler.api_archive_create_node(
@@ -182,9 +191,17 @@ pub async fn archive_get_node(
 
 pub async fn archive_edit_node(
     AuthedEngine(engine): AuthedEngine,
+    user: axum::extract::Extension<UserInfo>,
     Path(id): Path<u64>,
     Json(req): Json<ArchiveEditRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
+        return r;
+    }
+
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || {
         scheduler.api_archive_edit_node(
@@ -230,8 +247,16 @@ pub async fn archive_edit_node(
 
 pub async fn archive_delete_node(
     AuthedEngine(engine): AuthedEngine,
+    user: axum::extract::Extension<UserInfo>,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryDelete,
+    ) {
+        return r;
+    }
+
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || scheduler.api_archive_delete_node(id)).await;
     match result {
@@ -277,8 +302,16 @@ pub struct ArchiveMergeRequest {
 
 pub async fn archive_merge(
     AuthedEngine(engine): AuthedEngine,
+    user: axum::extract::Extension<UserInfo>,
     Json(req): Json<ArchiveMergeRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryDelete,
+    ) {
+        return r;
+    }
+
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || {
         scheduler.api_archive_merge(&req.source_ids, &req.title, req.category.as_deref())
@@ -325,8 +358,16 @@ pub struct ArchiveMoveRequest {
 
 pub async fn archive_move(
     AuthedEngine(engine): AuthedEngine,
+    user: axum::extract::Extension<UserInfo>,
     Json(req): Json<ArchiveMoveRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
+        return r;
+    }
+
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || {
         scheduler.api_archive_move(req.node_id, req.new_parent_id)
@@ -380,8 +421,16 @@ pub struct ArchiveImportDoc {
 
 pub async fn archive_import(
     AuthedEngine(engine): AuthedEngine,
+    user: axum::extract::Extension<UserInfo>,
     Json(req): Json<ArchiveImportRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
+        return r;
+    }
+
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
         // 1. 确保根节点

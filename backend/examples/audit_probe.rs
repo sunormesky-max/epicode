@@ -1,5 +1,51 @@
 //! Local-only audit reproductions. Uses disposable accounts/data and loopback TCP.
 //! Run with: cargo run --locked --offline --features ort/load-dynamic --example audit_probe
+// A11/A09 复现需要真实 tcp.rs。tcp.rs 自 #133 起引用 super::mcp_endpoint /
+// super::state(共享 guard/persona 函数) — example 上下文无这些兄弟模块,
+// 故在此提供最小桩(模块解析需要; 复现路径不走 persona 分支)。
+mod state {
+    use std::sync::Arc;
+    #[allow(dead_code)]
+    #[derive(Clone)]
+    pub struct CloudState {
+        pub user_mgr: Arc<epicode::engine::user_manager::UserManager>,
+        pub pub_skills: Arc<epicode::engine::skills::SkillEngine>,
+    }
+}
+mod mcp_endpoint {
+    use super::state::CloudState;
+    use epicode::engine::Engine;
+    use std::sync::Arc;
+
+    /// 桩镜像(与 cloud::mcp_endpoint 的 pub(super) 结构签名一致, tcp.rs 编译需要)
+    pub struct McpGateRejection {
+        pub response: serde_json::Value,
+    }
+    pub fn persona_readiness_response(
+        id: Option<serde_json::Value>,
+        code: &str,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "jsonrpc": "2.0", "id": id,
+            "result": { "protocol": { "ok": false, "error": { "code": code, "message": "persona stub (audit_probe)" } } }
+        })
+    }
+    pub fn guard_mcp_request(
+        _state: &CloudState,
+        _user_id: &str,
+        _engine: &Engine,
+        _request: &serde_json::Value,
+    ) -> Option<McpGateRejection> {
+        None
+    }
+    pub fn start_cognitive_loop_if_needed(
+        _state: &CloudState,
+        _user_id: &str,
+        _engine: Arc<Engine>,
+    ) {
+    }
+}
+
 #[path = "../src/bin/cloud/tcp.rs"]
 mod cloud_tcp;
 
@@ -78,7 +124,13 @@ async fn main() {
     );
     let auth =
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"api_key":viewer.api_key}});
-    let (_, handler) = cloud_tcp::tcp_try_authenticate(&auth.to_string(), &mgr).unwrap();
+    let probe_state = state::CloudState {
+        user_mgr: mgr.clone(),
+        pub_skills: std::sync::Arc::new(epicode::engine::skills::SkillEngine::new(
+            engine.storage.clone(),
+        )),
+    };
+    let (_, handler) = cloud_tcp::tcp_try_authenticate(&auth.to_string(), &probe_state).unwrap();
     let update = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_update","arguments":{"id":memory_id,"content":"Local audit record modified by viewer"}}});
     let response: Value = serde_json::from_str(&handler.process_json(&update.to_string())).unwrap();
     let data = tool_data(&response);
@@ -91,12 +143,17 @@ async fn main() {
     let address = listener.local_addr().unwrap();
     drop(listener);
     let shutdown = Arc::new(AtomicBool::new(false));
-    let thread_mgr = mgr.clone();
+    let thread_state = std::sync::Arc::new(state::CloudState {
+        user_mgr: mgr.clone(),
+        pub_skills: std::sync::Arc::new(epicode::engine::skills::SkillEngine::new(
+            engine.storage.clone(),
+        )),
+    });
     let thread_shutdown = shutdown.clone();
     let runtime = tokio::runtime::Handle::current();
     let server = std::thread::spawn(move || {
         let _entered = runtime.enter();
-        cloud_tcp::run_tcp_server(&address.to_string(), &thread_mgr, &thread_shutdown);
+        cloud_tcp::run_tcp_server(&address.to_string(), &thread_state, &thread_shutdown);
     });
     let stream = (0..50)
         .find_map(|_| {
