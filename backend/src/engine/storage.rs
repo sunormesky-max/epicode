@@ -1261,11 +1261,11 @@ impl StorageManager {
             if conn
                 .execute(
                     "INSERT OR REPLACE INTO drive_signals_archive (id, data, updated_at) VALUES (?1, ?2, ?3)",
-                    rusqlite::params![s.id, data, updated],
+                    rusqlite::params![s.id as i64, data, updated],
                 )
                 .is_ok()
             {
-                let _ = conn.execute("DELETE FROM drive_signals WHERE id=?1", rusqlite::params![s.id]);
+                let _ = conn.execute("DELETE FROM drive_signals WHERE id=?1", rusqlite::params![s.id as i64]);
                 moved += 1;
             }
         }
@@ -1392,7 +1392,7 @@ impl StorageManager {
         conn.execute(
             UPSERT_TETRA_SQL,
             params![
-                tetra.id,
+                tetra.id as i64,
                 tetra.core.x,
                 tetra.core.y,
                 tetra.core.z,
@@ -1425,7 +1425,7 @@ impl StorageManager {
 
     pub fn delete_tetra(&self, id: TetraId) -> Result<(), String> {
         let conn = self.conn.lock();
-        conn.execute("DELETE FROM tetrahedrons WHERE id = ?1", params![id])
+        conn.execute("DELETE FROM tetrahedrons WHERE id = ?1", params![id as i64])
             .map_err(|e| format!("delete tetra {}: {}", id, e))?;
         Ok(())
     }
@@ -1434,7 +1434,7 @@ impl StorageManager {
         let conn = self.conn.lock();
         conn.execute(
             "UPDATE tetrahedrons SET mass = ?1 WHERE id = ?2",
-            params![mass, id],
+            params![mass, id as i64],
         )
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1446,7 +1446,7 @@ impl StorageManager {
             self.encrypt_field(&serde_json::to_string(aliases).unwrap_or_else(|_| "[]".into()))?;
         conn.execute(
             "UPDATE tetrahedrons SET aliases = ?1 WHERE id = ?2",
-            params![aliases_json, id],
+            params![aliases_json, id as i64],
         )
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1458,7 +1458,7 @@ impl StorageManager {
             self.encrypt_field(&serde_json::to_string(labels).unwrap_or_else(|_| "[]".into()))?;
         conn.execute(
             "UPDATE tetrahedrons SET labels = ?1 WHERE id = ?2",
-            params![labels_json, id],
+            params![labels_json, id as i64],
         )
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1468,7 +1468,7 @@ impl StorageManager {
         let conn = self.conn.lock();
         conn.execute(
             "UPDATE tetrahedrons SET enforced = ?1 WHERE id = ?2",
-            params![enforced, id],
+            params![enforced, id as i64],
         )
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1476,7 +1476,7 @@ impl StorageManager {
 
     pub fn update_importance(&self, id: TetraId, delta: f64) -> Result<(), String> {
         let conn = self.conn.lock();
-        conn.execute("UPDATE tetrahedrons SET importance = MAX(0.1, MIN(5.0, importance + ?1)) WHERE id = ?2", params![delta, id])
+        conn.execute("UPDATE tetrahedrons SET importance = MAX(0.1, MIN(5.0, importance + ?1)) WHERE id = ?2", params![delta, id as i64])
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -1535,7 +1535,7 @@ impl StorageManager {
         let conn = self.conn.lock();
         conn.execute(
             "UPDATE tetrahedrons SET access_count = ?1 WHERE id = ?2",
-            params![count, id],
+            params![count, id as i64],
         )
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1688,7 +1688,7 @@ impl StorageManager {
             .prepare("UPDATE tetrahedrons SET access_count = ?1 WHERE id = ?2")
             .map_err(|e| e.to_string())?;
         for (id, count) in updates {
-            stmt.execute(params![count, id])
+            stmt.execute(params![*count as i64, *id as i64])
                 .map_err(|e| e.to_string())?;
         }
         drop(stmt);
@@ -1723,7 +1723,7 @@ impl StorageManager {
                 tx.execute(
                     UPSERT_TETRA_SQL,
                     params![
-                        tetra.id,
+                        tetra.id as i64,
                         tetra.core.x,
                         tetra.core.y,
                         tetra.core.z,
@@ -1870,7 +1870,7 @@ impl StorageManager {
 
         let rows = stmt
             .query_map([], |row| {
-                let id: u64 = row.get(0)?;
+                let id: u64 = row.get::<_, i64>(0)? as u64;
                 let core_x: f64 = row.get(1)?;
                 let core_y: f64 = row.get(2)?;
                 let core_z: f64 = row.get(3)?;
@@ -2045,8 +2045,8 @@ impl StorageManager {
 
         let rows = stmt
             .query_map([], |row| {
-                let source: u64 = row.get(0)?;
-                let target: u64 = row.get(1)?;
+                let source: u64 = row.get::<_, i64>(0)? as u64;
+                let target: u64 = row.get::<_, i64>(1)? as u64;
                 let rel_type_str: String = row.get(2)?;
                 let strength: f64 = row.get(3)?;
                 let rel_type = Self::parse_rel_type(&rel_type_str);
@@ -2060,7 +2060,7 @@ impl StorageManager {
                 .prepare("SELECT id FROM tetrahedrons")
                 .map_err(|e| e.to_string())?;
             let collected: std::collections::HashSet<u64> = stmt_ids
-                .query_map([], |row| row.get::<_, u64>(0))
+                .query_map([], |row| row.get::<_, i64>(0).map(|v| v as u64))
                 .map_err(|e| e.to_string())?
                 .filter_map(|r| r.ok())
                 .collect();
@@ -2095,9 +2095,9 @@ impl StorageManager {
 
         let rows = stmt
             .query_map([], |row| {
-                let id: u64 = row.get(0)?;
+                let id: u64 = row.get::<_, i64>(0)? as u64;
                 let label: String = row.get(1)?;
-                let member_count: u64 = row.get(2)?;
+                let member_count: u64 = row.get::<_, i64>(2)? as u64;
                 let centroid_blob: Option<Vec<u8>> = row.get(3).unwrap_or(None);
                 let centroid = centroid_blob
                     .as_deref()
@@ -2131,7 +2131,7 @@ impl StorageManager {
                 .prepare("SELECT id FROM tetrahedrons")
                 .map_err(|e| e.to_string())?;
             let db_ids: std::collections::HashSet<u64> = stmt
-                .query_map([], |row| row.get::<_, u64>(0))
+                .query_map([], |row| row.get::<_, i64>(0).map(|v| v as u64))
                 .map_err(|e| e.to_string())?
                 .filter_map(|r| r.ok())
                 .collect();
@@ -2139,8 +2139,11 @@ impl StorageManager {
         };
 
         for id in &stale_ids {
-            tx.execute("DELETE FROM tetrahedrons WHERE id = ?1", params![id])
-                .map_err(|e| format!("delete stale tetra {}: {}", id, e))?;
+            tx.execute(
+                "DELETE FROM tetrahedrons WHERE id = ?1",
+                params![*id as i64],
+            )
+            .map_err(|e| format!("delete stale tetra {}: {}", id, e))?;
         }
 
         for t in &tetras {
@@ -2163,7 +2166,7 @@ impl StorageManager {
             tx.execute(
                 UPSERT_TETRA_SQL,
                 params![
-                    t.id,
+                    t.id as i64,
                     t.core.x,
                     t.core.y,
                     t.core.z,
@@ -2212,8 +2215,13 @@ impl StorageManager {
             .map_err(|e| e.to_string())?;
         for r in &relations {
             let rel_type_str = Self::rel_type_str(&r.relation_type);
-            stmt.execute(params![r.source, r.target, rel_type_str, r.strength])
-                .map_err(|e| e.to_string())?;
+            stmt.execute(params![
+                r.source as i64,
+                r.target as i64,
+                rel_type_str,
+                r.strength
+            ])
+            .map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -2241,8 +2249,13 @@ impl StorageManager {
             } else {
                 VectorLayer::embedding_to_blob(&c.centroid)
             };
-            stmt.execute(params![c.id, c.label, c.member_count, centroid_blob])
-                .map_err(|e| e.to_string())?;
+            stmt.execute(params![
+                c.id as i64,
+                c.label,
+                c.member_count as i64,
+                centroid_blob
+            ])
+            .map_err(|e| e.to_string())?;
         }
         Ok(())
     }

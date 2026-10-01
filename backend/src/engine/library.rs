@@ -637,7 +637,7 @@ impl LibraryStore {
              WHERE c.content LIKE ?1 LIMIT ?2",
         ).map_err(|e| e.to_string())?;
         let rows: Vec<LibraryHit> = stmt
-            .query_map(params![like, k * 3], |r| {
+            .query_map(params![like, (k * 3) as i64], |r| {
                 Ok(LibraryHit {
                     chunk_id: r.get(0)?,
                     chunk_no: r.get(1)?,
