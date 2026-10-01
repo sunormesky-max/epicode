@@ -106,6 +106,13 @@ impl Engine {
         Self::build(data_path, None, None)
     }
 
+    /// A11(审计#134 P1): 带真实用户身份的降级构造 — Cloud 的共享向量不可用时,
+    /// 引擎身份曾退回 mcp-default(owner/加密上下文错位)。此变体显式保留 user_id,
+    /// 向量可用性不再决定身份。
+    pub fn with_data_dir_and_user(data_path: std::path::PathBuf, user_id: &str) -> Self {
+        Self::build(data_path, None, Some(user_id))
+    }
+
     pub fn with_shared_vector(
         data_path: std::path::PathBuf,
         shared_vector: Arc<VectorLayer>,

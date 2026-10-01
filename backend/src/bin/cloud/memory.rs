@@ -1334,8 +1334,16 @@ pub async fn timeline(
 
 pub async fn delete_memory(
     AuthedEngine(engine): AuthedEngine,
+    user: axum::extract::Extension<UserInfo>,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryDelete,
+    ) {
+        return r;
+    }
+
     let exists = engine.space().get_tetrahedron(id).is_some();
     if !exists {
         return (
@@ -1393,9 +1401,17 @@ pub struct UpdateContentRequest {
 
 pub async fn update_memory_content(
     AuthedEngine(engine): AuthedEngine,
+    user: axum::extract::Extension<UserInfo>,
     Path(id): Path<u64>,
     Json(body): Json<UpdateContentRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
+        return r;
+    }
+
     if let Err(e) = validate_content(&body.content) {
         return (
             StatusCode::BAD_REQUEST,
@@ -1454,8 +1470,16 @@ pub struct BatchDeleteRequest {
 
 pub async fn batch_delete_memories(
     AuthedEngine(engine): AuthedEngine,
+    user: axum::extract::Extension<UserInfo>,
     Json(body): Json<BatchDeleteRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryDelete,
+    ) {
+        return r;
+    }
+
     let engine_inner = engine.clone();
     let ids = body.ids;
     let result = tokio::task::spawn_blocking(move || {
