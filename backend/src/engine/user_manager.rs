@@ -633,9 +633,11 @@ impl UserManager {
             return Err("user already exists".into());
         }
         let parent_info = db.get(parent_id).ok_or("parent user not found")?.clone();
-        // 分级权限: 仅主账户(owner)或 admin 角色子账户可创建子账户
-        if parent_info.parent.is_some() && parent_info.role != UserRole::Admin {
-            return Err("insufficient role to manage sub-accounts".into());
+        // 安全修复(2026-10-01审计): 仅主账户可创建子账户 — admin子账户曾可造"孙账户"
+        // (parent=admin), 突破单层树假设且revoke中间层会产生永久孤儿。
+        // 哲学与"授admin仅根"一致: 扩编是根的特权, admin可管理(list/revoke/set_role)不可扩编。
+        if parent_info.parent.is_some() {
+            return Err("only main accounts can create sub-accounts".into());
         }
         if parent_info.sub_accounts.len() >= 10 {
             return Err("maximum 10 sub-accounts per main account".into());
@@ -703,6 +705,26 @@ impl UserManager {
             p.sub_accounts.retain(|s| s != sub_user_id);
         }
         db.remove(sub_user_id);
+        // 安全修复(2026-10-01审计): 级联清除名下孙账户 — 中间层被revoke时
+        // 其子账户会成为"parent指向已删账户"的永久孤儿(无人可管理、仍可访问)。
+        let orphans: Vec<String> = db
+            .values()
+            .filter(|u| u.parent.as_deref() == Some(sub_user_id))
+            .map(|u| u.user_id.clone())
+            .collect();
+        for orphan in &orphans {
+            if let Some(o) = db.get_mut(orphan) {
+                o.sub_accounts.clear();
+            }
+            db.remove(orphan);
+        }
+        if !orphans.is_empty() {
+            tracing::warn!(
+                "[UserManager] revoke cascade: {} grandchildren removed with {}",
+                orphans.len(),
+                sub_user_id
+            );
+        }
         let snapshot = db.clone();
         drop(db);
         self.save_users_db(&snapshot)
@@ -731,8 +753,18 @@ impl UserManager {
         if sub.parent.is_none() {
             return Err("cannot change role of a main account".into());
         }
-        if sub.parent.as_deref() != Some(actor_id) && actor.parent.is_some() {
-            return Err("not your sub-account".into());
+        // 归属检查: 根账户管自己整棵树; admin子账户可管同父兄弟(管理代理语义),
+        // 但不可触碰根(actor.parent.is_some → sub必为子账户, 上方已拦根)
+        if actor.parent.is_none() {
+            // 根: sub必须在自家电树上(直接子或孙 — 孙由级联保护)
+            if sub.parent.as_deref() != Some(actor_id) {
+                return Err("not your sub-account".into());
+            }
+        } else {
+            // admin子账户: 只能管同父的兄弟子账户
+            if sub.parent != actor.parent {
+                return Err("not your sub-account".into());
+            }
         }
         sub.role = role;
         let updated = sub.clone();
