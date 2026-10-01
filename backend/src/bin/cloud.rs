@@ -519,7 +519,7 @@ async fn main() {
     }
 
     let active_tasks_counter = state.active_tasks.clone();
-    let app = app.with_state(state);
+    let app = app.with_state(state.clone());
 
     let addr: SocketAddr = match listen_addr.parse() {
         Ok(a) => a,
@@ -585,12 +585,12 @@ async fn main() {
 
     if let Some(port) = tcp_port {
         let tcp_addr = format!("{}:{}", tcp_bind, port);
-        let mgr = user_mgr.clone();
+        let tcp_state = state.clone();
         let sf = shutdown_flag.clone();
         let rt_handle = tokio::runtime::Handle::current();
         let _tcp_thread = std::thread::spawn(move || {
             let _guard = rt_handle.enter();
-            run_tcp_server(&tcp_addr, &mgr, &sf);
+            run_tcp_server(&tcp_addr, &tcp_state, &sf);
         });
     }
 

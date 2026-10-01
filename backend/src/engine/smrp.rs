@@ -146,6 +146,12 @@ pub fn search_score_base(mode: SearchMode) -> &'static str {
     }
 }
 
+pub fn paginate_search_results<T>(results: Vec<T>, offset: usize, limit: usize) -> (usize, Vec<T>) {
+    let total_found = results.len();
+    let page = results.into_iter().skip(offset).take(limit).collect();
+    (total_found, page)
+}
+
 /// 一次性 cluster 索引（id → (cluster_id, size)），避免每条记忆 find_clusters O(N)。
 /// 使用 scheduler 的缓存版本（按 structure_version 失效）。
 pub fn cluster_index(engine: &Engine) -> std::collections::HashMap<TetraId, (usize, usize)> {
@@ -388,7 +394,8 @@ pub fn recall_data(
 #[cfg(test)]
 mod tests {
     use super::{
-        search_score_base, search_sources, tier_recall, tier_search, tier_search_for_mode,
+        paginate_search_results, search_score_base, search_sources, tier_recall, tier_search,
+        tier_search_for_mode,
     };
     use crate::engine::search_engine::SearchMode;
 
@@ -420,6 +427,17 @@ mod tests {
             ),
             "experiential"
         );
+    }
+
+    #[test]
+    fn search_pagination_reports_bounded_candidate_count() {
+        let (total_found, page) = paginate_search_results(vec![1, 2, 3, 4, 5], 2, 2);
+        assert_eq!(total_found, 5);
+        assert_eq!(page, vec![3, 4]);
+
+        let (empty_total, empty_page) = paginate_search_results(vec![1, 2], 5, 2);
+        assert_eq!(empty_total, 2);
+        assert!(empty_page.is_empty());
     }
 
     #[test]

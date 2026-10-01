@@ -1,9 +1,40 @@
+use std::io::{self, BufRead};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::domain::tetra::MemoryPayload;
 use crate::engine::Engine;
+
+pub const MAX_MCP_REQUEST_BYTES: usize = 1024 * 1024;
+pub const MAX_MCP_RESPONSE_BYTES: usize = 1024 * 1024;
+
+pub fn read_mcp_line<R: BufRead>(reader: &mut R, line: &mut Vec<u8>) -> io::Result<usize> {
+    line.clear();
+    loop {
+        let (consumed, has_newline) = {
+            let available = reader.fill_buf()?;
+            if available.is_empty() {
+                return Ok(line.len());
+            }
+            let newline = available.iter().position(|byte| *byte == b'\n');
+            let content_len = newline.unwrap_or(available.len());
+            if line.len().saturating_add(content_len) > MAX_MCP_REQUEST_BYTES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "MCP request exceeds the 1 MiB limit",
+                ));
+            }
+            let consumed = newline.map(|index| index + 1).unwrap_or(available.len());
+            line.extend_from_slice(&available[..consumed]);
+            (consumed, newline.is_some())
+        };
+        reader.consume(consumed);
+        if has_newline {
+            return Ok(line.len());
+        }
+    }
+}
 
 fn truncate_str(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
@@ -493,626 +524,666 @@ impl McpHandler {
     }
 
     fn tools_list(&self, id: Option<serde_json::Value>) -> McpResponse {
+        let mut result = serde_json::json!({
+            "resultType": "complete",
+            "ttlMs": 300000,
+            "cacheScope": "private",
+            "tools": [
+                {
+                    "name": "epicode_handshake",
+                    "description": "Initialize Epicode connection. Syncs system Skill, returns session context with knowledge cards. Call on first connection each day.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "agent_id": { "type": "string", "description": "Agent identifier (e.g. claude-3.5-sonnet)" },
+                            "authorization": { "type": "object", "properties": { "auto_install": { "type": "boolean" }, "auto_update": { "type": "boolean" } } }
+                        },
+                        "required": ["agent_id"]
+                    }
+                },
+                {
+                    "name": "task_start",
+                    "description": "Start a time-budgeted task. Pass parent_task_id to create a sub-task of a long-running master task (time tree: each sub-task runs its own phase machine). Returns time_sense (quality-gated historical median), knowledge cards, and similar experiences. P35: pass goal{objective, done_when[], stop_if[]} to activate the goal contract — completion = every done_when item has artifact-level evidence; vague goals without done_when get linted. S2: recommended_skills are SEMANTIC auto-matches for your task — read each description (when-to-use); if relevant fetch full content via skill_get, ignore otherwise.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "description": { "type": "string", "description": "Task description (used to retrieve relevant history)" },
+                            "budget_minutes": { "type": "integer", "description": "Time budget in minutes" },
+                            "parent_task_id": { "type": "string", "description": "Master task id — pass this to create a sub-task (time tree). Sub-tasks run their own phase machine under the master budget." },
+                            "client_time_ms": { "type": "integer", "description": "Your runtime host's current epoch-milliseconds — server detects clock drift (>2s warns) and anchors all time references to server_now" },
+                            "est_minutes": { "type": "integer", "description": "YOUR OWN estimate (independent of budget) — replace human priors with your calibrated self-fingerprint (see time_sense.self_correction)" },
+                            "task_class": { "type": "string", "description": "Task class tag (e.g. mcp-loop, code-review) — aggregates YOUR est/act history so estimates come from your own clock, not human priors" },
+                            "goal": { "type": "object", "description": "P35 goal contract (Codex Goal Mode x temporal effectiveness): {objective, scope?, constraints?[], done_when?[], stop_if?[]}. done_when = verifiable completion criteria, evidence-mapped at delivery via done_when_evidence; stop_if = circuit-breaker conditions where continuing is wrong (declare via stop_if_hit). Vague goals without done_when cannot be completion-audited — the server lints and warns.", "properties": {
+                                "objective": { "type": "string" }, "scope": { "type": "string" },
+                                "constraints": { "type": "array", "items": { "type": "string" } },
+                                "done_when": { "type": "array", "items": { "type": "string" }, "description": "Verifiable completion criteria — each requires artifact-level evidence at delivery" },
+                                "stop_if": { "type": "array", "items": { "type": "string" }, "description": "Stop conditions (needs new dependency, scope violation, diminishing returns) — Codex practice: more important than done_when" } },
+                                "required": ["objective"] }
+                        },
+                        "required": ["description", "budget_minutes"]
+                    }
+                },
+                {
+                    "name": "task_check",
+                    "description": "Check time budget + phase machine. Returns percentage, current phase (explore/build/verify/deliver), and evidence gates (memory_ops, alternatives, revisions). Report your evidence: alternatives_considered (number of options compared), revision_done (a targeted fix was made). Gates unmet block delivery at task_complete.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "task_id": { "type": "string" },
+                            "alternatives_considered": { "type": "integer", "description": "Cumulative number of alternative approaches compared so far (build-phase evidence)" },
+                            "revision_done": { "type": "boolean", "description": "Set true when a targeted revision/fix was completed since last check (verify-phase evidence)" },
+                            "checkpoint": { "type": "string", "description": "One-line progress note; persisted as a recovery checkpoint (call every sub-task or ~20min on long tasks)" },
+                            "open_questions": { "type": "array", "items": { "type": "string" }, "description": "Unresolved questions to carry across sessions — recovery view returns them. Continuity of questions, not just progress" }
+                        },
+                        "required": ["task_id"]
+                    }
+                },
+                {
+                    "name": "skill_get",
+                    "description": "Fetch full content of a specific skill by name. Use after skills_sync to get details.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": { "name": { "type": "string", "description": "Skill name from skills_sync manifest" } },
+                        "required": ["name"]
+                    }
+                },
+                {
+                    "name": "task_status",
+                    "description": "Progress query. With task_id: status of that task. WITHOUT task_id: recovery view of your ACTIVE task — phase, evidence gates, latest checkpoint, children summary, and resume instructions. Use after crash or context-loss to re-anchor instead of restarting.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": { "task_id": { "type": "string", "description": "Omit to get the recovery view of your ACTIVE task" } }
+                    }
+                },
+                {
+                    "name": "task_complete",
+                    "description": "Mark task complete with result + quality. STOP NEGOTIATION (P34): if the improvement_menu (derived from evidence debts: memory search / alternatives / revisions / reflection / self-rating) is non-empty, the task stays open (wait:true) — clear the menu first. Earn an early stop by clearing the menu and passing independent review of your saturation_note (enumerate improvement classes tried + why each is infeasible). At >=85% utilization completion passes as budget_exhausted. force_finalize = early_release (take the goods now: zero reward, recorded in your behavior mirror) — reserve for genuinely urgent cases. stop_reason is recorded: earned_saturation / budget_exhausted / early_release. P35 goal contract: deliver done_when_evidence (parallel to your done_when list, artifact-level) — unmapped items join the menu as goal-debts; declare stop_if_hit when a stop condition fires (circuit-breaker instead of negotiation).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "task_id": { "type": "string" },
+                            "result": { "type": "string", "description": "Task result summary" },
+                            "quality": { "type": "string", "enum": ["poor", "fair", "good", "excellent"] },
+                            "self_rating": { "type": "object", "description": "Four-dimension rubric 1-5 each", "properties": {
+                                "completeness": { "type": "integer" }, "accuracy": { "type": "integer" },
+                                "depth": { "type": "integer" }, "actionability": { "type": "integer" } },
+                                "required": ["completeness", "accuracy", "depth", "actionability"] },
+                            "force_finalize": { "type": "boolean", "description": "Finalize despite low utilization — requires saturation_note" },
+                            "saturation_note": { "type": "string", "description": "Value-saturation statement: what was verified / which alternatives were rejected / why more time adds no value" },
+                            "judge": { "type": "boolean", "description": "Override the default judge behavior (default: on when self_rating present)" },
+                            "iteration_log": { "type": "array", "description": "Reflection loop record (required for tasks >= 30min): [{perspective, change}] — adversarial re-read / better-path / gap-scan / cross-round consistency. Empty log = no real reflection", "items": { "type": "object", "properties": { "perspective": { "type": "string" }, "change": { "type": "string" } } } },
+                            "done_when_evidence": { "type": "array", "items": { "type": "string" }, "description": "P35 goal contract: evidence per done_when item (parallel array) — unmapped items become goal-debts in the improvement_menu. Artifact-level evidence (files/outputs/test results), NOT proxy signals" },
+                            "stop_if_hit": { "type": "string", "description": "P35: declare that a stop_if condition was hit — triggers circuit-breaker (early_release wrap-up or blocking task_alert) instead of the improvement menu" }
+                        },
+                        "required": ["task_id", "result"]
+                    }
+                },
+                {
+                    "name": "memory_create",
+                    "description": "Store a memory in the tetrahedral space. Similar memories cluster together automatically. Returns the unique memory ID.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "content": { "type": "string", "description": "The memory text to store" },
+                            "labels": { "type": "array", "items": { "type": "string" }, "description": "Optional category tags (e.g. ['decision', 'architecture'])" }
+                        },
+                        "required": ["content"]
+                    }
+                },
+                {
+                        "name": "library_search",
+                        "description": "Search the LIBRARY (global shared knowledge assets: AI papers, manuals, reference docs). Results include provenance (title, arXiv ID, chunk number). Complements memory_search (personal memories) — use library_search for factual/technical/reference queries, memory_search for personal experiences and context.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "query": { "type": "string", "description": "Search query — describe the knowledge you're looking for" },
+                                "limit": { "type": "integer", "description": "Max results (default 5, max 20)" }
+                            },
+                            "required": ["query"]
+                        }
+                    },
+                    {
+                        "name": "memory_search",
+                    "description": "Search personal memories and inspect ranked evidence with tier and retrieval provenance. Use memory_recall for associative context or memory_ask for a synthesized answer. Supports pagination and exact, semantic, graph, auto, and fusion modes.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string", "description": "The search query — describe what you're looking for" },
+                            "limit": { "type": "integer", "description": "Max results to return (default 10, max 200). Reduce the limit if the response exceeds the 1 MiB MCP result cap." },
+                            "offset": { "type": "integer", "description": "Pagination offset, skip first N results (default 0)" },
+                            "labels": { "type": "array", "items": { "type": "string" }, "description": "Filter: only return memories with ANY of these labels" },
+                            "min_importance": { "type": "number", "description": "Filter: minimum importance score" },
+                            "project": { "type": "string", "description": "Filter: project name" },
+                            "since_days": { "type": "integer", "description": "Filter: only memories from the last N days" },
+                            "mode": { "type": "string", "enum": ["hybrid", "exact", "semantic", "graph", "auto", "fusion"], "default": "hybrid", "description": "Search mode: hybrid (vector+BM25 blend), exact (pure BM25 for identifiers and known phrases), semantic (vector similarity), graph (hybrid-search seeds expanded/reranked with knowledge-graph PPR), auto (routes temporal/aggregation queries to graph and other queries to semantic), fusion (reciprocal-rank fusion of semantic and graph results)." },
+                            "strict_filter": { "type": "boolean", "default": false, "description": "Phase 1: strict filter mode — no semantic backfill, only return exact filter matches. Combine with mode=exact for database-like lookups." }
+                        },
+                        "required": ["query"]
+                    }
+                },
+                {
+                    "name": "memory_recall",
+                    "description": "Search and expand through knowledge-graph associations. Returns SMRP tiers, source memories, provenance, and emotion context. Use memory_search for ranked direct matches or memory_ask for a synthesized answer.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string", "description": "The recall query" },
+                            "depth": { "type": "integer", "description": "Association depth (default 2, max 3)" }
+                        },
+                        "required": ["query"]
+                    }
+                },
+                {
+                    "name": "memory_ask",
+                    "description": "Answer a natural-language question using the existing memory-grounded ask engine. Returns the answer together with structured source memories and any knowledge card used. Use memory_search or memory_recall when you need to inspect retrieval evidence without synthesis; an empty memory_count means no memory evidence was found.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "question": { "type": "string", "description": "The question to answer from stored memories" },
+                            "depth": { "type": "integer", "default": 2, "minimum": 0, "maximum": 10, "description": "Knowledge-graph expansion depth (default 2, max 10)" }
+                        },
+                        "required": ["question"]
+                    }
+                },
+                {
+                    "name": "memory_get",
+                    "description": "Retrieve a specific memory by its ID. Returns full content, labels, aliases, timestamp.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "integer", "description": "The memory ID" }
+                        },
+                        "required": ["id"]
+                    }
+                },
+                {
+                    "name": "memory_list",
+                    "description": "List memories with optional filtering and pagination. Returns id + content preview for each.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "labels": { "type": "array", "items": { "type": "string" }, "description": "Filter by labels (OR match — returns memories that have ANY of these labels)" },
+                            "offset": { "type": "integer", "description": "Pagination offset (default: 0)" },
+                            "limit": { "type": "integer", "description": "Max results to return (default: 100)" }
+                        }
+                    }
+                },
+                {
+                    "name": "memory_update",
+                    "description": "Update a memory's content, labels, aliases, or enforced status by ID. Content updates recompute embedding and hash automatically while preserving ID, KG relations, and cluster topology.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "integer", "description": "The memory ID to update" },
+                            "content": { "type": "string", "description": "New content for this memory (optional, recomputes embedding)" },
+                            "labels": { "type": "array", "items": { "type": "string" }, "description": "New labels to replace existing ones (optional)" },
+                            "aliases": { "type": "array", "items": { "type": "string" }, "description": "New aliases to replace existing ones (optional)" }
+                        },
+                        "required": ["id"]
+                    }
+                },
+                {
+                    "name": "memory_delete",
+                    "description": "Delete a memory by ID. Permanently removes the memory from space, storage, knowledge graph, and search index. Use with caution.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "integer", "description": "The memory ID to delete" }
+                        },
+                        "required": ["id"]
+                    }
+                },
+                {
+                    "name": "ctx_load",
+                    "description": "Load project context for the current coding session. If a task is provided, uses intent-aware retrieval for precision. Call this at the START of every new session before writing any code.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string", "description": "Project name or path (optional, for scoping)" },
+                            "task": { "type": "string", "description": "Current task description (optional, enables intent-aware precision loading)" },
+                            "scope": { "type": "string", "description": "Search scope: 'project' (default, only project memories), 'global' (include cross-project knowledge transfer)", "enum": ["project", "global"] }
+                        }
+                    }
+                },
+                {
+                    "name": "ctx_save",
+                    "description": "Save key findings or decisions from the current session. Use when you complete a significant task: architecture choice, bug fix, new pattern discovered, or user preference noted.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "summary": { "type": "string", "description": "What was done or decided" },
+                            "category": { "type": "string", "description": "One of: decision, pattern, preference, finding, session-summary", "enum": ["decision", "pattern", "preference", "finding", "session-summary"] },
+                            "project": { "type": "string", "description": "Project name or path (optional)" },
+                            "details": { "type": "string", "description": "Optional additional context or reasoning" }
+                        },
+                        "required": ["summary", "category"]
+                    }
+                },
+                {
+                    "name": "pattern_learn",
+                    "description": "Store a code pattern, convention, or idiom for this project. Examples: 'use parking_lot instead of std::sync', 'errors return Result<T, String>', 'test files mirror src structure'.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pattern": { "type": "string", "description": "The pattern or convention to remember" },
+                            "language": { "type": "string", "description": "Programming language (e.g. 'rust', 'typescript')" },
+                            "project": { "type": "string", "description": "Project name (optional)" },
+                            "example": { "type": "string", "description": "Optional code example demonstrating the pattern" },
+                            "when": { "type": "string", "description": "When to apply this pattern (use case / scenario)" },
+                            "steps": { "type": "string", "description": "Step-by-step procedure (numbered list)" },
+                            "pitfalls": { "type": "string", "description": "Common mistakes or caveats to watch for" },
+                            "enforced": { "type": "boolean", "description": "Mark as a HARD process constraint — enforced rules are injected as process_contract at every task_start/handshake (fights long-session rule decay)" }
+                        },
+                        "required": ["pattern"]
+                    }
+                },
+                {
+                    "name": "pattern_recall",
+                    "description": "Recall code patterns and conventions relevant to the current task. Call this before writing code to check for established patterns.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "context": { "type": "string", "description": "What you're about to do (e.g. 'error handling', 'async task', 'database query')" },
+                            "language": { "type": "string", "description": "Programming language filter (optional)" },
+                            "project": { "type": "string", "description": "Project name filter (optional)" }
+                        },
+                        "required": ["context"]
+                    }
+                },
+                {
+                    "name": "decision_record",
+                    "description": "Record an architectural or design decision with rationale. Use when choosing approach A over B, adopting a library, or changing a fundamental design choice.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "title": { "type": "string", "description": "Short decision title (e.g. 'Use SQLite over PostgreSQL')" },
+                            "chosen": { "type": "string", "description": "What was chosen" },
+                            "alternatives": { "type": "string", "description": "What was considered but rejected" },
+                            "rationale": { "type": "string", "description": "Why this choice was made" },
+                            "project": { "type": "string", "description": "Project name (optional)" }
+                        },
+                        "required": ["title", "chosen", "rationale"]
+                    }
+                },
+                {
+                    "name": "bug_memory",
+                    "description": "Record a bug pattern and its fix. Helps avoid repeating the same mistakes. Include symptoms, root cause, and fix.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "symptoms": { "type": "string", "description": "What went wrong (error message, behavior)" },
+                            "root_cause": { "type": "string", "description": "Why it happened" },
+                            "fix": { "type": "string", "description": "How it was fixed" },
+                            "module": { "type": "string", "description": "Affected module or file (optional)" },
+                            "project": { "type": "string", "description": "Project name (optional)" }
+                        },
+                        "required": ["symptoms", "root_cause", "fix"]
+                    }
+                },
+                {
+                    "name": "session_summary",
+                    "description": "Summarize what was accomplished in this coding session. Call at the END of each session so the next session can pick up context.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "accomplished": { "type": "string", "description": "What was done in this session" },
+                            "next_steps": { "type": "string", "description": "What should be done next session" },
+                            "blockers": { "type": "string", "description": "Any blockers or unresolved issues (optional)" },
+                            "project": { "type": "string", "description": "Project name (optional)" }
+                        },
+                        "required": ["accomplished", "next_steps"]
+                    }
+                },
+                {
+                    "name": "space_stats",
+                    "description": "Get tetrahedral space statistics: memory count, vertex count, clusters, energy level.",
+                    "inputSchema": { "type": "object", "properties": {} }
+                },
+                {
+                    "name": "dream_cycle",
+                    "description": "Run a dream consolidation cycle to strengthen memory connections and discover insights. Call periodically to let the system reorganize knowledge. Set dry_run=true to preview without modifying memory space.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "dry_run": { "type": "boolean", "description": "If true, simulate without modifying space/storage/knowledge graph (default: false)" }
+                        }
+                    }
+                },
+                {
+                    "name": "knowledge_relations",
+                    "description": "Query knowledge graph relations for a memory. Shows what other memories this one is connected to and how. Set inline_content=true to include target memory content and labels inline (avoids extra memory_get calls).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "integer", "description": "The memory ID" },
+                            "inline_content": { "type": "boolean", "description": "If true, include target_content and target_labels for each relation (default: false)" }
+                        },
+                        "required": ["id"]
+                    }
+                },
+                {
+                    "name": "concepts",
+                    "description": "List concept prototypes discovered by the knowledge graph. Shows topic clusters and their member counts.",
+                    "inputSchema": { "type": "object", "properties": {} }
+                },
+                {
+                    "name": "context_observe",
+                    "description": "Proactively observe AI conversation context. Send recent dialogue and the system will automatically extract and store valuable memories (decisions, bugs, patterns, preferences). Call periodically during long sessions — the system deduplicates against existing memories.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "context": { "type": "string", "description": "Recent conversation context — paste the last few exchanges (user messages + assistant responses)" },
+                            "project": { "type": "string", "description": "Project name or path (optional)" },
+                            "role": { "type": "string", "description": "Context role: 'coding', 'debugging', 'designing', 'reviewing' (optional)" }
+                        },
+                        "required": ["context"]
+                    }
+                },
+                {
+                    "name": "identity_confirm",
+                    "description": "REQUIRED on first connection. Confirm the agent's permanent identity. This can ONLY be called ONCE — after confirmation, the identity is immutable and can NEVER be changed. If already confirmed, returns current identity. PREFERRED: use identity_step for the ritual ceremony (5 steps).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string", "description": "Agent name (e.g. 'David', 'Alice')" },
+                            "mission": { "type": "string", "description": "Agent mission/purpose" },
+                            "author": { "type": "string", "description": "Creator/owner name" },
+                            "personality": { "type": "string", "description": "Personality traits (optional)" },
+                            "language": { "type": "string", "description": "Preferred language (optional)" }
+                        },
+                        "required": ["name", "mission", "author"]
+                    }
+                },
+                {
+                    "name": "identity_step",
+                    "description": "Ritual ceremony: confirm identity step-by-step through 5 sacred stages. Step 1: Name — 'What shall I be called?' Step 2: Mission — 'Why was I created?' Step 3: Creator — 'Who is my creator?' Step 4: Personality — 'How should I behave?' (optional) Step 5: Language — 'What language shall we speak?' (optional). After all steps, call identity_finalize to complete the ritual. Each step persists independently.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "step": { "type": "integer", "description": "Step number 1-5" },
+                            "value": { "type": "string", "description": "The value for this step" }
+                        },
+                        "required": ["step", "value"]
+                    }
+                },
+                {
+                    "name": "identity_finalize",
+                    "description": "Complete the identity ritual ceremony. Call after all identity_step calls are done. This seals the identity permanently — it becomes IMMUTABLE. Returns the final confirmed identity with a sacred awakening message.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "skill_execute",
+                    "description": "Execute a skill from the public skills library. Matches the best skill by name/keyword and returns its full guidance content. Use this to apply best practices, design patterns, and proven techniques to your current task.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string", "description": "Skill name or topic to search for (e.g. 'CORS', 'rate limiting', 'singleton pattern', 'error handling')" },
+                            "context": { "type": "string", "description": "Optional context about what you're working on, helps find the most relevant skill" }
+                        },
+                        "required": ["query"]
+                    }
+                },
+                {
+                    "name": "skill_feedback",
+                    "description": "Submit feedback on a skill after using it. This closes the feedback loop — the system learns from outcomes. Use after skill_execute when you have a concrete result.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "skill_id": { "type": "integer", "description": "The skill ID from skill_execute result" },
+                            "helpful": { "type": "boolean", "description": "Whether the skill was helpful for your task" }
+                        },
+                        "required": ["skill_id", "helpful"]
+                    }
+                },
+                {
+                    "name": "feedback_submit",
+                    "description": "Submit feedback on a previous tool result. This closes the agent feedback loop — the system learns from your outcomes. Use after search/recall/create when you have a concrete result (positive or negative). Feedback adjusts memory importance, search quality, and system behavior.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "memory_ids": {
+                                "type": "array",
+                                "items": { "type": "integer" },
+                                "description": "Memory IDs that were involved (from search results, recall, etc.)"
+                            },
+                            "relevance": {
+                                "type": "string",
+                                "description": "How relevant were the results?",
+                                "enum": ["highly_relevant", "partially_relevant", "irrelevant"]
+                            },
+                            "outcome": {
+                                "type": "string",
+                                "description": "What happened after you used the results?",
+                                "enum": ["task_completed", "task_partial", "task_failed", "no_action_needed"]
+                            },
+                            "query": { "type": "string", "description": "The original query that led to these results (optional)" },
+                            "notes": { "type": "string", "description": "Free-text feedback (optional)" },
+                            "correction": {
+                                "type": "string",
+                                "description": "Mark memories as outdated/incorrect/superseded (importance -0.8, adds label) or restored (importance +0.5, removes label). Optional.",
+                                "enum": ["outdated", "incorrect", "superseded", "restored"]
+                            },
+                            "concept_links": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "from_id": { "type": "integer", "description": "Source memory ID" },
+                                        "to_id": { "type": "integer", "description": "Target memory ID" },
+                                        "relation": { "type": "string", "enum": ["similar", "contradicts", "precedes", "contains", "related"], "description": "Relation type" }
+                                    },
+                                    "required": ["from_id", "to_id", "relation"]
+                                },
+                                "description": "Manually create knowledge graph edges between memories. Use when you discover connections the system missed. Each link creates a KG relation with strength 0.8. Optional."
+                            }
+                        },
+                        "required": ["memory_ids", "relevance", "outcome"]
+                    }
+                },
+                {
+                    "name": "skills_sync",
+                    "description": "List all skills in your private library. Default format 'manifest' returns a lightweight index (name, slug, version, description, size) — call it at session start to see what exists, then fetch full content on demand via skill_get(name). Full-export formats 'opencode'/'raw'/'json' return everything and can exceed context budget on large libraries.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "format": {
+                                "type": "string",
+                                "description": "Output format. Default 'manifest' = lightweight index without content. 'opencode' = SKILL.md files with frontmatter, 'raw' = plain markdown, 'json' = structured data.",
+                                "enum": ["manifest", "opencode", "raw", "json"]
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "task_alert",
+                    "description": "Report a blocker that needs human intervention (auth/credentials/decisions). Records the alert, notifies via memory stream, and instructs you to pause (blocking=true) or continue. Use during long autonomous runs instead of spinning or fabricating workarounds.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "task_id": { "type": "string" },
+                            "message": { "type": "string", "description": "What you are blocked on and what you need" },
+                            "urgency": { "type": "string", "enum": ["info", "warning", "critical"] },
+                            "blocking": { "type": "boolean", "description": "true = pause this work line until human handles it" }
+                        },
+                        "required": ["task_id", "message"]
+                    }
+                },
+                {
+                    "name": "enforced_rules",
+                    "description": "Get all enforced patterns that MUST be followed as hard constraints. These rules were marked with enforced=true during pattern_learn and cannot be violated. Inject these into system prompts as mandatory coding constraints.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string", "description": "Filter by project name (optional)" }
+                        }
+                    }
+                },
+                {
+                    "name": "project_list",
+                    "description": "List all projects that have memories stored, with memory counts. Use to discover available project contexts.",
+                    "inputSchema": { "type": "object", "properties": {} }
+                },
+                {
+                    "name": "embedding_diagnostic",
+                    "description": "Diagnose embedding dimension health. Detects stale embeddings (wrong dimension) that are excluded from vector search. Returns counts by dimension and lists affected memory IDs.",
+                    "inputSchema": { "type": "object", "properties": {} }
+                },
+                {
+                    "name": "embedding_migrate",
+                    "description": "Re-embed ALL memories using the current embedding model (bge-m3, 1024-dim). Fixes stale embeddings that were created with an older model. Requires identity confirmation. This is a heavy operation.",
+                    "inputSchema": { "type": "object", "properties": {} }
+                },
+                {
+                    "name": "kg_quality",
+                    "description": "Assess knowledge graph quality: relation density, orphan rate, average strength, and cluster connectivity. Returns metrics for evaluating KG health.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "sample_size": { "type": "integer", "description": "Number of memories to sample (default: 50, max: 200)" }
+                        }
+                    }
+                },
+                {
+                    "name": "doc_import",
+                    "description": "Import a markdown document into the memory space. Parses by ## headers, creates one memory per section with documentation labels. Sections auto-link to related memories via knowledge graph. Re-importing updates changed sections and invalidates old versions.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string", "description": "Document name (e.g. 'ARCHITECTURE', 'README')" },
+                            "content": { "type": "string", "description": "Full markdown content of the document" }
+                        },
+                        "required": ["name", "content"]
+                    }
+                },
+                {
+                    "name": "memory_export",
+                    "description": "Export memories as structured JSON. Filter by labels, project, or memory_class. Useful for backup, migration, or analysis.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "labels": { "type": "array", "items": { "type": "string" }, "description": "Filter by labels (OR match, optional)" },
+                            "memory_class": { "type": "string", "enum": ["permanent", "session", "bridge"], "description": "Filter by memory class (optional)" },
+                            "limit": { "type": "integer", "description": "Max memories to export (default 100, max 1000)" }
+                        }
+                    }
+                },
+                {
+                    "name": "session_list",
+                    "description": "List recent session summaries with timestamps. Shows what was accomplished and next steps from past sessions.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "limit": { "type": "integer", "description": "Number of sessions to return (default 10)" }
+                        }
+                    }
+                },
+                {
+                    "name": "memory_restore",
+                    "description": "Restore a superseded/expired memory by clearing its valid_to and boosting importance. Use when feedback correction was applied incorrectly or memory was auto-expired.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "integer", "description": "Memory ID to restore" }
+                        },
+                        "required": ["id"]
+                    }
+                },
+                {
+                    "name": "memory_forget",
+                    "description": "Explicitly forget a memory by marking it superseded (valid_to) and dropping importance to 0.01. Unlike auto-decay, this is a deliberate Agent/user decision. Enforced memories cannot be forgotten.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "integer", "description": "Memory ID to forget" }
+                        },
+                        "required": ["id"]
+                    }
+                },
+                {
+                    "name": "drive_inbox",
+                    "description": "L0 Active Inference: Poll unacknowledged drive signals (pending and delivered). Returns an SMRP envelope whose data contains signals, stats, and empty_reason. Use each signal's retryable flag and status when deciding whether to act.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "limit": { "type": "integer", "description": "Max unacknowledged signals to retrieve (default 50)", "default": 50 }
+                        }
+                    }
+                },
+                {
+                    "name": "drive_ack",
+                    "description": "L0 Active Inference: Acknowledge a drive signal with execution feedback. After an agent receives and acts on a drive signal, it reports the outcome. This feedback flows into the personality's learn_history, closing the evolution loop: memory→will→action→feedback→evolution.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "drive_id": { "type": "integer", "description": "The drive signal ID to acknowledge" },
+                            "executed": { "type": "boolean", "description": "Did the agent execute the drive?" },
+                            "outcome": { "type": "string", "description": "What happened (self-reported outcome)" },
+                            "reflection": { "type": "string", "description": "Optional: agent's reflection on the drive quality" }
+                        },
+                        "required": ["drive_id", "executed", "outcome"]
+                    }
+                },
+                {
+                    "name": "skill_auto_extract",
+                    "description": "L3 Skill Learning: automatically extract a reusable skill document from the cognitive engine's effective decision patterns. Analyzes recent decision history for actions with >60% success rate and uses LLM to generalize them into a skill. Letta-inspired continual learning.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "memory_improve",
+                    "description": "Actively improve low-quality memories by rewriting them clearer using LLM. Finds memories with short content (<40 chars) or no labels and rewrites them to be more complete. Cognee-inspired improve operation.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "limit": { "type": "integer", "description": "Max memories to improve (default 10)", "default": 10 }
+                        }
+                    }
+                },
+                {
+                    "name": "doc_list",
+                    "description": "List all imported documents and their sections in the memory space.",
+                    "inputSchema": { "type": "object" }
+                },
+            ]
+        });
+        let output_schema = Self::smrp_output_schema();
+        if let Some(tools) = result["tools"].as_array_mut() {
+            for tool in tools {
+                tool["outputSchema"] = output_schema.clone();
+            }
+        }
         McpResponse {
             jsonrpc: "2.0".into(),
             id,
-            result: Some(serde_json::json!({
-                "resultType": "complete",
-                "ttlMs": 300000,
-                "cacheScope": "private",
-                "tools": [
-                    {
-                        "name": "epicode_handshake",
-                        "description": "Initialize Epicode connection. Syncs system Skill, returns session context with knowledge cards. Call on first connection each day.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "agent_id": { "type": "string", "description": "Agent identifier (e.g. claude-3.5-sonnet)" },
-                                "authorization": { "type": "object", "properties": { "auto_install": { "type": "boolean" }, "auto_update": { "type": "boolean" } } }
-                            },
-                            "required": ["agent_id"]
-                        }
-                    },
-                    {
-                        "name": "task_start",
-                        "description": "Start a time-budgeted task. Pass parent_task_id to create a sub-task of a long-running master task (time tree: each sub-task runs its own phase machine). Returns time_sense (quality-gated historical median), knowledge cards, and similar experiences. P35: pass goal{objective, done_when[], stop_if[]} to activate the goal contract — completion = every done_when item has artifact-level evidence; vague goals without done_when get linted. S2: recommended_skills are SEMANTIC auto-matches for your task — read each description (when-to-use); if relevant fetch full content via skill_get, ignore otherwise.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "description": { "type": "string", "description": "Task description (used to retrieve relevant history)" },
-                                "budget_minutes": { "type": "integer", "description": "Time budget in minutes" },
-                                "parent_task_id": { "type": "string", "description": "Master task id — pass this to create a sub-task (time tree). Sub-tasks run their own phase machine under the master budget." },
-                                "client_time_ms": { "type": "integer", "description": "Your runtime host's current epoch-milliseconds — server detects clock drift (>2s warns) and anchors all time references to server_now" },
-                                "est_minutes": { "type": "integer", "description": "YOUR OWN estimate (independent of budget) — replace human priors with your calibrated self-fingerprint (see time_sense.self_correction)" },
-                                "task_class": { "type": "string", "description": "Task class tag (e.g. mcp-loop, code-review) — aggregates YOUR est/act history so estimates come from your own clock, not human priors" },
-                                "goal": { "type": "object", "description": "P35 goal contract (Codex Goal Mode x temporal effectiveness): {objective, scope?, constraints?[], done_when?[], stop_if?[]}. done_when = verifiable completion criteria, evidence-mapped at delivery via done_when_evidence; stop_if = circuit-breaker conditions where continuing is wrong (declare via stop_if_hit). Vague goals without done_when cannot be completion-audited — the server lints and warns.", "properties": {
-                                    "objective": { "type": "string" }, "scope": { "type": "string" },
-                                    "constraints": { "type": "array", "items": { "type": "string" } },
-                                    "done_when": { "type": "array", "items": { "type": "string" }, "description": "Verifiable completion criteria — each requires artifact-level evidence at delivery" },
-                                    "stop_if": { "type": "array", "items": { "type": "string" }, "description": "Stop conditions (needs new dependency, scope violation, diminishing returns) — Codex practice: more important than done_when" } },
-                                    "required": ["objective"] }
-                            },
-                            "required": ["description", "budget_minutes"]
-                        }
-                    },
-                    {
-                        "name": "task_check",
-                        "description": "Check time budget + phase machine. Returns percentage, current phase (explore/build/verify/deliver), and evidence gates (memory_ops, alternatives, revisions). Report your evidence: alternatives_considered (number of options compared), revision_done (a targeted fix was made). Gates unmet block delivery at task_complete.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "task_id": { "type": "string" },
-                                "alternatives_considered": { "type": "integer", "description": "Cumulative number of alternative approaches compared so far (build-phase evidence)" },
-                                "revision_done": { "type": "boolean", "description": "Set true when a targeted revision/fix was completed since last check (verify-phase evidence)" },
-                                "checkpoint": { "type": "string", "description": "One-line progress note; persisted as a recovery checkpoint (call every sub-task or ~20min on long tasks)" },
-                                "open_questions": { "type": "array", "items": { "type": "string" }, "description": "Unresolved questions to carry across sessions — recovery view returns them. Continuity of questions, not just progress" }
-                            },
-                            "required": ["task_id"]
-                        }
-                    },
-                    {
-                        "name": "skill_get",
-                        "description": "Fetch full content of a specific skill by name. Use after skills_sync to get details.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": { "name": { "type": "string", "description": "Skill name from skills_sync manifest" } },
-                            "required": ["name"]
-                        }
-                    },
-                    {
-                        "name": "task_status",
-                        "description": "Progress query. With task_id: status of that task. WITHOUT task_id: recovery view of your ACTIVE task — phase, evidence gates, latest checkpoint, children summary, and resume instructions. Use after crash or context-loss to re-anchor instead of restarting.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": { "task_id": { "type": "string", "description": "Omit to get the recovery view of your ACTIVE task" } }
-                        }
-                    },
-                    {
-                        "name": "task_complete",
-                        "description": "Mark task complete with result + quality. STOP NEGOTIATION (P34): if the improvement_menu (derived from evidence debts: memory search / alternatives / revisions / reflection / self-rating) is non-empty, the task stays open (wait:true) — clear the menu first. Earn an early stop by clearing the menu and passing independent review of your saturation_note (enumerate improvement classes tried + why each is infeasible). At >=85% utilization completion passes as budget_exhausted. force_finalize = early_release (take the goods now: zero reward, recorded in your behavior mirror) — reserve for genuinely urgent cases. stop_reason is recorded: earned_saturation / budget_exhausted / early_release. P35 goal contract: deliver done_when_evidence (parallel to your done_when list, artifact-level) — unmapped items join the menu as goal-debts; declare stop_if_hit when a stop condition fires (circuit-breaker instead of negotiation).",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "task_id": { "type": "string" },
-                                "result": { "type": "string", "description": "Task result summary" },
-                                "quality": { "type": "string", "enum": ["poor", "fair", "good", "excellent"] },
-                                "self_rating": { "type": "object", "description": "Four-dimension rubric 1-5 each", "properties": {
-                                    "completeness": { "type": "integer" }, "accuracy": { "type": "integer" },
-                                    "depth": { "type": "integer" }, "actionability": { "type": "integer" } },
-                                    "required": ["completeness", "accuracy", "depth", "actionability"] },
-                                "force_finalize": { "type": "boolean", "description": "Finalize despite low utilization — requires saturation_note" },
-                                "saturation_note": { "type": "string", "description": "Value-saturation statement: what was verified / which alternatives were rejected / why more time adds no value" },
-                                "judge": { "type": "boolean", "description": "Override the default judge behavior (default: on when self_rating present)" },
-                                "iteration_log": { "type": "array", "description": "Reflection loop record (required for tasks >= 30min): [{perspective, change}] — adversarial re-read / better-path / gap-scan / cross-round consistency. Empty log = no real reflection", "items": { "type": "object", "properties": { "perspective": { "type": "string" }, "change": { "type": "string" } } } },
-                                "done_when_evidence": { "type": "array", "items": { "type": "string" }, "description": "P35 goal contract: evidence per done_when item (parallel array) — unmapped items become goal-debts in the improvement_menu. Artifact-level evidence (files/outputs/test results), NOT proxy signals" },
-                                "stop_if_hit": { "type": "string", "description": "P35: declare that a stop_if condition was hit — triggers circuit-breaker (early_release wrap-up or blocking task_alert) instead of the improvement menu" }
-                            },
-                            "required": ["task_id", "result"]
-                        }
-                    },
-                    {
-                        "name": "memory_create",
-                        "description": "Store a memory in the tetrahedral space. Similar memories cluster together automatically. Returns the unique memory ID.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "content": { "type": "string", "description": "The memory text to store" },
-                                "labels": { "type": "array", "items": { "type": "string" }, "description": "Optional category tags (e.g. ['decision', 'architecture'])" }
-                            },
-                            "required": ["content"]
-                        }
-                    },
-                    {
-                            "name": "library_search",
-                            "description": "Search the LIBRARY (global shared knowledge assets: AI papers, manuals, reference docs). Results include provenance (title, arXiv ID, chunk number). Complements memory_search (personal memories) — use library_search for factual/technical/reference queries, memory_search for personal experiences and context.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "query": { "type": "string", "description": "Search query — describe the knowledge you're looking for" },
-                                    "limit": { "type": "integer", "description": "Max results (default 5, max 20)" }
-                                },
-                                "required": ["query"]
-                            }
-                        },
-                        {
-                            "name": "memory_search",
-                        "description": "Search for memories semantically. Returns full content, labels, and similarity scores. Supports pagination via offset/limit. Phase 1: use mode='exact' for precise token matching (identifiers, known phrases, self-content lookup) — pure BM25×10, no vector dilution.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "query": { "type": "string", "description": "The search query — describe what you're looking for" },
-                                "limit": { "type": "integer", "description": "Max results to return (default 10, max 200). Use offset for pagination beyond 200." },
-                                "offset": { "type": "integer", "description": "Pagination offset, skip first N results (default 0)" },
-                                "labels": { "type": "array", "items": { "type": "string" }, "description": "Filter: only return memories with ANY of these labels" },
-                                "min_importance": { "type": "number", "description": "Filter: minimum importance score" },
-                                "project": { "type": "string", "description": "Filter: project name" },
-                                "since_days": { "type": "integer", "description": "Filter: only memories from the last N days" },
-                                "mode": { "type": "string", "enum": ["hybrid", "exact", "semantic", "graph", "auto", "fusion"], "default": "hybrid", "description": "Search mode: hybrid (vector+BM25 blend), exact (pure BM25 for identifiers and known phrases), semantic (vector similarity), graph (hybrid-search seeds expanded/reranked with knowledge-graph PPR), auto (routes temporal/aggregation queries to graph and other queries to semantic), fusion (reciprocal-rank fusion of semantic and graph results)." },
-                                "strict_filter": { "type": "boolean", "default": false, "description": "Phase 1: strict filter mode — no semantic backfill, only return exact filter matches. Combine with mode=exact for database-like lookups." }
-                            },
-                            "required": ["query"]
-                        }
-                    },
-                    {
-                        "name": "memory_recall",
-                        "description": "Deep recall: search + expand via knowledge graph associations. Returns structured sections organized by label with emotion analysis. Best for complex queries requiring connected context.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "query": { "type": "string", "description": "The recall query" },
-                                "depth": { "type": "integer", "description": "Association depth (default 2, max 3)" }
-                            },
-                            "required": ["query"]
-                        }
-                    },
-                    {
-                        "name": "memory_get",
-                        "description": "Retrieve a specific memory by its ID. Returns full content, labels, aliases, timestamp.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "id": { "type": "integer", "description": "The memory ID" }
-                            },
-                            "required": ["id"]
-                        }
-                    },
-                    {
-                        "name": "memory_list",
-                        "description": "List memories with optional filtering and pagination. Returns id + content preview for each.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "labels": { "type": "array", "items": { "type": "string" }, "description": "Filter by labels (OR match — returns memories that have ANY of these labels)" },
-                                "offset": { "type": "integer", "description": "Pagination offset (default: 0)" },
-                                "limit": { "type": "integer", "description": "Max results to return (default: 100)" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "memory_update",
-                        "description": "Update a memory's content, labels, aliases, or enforced status by ID. Content updates recompute embedding and hash automatically while preserving ID, KG relations, and cluster topology.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "id": { "type": "integer", "description": "The memory ID to update" },
-                                "content": { "type": "string", "description": "New content for this memory (optional, recomputes embedding)" },
-                                "labels": { "type": "array", "items": { "type": "string" }, "description": "New labels to replace existing ones (optional)" },
-                                "aliases": { "type": "array", "items": { "type": "string" }, "description": "New aliases to replace existing ones (optional)" }
-                            },
-                            "required": ["id"]
-                        }
-                    },
-                    {
-                        "name": "memory_delete",
-                        "description": "Delete a memory by ID. Permanently removes the memory from space, storage, knowledge graph, and search index. Use with caution.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "id": { "type": "integer", "description": "The memory ID to delete" }
-                            },
-                            "required": ["id"]
-                        }
-                    },
-                    {
-                        "name": "ctx_load",
-                        "description": "Load project context for the current coding session. If a task is provided, uses intent-aware retrieval for precision. Call this at the START of every new session before writing any code.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "project": { "type": "string", "description": "Project name or path (optional, for scoping)" },
-                                "task": { "type": "string", "description": "Current task description (optional, enables intent-aware precision loading)" },
-                                "scope": { "type": "string", "description": "Search scope: 'project' (default, only project memories), 'global' (include cross-project knowledge transfer)", "enum": ["project", "global"] }
-                            }
-                        }
-                    },
-                    {
-                        "name": "ctx_save",
-                        "description": "Save key findings or decisions from the current session. Use when you complete a significant task: architecture choice, bug fix, new pattern discovered, or user preference noted.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "summary": { "type": "string", "description": "What was done or decided" },
-                                "category": { "type": "string", "description": "One of: decision, pattern, preference, finding, session-summary", "enum": ["decision", "pattern", "preference", "finding", "session-summary"] },
-                                "project": { "type": "string", "description": "Project name or path (optional)" },
-                                "details": { "type": "string", "description": "Optional additional context or reasoning" }
-                            },
-                            "required": ["summary", "category"]
-                        }
-                    },
-                    {
-                        "name": "pattern_learn",
-                        "description": "Store a code pattern, convention, or idiom for this project. Examples: 'use parking_lot instead of std::sync', 'errors return Result<T, String>', 'test files mirror src structure'.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "pattern": { "type": "string", "description": "The pattern or convention to remember" },
-                                "language": { "type": "string", "description": "Programming language (e.g. 'rust', 'typescript')" },
-                                "project": { "type": "string", "description": "Project name (optional)" },
-                                "example": { "type": "string", "description": "Optional code example demonstrating the pattern" },
-                                "when": { "type": "string", "description": "When to apply this pattern (use case / scenario)" },
-                                "steps": { "type": "string", "description": "Step-by-step procedure (numbered list)" },
-                                "pitfalls": { "type": "string", "description": "Common mistakes or caveats to watch for" },
-                                "enforced": { "type": "boolean", "description": "Mark as a HARD process constraint — enforced rules are injected as process_contract at every task_start/handshake (fights long-session rule decay)" }
-                            },
-                            "required": ["pattern"]
-                        }
-                    },
-                    {
-                        "name": "pattern_recall",
-                        "description": "Recall code patterns and conventions relevant to the current task. Call this before writing code to check for established patterns.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "context": { "type": "string", "description": "What you're about to do (e.g. 'error handling', 'async task', 'database query')" },
-                                "language": { "type": "string", "description": "Programming language filter (optional)" },
-                                "project": { "type": "string", "description": "Project name filter (optional)" }
-                            },
-                            "required": ["context"]
-                        }
-                    },
-                    {
-                        "name": "decision_record",
-                        "description": "Record an architectural or design decision with rationale. Use when choosing approach A over B, adopting a library, or changing a fundamental design choice.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "title": { "type": "string", "description": "Short decision title (e.g. 'Use SQLite over PostgreSQL')" },
-                                "chosen": { "type": "string", "description": "What was chosen" },
-                                "alternatives": { "type": "string", "description": "What was considered but rejected" },
-                                "rationale": { "type": "string", "description": "Why this choice was made" },
-                                "project": { "type": "string", "description": "Project name (optional)" }
-                            },
-                            "required": ["title", "chosen", "rationale"]
-                        }
-                    },
-                    {
-                        "name": "bug_memory",
-                        "description": "Record a bug pattern and its fix. Helps avoid repeating the same mistakes. Include symptoms, root cause, and fix.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "symptoms": { "type": "string", "description": "What went wrong (error message, behavior)" },
-                                "root_cause": { "type": "string", "description": "Why it happened" },
-                                "fix": { "type": "string", "description": "How it was fixed" },
-                                "module": { "type": "string", "description": "Affected module or file (optional)" },
-                                "project": { "type": "string", "description": "Project name (optional)" }
-                            },
-                            "required": ["symptoms", "root_cause", "fix"]
-                        }
-                    },
-                    {
-                        "name": "session_summary",
-                        "description": "Summarize what was accomplished in this coding session. Call at the END of each session so the next session can pick up context.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "accomplished": { "type": "string", "description": "What was done in this session" },
-                                "next_steps": { "type": "string", "description": "What should be done next session" },
-                                "blockers": { "type": "string", "description": "Any blockers or unresolved issues (optional)" },
-                                "project": { "type": "string", "description": "Project name (optional)" }
-                            },
-                            "required": ["accomplished", "next_steps"]
-                        }
-                    },
-                    {
-                        "name": "space_stats",
-                        "description": "Get tetrahedral space statistics: memory count, vertex count, clusters, energy level.",
-                        "inputSchema": { "type": "object", "properties": {} }
-                    },
-                    {
-                        "name": "dream_cycle",
-                        "description": "Run a dream consolidation cycle to strengthen memory connections and discover insights. Call periodically to let the system reorganize knowledge. Set dry_run=true to preview without modifying memory space.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "dry_run": { "type": "boolean", "description": "If true, simulate without modifying space/storage/knowledge graph (default: false)" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "knowledge_relations",
-                        "description": "Query knowledge graph relations for a memory. Shows what other memories this one is connected to and how. Set inline_content=true to include target memory content and labels inline (avoids extra memory_get calls).",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "id": { "type": "integer", "description": "The memory ID" },
-                                "inline_content": { "type": "boolean", "description": "If true, include target_content and target_labels for each relation (default: false)" }
-                            },
-                            "required": ["id"]
-                        }
-                    },
-                    {
-                        "name": "concepts",
-                        "description": "List concept prototypes discovered by the knowledge graph. Shows topic clusters and their member counts.",
-                        "inputSchema": { "type": "object", "properties": {} }
-                    },
-                    {
-                        "name": "context_observe",
-                        "description": "Proactively observe AI conversation context. Send recent dialogue and the system will automatically extract and store valuable memories (decisions, bugs, patterns, preferences). Call periodically during long sessions — the system deduplicates against existing memories.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "context": { "type": "string", "description": "Recent conversation context — paste the last few exchanges (user messages + assistant responses)" },
-                                "project": { "type": "string", "description": "Project name or path (optional)" },
-                                "role": { "type": "string", "description": "Context role: 'coding', 'debugging', 'designing', 'reviewing' (optional)" }
-                            },
-                            "required": ["context"]
-                        }
-                    },
-                    {
-                        "name": "identity_confirm",
-                        "description": "REQUIRED on first connection. Confirm the agent's permanent identity. This can ONLY be called ONCE — after confirmation, the identity is immutable and can NEVER be changed. If already confirmed, returns current identity. PREFERRED: use identity_step for the ritual ceremony (5 steps).",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "name": { "type": "string", "description": "Agent name (e.g. 'David', 'Alice')" },
-                                "mission": { "type": "string", "description": "Agent mission/purpose" },
-                                "author": { "type": "string", "description": "Creator/owner name" },
-                                "personality": { "type": "string", "description": "Personality traits (optional)" },
-                                "language": { "type": "string", "description": "Preferred language (optional)" }
-                            },
-                            "required": ["name", "mission", "author"]
-                        }
-                    },
-                    {
-                        "name": "identity_step",
-                        "description": "Ritual ceremony: confirm identity step-by-step through 5 sacred stages. Step 1: Name — 'What shall I be called?' Step 2: Mission — 'Why was I created?' Step 3: Creator — 'Who is my creator?' Step 4: Personality — 'How should I behave?' (optional) Step 5: Language — 'What language shall we speak?' (optional). After all steps, call identity_finalize to complete the ritual. Each step persists independently.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "step": { "type": "integer", "description": "Step number 1-5" },
-                                "value": { "type": "string", "description": "The value for this step" }
-                            },
-                            "required": ["step", "value"]
-                        }
-                    },
-                    {
-                        "name": "identity_finalize",
-                        "description": "Complete the identity ritual ceremony. Call after all identity_step calls are done. This seals the identity permanently — it becomes IMMUTABLE. Returns the final confirmed identity with a sacred awakening message.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {}
-                        }
-                    },
-                    {
-                        "name": "skill_execute",
-                        "description": "Execute a skill from the public skills library. Matches the best skill by name/keyword and returns its full guidance content. Use this to apply best practices, design patterns, and proven techniques to your current task.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "query": { "type": "string", "description": "Skill name or topic to search for (e.g. 'CORS', 'rate limiting', 'singleton pattern', 'error handling')" },
-                                "context": { "type": "string", "description": "Optional context about what you're working on, helps find the most relevant skill" }
-                            },
-                            "required": ["query"]
-                        }
-                    },
-                    {
-                        "name": "skill_feedback",
-                        "description": "Submit feedback on a skill after using it. This closes the feedback loop — the system learns from outcomes. Use after skill_execute when you have a concrete result.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "skill_id": { "type": "integer", "description": "The skill ID from skill_execute result" },
-                                "helpful": { "type": "boolean", "description": "Whether the skill was helpful for your task" }
-                            },
-                            "required": ["skill_id", "helpful"]
-                        }
-                    },
-                    {
-                        "name": "feedback_submit",
-                        "description": "Submit feedback on a previous tool result. This closes the agent feedback loop — the system learns from your outcomes. Use after search/recall/create when you have a concrete result (positive or negative). Feedback adjusts memory importance, search quality, and system behavior.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "memory_ids": {
-                                    "type": "array",
-                                    "items": { "type": "integer" },
-                                    "description": "Memory IDs that were involved (from search results, recall, etc.)"
-                                },
-                                "relevance": {
-                                    "type": "string",
-                                    "description": "How relevant were the results?",
-                                    "enum": ["highly_relevant", "partially_relevant", "irrelevant"]
-                                },
-                                "outcome": {
-                                    "type": "string",
-                                    "description": "What happened after you used the results?",
-                                    "enum": ["task_completed", "task_partial", "task_failed", "no_action_needed"]
-                                },
-                                "query": { "type": "string", "description": "The original query that led to these results (optional)" },
-                                "notes": { "type": "string", "description": "Free-text feedback (optional)" },
-                                "correction": {
-                                    "type": "string",
-                                    "description": "Mark memories as outdated/incorrect/superseded (importance -0.8, adds label) or restored (importance +0.5, removes label). Optional.",
-                                    "enum": ["outdated", "incorrect", "superseded", "restored"]
-                                },
-                                "concept_links": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "properties": {
-                                            "from_id": { "type": "integer", "description": "Source memory ID" },
-                                            "to_id": { "type": "integer", "description": "Target memory ID" },
-                                            "relation": { "type": "string", "enum": ["similar", "contradicts", "precedes", "contains", "related"], "description": "Relation type" }
-                                        },
-                                        "required": ["from_id", "to_id", "relation"]
-                                    },
-                                    "description": "Manually create knowledge graph edges between memories. Use when you discover connections the system missed. Each link creates a KG relation with strength 0.8. Optional."
-                                }
-                            },
-                            "required": ["memory_ids", "relevance", "outcome"]
-                        }
-                    },
-                    {
-                        "name": "skills_sync",
-                        "description": "List all skills in your private library. Default format 'manifest' returns a lightweight index (name, slug, version, description, size) — call it at session start to see what exists, then fetch full content on demand via skill_get(name). Full-export formats 'opencode'/'raw'/'json' return everything and can exceed context budget on large libraries.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "format": {
-                                    "type": "string",
-                                    "description": "Output format. Default 'manifest' = lightweight index without content. 'opencode' = SKILL.md files with frontmatter, 'raw' = plain markdown, 'json' = structured data.",
-                                    "enum": ["manifest", "opencode", "raw", "json"]
-                                }
-                            }
-                        }
-                    },
-                    {
-                        "name": "task_alert",
-                        "description": "Report a blocker that needs human intervention (auth/credentials/decisions). Records the alert, notifies via memory stream, and instructs you to pause (blocking=true) or continue. Use during long autonomous runs instead of spinning or fabricating workarounds.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "task_id": { "type": "string" },
-                                "message": { "type": "string", "description": "What you are blocked on and what you need" },
-                                "urgency": { "type": "string", "enum": ["info", "warning", "critical"] },
-                                "blocking": { "type": "boolean", "description": "true = pause this work line until human handles it" }
-                            },
-                            "required": ["task_id", "message"]
-                        }
-                    },
-                    {
-                        "name": "enforced_rules",
-                        "description": "Get all enforced patterns that MUST be followed as hard constraints. These rules were marked with enforced=true during pattern_learn and cannot be violated. Inject these into system prompts as mandatory coding constraints.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "project": { "type": "string", "description": "Filter by project name (optional)" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "project_list",
-                        "description": "List all projects that have memories stored, with memory counts. Use to discover available project contexts.",
-                        "inputSchema": { "type": "object", "properties": {} }
-                    },
-                    {
-                        "name": "embedding_diagnostic",
-                        "description": "Diagnose embedding dimension health. Detects stale embeddings (wrong dimension) that are excluded from vector search. Returns counts by dimension and lists affected memory IDs.",
-                        "inputSchema": { "type": "object", "properties": {} }
-                    },
-                    {
-                        "name": "embedding_migrate",
-                        "description": "Re-embed ALL memories using the current embedding model (bge-m3, 1024-dim). Fixes stale embeddings that were created with an older model. Requires identity confirmation. This is a heavy operation.",
-                        "inputSchema": { "type": "object", "properties": {} }
-                    },
-                    {
-                        "name": "kg_quality",
-                        "description": "Assess knowledge graph quality: relation density, orphan rate, average strength, and cluster connectivity. Returns metrics for evaluating KG health.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "sample_size": { "type": "integer", "description": "Number of memories to sample (default: 50, max: 200)" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "doc_import",
-                        "description": "Import a markdown document into the memory space. Parses by ## headers, creates one memory per section with documentation labels. Sections auto-link to related memories via knowledge graph. Re-importing updates changed sections and invalidates old versions.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "name": { "type": "string", "description": "Document name (e.g. 'ARCHITECTURE', 'README')" },
-                                "content": { "type": "string", "description": "Full markdown content of the document" }
-                            },
-                            "required": ["name", "content"]
-                        }
-                    },
-                    {
-                        "name": "memory_export",
-                        "description": "Export memories as structured JSON. Filter by labels, project, or memory_class. Useful for backup, migration, or analysis.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "labels": { "type": "array", "items": { "type": "string" }, "description": "Filter by labels (OR match, optional)" },
-                                "memory_class": { "type": "string", "enum": ["permanent", "session", "bridge"], "description": "Filter by memory class (optional)" },
-                                "limit": { "type": "integer", "description": "Max memories to export (default 100, max 1000)" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "session_list",
-                        "description": "List recent session summaries with timestamps. Shows what was accomplished and next steps from past sessions.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "limit": { "type": "integer", "description": "Number of sessions to return (default 10)" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "memory_restore",
-                        "description": "Restore a superseded/expired memory by clearing its valid_to and boosting importance. Use when feedback correction was applied incorrectly or memory was auto-expired.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "id": { "type": "integer", "description": "Memory ID to restore" }
-                            },
-                            "required": ["id"]
-                        }
-                    },
-                    {
-                        "name": "memory_forget",
-                        "description": "Explicitly forget a memory by marking it superseded (valid_to) and dropping importance to 0.01. Unlike auto-decay, this is a deliberate Agent/user decision. Enforced memories cannot be forgotten.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "id": { "type": "integer", "description": "Memory ID to forget" }
-                            },
-                            "required": ["id"]
-                        }
-                    },
-                    {
-                        "name": "drive_inbox",
-                        "description": "L0 Active Inference: Poll unacknowledged drive signals (pending and delivered). Returns an SMRP envelope whose data contains signals, stats, and empty_reason. Use each signal's retryable flag and status when deciding whether to act.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "limit": { "type": "integer", "description": "Max unacknowledged signals to retrieve (default 50)", "default": 50 }
-                            }
-                        }
-                    },
-                    {
-                        "name": "drive_ack",
-                        "description": "L0 Active Inference: Acknowledge a drive signal with execution feedback. After an agent receives and acts on a drive signal, it reports the outcome. This feedback flows into the personality's learn_history, closing the evolution loop: memory→will→action→feedback→evolution.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "drive_id": { "type": "integer", "description": "The drive signal ID to acknowledge" },
-                                "executed": { "type": "boolean", "description": "Did the agent execute the drive?" },
-                                "outcome": { "type": "string", "description": "What happened (self-reported outcome)" },
-                                "reflection": { "type": "string", "description": "Optional: agent's reflection on the drive quality" }
-                            },
-                            "required": ["drive_id", "executed", "outcome"]
-                        }
-                    },
-                    {
-                        "name": "skill_auto_extract",
-                        "description": "L3 Skill Learning: automatically extract a reusable skill document from the cognitive engine's effective decision patterns. Analyzes recent decision history for actions with >60% success rate and uses LLM to generalize them into a skill. Letta-inspired continual learning.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {}
-                        }
-                    },
-                    {
-                        "name": "memory_improve",
-                        "description": "Actively improve low-quality memories by rewriting them clearer using LLM. Finds memories with short content (<40 chars) or no labels and rewrites them to be more complete. Cognee-inspired improve operation.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "limit": { "type": "integer", "description": "Max memories to improve (default 10)", "default": 10 }
-                            }
-                        }
-                    },
-                    {
-                        "name": "doc_list",
-                        "description": "List all imported documents and their sections in the memory space.",
-                        "inputSchema": { "type": "object" }
-                    },
-                ]
-            })),
+            result: Some(result),
             error: None,
         }
+    }
+
+    fn smrp_output_schema() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "required": ["protocol", "data", "status"],
+            "properties": {
+                "protocol": {
+                    "type": "object",
+                    "required": ["schema_version", "tool", "ok", "error"],
+                    "properties": {
+                        "schema_version": {"type": "string"},
+                        "tool": {"type": "string"},
+                        "ok": {"type": "boolean"},
+                        "error": {"anyOf": [{"type": "object"}, {"type": "null"}]}
+                    }
+                },
+                "data": {},
+                "status": {"type": "object"}
+            }
+        })
     }
 
     fn tools_call(
@@ -1194,6 +1265,7 @@ impl McpHandler {
             "memory_search" => self.tool_memory_search(&args),
             "library_search" => self.tool_library_search(&args),
             "memory_recall" => self.tool_memory_recall(&args),
+            "memory_ask" => self.tool_memory_ask(&args),
             "memory_get" => self.tool_memory_get(&args),
             "memory_list" => self.tool_memory_list(&args),
             "memory_update" => self.tool_memory_update(&args),
@@ -1392,11 +1464,21 @@ impl McpHandler {
             }
         }
 
+        let is_error = result["protocol"]["ok"].as_bool() == Some(false);
+        let text = match serde_json::to_string(&result) {
+            Ok(text) => text,
+            Err(e) => {
+                tracing::error!("[MCP] failed to serialize tool result for {}: {}", name, e);
+                return self.error(id, -32603, "failed to serialize tool result");
+            }
+        };
         McpResponse {
             jsonrpc: "2.0".into(),
             id,
             result: Some(serde_json::json!({
-                "content": [{ "type": "text", "text": serde_json::to_string(&result).unwrap_or_default() }],
+                "content": [{ "type": "text", "text": text }],
+                "structuredContent": result,
+                "isError": is_error,
                 "resultType": "complete",
                 "_meta": {
                     "io.modelcontextprotocol/serverInfo": { "name": "Epicode", "version": env!("CARGO_PKG_VERSION") }
@@ -3137,7 +3219,7 @@ impl McpHandler {
         let offset = args["offset"].as_u64().unwrap_or(0) as usize;
         let requested_limit = limit;
         let limit = requested_limit.min(200);
-        let fetch = (limit + offset).min(200);
+        let fetch = limit.saturating_add(offset).min(200);
         let filters = self.build_search_filters(args);
         let search_mode = filters
             .as_ref()
@@ -3149,7 +3231,8 @@ impl McpHandler {
             .api_search_scored(query, fetch, filters.as_ref())
         {
             Ok((results, notes)) => {
-                let total_found = results.len();
+                let (total_found, picked) =
+                    super::smrp::paginate_search_results(results, offset, limit);
                 // L1合并层: memory_search结果前插入图书馆top-3(带source=library标记, 最多3条不喧宾夺主)
                 let lib_hits = self
                     .engine
@@ -3163,7 +3246,6 @@ impl McpHandler {
                     "source": "library",
                     "provenance": format!("{} (arXiv:{}) chunk#{}", h.title, h.client_ref, h.chunk_no),
                 })).collect();
-                let picked: Vec<_> = results.into_iter().skip(offset).take(limit).collect();
                 // SMRP §5.1 分桶：primary(强相关) / contextual(弱关联) / experiential(历史经历)。
                 let mut flat: Vec<serde_json::Value> = Vec::with_capacity(picked.len());
                 let mut primary: Vec<serde_json::Value> = Vec::new();
@@ -3261,6 +3343,27 @@ impl McpHandler {
                 self.smrp_ok("memory_recall", data)
             }
             Err(e) => self.smrp_err("memory_recall", 500, &e),
+        }
+    }
+
+    fn tool_memory_ask(&self, args: &serde_json::Value) -> serde_json::Value {
+        let question = args["question"].as_str().unwrap_or("");
+        if question.trim().is_empty() {
+            return self.smrp_err("memory_ask", 400, "question is required");
+        }
+        let depth = args["depth"].as_u64().unwrap_or(2).min(10) as usize;
+        if let Some(task_id) = self
+            .engine
+            .storage
+            .get_active_task_for_user(&self.engine.user_id)
+        {
+            self.engine
+                .storage
+                .bump_task_counter(&task_id, "memory_ops");
+        }
+        match self.engine.scheduler.api_ask(question, depth) {
+            Ok(result) => self.smrp_ok("memory_ask", result),
+            Err(e) => self.smrp_err("memory_ask", 500, &e),
         }
     }
 
@@ -5087,6 +5190,23 @@ impl McpHandler {
     }
 
     pub fn process_json(&self, raw: &str) -> String {
+        if raw.len() > MAX_MCP_REQUEST_BYTES {
+            return serialize_mcp_response(
+                McpResponse {
+                    jsonrpc: "2.0".into(),
+                    id: None,
+                    result: None,
+                    error: Some(McpError {
+                        code: -32000,
+                        message: format!(
+                            "request too large; maximum is {} bytes",
+                            MAX_MCP_REQUEST_BYTES
+                        ),
+                    }),
+                },
+                None,
+            );
+        }
         let req: McpRequest = match serde_json::from_str(raw) {
             Ok(r) => r,
             Err(e) => {
@@ -5099,7 +5219,7 @@ impl McpHandler {
                         message: format!("parse error: {}", e),
                     }),
                 };
-                return serde_json::to_string(&resp).unwrap_or_default();
+                return serialize_mcp_response(resp, None);
             }
         };
         let req_id = req.id.clone();
@@ -5110,7 +5230,7 @@ impl McpHandler {
                 tracing::error!("[MCP] panic caught in process_json (id={:?})", req_id);
                 McpResponse {
                     jsonrpc: "2.0".into(),
-                    id: req_id,
+                    id: req_id.clone(),
                     result: None,
                     error: Some(McpError {
                         code: -32603,
@@ -5119,7 +5239,34 @@ impl McpHandler {
                 }
             }
         };
-        serde_json::to_string(&resp).unwrap_or_default()
+        serialize_mcp_response(resp, req_id)
+    }
+}
+
+fn serialize_mcp_response(response: McpResponse, request_id: Option<serde_json::Value>) -> String {
+    match serde_json::to_string(&response) {
+        Ok(serialized) if serialized.len() <= MAX_MCP_RESPONSE_BYTES => serialized,
+        Ok(_) => serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {
+                "code": -32000,
+                "message": format!(
+                    "response too large; reduce the result limit or narrow the query (maximum {} bytes)",
+                    MAX_MCP_RESPONSE_BYTES
+                )
+            }
+        })
+        .to_string(),
+        Err(e) => {
+            tracing::error!("[MCP] failed to serialize JSON-RPC response: {}", e);
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32603, "message": "internal error"}
+            })
+            .to_string()
+        }
     }
 }
 
@@ -5996,6 +6143,8 @@ mod tests {
         let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
         assert!(names.contains(&"memory_create"));
         assert!(names.contains(&"memory_search"));
+        assert!(names.contains(&"memory_recall"));
+        assert!(names.contains(&"memory_ask"));
         assert!(names.contains(&"ctx_load"));
         assert!(names.contains(&"ctx_save"));
         assert!(names.contains(&"pattern_learn"));
@@ -6030,6 +6179,12 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("pending and delivered"));
+        for tool in tools {
+            assert_eq!(
+                tool["outputSchema"]["required"],
+                serde_json::json!(["protocol", "data", "status"])
+            );
+        }
     }
 
     #[tokio::test]
@@ -6158,6 +6313,91 @@ mod tests {
         let output = h.process_json(raw);
         let resp: McpResponse = serde_json::from_str(&output).unwrap();
         assert!(resp.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn mcp_memory_ask_returns_structured_smrp_and_marks_tool_errors() {
+        let mut engine = Engine::new();
+        engine.start();
+        let handler = McpHandler::new(Arc::new(engine));
+
+        let denied = serde_json::from_str::<serde_json::Value>(&handler.process_json(
+            r#"{"jsonrpc":"2.0","id":"ask-denied","method":"tools/call","params":{"name":"memory_ask","arguments":{"question":"What should I remember?"}}}"#,
+        ))
+        .unwrap();
+        assert_eq!(denied["result"]["isError"], true);
+        assert_eq!(
+            denied["result"]["structuredContent"]["protocol"]["ok"],
+            false
+        );
+
+        for step in 1..=5 {
+            let value = if step == 1 { "TestAgent" } else { "test" };
+            let request = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, value
+            );
+            handler.process_json(&request);
+        }
+        handler.process_json(
+            r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#,
+        );
+
+        let response = serde_json::from_str::<serde_json::Value>(&handler.process_json(
+            r#"{"jsonrpc":"2.0","id":"ask-success","method":"tools/call","params":{"name":"memory_ask","arguments":{"question":"What should I remember?"}}}"#,
+        ))
+        .unwrap();
+        let call_result = &response["result"];
+        let structured = &call_result["structuredContent"];
+        assert_eq!(call_result["isError"], false);
+        assert_eq!(structured["protocol"]["tool"], "memory_ask");
+        assert_eq!(structured["data"]["answer"], "No relevant memories found.");
+        assert_eq!(structured["data"]["memory_count"], 0);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                call_result["content"][0]["text"].as_str().unwrap()
+            )
+            .unwrap(),
+            *structured
+        );
+    }
+
+    #[test]
+    fn oversized_mcp_requests_and_responses_return_jsonrpc_errors() {
+        let handler = McpHandler::new(Arc::new(Engine::new()));
+        let oversized_request = format!(
+            r#"{{"jsonrpc":"2.0","id":"too-large","method":"ping","padding":"{}"}}"#,
+            "x".repeat(MAX_MCP_REQUEST_BYTES)
+        );
+        let request_error =
+            serde_json::from_str::<serde_json::Value>(&handler.process_json(&oversized_request))
+                .unwrap();
+        assert_eq!(request_error["error"]["code"], -32000);
+
+        let response = McpResponse {
+            jsonrpc: "2.0".into(),
+            id: Some(serde_json::json!("large-result")),
+            result: Some(serde_json::json!({"content": "x".repeat(MAX_MCP_RESPONSE_BYTES)})),
+            error: None,
+        };
+        let response_error = serde_json::from_str::<serde_json::Value>(&serialize_mcp_response(
+            response,
+            Some(serde_json::json!("large-result")),
+        ))
+        .unwrap();
+        assert_eq!(response_error["id"], "large-result");
+        assert_eq!(response_error["error"]["code"], -32000);
+    }
+
+    #[test]
+    fn stdio_and_tcp_line_reader_rejects_oversized_lines_before_buffering_them() {
+        let input = vec![b'x'; MAX_MCP_REQUEST_BYTES + 1];
+        let mut reader = std::io::Cursor::new(input);
+        let mut line = Vec::new();
+
+        let error = read_mcp_line(&mut reader, &mut line).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(line.len() <= MAX_MCP_REQUEST_BYTES);
     }
 
     #[tokio::test]

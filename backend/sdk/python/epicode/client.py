@@ -16,6 +16,7 @@ from epicode.exceptions import (
     ValidationError,
 )
 from epicode.models import (
+    AskMemory,
     AskResponse,
     CreateNodeResponse,
     DreamCycleResponse,
@@ -32,10 +33,74 @@ from epicode.models import (
     RememberResponse,
     SearchResult,
     SearchResponse,
+    SmrpEnvelope,
+    SmrpProtocol,
     StatsResponse,
     TieredMemoryResult,
     TimelineResponse,
 )
+
+def _unwrap_smrp(
+    response: dict[str, Any],
+) -> tuple[dict[str, Any], SmrpEnvelope | None]:
+    protocol = response.get("protocol")
+    status = response.get("status")
+    if not isinstance(protocol, dict) or not isinstance(status, dict) or "data" not in response:
+        return response, None
+
+    ok = protocol.get("ok")
+    if not isinstance(ok, bool):
+        raise EpicodeError(
+            "Invalid SMRP response: protocol.ok must be a boolean",
+            status_code=200,
+            response_body=response,
+        )
+    raw_error = protocol.get("error")
+    error = raw_error if isinstance(raw_error, dict) else None
+    envelope = SmrpEnvelope(
+        protocol=SmrpProtocol(
+            schema_version=str(protocol.get("schema_version", "")),
+            tool=str(protocol.get("tool", "")),
+            ok=ok,
+            error=error,
+        ),
+        data=response["data"] if isinstance(response["data"], dict) else None,
+        status=status,
+    )
+    if not ok:
+        message = error.get("message", "SMRP operation failed") if error else "SMRP operation failed"
+        raise EpicodeError(message, status_code=200, response_body=response)
+    if envelope.data is None:
+        raise EpicodeError(
+            "Invalid SMRP response: successful data must be an object",
+            status_code=200,
+            response_body=response,
+        )
+    return envelope.data, envelope
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _search_result(raw: Any) -> SearchResult | None:
+    if not isinstance(raw, dict):
+        return None
+    metrics = raw.get("metrics")
+    topology = raw.get("topology")
+    return SearchResult(
+        id=str(raw.get("id", "")),
+        content=str(raw.get("content", "")),
+        labels=_string_list(raw.get("labels")),
+        similarity=float(raw.get("similarity", 0.0)),
+        tier=raw.get("tier") if isinstance(raw.get("tier"), str) else None,
+        source=_string_list(raw.get("source")),
+        metrics=metrics if isinstance(metrics, dict) else {},
+        topology=topology if isinstance(topology, dict) else None,
+        matched_by=_string_list(raw.get("matched_by")),
+    )
 
 
 class EpicodeClient:
@@ -113,39 +178,80 @@ class EpicodeClient:
             success=data.get("success", False),
         )
 
-    def remember(self, content: str) -> RememberResponse:
+    def remember(
+        self, content: str, *, labels: list[str] | None = None
+    ) -> RememberResponse:
         """Store a new memory as a tetrahedron in 3D space.
 
         Unlike flat vector databases like Pinecone, Epicode stores each memory
         with spatial coordinates and automatically extracts knowledge graph
         relationships.
         """
-        data = self._request("POST", "/remember", json={"content": content})
+        payload: dict[str, Any] = {"content": content}
+        if labels is not None:
+            payload["labels"] = labels
+        raw = self._request("POST", "/remember", json=payload)
+        data, smrp = _unwrap_smrp(raw)
         return RememberResponse(
-            success=data.get("success", False),
-            id=data.get("id", ""),
-            labels=data.get("labels", []),
+            success=smrp.protocol.ok if smrp else data.get("success", False),
+            id=str(data.get("id", "")),
+            labels=_string_list(data.get("labels")),
+            smrp=smrp,
         )
 
-    def search(self, query: str, *, limit: int | None = None) -> SearchResponse:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        labels: list[str] | None = None,
+        min_importance: float | None = None,
+        project: str | None = None,
+        since_days: int | None = None,
+        mode: str | None = None,
+        strict_filter: bool | None = None,
+    ) -> SearchResponse:
         """Search memories by semantic similarity."""
         payload: dict[str, Any] = {"query": query}
-        if limit is not None:
-            payload["limit"] = limit
-        data = self._request("POST", "/search", json=payload)
+        for key, value in (
+            ("limit", limit),
+            ("offset", offset),
+            ("labels", labels),
+            ("min_importance", min_importance),
+            ("project", project),
+            ("since_days", since_days),
+            ("mode", mode),
+            ("strict_filter", strict_filter),
+        ):
+            if value is not None:
+                payload[key] = value
+        raw = self._request("POST", "/search", json=payload)
+        data, smrp = _unwrap_smrp(raw)
         results = [
-            SearchResult(
-                id=r.get("id", ""),
-                content=r.get("content", ""),
-                labels=r.get("labels", []),
-                similarity=r.get("similarity", 0.0),
-            )
+            parsed
             for r in data.get("results", [])
+            if (parsed := _search_result(r)) is not None
         ]
+        raw_tiers = data.get("tiers")
+        tiers = {
+            name: [
+                parsed
+                for item in items
+                if (parsed := _search_result(item)) is not None
+            ]
+            for name, items in raw_tiers.items()
+            if isinstance(name, str) and isinstance(items, list)
+        } if isinstance(raw_tiers, dict) else {}
         return SearchResponse(
-            success=data.get("success", False),
+            success=smrp.protocol.ok if smrp else data.get("success", False),
             results=results,
-            total=data.get("total", 0),
+            total=data.get("total_found", data.get("total", data.get("count", 0))),
+            offset=data.get("offset", offset or 0),
+            limit=data.get("limit", limit or 0),
+            tiers=tiers,
+            score_notes=data.get("score_notes", {}),
+            smrp=smrp,
         )
 
     def recall(self, query: str, *, depth: int | None = None) -> RecallResponse:
@@ -158,21 +264,25 @@ class EpicodeClient:
         payload: dict[str, Any] = {"query": query}
         if depth is not None:
             payload["depth"] = depth
-        data = self._request("POST", "/recall", json=payload)
-        raw_emotion = data.get("emotion", {})
+        raw = self._request("POST", "/recall", json=payload)
+        data, smrp = _unwrap_smrp(raw)
+        raw_emotion = data.get("emotion")
+        if not isinstance(raw_emotion, dict):
+            raw_emotion = {}
         emotion = Emotion(
             pleasure=raw_emotion.get("pleasure", 0.0),
             arousal=raw_emotion.get("arousal", 0.0),
             dominance=raw_emotion.get("dominance", 0.0),
         )
         return RecallResponse(
-            success=data.get("success", False),
+            success=smrp.protocol.ok if smrp else data.get("success", False),
             query=data.get("query", ""),
             seed_count=data.get("seed_count", 0),
             total_fragments=data.get("total_fragments", 0),
             associated_count=data.get("associated_count", 0),
             emotion=emotion,
             memory_file=data.get("memory_file", ""),
+            smrp=smrp,
         )
 
     def ask(self, question: str, *, depth: int | None = None) -> AskResponse:
@@ -180,13 +290,36 @@ class EpicodeClient:
         payload: dict[str, Any] = {"question": question}
         if depth is not None:
             payload["depth"] = depth
-        data = self._request("POST", "/ask", json=payload)
+        raw = self._request("POST", "/ask", json=payload)
+        data, smrp = _unwrap_smrp(raw)
+        memories: list[AskMemory | str] = []
+        for item in data.get("memories", []):
+            if isinstance(item, dict):
+                item_id = item.get("id")
+                labels = _string_list(item.get("labels"))
+                relevance = item.get("relevance", 0.0)
+                memories.append(
+                    AskMemory(
+                        id=item_id if isinstance(item_id, (int, str)) else None,
+                        labels=labels,
+                        content=str(item.get("content", "")),
+                        relevance=float(relevance) if isinstance(relevance, (int, float)) else 0.0,
+                    )
+                )
+            elif isinstance(item, str):
+                memories.append(item)
         return AskResponse(
-            success=data.get("success", False),
+            success=smrp.protocol.ok if smrp else data.get("success", False),
             question=data.get("question", ""),
             answer=data.get("answer", ""),
             memory_count=data.get("memory_count", 0),
-            memories=data.get("memories", []),
+            memories=memories,
+            knowledge_card_used=(
+                data.get("knowledge_card_used")
+                if isinstance(data.get("knowledge_card_used"), str)
+                else None
+            ),
+            smrp=smrp,
         )
 
     def create_node(
