@@ -157,8 +157,7 @@ pub(super) fn start_cognitive_loop_if_needed(
     user_id: &str,
     engine: Arc<epicode::engine::Engine>,
 ) {
-    if !state.user_mgr.is_loop_started(user_id) {
-        state.user_mgr.mark_loop_started(user_id);
+    if state.user_mgr.try_mark_loop_started(user_id) {
         let uid = user_id.to_string();
         tokio::spawn(async move {
             if std::env::var("ENABLE_COGNITIVE").as_deref() == Ok("1") {

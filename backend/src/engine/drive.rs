@@ -660,11 +660,20 @@ impl DriveQueue {
     }
 
     pub fn peek_pending(&self, limit: usize) -> Vec<DriveSignal> {
+        self.peek_pending_matching(limit, |_| true)
+    }
+
+    /// Apply the consumer filter before the limit so unrelated pending work cannot starve it.
+    pub(crate) fn peek_pending_matching(
+        &self,
+        limit: usize,
+        predicate: impl Fn(&DriveSignal) -> bool,
+    ) -> Vec<DriveSignal> {
         self.sweep_expired();
         let signals = self.signals.lock();
         signals
             .iter()
-            .filter(|s| matches!(s.status, DriveStatus::Pending))
+            .filter(|s| matches!(s.status, DriveStatus::Pending) && predicate(s))
             .take(limit)
             .cloned()
             .collect()
@@ -1084,6 +1093,59 @@ mod will_valve_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pending_signal(intent_type: DriveIntent, description: &str) -> DriveSignal {
+        DriveSignal {
+            id: 0,
+            timestamp: 0,
+            intent_type,
+            description: description.to_string(),
+            evidence: Vec::new(),
+            urgency: DriveUrgency::Medium,
+            target_capability: None,
+            emotion: None,
+            origin_tick: 0,
+            status: DriveStatus::Pending,
+            feedback: None,
+            retry_count: 0,
+            expires_at: None,
+            enqueued_at_ms: 0,
+            time_budget_ms: None,
+        }
+    }
+
+    #[test]
+    fn filtered_pending_peek_does_not_starve_later_matching_signals() {
+        let queue = DriveQueue::new();
+        for index in 0..12 {
+            queue.enqueue(pending_signal(
+                DriveIntent::Warn,
+                &format!("external warning {index}"),
+            ));
+        }
+        let explore_ids: Vec<_> = (0..4)
+            .map(|index| {
+                queue.enqueue(pending_signal(
+                    DriveIntent::Explore,
+                    &format!("self-driving exploration {index}"),
+                ))
+            })
+            .collect();
+
+        let selected = queue.peek_pending_matching(3, |signal| {
+            matches!(signal.intent_type, DriveIntent::Explore)
+        });
+        assert_eq!(
+            selected.iter().map(|signal| signal.id).collect::<Vec<_>>(),
+            explore_ids[..3]
+        );
+
+        let external_pending = queue.peek_pending(10);
+        assert_eq!(external_pending.len(), 10);
+        assert!(external_pending
+            .iter()
+            .all(|signal| matches!(signal.intent_type, DriveIntent::Warn)));
+    }
 
     #[test]
     fn drive_signal_inbox_json_includes_retryability_and_snake_case_enums() {
