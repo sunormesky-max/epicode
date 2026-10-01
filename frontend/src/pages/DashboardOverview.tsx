@@ -29,6 +29,11 @@ export default function DashboardOverview() {
   const [keyInfo, setKeyInfo] = useState<{ masked_key: string; role?: string; permissions?: string[] } | null>(null);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [newKeyCopyMsg, setNewKeyCopyMsg] = useState(''); // '' | '已复制 ✓' | '复制失败' — 一次性密钥必须给反馈
+  // 原生对话框替代态: 微信XWeb等WebView吞window.prompt/confirm → 点按钮无反应(2026-10-01实测)
+  const [pwdPrompt, setPwdPrompt] = useState<null | 'reveal' | 'reset'>(null); // 打开的密码确认动作
+  const [pwdInput, setPwdInput] = useState('');
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [pwdError, setPwdError] = useState('');
   const [keyFromReset, setKeyFromReset] = useState(false);
   const [stats, setStats] = useState<StatsData | null>(null);
   // 刀2: 健康不再写死 Online — 真实探测, 失败显示错误状态(审计前端P0-4)
@@ -226,20 +231,64 @@ export default function DashboardOverview() {
               <Terminal size={10} style={{ verticalAlign: -1 }} />
               <span title="API Key(智能体接入凭证)" style={{ fontFamily: 'var(--font-mono)' }}>{keyInfo?.masked_key ?? '…'}</span>
               <button
-                onClick={() => { const pw = window.prompt('显示完整密钥 — 请输入登录密码(此操作不影响现有智能体连接):'); if (pw === null) return; revealApiKey(pw).then(d => { setKeyFromReset(false); setNewKey(d.api_key); }).catch(e => window.alert('密码错误或操作失败: ' + (e instanceof Error ? e.message : e))); }}
+                onClick={() => { setPwdPrompt('reveal'); setPwdInput(''); setPwdError(''); }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', color: 'var(--text-secondary)' }}
                 title="显示完整密钥(密码确认, 非破坏)"
               >
                 <Copy size={11} />
               </button>
               <button
-                onClick={() => { if (!window.confirm('重置 API Key？旧密钥将立即失效，所有已配置的智能体会断开，需更新为新密钥。')) return; const pw = window.prompt('重置密钥 — 请输入登录密码确认:'); if (pw === null) return; resetApiKey(pw).then(d => { setKeyFromReset(true); setNewKey(d.api_key); return getApiKeyInfo(); }).then(setKeyInfo).catch(e => window.alert('密码错误或操作失败: ' + (e instanceof Error ? e.message : e))); }}
+                onClick={() => { setPwdPrompt('reset'); setPwdInput(''); setPwdError(''); }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', color: 'var(--accent-orange)' }}
                 title="重置 API Key(密码确认)"
               >
                 <RefreshCw size={11} />
               </button>
             </p>
+            {pwdPrompt && (
+              <div style={{ marginTop: 8, padding: '8px 10px', border: '1px solid var(--accent-orange)', borderRadius: 8, fontSize: 11, background: 'rgba(0,0,0,0.25)' }}>
+                <p style={{ margin: '0 0 6px', color: pwdPrompt === 'reset' ? 'var(--accent-orange)' : 'var(--text-secondary)', fontWeight: 600 }}>
+                  {pwdPrompt === 'reset' ? '⚠ 重置 API Key — 旧密钥将立即失效, 所有已配置的智能体会断开。' : '显示完整密钥 — 请输入登录密码(不影响现有智能体连接):'}
+                </p>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    type="password"
+                    value={pwdInput}
+                    autoFocus
+                    onChange={e => { setPwdInput(e.target.value); setPwdError(''); }}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('pwd-confirm-btn')?.click(); } }}
+                    placeholder="登录密码"
+                    style={{ flex: 1, background: 'rgba(0,0,0,0.4)', color: 'var(--text-primary)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, padding: '5px 8px', fontSize: 11.5, fontFamily: 'var(--font-mono)' }}
+                  />
+                  <button
+                    id="pwd-confirm-btn"
+                    disabled={pwdBusy || !pwdInput}
+                    onClick={async () => {
+                      setPwdBusy(true); setPwdError('');
+                      try {
+                        if (pwdPrompt === 'reveal') {
+                          const d = await revealApiKey(pwdInput);
+                          setKeyFromReset(false); setNewKey(d.api_key);
+                        } else {
+                          const d = await resetApiKey(pwdInput);
+                          setKeyFromReset(true); setNewKey(d.api_key);
+                          setKeyInfo(await getApiKeyInfo());
+                        }
+                        setPwdPrompt(null); setPwdInput('');
+                      } catch (e: unknown) {
+                        setPwdError('密码错误或操作失败: ' + (e instanceof Error ? e.message : String(e)));
+                      }
+                      setPwdBusy(false);
+                    }}
+                    style={{ background: pwdPrompt === 'reset' ? 'var(--accent-orange)' : 'var(--accent-cyan-bright, #3ecfae)', color: pwdPrompt === 'reset' ? '#1a1005' : '#04121a', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 600, opacity: pwdBusy || !pwdInput ? 0.5 : 1 }}
+                  >
+                    {pwdBusy ? '…' : pwdPrompt === 'reset' ? '确认重置' : '显示'}
+                  </button>
+                  <button onClick={() => { setPwdPrompt(null); setPwdInput(''); setPwdError(''); }} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 11, color: 'var(--text-tertiary)' }}>取消</button>
+                </div>
+                {pwdError && <p style={{ margin: '6px 0 0', color: '#f87171', fontSize: 10.5 }}>{pwdError}</p>}
+              </div>
+            )}
             {newKey && (
               <div style={{ marginTop: 8, padding: '6px 8px', border: '1px solid var(--accent-orange)', borderRadius: 6, fontSize: 11 }}>
                 <p style={{ margin: 0, color: 'var(--accent-orange)', fontWeight: 600 }}>{keyFromReset ? '新密钥(仅此一次显示， 旧密钥已失效):' : '完整密钥(仅本次显示， 此操作不影响现有智能体连接):'}</p>
