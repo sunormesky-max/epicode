@@ -118,8 +118,12 @@ with a firewall. Never expose the gateway's HTTP port publicly.
 
 | Service | Mount path | Purpose | Backup cadence |
 |---------|-----------|---------|----------------|
-| backend | `/app/data` | SQLite DB, ONNX models, backups | Daily (or before upgrades) |
+| backend | `/app/data` | Per-user and shared-library SQLite DBs, ONNX models, backups | Daily (or before upgrades) |
 | redis | `/data` | AOF/RDB persistence (if enabled) | Optional (cache is rebuildable) |
+
+The shared L1 library database is `library.db` under the backend's configured data directory. Keep it on the persistent backend volume; Cloud startup fails rather than accepting library writes to a temporary in-memory database if the persistent store cannot be opened. The HNSW index is reconstructed from persisted chunk embeddings after restart.
+
+Deployments that persisted the former hard-coded `/var/lib/tetramem/library.db` without setting a data directory should stop the old service and use SQLite backup tooling to migrate that database into the configured data directory before upgrading. Deployments with `EPICODE_DATA_DIR` or `TETRAMEM_DATA_DIR` already configured keep the same library database path.
 
 Kubernetes example:
 
