@@ -25,6 +25,7 @@ export default function Register() {
   const { t } = useI18nContext();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
@@ -40,7 +41,7 @@ export default function Register() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!username.trim() || !password.trim()) {
+    if (!username.trim() || !email.trim() || !password.trim()) {
       setError(t('register.errorFillFields'));
       return;
     }
@@ -50,9 +51,9 @@ export default function Register() {
     }
     setLoading(true);
     try {
-      const reg = await registerUser(username.trim(), password.trim(), inviteCode.trim() || undefined);
+      const reg = await registerUser(username.trim(), password.trim(), inviteCode.trim() || undefined, email.trim());
       setIssuedKey(reg.api_key || '');
-      await loginUser(username.trim(), password.trim());
+      await loginUser(email.trim(), password.trim());
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
       if (msg.toLowerCase().includes('invite')) {
@@ -149,6 +150,14 @@ export default function Register() {
                 </label>
                 <input id="reg-username" type="text" value={username} onChange={(e) => setUsername(e.target.value)}
                   placeholder={t('register.username')} className="dark-input" autoComplete="username" />
+              </div>
+
+              <div>
+                <label htmlFor="reg-email" className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
+                  邮箱
+                </label>
+                <input id="reg-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@example.com" className="dark-input" autoComplete="email" required />
               </div>
 
               <div>

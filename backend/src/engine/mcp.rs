@@ -85,6 +85,8 @@ pub struct McpHandler {
     /// A01(审计#134): 子账户角色门 — None=主账户/本地全权; Some(role)时
     /// tools_call 按工具→权限映射拒无权调用。HTTP/TCP入口注入。
     role_gate: Option<crate::engine::user_manager::UserRole>,
+    /// Explicit grant set. When set, it overrides role.can for tool checks.
+    custom_permissions: Option<Vec<String>>,
 }
 
 impl McpHandler {
@@ -94,6 +96,7 @@ impl McpHandler {
             pub_skills: None,
             quota: None,
             role_gate: None,
+            custom_permissions: None,
         }
     }
 
@@ -373,6 +376,7 @@ impl McpHandler {
             pub_skills: Some(pub_skills),
             quota: None,
             role_gate: None,
+            custom_permissions: None,
         }
     }
 
@@ -401,6 +405,11 @@ impl McpHandler {
     /// A01: 注入子账户角色门(主账户/本地不调用=全权)
     pub fn with_role_gate(mut self, role: crate::engine::user_manager::UserRole) -> Self {
         self.role_gate = Some(role);
+        self
+    }
+
+    pub fn with_custom_permissions(mut self, permissions: Option<Vec<String>>) -> Self {
+        self.custom_permissions = permissions;
         self
     }
 
@@ -1238,7 +1247,12 @@ impl McpHandler {
         // 主账户(role_gate=None)与本地构造不设门; 读类/仪式/任务/意志工具放行。
         if let Some(role) = self.role_gate {
             if let Some(perm) = Self::tool_permission(name) {
-                if !role.can(perm) {
+                let allowed = if let Some(custom) = &self.custom_permissions {
+                    custom.iter().any(|n| n == perm.as_str())
+                } else {
+                    role.can(perm)
+                };
+                if !allowed {
                     let denied = self.smrp_err(name, 403, "insufficient role for this tool");
                     let text = serde_json::to_string(&denied).unwrap_or_default();
                     return McpResponse {

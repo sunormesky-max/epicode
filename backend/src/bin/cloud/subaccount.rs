@@ -41,6 +41,9 @@ pub async fn list_subaccounts(
                 "user_id": s.user_id,
                 "plan": serde_json::to_value(&s.plan).unwrap_or_default(),
                 "role": s.role.as_str(),
+                "email": s.email,
+                "custom_permissions": s.custom_permissions,
+                "effective_permissions": s.effective_permissions(),
                 "memories_used": s.memories_used,
                 "created_at": s.created_at,
             })
@@ -239,6 +242,49 @@ pub async fn set_subaccount_role(
             StatusCode::BAD_REQUEST,
             Json(epicode::engine::smrp::envelope_err_plain(
                 "subaccount_set_role",
+                400,
+                &e,
+            )),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SetPermissionsRequest {
+    /// Explicit grant list. Null restores the role template.
+    pub permissions: Option<Vec<String>>,
+}
+
+/// PATCH /v1/subaccounts/:id/permissions — human-configured grant set
+pub async fn set_subaccount_permissions(
+    State(st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
+    Path(sub_id): Path<String>,
+    Json(req): Json<SetPermissionsRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = require_perm(&user, Permission::SubaccountManage) {
+        return r;
+    }
+    match st
+        .user_mgr
+        .set_subaccount_permissions(&user.user_id, &sub_id, req.permissions)
+    {
+        Ok(info) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok_plain(
+                "subaccount_set_permissions",
+                serde_json::json!({
+                    "user_id": info.user_id,
+                    "role": info.role.as_str(),
+                    "custom_permissions": info.custom_permissions,
+                    "effective_permissions": info.effective_permissions(),
+                }),
+            )),
+        ),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "subaccount_set_permissions",
                 400,
                 &e,
             )),

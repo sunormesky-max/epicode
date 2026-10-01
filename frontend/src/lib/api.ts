@@ -732,7 +732,8 @@ export async function loginUser(username: string, password: string): Promise<{ a
 export async function registerUser(
   username: string,
   password: string,
-  inviteCode?: string
+  inviteCode?: string,
+  email?: string
 ): Promise<{ user_id: string; api_key: string }> {
   const extraHeaders: Record<string, string> = {};
   if (inviteCode) {
@@ -740,7 +741,7 @@ export async function registerUser(
   }
   const data = await request<{ success: boolean; user_id: string; api_key: string; plan: string; max_memories: number }>('/register', {
     method: 'POST',
-    body: { user_id: username, password },
+    body: { user_id: username, password, email: email || undefined },
     public: true,
     extraHeaders,
   });
@@ -1133,6 +1134,15 @@ export function setSubAccountRole(user_id: string, role: SubRole): Promise<{ use
   return request(`/v1/subaccounts/${encodeURIComponent(user_id)}/role`, {
     method: 'PATCH',
     body: { role },
+  });
+}
+
+/** Human-configured grant set. Null restores the role template. */
+export function setSubAccountPermissions(user_id: string, permissions: string[] | null): Promise<{ user_id: string; effective_permissions: string[] }> {
+  invalidateCache('/v1/subaccounts');
+  return request(`/v1/subaccounts/${encodeURIComponent(user_id)}/permissions`, {
+    method: 'PATCH',
+    body: { permissions },
   });
 }
 

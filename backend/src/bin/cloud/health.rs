@@ -422,6 +422,9 @@ pub struct RegisterRequest {
     pub user_id: String,
     pub plan: Option<String>,
     pub password: String,
+    /// Optional login alias. When set, login accepts this email as well as user_id.
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 pub async fn register_user(
@@ -443,6 +446,11 @@ pub async fn register_user(
             StatusCode::BAD_REQUEST,
             "password must be at least 6 characters",
         );
+    }
+    if let Some(email) = req.email.as_deref() {
+        if !email.trim().is_empty() && epicode::engine::user_manager::normalize_email(email).is_err() {
+            return error_response(StatusCode::BAD_REQUEST, "invalid email");
+        }
     }
 
     // 验证通过后检查授权（邀请码/admin）
@@ -478,7 +486,7 @@ pub async fn register_user(
 
     match st
         .user_mgr
-        .register(&req.user_id, &api_key, plan, &req.password)
+        .register(&req.user_id, &api_key, plan, &req.password, req.email.as_deref())
     {
         Ok(info) => {
             tracing::info!("user registered: {} plan={:?}", info.user_id, info.plan);
@@ -487,6 +495,7 @@ pub async fn register_user(
                 Json(serde_json::json!({
                     "success": true,
                     "user_id": info.user_id,
+                "email": info.email,
                     "api_key": api_key,
                     "plan": serde_json::to_value(&info.plan).unwrap_or_default(),
                     "max_memories": info.max_memories,
@@ -506,6 +515,7 @@ pub async fn register_user(
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
+    /// user_id or registered email
     pub user_id: String,
     pub password: String,
 }
@@ -679,7 +689,11 @@ pub async fn login_user(
     Json(req): Json<LoginRequest>,
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
-    if let Err(e) = validate_user_id(&req.user_id) {
+    if req.user_id.contains('@') {
+        if epicode::engine::user_manager::normalize_email(&req.user_id).is_err() {
+            return error_response(StatusCode::BAD_REQUEST, "invalid email").into_response();
+        }
+    } else if let Err(e) = validate_user_id(&req.user_id) {
         return error_response(StatusCode::BAD_REQUEST, &e).into_response();
     }
     if req.password.is_empty() {
