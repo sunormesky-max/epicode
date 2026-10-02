@@ -282,6 +282,6 @@ fn record_api_call(st: &CloudState, api_key: &str) {
     let mut daily = st.api_calls_daily.lock();
     let user_daily = daily
         .entry(api_key.to_string())
-        .or_insert_with(HashMap::new);
+        .or_default();
     *user_daily.entry(today).or_insert(0) += 1;
 }
