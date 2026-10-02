@@ -12,7 +12,7 @@ import {
 
 const RAIL_W = 64;
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default function DashboardLayout({ children, viewport = false }: { children: React.ReactNode; viewport?: boolean }) {
   const { t, lang } = useI18nContext();
   const location = useLocation();
   const path = location.pathname;
@@ -221,7 +221,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         className="min-h-screen md:pl-[64px]"
         style={{ position: 'relative', zIndex: 1 }}
       >
-        <div className="px-5 pt-16 pb-5 md:p-7 max-w-[1440px] mx-auto observatory-frame">
+        <div className={`px-5 pt-16 pb-5 md:p-7 max-w-[1440px] mx-auto observatory-frame${viewport ? ' dashboard-viewport-frame' : ''}`}>
           <header className="dashboard-header">
             <div><span className="workspace-label">EPICODE / {lang === 'zh' ? '工作空间' : 'WORKSPACE'}</span><p>{navItems.find(item => item.href.replace('#', '') === path.replace(/\/$/, ''))?.label ?? t('nav.overview')}</p></div>
             <ObservationStatus />
@@ -229,7 +229,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <nav className="dashboard-page-nav" aria-label={lang === 'zh' ? '工作空间页面' : 'Workspace pages'}>{navItems.map(item => <a key={item.href} href={item.href} aria-current={path.replace(/\/$/, '') === item.href.replace('#', '') ? 'page' : undefined}>{item.label}</a>)}</nav>
           <span className="of-corner-b left" aria-hidden="true" />
           <span className="of-corner-b right" aria-hidden="true" />
-          {children}
+          {viewport ? <div className="dashboard-viewport-content">{children}</div> : children}
         </div>
       </main>
 

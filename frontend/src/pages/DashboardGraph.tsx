@@ -1131,11 +1131,11 @@ export default function DashboardGraph() {
   };
 
   return (
-    <DashboardLayout>
+    <DashboardLayout viewport>
       {/* 全屏图谱容器 */}
       <div style={{
         position: 'relative',
-        height: 'calc(100vh - 40px)',
+        flex: 1,
         minHeight: 500,
         borderRadius: 16,
         overflow: 'hidden',

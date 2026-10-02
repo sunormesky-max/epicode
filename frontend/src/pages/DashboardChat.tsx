@@ -134,8 +134,8 @@ export default function DashboardChat() {
   ];
 
   return (
-    <DashboardLayout>
-      <div style={{ marginBottom: 16 }}>
+    <DashboardLayout viewport>
+      <div style={{ marginBottom: 16, flexShrink: 0 }}>
         <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent-cyan)', letterSpacing: '0.16em', marginBottom: 10 }}>CHAT</p>
         <h1 style={{
           color: 'var(--text-primary)', fontSize: 'clamp(26px, 3.5vw, 36px)', fontWeight: 700,
@@ -158,9 +158,9 @@ export default function DashboardChat() {
       </div>
 
       {/* 对话区 */}
-      <div style={{ ...glassPanel, display: 'flex', flexDirection: 'column', height: 'calc(100vh - 200px)', minHeight: 400, overflow: 'hidden' }}>
+      <div style={{ ...glassPanel, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 400, overflow: 'hidden' }}>
         {/* 消息列表 */}
-        <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+        <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 20 }}>
           {messages.length === 0 && (
             <div style={{ textAlign: 'center', padding: '40px 20px' }}>
               <Brain size={48} style={{ color: 'rgba(62,207,174,0.3)', marginBottom: 16 }} />
@@ -251,7 +251,7 @@ export default function DashboardChat() {
         </div>
 
         {/* 输入区 */}
-        <div style={{ padding: 16, borderTop: '1px solid rgba(62,207,174,0.1)' }}>
+        <div style={{ padding: 16, flexShrink: 0, borderTop: '1px solid rgba(62,207,174,0.1)' }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
               ref={inputRef}
