@@ -1,10 +1,10 @@
-import { lazy, Suspense, Component, type ReactNode } from 'react';
+import { lazy, Suspense, Component, Fragment, useEffect, useState, type ReactNode } from 'react';
 import { Routes, Route, Navigate } from 'react-router';
 import { I18nProvider } from '@/i18n/I18nContext';
 import PageBackground from '@/components/PageBackground';
 import AudioField from "./components/AudioField";
 import { CognitiveProvider } from '@/components/CognitiveContext';
-import { isAuthenticated } from '@/lib/api';
+import { AUTH_CHANGE_EVENT, getUserId, isAuthenticated } from '@/lib/api';
 
 const Home = lazy(() => import('@/pages/Home'));
 const Login = lazy(() => import('@/pages/Login'));
@@ -65,12 +65,23 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 }
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
-  if (!isAuthenticated()) {
-    // 工程性: 过期可见 — 打标让登录页解释原因, 不再静默弹回
-    try { sessionStorage.setItem('epi_auth_expired', '1'); } catch { /* ignore */ }
-    return <Navigate to="/login" replace />;
-  }
-  return <>{children}</>;
+  const [auth, setAuth] = useState(() => ({ userId: getUserId(), transitioning: false }));
+  useEffect(() => {
+    const onAuthChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId?: string | null; transitioning?: boolean }>).detail;
+      setAuth({
+        userId: detail?.userId === undefined ? getUserId() : detail.userId,
+        transitioning: detail?.transitioning === true,
+      });
+    };
+    window.addEventListener(AUTH_CHANGE_EVENT, onAuthChange);
+    return () => window.removeEventListener(AUTH_CHANGE_EVENT, onAuthChange);
+  }, []);
+
+  // Unmount cached page state before logout or an account change completes.
+  if (auth.transitioning) return <Loading />;
+  if (!auth.userId || !isAuthenticated()) return <Navigate to="/login" replace />;
+  return <Fragment key={auth.userId}>{children}</Fragment>;
 }
 
 function NotFound() {
