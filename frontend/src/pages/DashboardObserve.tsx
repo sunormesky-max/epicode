@@ -1,23 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
 import { AUTH_CHANGE_EVENT } from '@/lib/api';
-import {
-  presentDriveDescription,
-  presentDriveGrounding,
-  type DriveGrounding,
-  type PresentedDriveGrounding,
-} from '@/lib/drive-signals';
+import { presentDriveDescription } from '@/lib/drive-signals';
 // 历史火花线: 会话级状态环存(最近120个认知采样), 观测舱的心电图
 import DashboardLayout from '@/components/DashboardLayout';
-import { useIsMobile } from '@/hooks/useIsMobile';
+import { energyPercent, mergeEvents } from '@/lib/observation';
 import { useI18nContext } from '@/i18n/useI18n';
-import type { TranslationKey } from '@/i18n/translations';
 
 /**
  * 观测舱 — Observation Deck
  *
- * 人类观测系统的核心界面: 全视口沉浸视图,人类像通过望远镜观察活系统。
- * 四角 HUD 读数 + 中心脉冲事件,全部由背景 SSE 已发布的真实认知状态驱动。
- * 零卡片,零装饰 — 只有仪器。
+ * Readable state, bounded signal history and sample trends from the shared SSE.
+ * No inferred engine health: sample freshness is reported by the workspace header.
  */
 
 interface CognitiveState {
@@ -35,8 +28,6 @@ interface DriveSignal {
   intent: string;
   urgency: string;
   desc: string;
-  evidence: number[];
-  grounding: PresentedDriveGrounding | null;
   at: number;
 }
 
@@ -50,41 +41,45 @@ function emoStr(e: unknown): string | null {
 }
 
 export default function DashboardObserve() {
-  const { t } = useI18nContext();
-  const [nowSnapshot] = useState(() => Date.now()); // 渲染期纯函数: 挂载时快照
-  const [cog, setCog] = useState<CognitiveState | null>(null);
+  const { t, lang } = useI18nContext();
+  const zh = lang === 'zh';
+  const [paused, setPaused] = useState(false);
+  const [nowSnapshot, setNowSnapshot] = useState(() => Date.now()); // 渲染期纯函数: 挂载时快照
+  const [cog, setCog] = useState<CognitiveState | null>(() => (window as Window & { __cognitiveState?: CognitiveState }).__cognitiveState ?? null);
   const [wills, setWills] = useState<DriveSignal[]>([]);
-  const [pulses, setPulses] = useState<{ id: number; x: number; y: number; born: number }[]>([]);
-  const pulseId = useRef(0);
-  const isMobile = useIsMobile();
+
   // 历史环存: 每次认知状态到达采样一次(t/energy/dream)
   const [samples, setSamples] = useState<{ t: number; e: number; d: number }[]>([]);
   const sparkRef = useRef<HTMLCanvasElement>(null);
 
+  const dreamStarted = useRef<number | null>(null);
   const [dreamCycles, setDreamCycles] = useState(0);
   const [lastDream, setLastDream] = useState<number | null>(null);
   useEffect(() => {
     const onCog = (ev: Event) => {
       const d = (ev as CustomEvent).detail as CognitiveState;
       const isDream = (d.cognitiveStatus || '').includes('dream') || (d.cognitiveStatus || '').includes('sleep');
-      setSamples(prev => {
-        const wasDream = prev.length > 0 ? prev[prev.length - 1].d === 1 : false;
-        if (isDream && !wasDream) setDreamCycles(c => c + 1);           // 入梦沿: 新周期
-        if (!isDream && wasDream && prev.length > 1) {
-          const seg = prev.filter(x => x.d === 1);
-          if (seg.length > 1) setLastDream(Math.round((seg[seg.length - 1].t - seg[0].t) / 60000));
-        }
-        return [...prev.slice(-119), { t: Date.now(), e: d.energy ?? 0, d: isDream ? 1 : 0 }];
-      });
+      if (!d.timestamp) return;
+      if (isDream && dreamStarted.current === null) {
+        dreamStarted.current = Date.now();
+        setDreamCycles(count => count + 1);
+      } else if (!isDream && dreamStarted.current !== null) {
+        setLastDream(Math.round((Date.now() - dreamStarted.current) / 60000));
+        dreamStarted.current = null;
+      }
+      setSamples(prev => [...prev.slice(-119), { t: Date.now(), e: d.energy ?? 0, d: isDream ? 1 : 0 }]);
     };
     const onAuthChange = () => {
       setSamples([]);
+      dreamStarted.current = null;
       setDreamCycles(0);
       setLastDream(null);
     };
+    const timer = window.setInterval(() => { if (!document.hidden) setNowSnapshot(Date.now()); }, 5000);
     window.addEventListener('cognitive-update', onCog);
     window.addEventListener(AUTH_CHANGE_EVENT, onAuthChange);
     return () => {
+      clearInterval(timer);
       window.removeEventListener('cognitive-update', onCog);
       window.removeEventListener(AUTH_CHANGE_EVENT, onAuthChange);
     };
@@ -93,22 +88,25 @@ export default function DashboardObserve() {
   // 火花线绘制
   useEffect(() => {
     const c = sparkRef.current;
-    if (!c || samples.length < 2) return;
+    if (!c) return;
     const ctx = c.getContext('2d');
     if (!ctx) return;
     const W = c.width = c.offsetWidth * 2, H = c.height = 76;
     ctx.setTransform(2, 0, 0, 2, 0, 0);
     const w = W / 2, h = H / 2;
     ctx.clearRect(0, 0, w, h);
+    if (samples.length < 2) return;
     const n = samples.length;
     const x = (i: number) => (i / (n - 1)) * (w - 2) + 1;
-    const yE = (v: number) => h - 6 - (v / 10000) * (h - 12);
+    const yE = (v: number) => h - 6 - (energyPercent(v) / 100) * (h - 12);
     // 能量线(青)
     ctx.beginPath();
     samples.forEach((s2, i) => i ? ctx.lineTo(x(i), yE(s2.e)) : ctx.moveTo(x(i), yE(s2.e)));
     // 基线(发丝)
     ctx.strokeStyle = 'rgba(245,244,240,0.06)'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(1, h - 6); ctx.lineTo(w - 1, h - 6); ctx.stroke();
+    ctx.beginPath();
+    samples.forEach((s2, i) => i ? ctx.lineTo(x(i), yE(s2.e)) : ctx.moveTo(x(i), yE(s2.e)));
     // 能量线下渐变充填
     ctx.lineTo(x(n - 1), h); ctx.lineTo(x(0), h); ctx.closePath();
     const fg = ctx.createLinearGradient(0, 0, 0, h);
@@ -135,41 +133,21 @@ export default function DashboardObserve() {
     const onCog = (e: Event) => {
       const d = (e as CustomEvent).detail as CognitiveState;
       setCog(d);
-      // 认知状态到达 → 场内脉冲环(真实事件驱动的观测视效)
-      const id = ++pulseId.current;
-      setPulses(p => [...p.slice(-5), { id, x: 20 + Math.random() * 60, y: 55 + Math.random() * 25, born: Date.now() }]);
-      setTimeout(() => setPulses(p => p.filter(x => x.id !== id)), 2600);
     };
     const onDrive = (e: Event) => {
-      const d = (e as CustomEvent).detail as { signals?: {
-        id: number;
-        intent_type: string;
-        urgency: string;
-        description?: string | null;
-        description_e2e?: string | null;
-        evidence?: number[];
-        grounding?: DriveGrounding | null;
-        grounding_e2e?: string | null;
-      }[] };
+      if (paused) return;
+      const d = (e as CustomEvent).detail as { signals?: { id: number; intent_type: string; urgency: string; description?: string | null; description_e2e?: string | null }[] };
       if (Array.isArray(d.signals)) {
-        setWills(prev => [...d.signals!.map(s => {
+        setWills(prev => mergeEvents(d.signals!.map(s => {
           const description = presentDriveDescription(s, t('dash.cog.driveEncrypted'), s.intent_type);
-          const grounding = presentDriveGrounding(s, t('dash.cog.driveEncrypted'));
-          return {
-            id: s.id,
-            intent: s.intent_type,
-            urgency: s.urgency,
-            desc: description.text,
-            evidence: s.evidence ?? [],
-            grounding,
-            at: Date.now(),
-          };
-        }), ...prev].slice(0, 6));
+          return { id: s.id, intent: s.intent_type, urgency: s.urgency, desc: description.text, at: Date.now() };
+        }), prev, 20));
       }
     };
     const onAuthChange = () => {
       setCog(null);
       setWills([]);
+      setPaused(false);
     };
     window.addEventListener('cognitive-update', onCog);
     window.addEventListener('drive-update', onDrive);
@@ -179,25 +157,26 @@ export default function DashboardObserve() {
       window.removeEventListener('drive-update', onDrive);
       window.removeEventListener(AUTH_CHANGE_EVENT, onAuthChange);
     };
-  }, [t]);
+  }, [t, paused]);
 
-  const status = cog?.cognitiveStatus ?? '—';
+  const status = cog?.timestamp ? cog.cognitiveStatus : (zh ? '等待数据' : 'Waiting for data');
   const statusColor = status.includes('dream') || status.includes('sleep') ? 'var(--accent-purple)' : 'var(--accent-cyan)';
   const emo = emoStr(cog?.emotion);
-  const energyPct = cog ? Math.min(100, cog.energy / 10000 * 100) : 0;
+  const energyPct = cog ? energyPercent(cog.energy) : 0;
 
   const HUD_LABEL: React.CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.16em' };
   const HUD_VAL: React.CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-secondary)' };
 
   return (
     <DashboardLayout>
+      <section className="observe-intro"><div><p className="workspace-label">{zh ? '人类观测站' : 'OBSERVATION DECK'}</p><h1>{zh ? '看见系统正在发生什么' : 'Understand the system at a glance'}</h1><p>{zh ? '先看数据是否新鲜，再看状态、趋势与行动信号。' : 'Check freshness first, then explore state, trends and signals.'}</p></div><a href="#/dashboard/cognitive" className="observe-button">{zh ? '认知详情 →' : 'Cognitive details →'}</a></section>
       {/* 全视口观测面: 不用普通内容 padding,直接铺满取景框内区域 */}
-      <div style={isMobile ? { minHeight: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', gap: 22, paddingTop: 8 } : { minHeight: 'calc(100vh - 120px)', position: 'relative' }}>
+      <div className="observe-grid">
 
         {/* 中心: 当前状态大字 — 系统此刻的存在方式 */}
-        <div style={isMobile ? { textAlign: 'center', pointerEvents: 'none', padding: '24px 0' } : { position: 'absolute', top: '38%', left: 0, right: 0, textAlign: 'center', pointerEvents: 'none' }}>
+        <div className="observe-panel observe-state">
           <div style={{
-            fontFamily: 'var(--font-display)', fontSize: 'clamp(40px, 8vw, 110px)', fontWeight: 700,
+            fontFamily: 'var(--font-display)', fontSize: 'clamp(26px, 4vw, 48px)', fontWeight: 700,
             letterSpacing: '-0.04em', color: 'var(--text-primary)', opacity: 0.9, lineHeight: 1,
             transition: 'color 1.2s ease',
           }}>
@@ -210,87 +189,47 @@ export default function DashboardObserve() {
           )}
         </div>
 
-        {/* 事件脉冲环: 认知状态到达时的真实事件视效 */}
-        {pulses.map(p => (
-          <span key={p.id} style={{
-            position: 'absolute', left: `${p.x}%`, top: `${p.y}%`,
-            width: 14, height: 14, marginLeft: -7, marginTop: -7, borderRadius: '50%',
-            border: `1px solid ${statusColor}`, pointerEvents: 'none',
-            animation: 'ob-pulse 2.6s ease-out forwards',
-          }} />
-        ))}
 
         {/* HUD 左上: 生命体征 */}
-        <div style={isMobile ? { borderLeft: '2px solid var(--accent-cyan)', paddingLeft: 12 } : { position: 'absolute', top: 8, left: 12 }}>
-          <p style={HUD_LABEL}>VITALS</p>
-          <p style={{ ...HUD_VAL, marginTop: 6 }}>e=<span style={{ color: statusColor }}>{cog?.energy ?? '—'}</span> / 10000</p>
+        <div className="observe-panel">
+          <p style={HUD_LABEL}>{zh ? '能量与记忆簇' : 'VITALS'}</p>
+          <p style={{ ...HUD_VAL, marginTop: 6 }}>e=<span style={{ color: statusColor }}>{cog?.timestamp ? cog.energy : '—'}</span> / 10000</p>
           <div style={{ width: 150, height: 3, background: 'rgba(245,244,240,0.06)', borderRadius: 2, marginTop: 6, overflow: 'hidden' }}>
             <div style={{ width: `${energyPct}%`, height: '100%', background: statusColor, transition: 'width 1s ease' }} />
           </div>
-          <p style={{ ...HUD_VAL, marginTop: 8 }}>clusters <span style={{ color: 'var(--text-primary)' }}>{cog?.clusters ?? '—'}</span></p>
+          <p style={{ ...HUD_VAL, marginTop: 8 }}>clusters <span style={{ color: 'var(--text-primary)' }}>{cog?.timestamp ? cog.clusters : '—'}</span></p>
         </div>
 
         {/* HUD 右上: 记忆体量 */}
-        <div style={isMobile ? { borderLeft: '2px solid var(--accent-purple)', paddingLeft: 12 } : { position: 'absolute', top: 8, right: 12, textAlign: 'right' }}>
-          <p style={HUD_LABEL}>MEMORY</p>
+        <div className="observe-panel">
+          <p style={HUD_LABEL}>{zh ? '记忆总量' : 'MEMORIES'}</p>
           <p style={{ fontFamily: 'var(--font-display)', fontSize: 34, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', marginTop: 4 }}>
-            {cog?.memories ?? '—'}
+            {cog?.timestamp ? cog.memories.toLocaleString() : '—'}
           </p>
-          <p style={HUD_LABEL}>memories live</p>
+          <p style={HUD_LABEL}>{zh ? '最近一次有效采样' : 'Last received sample'}</p>
         </div>
 
         {/* HUD 左下: 意志流 — 系统最近的欲望 */}
-        <div style={isMobile ? { borderLeft: '2px solid var(--accent-cyan)', paddingLeft: 12 } : { position: 'absolute', bottom: 8, left: 12, maxWidth: '46%' }}>
-          <p style={HUD_LABEL}>WILL STREAM</p>
+        <div className="observe-panel observe-signals">
+          <div className="observe-heading"><h2>{zh ? '行动信号' : 'ACTION SIGNALS'} <span>{wills.length}</span></h2><button className="observe-button" onClick={() => setPaused(value => !value)} aria-pressed={paused}>{paused ? (zh ? '继续接收' : 'Resume') : (zh ? '暂停接收' : 'Pause')}</button></div>
+          <p className="observe-caption">{paused ? (zh ? '列表已暂停；暂停期间的事件不会补回。状态读数继续更新。' : 'Feed paused; skipped events are not replayed. State readings continue.') : (zh ? '保留最近 20 条唯一信号，展开查看全文。信号不代表已执行。' : 'Latest 20 unique signals. Expand to read; signals do not confirm execution.')}</p>
           {wills.length === 0 ? (
-            <p style={{ ...HUD_VAL, marginTop: 6, opacity: 0.5 }}>no signals — the system is quiet</p>
-          ) : wills.map(w => {
-            const uncertaintyLabel = (uncertainty: string) => {
-              const keys: Record<string, TranslationKey> = {
-                single_memory_source: 'dash.cog.driveUncertainty.singleMemorySource',
-                not_reviewed: 'dash.cog.driveUncertainty.notReviewed',
-                known_conflict: 'dash.cog.driveUncertainty.knownConflict',
-                unresolved_evidence: 'dash.cog.driveUncertainty.unresolvedEvidence',
-              };
-              const key = keys[uncertainty];
-              return key ? t(key) : uncertainty;
-            };
-            const sources = w.grounding?.evidence.length
-              ? w.grounding.evidence.map(source => {
-                const recordedAt = new Date(source.recorded_at * 1000).toISOString().slice(0, 16);
-                return `#${source.id} @${recordedAt}`;
-              }).join(', ')
-              : w.evidence.map(id => `#${id}`).join(', ');
-            const groundingTitle = w.grounding
-              ? `${t('dash.cog.driveReason')}: ${w.grounding.reason}\n${t('dash.cog.driveEvidence')}: ${sources}\n${t('dash.cog.driveUncertainty')}: ${w.grounding.uncertainty.map(uncertaintyLabel).join(', ')}`
-              : `${t('dash.cog.driveEvidence')}: ${sources || t('dash.cog.driveEvidence.none')}`;
-            return (
-              <div key={w.id} title={`${w.desc}\n${groundingTitle}`}>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, marginTop: 5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  <span style={{ color: 'var(--accent-cyan)' }}>#{w.id}</span>{' '}
-                  <span style={{ color: 'var(--text-secondary)' }}>{w.intent}</span>{' '}
-                  <span style={{ opacity: 0.6 }}>{w.urgency}</span>{' '}
-                  {w.desc.slice(0, 60)}
-                </p>
-                {(w.evidence.length > 0 || w.grounding) && (
-                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: 10, marginTop: 2, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {w.grounding?.encrypted
-                      ? w.grounding.reason
-                      : `${w.grounding?.reason ? `${t('dash.cog.driveReason')}: ${w.grounding.reason} · ` : ''}${t('dash.cog.driveEvidence')}: ${sources || t('dash.cog.driveEvidence.none')}${w.grounding?.uncertainty.length ? ` · ${t('dash.cog.driveUncertainty')}: ${w.grounding.uncertainty.map(uncertaintyLabel).join(', ')}` : ''}`}
-                  </p>
-                )}
-              </div>
-            );
-          })}
+            <p style={{ ...HUD_VAL, marginTop: 6, opacity: 0.5 }}>{zh ? '尚未收到行动信号；不代表系统没有活动。' : 'No signals received; this does not imply inactivity.'}</p>
+          ) : wills.map(w => (
+            <details key={w.id} className="signal-row">
+              <summary><span>#{w.id}</span><strong>{w.intent}</strong><span className={['high', 'critical'].includes(w.urgency) ? 'signal-urgent' : ''}>{w.urgency}</span></summary>
+              <p>{w.desc}</p>
+            </details>
+          ))}
         </div>
 
         {/* HUD 右下: 最新思维 — 系统此刻在想什么 */}
-        <div style={isMobile ? { borderLeft: '2px solid var(--accent-purple)', paddingLeft: 12 } : { position: 'absolute', bottom: 8, right: 12, maxWidth: '40%', textAlign: 'right' }}>
-          <p style={HUD_LABEL}>LATEST THOUGHT</p>
-          <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 6, lineHeight: 1.6, maxHeight: 66, overflow: 'hidden', textAlign: isMobile ? 'left' : 'right' }}>
+        <div className="observe-panel observe-thought">
+          <p style={HUD_LABEL}>{zh ? '最新思维' : 'LATEST THOUGHT'}</p>
+          <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 6, lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
             {(cog?.latestThought || '').trim() && cog
               ? cog.latestThought
-              : <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)', fontStyle: 'italic' }}>the mind is quiet</span>}
+              : <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)', fontStyle: 'italic' }}>{zh ? '尚未收到思维内容' : 'No thought received yet'}</span>}
           </p>
           {cog && (cog.latestThought || '').trim() && (
             <p style={{ ...HUD_LABEL, marginTop: 6, opacity: 0.6 }}>
@@ -300,16 +239,22 @@ export default function DashboardObserve() {
         </div>
 
         {/* 底部中央: 状态历史火花线 + 观测提示 */}
-        <div style={isMobile ? { width: '100%', textAlign: 'center' } : { position: 'absolute', bottom: 26, left: '50%', transform: 'translateX(-50%)', width: 'min(560px, 60vw)', textAlign: 'center' }}>
-          <canvas ref={sparkRef} style={{ width: '100%', height: 46, display: samples.length < 2 ? 'none' : 'block' }} />
+        <div className="observe-panel observe-history">
+          <h2>{zh ? '能量趋势' : 'Energy trend'}</h2>
+          <p className="observe-caption">{zh ? '最近 120 个采样，能量范围 0–100%；横轴为采样顺序，不代表固定时间间隔。紫色区间表示梦境状态。' : 'Latest 120 samples, energy 0–100%, by arrival order rather than fixed time intervals. Violet bands indicate dream states.'}</p>
+          <canvas role="img" aria-label={zh ? "能量采样趋势" : "Energy sample trend"} ref={sparkRef} style={{ width: '100%', height: 46, display: samples.length < 2 ? 'none' : 'block' }} />
+          {samples.length > 0 && <details className="sample-details"><summary>{zh ? '最近采样明细' : 'Recent sample details'}</summary><table>
+            <thead><tr><th>{zh ? '接收时间' : 'Received'}</th><th>{zh ? '能量' : 'Energy'}</th><th>{zh ? '梦境' : 'Dream'}</th></tr></thead>
+            <tbody>{samples.slice(-10).reverse().map((sample, index) => <tr key={`${sample.t}-${index}`}><td>{new Date(sample.t).toLocaleTimeString(zh ? 'zh-CN' : 'en-US')}</td><td>{sample.e}</td><td>{sample.d ? (zh ? '是' : 'Yes') : '—'}</td></tr>)}</tbody>
+          </table></details>}
           {samples.length < 2 && (
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', opacity: 0.6, height: 38, lineHeight: '38px', margin: 0 }}>
-              HISTORY — 保持观测以积累
+              {zh ? '等待至少两个采样，暂无数据不代表能量为零。' : 'Waiting for two samples. Missing data does not mean zero energy.'}
             </p>
           )}
         </div>
-        <p style={isMobile ? { fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.2em', opacity: 0.6, textAlign: 'center' } : { position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.2em', opacity: 0.6 }}>
-          OBSERVATION DECK · LIVE · {samples.length} SAMPLES{dreamCycles > 0 ? ` · DREAMS ${dreamCycles}${lastDream != null ? ` (last ${lastDream}m)` : ''}` : ''}
+        <p className="observe-footnote">
+          OBSERVATION DECK · {samples.length} SAMPLES{dreamCycles > 0 ? ` · DREAMS ${dreamCycles}${lastDream != null ? ` (last ${lastDream}m)` : ''}` : ''}
         </p>
       </div>
     </DashboardLayout>

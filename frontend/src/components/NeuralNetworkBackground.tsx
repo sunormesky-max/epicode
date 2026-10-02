@@ -345,7 +345,12 @@ export default function NeuralNetworkBackground() {
         rafRef.current = requestAnimationFrame(loop);
       }
     }
-    function startLoop() { if (!rafRef.current) { lastTime = 0; rafRef.current = requestAnimationFrame(loop); } }
+    const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    function startLoop() {
+      if (document.hidden) return;
+      if (motionPreference.matches) { draw(); return; }
+      if (!rafRef.current) { lastTime = 0; rafRef.current = requestAnimationFrame(loop); }
+    }
     function stopLoop() { if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; } }
 
     resize();
@@ -354,12 +359,14 @@ export default function NeuralNetworkBackground() {
     let resizeTimer: ReturnType<typeof setTimeout>;
     const onR = () => {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => { resize(); }, 150);
+      resizeTimer = setTimeout(() => { resize(); if (motionPreference.matches) draw(); }, 150);
     };
     const onVis = () => {
       visibleRef.current = !document.hidden;
       if (document.hidden) stopLoop(); else startLoop();
     };
+    const onMotion = () => { stopLoop(); startLoop(); };
+    motionPreference.addEventListener('change', onMotion);
     const onScroll = () => { scrollY.current = window.scrollY; };
     const onProbe = (ev: Event) => {
       const n = Math.min(12, ((ev as CustomEvent).detail as { count?: number })?.count ?? 0);
@@ -442,6 +449,7 @@ export default function NeuralNetworkBackground() {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("mousemove", onM);
       document.removeEventListener('visibilitychange', onVis);
+      motionPreference.removeEventListener('change', onMotion);
     };
   }, []);
 
