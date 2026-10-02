@@ -22,14 +22,15 @@ Public API base URL: `https://epicode.cn/api`. Authenticated endpoints accept an
 - SSE GET /v1/stream?ticket=YOUR_ONE_USE_TICKET — live cognitive stream (energy, emotion, cognitive_status, drive signals). Request a fresh ticket for every reconnect. Never put a long-lived API key in a URL.
 
 ## L0 Drive
-- GET /v1/drive/inbox — SMRP envelope; `data` contains unacknowledged `signals`, `stats`, and `empty_reason`. Inbox includes pending and delivered signals and a `retryable` flag.
+- GET /v1/drive/inbox — SMRP envelope; `data` contains unacknowledged `signals`, `stats`, and `empty_reason`. Inbox includes pending and delivered signals and a `retryable` flag. Memory-backed signals add `grounding` with source memory IDs/revisions, timestamps, rule reason, freshness deadline, and uncertainty flags; no confidence score is invented.
 - POST /v1/drive/ack {drive_id, executed, outcome, reflection?} — acknowledge and provide execution feedback. Requires an active primary executor registered with POST /v1/runtime/register; POST /v1/runtime/heartbeat revives an expired binding.
 - GET /v1/runtime/status — inspect the executor binding and lease.
 - POST /v1/runtime/unregister — remove the current account's executor binding.
 - Runtime register/status/heartbeat/unregister return an SMRP envelope when the account's engine is loaded and raw JSON otherwise; heartbeat reports `success: false` when no binding exists.
 - MCP `drive_inbox` and `drive_ack` use the same argument and signal fields. `drive_inbox` defaults to a limit of 50.
-- With an executor E2E public key registered, REST/MCP inbox and SSE encrypt descriptions as `description_e2e` and set `description` to null. High/Critical acknowledgements also require E2E enabled on the binding.
+- With an executor E2E public key registered, REST/MCP inbox and SSE encrypt descriptions and grounding as `description_e2e` and `grounding_e2e`, setting their plaintext fields to null. High/Critical acknowledgements also require E2E enabled on the binding.
 - SSE drive events are a projection containing newly enqueued signals. Browser EventSource clients must first mint a one-use ticket; see the stream endpoints above.
+- Drive signals are proposals, not authorization. Acknowledgement records an outcome; obtain explicit user confirmation before external, destructive, or high-impact operations. `ENABLE_COGNITIVE=1` enables the operator-wide cognitive loop; unregistering the executor revokes acknowledgement rights but does not stop proposal generation. There is no per-account proposal pause in the current API.
 
 ## Identity (required before memory tools on a fresh account)
 - POST /v1/identity/confirm — confirm agent identity (REST path of the MCP ritual).

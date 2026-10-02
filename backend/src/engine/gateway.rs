@@ -1105,6 +1105,15 @@ impl GatewayCenter {
     }
 
     pub fn list_by_labels(&self, labels: &[&str], limit: usize) -> Vec<(TetraId, MemoryPayload)> {
+        self.list_by_labels_matching(labels, limit, |_, _| true)
+    }
+
+    pub fn list_by_labels_matching(
+        &self,
+        labels: &[&str],
+        limit: usize,
+        mut include: impl FnMut(TetraId, &MemoryPayload) -> bool,
+    ) -> Vec<(TetraId, MemoryPayload)> {
         let label_idx = self.index.label_index.lock();
         let mut seen = HashSet::new();
         let mut results = Vec::new();
@@ -1113,7 +1122,9 @@ impl GatewayCenter {
                 for &id in ids {
                     if seen.insert(id) {
                         if let Some(t) = self.space.get_tetrahedron(id) {
-                            results.push((id, t.data.clone()));
+                            if include(id, &t.data) {
+                                results.push((id, t.data.clone()));
+                            }
                         }
                     }
                 }

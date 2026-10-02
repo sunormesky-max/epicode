@@ -270,7 +270,7 @@ paths:
     get:
       tags: [L0 Drive]
       summary: Poll unacknowledged drive signals
-      description: Returns pending and delivered signals (up to 50) in an SMRP envelope. Each signal carries retryable; this read does not acknowledge or transition the signal. When a primary executor E2E public key is registered, descriptions are encrypted into description_e2e.
+      description: Returns pending and delivered signals (up to 50) in an SMRP envelope. Each signal carries retryable; this read does not acknowledge or transition the signal. Memory-backed signals include optional grounding provenance and are revalidated before delivery. When a primary executor E2E public key is registered, descriptions and grounding are encrypted into description_e2e and grounding_e2e.
       responses:
         "200":
           description: SMRP envelope with signals, queue stats, and empty_reason
@@ -284,7 +284,7 @@ paths:
     post:
       tags: [L0 Drive]
       summary: Acknowledge a drive signal with execution feedback
-      description: Requires the active primary-executor binding. High/Critical signals require E2E-enabled registration.
+      description: Requires the active primary-executor binding. High/Critical signals require E2E-enabled registration. Acknowledgement records outcome; it is not user consent for an external, destructive, or high-impact operation.
       requestBody:
         required: true
         content:
@@ -428,7 +428,7 @@ paths:
           description: Single-use ticket, valid for 120 seconds.
       responses:
         "200":
-          description: Server-sent status and newly enqueued drive event frames
+          description: Server-sent status and newly enqueued drive event frames; drive projections include memory grounding or its E2E ciphertext.
           content:
             text/event-stream:
               schema: { type: string }
@@ -936,6 +936,30 @@ components:
       properties:
         success: { type: boolean }
         timestamp: { type: integer }
+    DriveGrounding:
+      type: object
+      required: [reason, evidence, uncertainty, fresh_until, complete]
+      properties:
+        reason: { type: string }
+        evidence:
+          type: array
+          items: { $ref: "#/components/schemas/DriveMemoryEvidence" }
+        uncertainty:
+          type: array
+          items:
+            type: string
+            enum: [single_memory_source, not_reviewed, known_conflict, unresolved_evidence]
+        fresh_until: { type: [integer, "null"], description: Unix seconds; uses the existing detector freshness window. }
+        complete: { type: boolean, description: True only when all signal evidence IDs resolve to current persistent memories. }
+    DriveMemoryEvidence:
+      type: object
+      required: [id, revision, recorded_at, last_reviewed_at, importance]
+      properties:
+        id: { type: integer }
+        revision: { type: string, description: Stable hexadecimal fingerprint of content and eligibility metadata; not a confidence value. }
+        recorded_at: { type: integer }
+        last_reviewed_at: { type: [integer, "null"] }
+        importance: { type: number }
     DriveSignal:
       type: object
       required: [id, timestamp, intent_type, description, evidence, urgency, target_capability, emotion, origin_tick, status, feedback, retry_count, expires_at, enqueued_at_ms, time_budget_ms, retryable]
@@ -946,6 +970,12 @@ components:
         description: { type: [string, "null"] }
         description_e2e: { type: [string, "null"], description: Present when description is encrypted for the registered executor. }
         evidence: { type: array, items: { type: integer } }
+        grounding:
+          oneOf:
+            - $ref: "#/components/schemas/DriveGrounding"
+            - type: "null"
+        grounding_e2e: { type: [string, "null"], description: Present when grounding metadata is encrypted for the registered executor. }
+        terminal_reason: { type: [string, "null"], enum: [ttl_expired, evidence_stale, retries_exhausted, null] }
         urgency: { type: string, enum: [low, medium, high, critical] }
         status: { type: string, enum: [pending, delivered, executed, rejected, expired] }
         retryable: { type: boolean }
