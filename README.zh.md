@@ -53,7 +53,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/search \
   -d '{"query": "AI 记忆"}'
 ```
 
-> 💡 **在线演示：** [epicode.cn](https://epicode.cn) · 仪表盘截图将在后续 PR 中补充。
+> 💡 **在线演示：** [epicode.cn](https://epicode.cn)
 
 ## 核心特性
 
