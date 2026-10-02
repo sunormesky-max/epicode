@@ -280,8 +280,6 @@ fn record_api_call(st: &CloudState, api_key: &str) {
     drop(counts);
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let mut daily = st.api_calls_daily.lock();
-    let user_daily = daily
-        .entry(api_key.to_string())
-        .or_default();
+    let user_daily = daily.entry(api_key.to_string()).or_default();
     *user_daily.entry(today).or_insert(0) += 1;
 }
