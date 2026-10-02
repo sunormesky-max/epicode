@@ -267,6 +267,7 @@ pub fn tcp_try_authenticate(
                     user_id: user_info.user_id.clone(),
                 })
                 .with_role_gate(user_info.role)
+                .with_custom_permissions(user_info.custom_permissions.clone())
         } else {
             McpHandler::with_pub_skills(engine, state.pub_skills.clone()).with_quota(
                 epicode::engine::mcp::QuotaContext {

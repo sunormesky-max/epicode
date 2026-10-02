@@ -115,7 +115,7 @@ export default function Login() {
                   {t('login.username')}
                 </label>
                 <input id="login-username" type="text" value={username} onChange={(e) => setUsername(e.target.value)}
-                  placeholder={t('login.username')} className="dark-input" autoComplete="username" />
+                  placeholder="邮箱或用户名" className="dark-input" autoComplete="username" />
               </div>
               <div>
                 <label htmlFor="login-password" className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>

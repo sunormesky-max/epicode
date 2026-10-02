@@ -90,6 +90,7 @@ async fn main() {
         "local-audit-owner-key",
         UserPlan::Pro,
         "local-audit-password",
+        None,
     )
     .unwrap();
     let viewer = mgr
