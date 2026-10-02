@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0](https://github.com/sunormesky-max/epicode/compare/v1.2.0...v1.3.0) (2026-10-02)
+
+
+### Features
+
+* email login and human-configured subaccount permissions ([#145](https://github.com/sunormesky-max/epicode/issues/145)) ([c31cc95](https://github.com/sunormesky-max/epicode/commit/c31cc957dc991cf78cf80ce3b8dcf77dfe8e719f))
+* **ui:** improve dashboard navigation and observation clarity ([#144](https://github.com/sunormesky-max/epicode/issues/144)) ([cb162b3](https://github.com/sunormesky-max/epicode/commit/cb162b37f0e26d0c10452bc77289315c1e2b193b))
+
+
+### Bug Fixes
+
+* persist runtime bindings, expose /mcp, and stop dropping API stats ([#143](https://github.com/sunormesky-max/epicode/issues/143)) ([1ed353b](https://github.com/sunormesky-max/epicode/commit/1ed353b1d9d1d3c90460e303c7fccaa685a83ae3))
+
 ## [1.2.0](https://github.com/sunormesky-max/epicode/compare/v1.1.0...v1.2.0) (2026-10-01)
 
 
