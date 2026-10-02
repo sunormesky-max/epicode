@@ -8,7 +8,7 @@ This roadmap describes the direction of the Epicode project. Items closer to the
 - [x] Fix `context_observe` duplicate-memory extraction caused by overlapping decision/bug/pattern rules.
 - [x] Add memory aging / eviction based on quality score or LRU to prevent low-quality auto-extracted memories from diluting search.
 - [x] Improve CI with dependency caching and frontend/backend matrix coverage.
-- [x] Add dashboard screenshot and demo GIF to README.
+- [ ] Add dashboard screenshot and demo GIF to README.
 
 ## Medium term (3–6 months)
 

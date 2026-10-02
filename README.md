@@ -59,14 +59,14 @@ curl -X POST http://127.0.0.1:8080/api/v1/search \
   -d '{"query": "AI memory"}'
 ```
 
-> 💡 **Live demo:** [epicode.cn](https://epicode.cn) · Dashboard screenshot will be added in a follow-up PR.
+> 💡 **Live demo:** [epicode.cn](https://epicode.cn)
 
 ## Key Features
 
 - **Spatial Memory** — memories stored as tetrahedrons in 3D space for natural clustering.
 - **Semantic Search** — BM25 + HNSW hybrid search for natural-language retrieval.
 - **Knowledge Graph** — automatic relationship extraction and dynamic graph updates.
-- **Temporal Validity** — every memory supports `valid_from` / `valid_until` windows and freshness decay scoring, enabling time-aware recall (on par with Zep/Graphiti's core capability).
+- **Temporal Validity** — every memory supports `valid_from` / `valid_until` windows and freshness decay scoring. This is a storage/filter feature, not a claim of parity with Zep/Graphiti on a shared benchmark.
 - **MCP Integration** — discover the current tool catalog with MCP `tools/list`, including memory, identity, skills, and L0 drive tools.
 - **L0 Active Inference** — evidence-backed drive signals with REST/MCP inbox and acknowledgement flows.
 - **SMRP Protocol** — transport-independent structured memory responses with tier, retrieval provenance, and optional topology/placement metadata.
