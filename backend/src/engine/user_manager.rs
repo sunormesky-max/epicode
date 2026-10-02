@@ -251,7 +251,9 @@ impl UserInfo {
             return true;
         }
         if let Some(custom) = &self.custom_permissions {
-            return custom.iter().any(|name| Permission::parse(name) == Some(perm));
+            return custom
+                .iter()
+                .any(|name| Permission::parse(name) == Some(perm));
         }
         self.role.can(perm)
     }
@@ -674,7 +676,7 @@ impl UserManager {
         if !verify_password(password, &info.password_hash) {
             return Err("invalid password".into());
         }
-        tracing::info!("[UserManager] user {} logged in via password", user_id);
+        tracing::info!("[UserManager] user {} logged in via password", info.user_id);
         Ok(info)
     }
 
@@ -910,7 +912,8 @@ impl UserManager {
             Some(names) => {
                 let mut out = Vec::new();
                 for name in names {
-                    let perm = Permission::parse(name).ok_or_else(|| format!("unknown permission: {name}"))?;
+                    let perm = Permission::parse(name)
+                        .ok_or_else(|| format!("unknown permission: {name}"))?;
                     let label = perm.as_str().to_string();
                     if !out.contains(&label) {
                         out.push(label);
@@ -952,7 +955,6 @@ impl UserManager {
     }
 
     pub fn get_engine(&self, user_id: &str) -> Result<Arc<Engine>, String> {
-
         // H6 修复：防御性兜底——防止 ../ 路径遍历逃逸到任意目录
         if user_id.is_empty()
             || user_id.len() > 64

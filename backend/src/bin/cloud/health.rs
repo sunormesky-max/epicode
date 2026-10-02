@@ -448,7 +448,9 @@ pub async fn register_user(
         );
     }
     if let Some(email) = req.email.as_deref() {
-        if !email.trim().is_empty() && epicode::engine::user_manager::normalize_email(email).is_err() {
+        if !email.trim().is_empty()
+            && epicode::engine::user_manager::normalize_email(email).is_err()
+        {
             return error_response(StatusCode::BAD_REQUEST, "invalid email");
         }
     }
@@ -484,10 +486,13 @@ pub async fn register_user(
     };
     let api_key = format!("tm-{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
 
-    match st
-        .user_mgr
-        .register(&req.user_id, &api_key, plan, &req.password, req.email.as_deref())
-    {
+    match st.user_mgr.register(
+        &req.user_id,
+        &api_key,
+        plan,
+        &req.password,
+        req.email.as_deref(),
+    ) {
         Ok(info) => {
             tracing::info!("user registered: {} plan={:?}", info.user_id, info.plan);
             (

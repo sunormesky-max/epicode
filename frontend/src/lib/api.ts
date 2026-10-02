@@ -1138,6 +1138,12 @@ export function setSubAccountRole(user_id: string, role: SubRole): Promise<{ use
 }
 
 /** Human-configured grant set. Null restores the role template. */
+/** 后端八权限点清单(与 UserRole::permissions 黄金表一致) — 供权限配置UI遍历 */
+export const PERMISSIONS: string[] = [
+  'memory_read', 'memory_write', 'memory_delete', 'persona_import',
+  'skill_manage', 'library_manage', 'subaccount_manage', 'apikey_manage',
+];
+
 export function setSubAccountPermissions(user_id: string, permissions: string[] | null): Promise<{ user_id: string; effective_permissions: string[] }> {
   invalidateCache('/v1/subaccounts');
   return request(`/v1/subaccounts/${encodeURIComponent(user_id)}/permissions`, {
