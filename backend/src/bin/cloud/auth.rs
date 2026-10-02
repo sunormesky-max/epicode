@@ -1,6 +1,5 @@
 //! 鉴权 + 限流中间件（由 HTTP Router 通过 from_fn_with_state 挂载）。
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Instant;
 
@@ -258,19 +257,6 @@ fn check_rate_limit(st: &CloudState, key: &str, limit: usize) -> Option<axum::re
     None
 }
 
-#[cfg(test)]
-mod tests {
-    use super::has_conflicting_user_ids;
-
-    #[test]
-    fn conflicting_user_credentials_are_rejected_without_rejecting_same_user_migration() {
-        assert!(has_conflicting_user_ids(&["user-a", "user-b"]));
-        assert!(!has_conflicting_user_ids(&["user-a", "user-a"]));
-        assert!(!has_conflicting_user_ids(&["user-a"]));
-        assert!(!has_conflicting_user_ids(&[]));
-    }
-}
-
 fn record_api_call(st: &CloudState, api_key: &str) {
     if api_key.is_empty() {
         return;
@@ -282,4 +268,16 @@ fn record_api_call(st: &CloudState, api_key: &str) {
     let mut daily = st.api_calls_daily.lock();
     let user_daily = daily.entry(api_key.to_string()).or_default();
     *user_daily.entry(today).or_insert(0) += 1;
+}
+
+mod tests {
+    use super::has_conflicting_user_ids;
+
+    #[test]
+    fn conflicting_user_credentials_are_rejected_without_rejecting_same_user_migration() {
+        assert!(has_conflicting_user_ids(&["user-a", "user-b"]));
+        assert!(!has_conflicting_user_ids(&["user-a", "user-a"]));
+        assert!(!has_conflicting_user_ids(&["user-a"]));
+        assert!(!has_conflicting_user_ids(&[]));
+    }
 }
