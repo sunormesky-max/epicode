@@ -33,8 +33,7 @@ pub async fn think(
 
     let result = tokio::task::spawn_blocking(move || {
         // 1. 取意志
-        let sig = engine_inner.scheduler().drive_queue().peek_unacked(200)
-            .into_iter().find(|s| s.id == req.signal_id)
+        let sig = engine_inner.scheduler().current_drive_signal(req.signal_id)
             .ok_or_else(|| format!("signal #{} not in unacked inbox", req.signal_id))?;
         let signal_json = serde_json::to_value(&sig).unwrap_or_default();
 

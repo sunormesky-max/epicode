@@ -332,9 +332,9 @@ export type TranslationKey =
   | 'l0.pillar.memory.detail' | 'l0.pillar.memory.principle'
   | 'l0.pillar.mcp.en' | 'l0.pillar.mcp.title' | 'l0.pillar.mcp.def'
   | 'l0.pillar.mcp.detail' | 'l0.pillar.mcp.principle'
-  | 'l0.driveTitle' | 'l0.driveDesc1' | 'l0.driveDesc2'
+  | 'l0.driveTitle' | 'l0.driveDesc1' | 'l0.driveDesc2' | 'l0.driveGroundingDesc'
   | 'l0.driveCodeLabel' | 'l0.driveSseDesc' | 'l0.driveSseCodeLabel'
-  | 'l0.driveAckDesc' | 'l0.driveAckCodeLabel'
+  | 'l0.driveAckDesc' | 'l0.driveAckCodeLabel' | 'l0.driveSafetyDesc'
   | 'l0.evolutionTitle' | 'l0.evolutionDesc'
   | 'l0.flow.memoryAccumulation.label' | 'l0.flow.memoryAccumulation.desc'
   | 'l0.flow.errorDetection.label' | 'l0.flow.errorDetection.desc'
@@ -364,7 +364,11 @@ export type TranslationKey =
   | 'dash.cog.thoughtEmpty' | 'dash.cog.thoughtUpdatedAt'
   | 'dash.cog.learningWaiting' | 'dash.cog.reflectionWaiting'
   | 'dash.cog.explain' | 'dash.cog.driveEmpty'
-  | 'dash.cog.driveEncrypted'
+  | 'dash.cog.driveEncrypted' | 'dash.cog.driveEvidence' | 'dash.cog.driveEvidence.none'
+  | 'dash.cog.driveReason' | 'dash.cog.driveUncertainty'
+  | 'dash.cog.driveSafetyNotice'
+  | 'dash.cog.driveUncertainty.singleMemorySource' | 'dash.cog.driveUncertainty.notReviewed'
+  | 'dash.cog.driveUncertainty.knownConflict' | 'dash.cog.driveUncertainty.unresolvedEvidence'
   | 'dash.cog.refresh' | 'dash.cog.execute' | 'dash.cog.dismiss'
   | 'dash.cog.urgency.low' | 'dash.cog.urgency.medium' | 'dash.cog.urgency.high' | 'dash.cog.urgency.critical'
   | 'dash.cog.unit.signals' | 'dash.cog.executedLabel' | 'dash.cog.pendingLabel'
@@ -1213,15 +1217,17 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'l0.pillar.mcp.detail': 'L0 自研身份/记忆/事件/驱动协议。L1 = MCP/REST 适配层。L2 = 智能体壳。Epicode 的 SMRP 已超越 MCP——传输正交，语义独立。',
     'l0.pillar.mcp.principle': 'L0 人格 → L1 适配 → L2 执行体',
     'l0.driveTitle': 'Drive Signal — 意志的结构化表达',
-    'l0.driveDesc1': 'DriveSignal 的完整序列化结构由 /v1/drive/inbox 返回（SMRP data.signals）；包括状态、证据、过期时间和 retryable。MCP drive_inbox 返回同一信号结构。',
-    'l0.driveDesc2': '轮询：GET /v1/drive/inbox。确认：POST /v1/drive/ack，body 使用 drive_id、executed、outcome 和可选 reflection。ack 需要有效 primary executor 注册。',
+    'l0.driveDesc1': 'DriveSignal 的完整序列化结构由 /v1/drive/inbox 返回（SMRP data.signals）；包括状态、证据、过期时间、retryable 和可选 grounding。MCP drive_inbox 返回同一信号结构。',
+    'l0.driveDesc2': '轮询：GET /v1/drive/inbox。回报结果：POST /v1/drive/ack，body 使用 drive_id、executed、outcome 和可选 reflection。ack 需要有效 primary executor 注册。',
+    'l0.driveGroundingDesc': 'grounding 给出实际触发规则、记忆 ID/revision、记录/复习时间和不确定性标记，不提供虚构置信分数。投递前会重新验证来源版本和现有 10/30/60 分钟窗口；开启 E2E 后，grounding 与 description 一起加密。',
     'l0.driveCodeLabel': 'DRIVE SIGNAL · inbox data.signals[0]',
-    'l0.driveSseDesc': '浏览器 SSE 先用会话 cookie 或 API Key 调 POST /v1/stream/ticket，再以返回的一次性票据连接 GET /v1/stream?ticket=…。每次重连都必须重新申请票据。SSE 的 type=drive 事件包含新入队信号的传输子集；若启用端到端加密，description 为 null 且 description_e2e 携带密文。',
+    'l0.driveSseDesc': '浏览器 SSE 先用会话 cookie 或 API Key 调 POST /v1/stream/ticket，再以返回的一次性票据连接 GET /v1/stream?ticket=…。每次重连都必须重新申请票据。SSE 的 type=drive 事件包含新入队信号的传输子集；若启用端到端加密，description/grounding 为 null，密文分别位于 description_e2e/grounding_e2e。',
     'l0.driveSseCodeLabel': 'SSE EVENT · type=drive',
-    'l0.driveAckDesc': 'REST ack 与 MCP drive_ack 都需要 active primary executor；绑定超时后，POST /v1/runtime/heartbeat 可复活既有绑定。High/Critical 信号还要求注册时启用 E2E。',
+    'l0.driveAckDesc': 'REST ack 与 MCP drive_ack 都需要 active primary executor；绑定超时后，POST /v1/runtime/heartbeat 可复活既有绑定。High/Critical 信号还要求注册时启用 E2E。ack 记录执行反馈，不代表用户同意。',
     'l0.driveAckCodeLabel': 'REST ACK · POST /v1/drive/ack',
+    'l0.driveSafetyDesc': '信号是建议，不是执行授权。外部、破坏性或高影响操作必须先取得用户明确确认。运维可通过 ENABLE_COGNITIVE=1 开启认知循环；runtime/unregister 撤销执行器权限，但不会停止信号生成。当前没有账户级暂停开关。',
     'l0.evolutionTitle': '自驱动进化循环',
-    'l0.evolutionDesc': '当没有外部智能体连接时，Epicode 用自身的认知引擎作为"手"——自己消费自己的意志，形成完整的进化闭环。',
+    'l0.evolutionDesc': '当没有外部智能体连接时，Epicode 只会为仍有效、无已知矛盾的本地记忆生成带来源的摘要；证据稀疏或冲突时不写答案，并保留原始缺口记忆。',
     'l0.flow.memoryAccumulation.label': '记忆积累',
     'l0.flow.memoryAccumulation.desc': '759条记忆+KG+concepts形成内部模型',
     'l0.flow.errorDetection.label': '预测误差检测',
@@ -1290,9 +1296,18 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.cog.explain': '数据来自认知引擎每 3 秒的 SSE 推送。认知引擎以 MiniMax-M3 LLM 为大脑，每 2 分钟自主分析记忆空间状态（熵/簇/孤立率/搜索信号），产出推理思考（thoughts）、决策行动（actions）、学习反馈（learning）。情感系统（PAD 模型）和驱动力引擎影响 LLM 的决策倾向——这是系统"主观体验"的可视化。L0 Active Inference：记忆检测到预测误差 → 产出 DriveSignal（意志）→ 智能体作为"手"执行 → 反馈进化。',
     'dash.cog.driveEmpty': '没有待处理的意志信号。认知引擎下一个 tick（约 2 分钟）可能产生新的意志。',
     'dash.cog.driveEncrypted': '内容已加密；请使用已注册的执行器查看。',
+    'dash.cog.driveEvidence': '记忆证据',
+    'dash.cog.driveEvidence.none': '无可用记忆引用',
+    'dash.cog.driveReason': '触发理由',
+    'dash.cog.driveUncertainty': '不确定性',
+    'dash.cog.driveUncertainty.singleMemorySource': '单条记忆来源，未独立佐证',
+    'dash.cog.driveUncertainty.notReviewed': '来源尚未复习',
+    'dash.cog.driveUncertainty.knownConflict': '存在矛盾记忆',
+    'dash.cog.driveUncertainty.unresolvedEvidence': '部分证据 ID 无法解析为当前记忆',
+    'dash.cog.driveSafetyNotice': '确认按钮只记录执行结果，不会执行建议里的操作；外部、破坏性或高影响操作需先取得用户明确确认。',
     'dash.cog.refresh': '刷新',
-    'dash.cog.execute': '执行',
-    'dash.cog.dismiss': '忽略',
+    'dash.cog.execute': '报告已执行',
+    'dash.cog.dismiss': '报告未执行',
     'dash.cog.urgency.low': '低',
     'dash.cog.urgency.medium': '中',
     'dash.cog.urgency.high': '高',
@@ -2143,15 +2158,17 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'l0.pillar.mcp.detail': 'L0 is a self-developed identity/memory/event/drive protocol. L1 = MCP/REST adapter layer. L2 = agent shell. Epicode\'s SMRP already surpasses MCP — orthogonal transport, independent semantics.',
     'l0.pillar.mcp.principle': 'L0 Personality → L1 Adapter → L2 Executor',
     'l0.driveTitle': 'Drive Signal — Structured Expression of Will',
-    'l0.driveDesc1': 'The full serialized DriveSignal is returned by /v1/drive/inbox (SMRP data.signals), including status, evidence, expiry, and retryable. MCP drive_inbox returns the same signal shape.',
-    'l0.driveDesc2': 'Poll with GET /v1/drive/inbox. Acknowledge with POST /v1/drive/ack using drive_id, executed, outcome, and optional reflection. Ack requires an active primary-executor binding.',
+    'l0.driveDesc1': 'The full serialized DriveSignal is returned by /v1/drive/inbox (SMRP data.signals), including status, evidence, expiry, retryable, and optional grounding. MCP drive_inbox returns the same signal shape.',
+    'l0.driveDesc2': 'Poll with GET /v1/drive/inbox. Report an outcome with POST /v1/drive/ack using drive_id, executed, outcome, and optional reflection. Ack requires an active primary-executor binding.',
+    'l0.driveGroundingDesc': 'grounding reports the actual rule reason, memory IDs/revisions, recorded/reviewed times, and uncertainty flags; it deliberately contains no invented confidence score. Sources and the existing 10/30/60-minute detector windows are revalidated before delivery. E2E encrypts grounding together with the description.',
     'l0.driveCodeLabel': 'DRIVE SIGNAL · inbox data.signals[0]',
-    'l0.driveSseDesc': 'For browser SSE, mint a one-use ticket with POST /v1/stream/ticket using the session cookie or API key, then connect to GET /v1/stream?ticket=…. Mint a fresh ticket on every reconnect. The type=drive event contains a transport subset for newly enqueued signals; with end-to-end encryption enabled, description is null and description_e2e carries the ciphertext.',
+    'l0.driveSseDesc': 'For browser SSE, mint a one-use ticket with POST /v1/stream/ticket using the session cookie or API key, then connect to GET /v1/stream?ticket=…. Mint a fresh ticket on every reconnect. The type=drive event contains a transport subset for newly enqueued signals; with end-to-end encryption enabled, description/grounding are null and description_e2e/grounding_e2e carry the ciphertexts.',
     'l0.driveSseCodeLabel': 'SSE EVENT · type=drive',
-    'l0.driveAckDesc': 'REST ack and MCP drive_ack both require an active primary executor. If its binding expires, POST /v1/runtime/heartbeat revives it. High/Critical signals also require E2E to be enabled at registration.',
+    'l0.driveAckDesc': 'REST ack and MCP drive_ack both require an active primary executor. If its binding expires, POST /v1/runtime/heartbeat revives it. High/Critical signals also require E2E to be enabled at registration. Ack records feedback; it is not user consent.',
     'l0.driveAckCodeLabel': 'REST ACK · POST /v1/drive/ack',
+    'l0.driveSafetyDesc': 'Signals are proposals, not execution authorization. External, destructive, or high-impact operations require explicit user confirmation. Operators enable the cognitive loop with ENABLE_COGNITIVE=1; runtime/unregister revokes executor rights but does not stop proposal generation. There is currently no per-account pause.',
     'l0.evolutionTitle': 'Self-Driving Evolution Loop',
-    'l0.evolutionDesc': 'When no external agent is connected, Epicode uses its own cognitive engine as the "hand" — consuming its own will to form a complete closed loop of evolution.',
+    'l0.evolutionDesc': 'When no external agent is connected, Epicode writes only source-cited summaries from current, non-conflicting local memories; sparse or conflicting evidence produces no answer, and the original gap memory is retained.',
     'l0.flow.memoryAccumulation.label': 'Memory Accumulation',
     'l0.flow.memoryAccumulation.desc': '759 memories + KG + concepts form an internal model',
     'l0.flow.errorDetection.label': 'Prediction Error Detection',
@@ -2220,9 +2237,18 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.cog.explain': 'Data comes from the cognitive engine\'s SSE push every 3 seconds. The engine uses MiniMax-M3 LLM as its brain, autonomously analyzing memory-space state (entropy/clusters/isolation rate/search signals) every 2 minutes to produce reasoning thoughts, decision actions, and learning feedback. The emotion system (PAD model) and drive engine shape the LLM\'s decision tendency — this is a visualization of the system\'s "subjective experience". L0 Active Inference: memory detects prediction error → emits DriveSignal (will) → agent acts as the "hand" → feedback evolution.',
     'dash.cog.driveEmpty': 'No pending will signals. The next cognitive engine tick (~2 min) may produce new will.',
     'dash.cog.driveEncrypted': 'Encrypted for the registered executor; view it through that agent.',
+    'dash.cog.driveEvidence': 'memory evidence',
+    'dash.cog.driveEvidence.none': 'no memory references',
+    'dash.cog.driveReason': 'reason',
+    'dash.cog.driveUncertainty': 'uncertainty',
+    'dash.cog.driveUncertainty.singleMemorySource': 'single memory source; not independently corroborated',
+    'dash.cog.driveUncertainty.notReviewed': 'source has not been reviewed',
+    'dash.cog.driveUncertainty.knownConflict': 'known conflicting memory',
+    'dash.cog.driveUncertainty.unresolvedEvidence': 'some evidence IDs do not resolve to current memories',
+    'dash.cog.driveSafetyNotice': 'Ack reports an outcome; it does not execute a proposal. Obtain explicit user confirmation before external, destructive, or high-impact operations.',
     'dash.cog.refresh': 'Refresh',
-    'dash.cog.execute': 'Execute',
-    'dash.cog.dismiss': 'Dismiss',
+    'dash.cog.execute': 'Report executed',
+    'dash.cog.dismiss': 'Report not executed',
     'dash.cog.urgency.low': 'Low',
     'dash.cog.urgency.medium': 'Medium',
     'dash.cog.urgency.high': 'High',

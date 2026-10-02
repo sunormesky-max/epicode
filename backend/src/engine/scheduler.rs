@@ -1,6 +1,6 @@
 use parking_lot::Mutex as ParkMutex;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -37,6 +37,127 @@ pub struct SearchScoreNotes {
 struct CognitiveThought {
     tick: u64,
     state: SystemState,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct RecalledDriveEvidence {
+    id: u64,
+    content: String,
+    timestamp: i64,
+    relevance: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExploreBlockReason {
+    NoCurrentEvidence,
+    ConflictingEvidence,
+}
+
+fn recalled_drive_evidence(result: &serde_json::Value) -> Vec<RecalledDriveEvidence> {
+    let Some(sections) = result.get("results").and_then(|value| value.as_object()) else {
+        return Vec::new();
+    };
+    let mut by_id = HashMap::new();
+    for items in sections.values().filter_map(|value| value.as_array()) {
+        for item in items {
+            let (Some(id), Some(content), Some(timestamp)) = (
+                item.get("id").and_then(|value| value.as_u64()),
+                item.get("content").and_then(|value| value.as_str()),
+                item.get("timestamp").and_then(|value| value.as_i64()),
+            ) else {
+                continue;
+            };
+            let relevance = item
+                .get("relevance")
+                .and_then(|value| value.as_array())
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(serde_json::Value::as_f64)
+                        .fold(0.0_f64, f64::max)
+                })
+                .unwrap_or_default();
+            if !content.trim().is_empty() {
+                let candidate = RecalledDriveEvidence {
+                    id,
+                    content: content.to_string(),
+                    timestamp,
+                    relevance,
+                };
+                if by_id
+                    .get(&id)
+                    .is_none_or(|existing: &RecalledDriveEvidence| existing.relevance < relevance)
+                {
+                    by_id.insert(id, candidate);
+                }
+            }
+        }
+    }
+    let mut evidence: Vec<_> = by_id.into_values().collect();
+    evidence.sort_by(|a, b| {
+        b.relevance
+            .partial_cmp(&a.relevance)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    evidence.truncate(3);
+    evidence
+}
+
+fn local_exploration_summary(
+    question: &str,
+    evidence: &[RecalledDriveEvidence],
+    conflicts: &[u64],
+) -> Result<String, ExploreBlockReason> {
+    if evidence.is_empty() {
+        return Err(ExploreBlockReason::NoCurrentEvidence);
+    }
+    if !conflicts.is_empty() {
+        return Err(ExploreBlockReason::ConflictingEvidence);
+    }
+    let evidence_text = evidence
+        .iter()
+        .map(|item| {
+            format!(
+                "- [#{}] recorded_at={}: {}",
+                item.id,
+                item.timestamp,
+                item.content.chars().take(160).collect::<String>()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let caveat = if evidence.len() == 1 {
+        "One related memory only; it is not independently corroborated."
+    } else {
+        "These are retrieved memory fragments, not independent verification."
+    };
+    Ok(format!(
+        "Question: {}\nEvidence from current local memories:\n{}\nCaveat: {}\nThis is a source summary, not proof that the knowledge gap is resolved.",
+        question, evidence_text, caveat
+    ))
+}
+
+#[derive(Default)]
+struct SingleFlightGate {
+    in_flight: AtomicBool,
+}
+
+impl SingleFlightGate {
+    fn try_acquire(self: &Arc<Self>) -> Option<SingleFlightPermit> {
+        self.in_flight
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| SingleFlightPermit(Arc::clone(self)))
+    }
+}
+
+struct SingleFlightPermit(Arc<SingleFlightGate>);
+
+impl Drop for SingleFlightPermit {
+    fn drop(&mut self) {
+        self.0.in_flight.store(false, Ordering::Release);
+    }
 }
 
 /// SMRP §7.2 — scheduler 层完整创建报告（gateway 安置 + scheduler 录入副产物）。
@@ -79,6 +200,8 @@ pub struct SchedulerCenter {
     cognitive: Arc<CognitiveEngine>,
     gateway: Arc<super::gateway::GatewayCenter>,
     queue: ParkMutex<VecDeque<ScheduledTask>>,
+    loop_gate: Arc<SingleFlightGate>,
+    cycle_gate: Arc<SingleFlightGate>,
     tx: EventSender,
     tick_interval: parking_lot::RwLock<Duration>,
     tick_count: AtomicU64,
@@ -162,6 +285,8 @@ impl SchedulerCenter {
             cognitive,
             gateway,
             queue: ParkMutex::new(VecDeque::new()),
+            loop_gate: Arc::new(SingleFlightGate::default()),
+            cycle_gate: Arc::new(SingleFlightGate::default()),
             tx,
             tick_interval: parking_lot::RwLock::new(Duration::from_millis(tick_interval_ms)),
             tick_count: AtomicU64::new(0),
@@ -1217,6 +1342,209 @@ impl SchedulerCenter {
         }
     }
 
+    fn grounding_for_evidence(
+        &self,
+        evidence_ids: &[u64],
+        reason: &str,
+        conflict_ids: &[u64],
+        freshness_window_secs: Option<i64>,
+    ) -> Option<super::drive::DriveGrounding> {
+        if evidence_ids.is_empty() {
+            return None;
+        }
+
+        let now = chrono::Utc::now().timestamp();
+        let mut evidence = Vec::new();
+        let mut unresolved = false;
+        for &id in evidence_ids {
+            match self.api_get_node(id) {
+                Some(memory) if super::drive::memory_is_current(&memory, now) => {
+                    evidence.push(super::drive::DriveMemoryEvidence {
+                        id,
+                        revision: format!("{:016x}", super::drive::memory_revision(&memory)),
+                        recorded_at: memory.timestamp,
+                        last_reviewed_at: memory.last_reviewed_ts,
+                        importance: memory.importance,
+                    });
+                }
+                _ => unresolved = true,
+            }
+        }
+        if evidence.is_empty() {
+            return None;
+        }
+
+        let mut uncertainty = Vec::new();
+        if evidence.len() == 1 {
+            uncertainty.push(super::drive::DriveGroundingUncertainty::SingleMemorySource);
+        }
+        if evidence.iter().any(|item| item.last_reviewed_at.is_none()) {
+            uncertainty.push(super::drive::DriveGroundingUncertainty::NotReviewed);
+        }
+        if !conflict_ids.is_empty() {
+            uncertainty.push(super::drive::DriveGroundingUncertainty::KnownConflict);
+        }
+        if unresolved {
+            uncertainty.push(super::drive::DriveGroundingUncertainty::UnresolvedEvidence);
+        }
+
+        Some(super::drive::DriveGrounding {
+            reason: reason.to_string(),
+            complete: !unresolved && evidence.len() == evidence_ids.len(),
+            fresh_until: freshness_window_secs.map(|window| {
+                evidence
+                    .iter()
+                    .map(|source| source.recorded_at.saturating_add(window))
+                    .max()
+                    .unwrap_or_default()
+            }),
+            evidence,
+            uncertainty,
+        })
+    }
+
+    fn active_contradiction_ids(&self, id: u64, now: i64) -> Vec<u64> {
+        let mut contradictions: Vec<u64> = self
+            .api_get_relations(id)
+            .into_iter()
+            .filter(|(_, relation, _)| relation.eq_ignore_ascii_case("contradicts"))
+            .filter_map(|(other_id, _, _)| {
+                self.api_get_node(other_id)
+                    .filter(|memory| super::drive::memory_is_current(memory, now))
+                    .map(|_| other_id)
+            })
+            .collect();
+        contradictions.sort_unstable();
+        contradictions.dedup();
+        contradictions
+    }
+
+    fn signal_evidence_is_current(&self, signal: &super::drive::DriveSignal, now: i64) -> bool {
+        let Some(grounding) = signal.grounding.as_ref() else {
+            return true;
+        };
+        if !grounding.is_fresh_at(now) {
+            return false;
+        }
+        let sources_current = grounding.evidence.iter().all(|source| {
+            self.api_get_node(source.id).is_some_and(|memory| {
+                super::drive::memory_is_current(&memory, now)
+                    && format!("{:016x}", super::drive::memory_revision(&memory)) == source.revision
+            })
+        });
+        if !sources_current {
+            return false;
+        }
+        if matches!(&signal.intent_type, super::drive::DriveIntent::Suggest) {
+            if grounding
+                .uncertainty
+                .contains(&super::drive::DriveGroundingUncertainty::KnownConflict)
+            {
+                return false;
+            }
+            return grounding
+                .evidence
+                .iter()
+                .all(|source| self.active_contradiction_ids(source.id, now).is_empty());
+        }
+        true
+    }
+
+    fn refresh_signal_grounding(&self, signal: &mut super::drive::DriveSignal, now: i64) {
+        let Some(grounding) = signal.grounding.as_mut() else {
+            return;
+        };
+        for source in &mut grounding.evidence {
+            if let Some(memory) = self.api_get_node(source.id) {
+                source.last_reviewed_at = memory.last_reviewed_ts;
+            }
+        }
+        if grounding
+            .evidence
+            .iter()
+            .any(|source| source.last_reviewed_at.is_none())
+        {
+            if !grounding
+                .uncertainty
+                .contains(&super::drive::DriveGroundingUncertainty::NotReviewed)
+            {
+                grounding
+                    .uncertainty
+                    .push(super::drive::DriveGroundingUncertainty::NotReviewed);
+            }
+        } else {
+            grounding
+                .uncertainty
+                .retain(|value| *value != super::drive::DriveGroundingUncertainty::NotReviewed);
+        }
+
+        if !matches!(&signal.intent_type, super::drive::DriveIntent::Suggest) {
+            let has_known_conflict = grounding
+                .evidence
+                .iter()
+                .any(|source| !self.active_contradiction_ids(source.id, now).is_empty());
+            if has_known_conflict {
+                if !grounding
+                    .uncertainty
+                    .contains(&super::drive::DriveGroundingUncertainty::KnownConflict)
+                {
+                    grounding
+                        .uncertainty
+                        .push(super::drive::DriveGroundingUncertainty::KnownConflict);
+                }
+            } else {
+                grounding.uncertainty.retain(|value| {
+                    *value != super::drive::DriveGroundingUncertainty::KnownConflict
+                });
+            }
+        }
+    }
+
+    /// Return only unacknowledged signals whose captured memory sources still match.
+    /// Changed, expired, forgotten, or superseded sources terminalize the proposal.
+    pub fn current_drive_inbox(&self, limit: usize) -> Vec<super::drive::DriveSignal> {
+        let now = chrono::Utc::now().timestamp();
+        let candidates = self.drive_queue.peek_unacked(usize::MAX);
+        let mut current = Vec::new();
+        let mut stale_ids = Vec::new();
+
+        for signal in candidates {
+            if current.len() >= limit {
+                break;
+            }
+            if !self.signal_evidence_is_current(&signal, now) {
+                stale_ids.push(signal.id);
+            } else {
+                let mut signal = signal;
+                self.refresh_signal_grounding(&mut signal, now);
+                current.push(signal);
+            }
+        }
+
+        if self.drive_queue.expire_stale_evidence(&stale_ids) > 0 {
+            self.save_drive_queue();
+        }
+        current
+    }
+
+    pub fn current_drive_signal(&self, drive_id: u64) -> Option<super::drive::DriveSignal> {
+        let signal = self
+            .drive_queue
+            .get_signal(drive_id)
+            .filter(super::drive::DriveSignal::is_retryable)?;
+        let now = chrono::Utc::now().timestamp();
+        if self.signal_evidence_is_current(&signal, now) {
+            let mut signal = signal;
+            self.refresh_signal_grounding(&mut signal, now);
+            Some(signal)
+        } else if self.drive_queue.expire_stale_evidence(&[drive_id]) > 0 {
+            self.save_drive_queue();
+            None
+        } else {
+            None
+        }
+    }
+
     pub fn detect_prediction_errors(&self) -> Vec<super::drive::DriveSignal> {
         let mut signals = Vec::new();
         let now = chrono::Utc::now().timestamp();
@@ -1224,7 +1552,9 @@ impl SchedulerCenter {
         // Get existing unacked evidence to dedup.
         // peek_unacked 覆盖 Pending+Delivered: 信号被daemon取走(Delivered)但执行端未ack前,
         // 同一evidence不得重发 — 曾致 #5982 在30分钟窗内重复产 #105187/#105188
-        let pending = self.drive_queue.peek_unacked(50);
+        let pending = self
+            .drive_queue
+            .peek_unacked(super::drive::MAX_QUEUE_SIGNALS);
         let pending_evidence: std::collections::HashSet<u64> = pending
             .iter()
             .flat_map(|s| s.evidence.iter().copied())
@@ -1233,24 +1563,34 @@ impl SchedulerCenter {
         // ── Category 1: WARN — only for RECENTLY written identity/security memories ──
         // Don't scan the full library every tick — that creates noise.
         // Only warn on memories written in the last 10 minutes.
-        let now_ts = chrono::Utc::now().timestamp();
+        let now_ts = now;
         let ten_min_ago = now_ts - 600;
-        let warn_mems = self.gateway.list_recent(0, 50);
-        let warn_candidates: Vec<_> = warn_mems.iter()
-            .filter(|(id, p)| {
-                p.timestamp > ten_min_ago  // only recent memories
-                && p.importance >= 2.5  // high importance
-                && !pending_evidence.contains(id)  // not already pending
-                && p.valid_to.is_none()  // not superseded
-                && !super::drive::will_content_closed(&p.content)
-                && (p.labels.iter().any(|l| l == "identity" || l == "security" || l == "enforced" || l == "boundary"))
-            })
-            .take(2)
-            .collect();
+        let warn_candidates = self.gateway.list_by_labels_matching(
+            &["identity", "security", "enforced", "boundary"],
+            50,
+            |id, memory| {
+                memory.timestamp > ten_min_ago
+                    && memory.timestamp <= now_ts
+                    && memory.importance >= 2.5
+                    && !pending_evidence.contains(&id)
+                    && super::drive::memory_is_current(memory, now_ts)
+                    && !memory
+                        .labels
+                        .iter()
+                        .any(|label| label == "l0-exempt" || label == "quarantine")
+                    && !super::drive::will_content_closed(&memory.content)
+            },
+        );
 
-        for (id, p) in &warn_candidates {
+        for (id, p) in warn_candidates.iter().take(2) {
+            let conflicts = self.active_contradiction_ids(*id, now_ts);
+            let mut evidence = vec![*id];
+            evidence.extend(conflicts.iter().copied());
+            evidence.sort_unstable();
+            evidence.dedup();
             let content_lower = p.content.to_lowercase();
-            let desc = if content_lower.contains("identity") || content_lower.contains("身份") {
+            let mut desc = if content_lower.contains("identity") || content_lower.contains("身份")
+            {
                 format!("Identity-related memory #{} has high importance ({:.1}). Consider reviewing identity boundaries.", id, p.importance)
             } else if content_lower.contains("security") || content_lower.contains("安全") {
                 format!(
@@ -1274,13 +1614,19 @@ impl SchedulerCenter {
                     p.content.chars().take(80).collect::<String>()
                 )
             };
+            if !conflicts.is_empty() {
+                desc.push_str(&format!(
+                    " Known contradictory memory evidence: {:?}; review before acting.",
+                    conflicts
+                ));
+            }
 
             signals.push(super::drive::DriveSignal {
                 id: 0,
                 timestamp: now,
                 intent_type: super::drive::DriveIntent::Warn,
                 description: desc,
-                evidence: vec![*id],
+                evidence: evidence.clone(),
                 urgency: super::drive::DriveUrgency::High,
                 target_capability: Some("conversation".into()),
                 emotion: None,
@@ -1291,11 +1637,19 @@ impl SchedulerCenter {
                 expires_at: super::drive::default_expires_at(&super::drive::DriveUrgency::High),
                 enqueued_at_ms: 0,
                 time_budget_ms: None,
+                grounding: self.grounding_for_evidence(
+                    &evidence,
+                    "Recent high-importance identity, security, enforced, or boundary memory within the existing 10-minute window.",
+                    &conflicts,
+                    Some(600),
+                ),
+                terminal_reason: None,
             });
         }
 
         // ── Category 2: SUGGEST — architecture/decision/bridge gaps ──
-        let suggest_mems = self.gateway.list_by_labels(
+        let suggest_window = now_ts - 1800;
+        let suggest_mems = self.gateway.list_by_labels_matching(
             &[
                 "decision",
                 "architecture",
@@ -1307,34 +1661,37 @@ impl SchedulerCenter {
                 "core-directive",
             ],
             10,
+            |id, memory| {
+                memory.timestamp > suggest_window
+                    && memory.timestamp <= now_ts
+                    && (memory.labels.iter().any(|label| {
+                        label == "will-seed"
+                            || label == "will-expression"
+                            || label == "charter"
+                            || label == "core-directive"
+                    }) || memory.importance >= 2.5)
+                    && !pending_evidence.contains(&id)
+                    && super::drive::memory_is_current(memory, now_ts)
+                    && !memory.labels.iter().any(|label| {
+                        label == "identity"
+                            || label == "security"
+                            || label == "l0-exempt"
+                            || label == "quarantine"
+                    })
+                    && !super::drive::will_content_closed(&memory.content)
+            },
         );
         // 防重播: 只建议最近30分钟内写入/修改的记忆。
         // 老记忆(如 charter/will-seed 永久记忆)会在信号被消费后脱离pending去重,
         // 曾导致 Architecture memory #2857 每40秒重发一次的无限循环。
-        let suggest_window = now_ts - 1800;
-        let suggest_candidates: Vec<_> = suggest_mems
-            .iter()
-            .filter(|(id, p)| {
-                p.timestamp > suggest_window
-                    && (p.labels.iter().any(|l| {
-                        l == "will-seed"
-                            || l == "will-expression"
-                            || l == "charter"
-                            || l == "core-directive"
-                    }) || p.importance >= 2.5)
-                    && !pending_evidence.contains(id)
-                    && p.valid_to.is_none()
-                    && !p.labels.iter().any(|l| {
-                        l == "identity" || l == "security" || l == "l0-exempt" || l == "quarantine"
-                    })
-                    && !super::drive::will_content_closed(&p.content)
-            })
-            .take(3)
-            .collect();
-
-        for (id, p) in &suggest_candidates {
+        for (id, p) in suggest_mems.iter().take(3) {
+            let conflicts = self.active_contradiction_ids(*id, now_ts);
+            let mut evidence = vec![*id];
+            evidence.extend(conflicts.iter().copied());
+            evidence.sort_unstable();
+            evidence.dedup();
             let content_lower = p.content.to_lowercase();
-            let desc = if content_lower.contains("bridge") || content_lower.contains("桥") {
+            let mut desc = if content_lower.contains("bridge") || content_lower.contains("桥") {
                 format!(
                     "Bridge/integration memory #{} suggests an action item: {}",
                     id,
@@ -1361,14 +1718,29 @@ impl SchedulerCenter {
                 )
             };
 
+            if !conflicts.is_empty() {
+                desc = format!(
+                    "Potential contradiction between current memories {:?}; withholding the action-oriented follow-up until the evidence is reviewed.",
+                    evidence
+                );
+            }
+
             signals.push(super::drive::DriveSignal {
                 id: 0,
                 timestamp: now,
-                intent_type: super::drive::DriveIntent::Suggest,
+                intent_type: if conflicts.is_empty() {
+                    super::drive::DriveIntent::Suggest
+                } else {
+                    super::drive::DriveIntent::Warn
+                },
                 description: desc,
-                evidence: vec![*id],
+                evidence: evidence.clone(),
                 urgency: super::drive::DriveUrgency::Medium,
-                target_capability: Some("code_review".into()),
+                target_capability: Some(if conflicts.is_empty() {
+                    "code_review".into()
+                } else {
+                    "conversation".into()
+                }),
                 emotion: None,
                 origin_tick: 0,
                 status: super::drive::default_status(),
@@ -1377,26 +1749,39 @@ impl SchedulerCenter {
                 expires_at: super::drive::default_expires_at(&super::drive::DriveUrgency::Medium),
                 enqueued_at_ms: 0,
                 time_budget_ms: None,
+                grounding: self.grounding_for_evidence(
+                    &evidence,
+                    if conflicts.is_empty() {
+                        "Recent decision, architecture, bridge, protocol, or directive memory matched the existing 30-minute follow-up gate."
+                    } else {
+                        "A current contradiction was found; the action-oriented follow-up was withheld."
+                    },
+                    &conflicts,
+                    Some(1800),
+                ),
+                terminal_reason: None,
             });
         }
 
         // ── Category 3: EXPLORE — knowledge gaps (self-driving consumes these) ──
-        let explore_mems = self.gateway.list_by_labels(&["knowledge-gap"], 5);
-        // 防重播: 只探索最近60分钟内产生的gap, 老gap已被探索多轮仍存说明非易解, 重复发信号只产生噪音
         let explore_window = now_ts - 3600;
-        let explore_candidates: Vec<_> = explore_mems
-            .iter()
-            .filter(|(id, p)| {
-                p.timestamp > explore_window
-                    && !pending_evidence.contains(id)
-                    && p.valid_to.is_none()
-                    && !super::drive::will_content_closed(&p.content)
-                    && !p.labels.iter().any(|l| {
-                        l == "identity" || l == "security" || l == "quarantine" || l == "l0-exempt"
-                    })
-            })
-            .take(1) // throttle: max 1 explore per tick
-            .collect();
+        let explore_mems =
+            self.gateway
+                .list_by_labels_matching(&["knowledge-gap"], 5, |id, memory| {
+                    memory.timestamp > explore_window
+                        && memory.timestamp <= now_ts
+                        && !pending_evidence.contains(&id)
+                        && super::drive::memory_is_current(memory, now_ts)
+                        && !super::drive::will_content_closed(&memory.content)
+                        && !memory.labels.iter().any(|label| {
+                            label == "identity"
+                                || label == "security"
+                                || label == "quarantine"
+                                || label == "l0-exempt"
+                        })
+                });
+        // 防重播: 只探索最近60分钟内产生的gap, 老gap已被探索多轮仍存说明非易解, 重复发信号只产生噪音
+        let explore_candidates = explore_mems.iter().take(1).collect::<Vec<_>>();
 
         if !explore_candidates.is_empty() {
             let evidence: Vec<u64> = explore_candidates
@@ -1419,24 +1804,19 @@ impl SchedulerCenter {
                         .collect::<String>()
                 })
                 .collect();
-            let gap_desc = if gap_queries.is_empty() {
-                format!(
-                    "Knowledge gaps detected from {} miss queries",
-                    explore_mems.len()
-                )
-            } else {
-                format!(
-                    "知识缺口: 我不知道 '{}' 相关的知识 (共{}个缺口)",
-                    gap_queries.join("' 和 '"),
-                    explore_mems.len()
-                )
-            };
+            let gap_source = explore_candidates[0];
+            let gap_desc = format!(
+                "Knowledge gap from memory #{} recorded at {}: search miss for '{}'. A miss means recall did not find support, not that no answer exists.",
+                gap_source.0,
+                gap_source.1.timestamp,
+                gap_queries.join("' and '")
+            );
             signals.push(super::drive::DriveSignal {
                 id: 0,
                 timestamp: now,
                 intent_type: super::drive::DriveIntent::Explore,
                 description: gap_desc,
-                evidence,
+                evidence: evidence.clone(),
                 urgency: super::drive::DriveUrgency::Low,
                 target_capability: Some("search".into()),
                 emotion: None,
@@ -1447,6 +1827,13 @@ impl SchedulerCenter {
                 expires_at: super::drive::default_expires_at(&super::drive::DriveUrgency::Low),
                 enqueued_at_ms: 0,
                 time_budget_ms: None,
+                grounding: self.grounding_for_evidence(
+                    &evidence,
+                    "Recent knowledge-gap memory created by an unanswered memory search within the existing 60-minute window.",
+                    &[],
+                    Some(3600),
+                ),
+                terminal_reason: None,
             });
         }
 
@@ -1478,21 +1865,21 @@ impl SchedulerCenter {
                         retry_count: 0,
                         expires_at: super::drive::default_expires_at(&super::drive::DriveUrgency::Low),
                         enqueued_at_ms: 0, time_budget_ms: None,
+                        grounding: None,
+                        terminal_reason: None,
                     });
                 }
             }
         }
 
-        // Phase 2 降噪: 过滤掉 evidence 含 superseded 记忆的信号
-        // (思琪#80-#95校准: superseded/过时证据复读)
+        // Recheck the evidence after candidate selection to close the concurrent-update window.
         signals.retain(|s| {
-            s.evidence.iter().all(|&eid| {
-                if let Some(t) = self.space.get_tetrahedron(eid) {
-                    t.data.valid_to.is_none()
-                } else {
-                    true // 不存在的记忆不过滤(可能是外部引用)
-                }
-            })
+            s.evidence.is_empty()
+                || s.grounding.as_ref().is_some_and(|grounding| {
+                    grounding.complete
+                        && grounding.is_fresh_at(now)
+                        && self.signal_evidence_is_current(s, now)
+                })
         });
 
         signals
@@ -1510,17 +1897,23 @@ impl SchedulerCenter {
         // (not yet Executed or Rejected).
         let mut enqueued = 0;
         let mut throttled = 0;
+        let mut backpressured = 0;
         for signal in signals {
             match self.drive_queue.should_birth(
                 &signal.intent_type,
                 &signal.evidence,
                 &signal.description,
             ) {
-                Ok(()) => {
-                    let _ = self.drive_queue.enqueue(signal);
-                    self.save_drive_queue();
-                    enqueued += 1;
-                }
+                Ok(()) => match self.drive_queue.try_enqueue(signal) {
+                    Ok(_) => {
+                        self.save_drive_queue();
+                        enqueued += 1;
+                    }
+                    Err(error) => {
+                        backpressured += 1;
+                        tracing::warn!("[L0] signal admission backpressured: {:?}", error);
+                    }
+                },
                 Err(why) => {
                     throttled += 1;
                     tracing::info!(
@@ -1533,14 +1926,14 @@ impl SchedulerCenter {
             }
         }
 
-        if enqueued > 0 || throttled > 0 {
+        if enqueued > 0 || throttled > 0 || backpressured > 0 {
             // P1-6: enqueue 后立刻持久化, 防止重启丢 signal
-            if enqueued > 0 {
-                self.save_drive_queue();
-            }
             tracing::info!(
-                "[L0] prediction errors [user={}]: {} enqueued, {} throttled (evidence-level dedup)",
-                self.owner_user.lock().clone(), enqueued, throttled
+                "[L0] prediction errors [user={}]: {} enqueued, {} throttled, {} backpressured",
+                self.owner_user.lock().clone(),
+                enqueued,
+                throttled,
+                backpressured
             );
         }
     }
@@ -1556,15 +1949,26 @@ impl SchedulerCenter {
     /// This is the personality acting on its own will — thinking to itself,
     /// "I'm curious about X. Let me reason about what I know and record my conclusion."
     fn process_drive_signals(&self) {
-        // Use peek_pending (not poll) so signals stay visible to external agents.
-        // Self-driving only consumes Explore intents. Warn/Suggest/etc stay Pending
-        // for external agents to pick up via drive_inbox.
-        let all_pending = self.drive_queue.peek_pending(10);
-        let signals: Vec<_> = all_pending
+        // Peek without changing status so non-Explore signals stay visible to external agents.
+        let candidates = self.drive_queue.peek_pending_matching(3, |signal| {
+            matches!(signal.intent_type, super::drive::DriveIntent::Explore)
+        });
+        let now = chrono::Utc::now().timestamp();
+        let mut stale_ids = Vec::new();
+        let signals: Vec<_> = candidates
             .into_iter()
-            .filter(|s| matches!(s.intent_type, super::drive::DriveIntent::Explore))
-            .take(3)
+            .filter(|signal| {
+                if self.signal_evidence_is_current(signal, now) {
+                    true
+                } else {
+                    stale_ids.push(signal.id);
+                    false
+                }
+            })
             .collect();
+        if self.drive_queue.expire_stale_evidence(&stale_ids) > 0 {
+            self.save_drive_queue();
+        }
         if signals.is_empty() {
             return;
         }
@@ -1577,134 +1981,168 @@ impl SchedulerCenter {
         for signal in signals {
             match signal.intent_type {
                 super::drive::DriveIntent::Explore => {
-                    // The personality is curious — try to fill the knowledge gap.
                     tracing::info!(
                         "[L0] self-explore: drive #{} | {}",
                         signal.id,
                         signal.description.chars().take(80).collect::<String>()
                     );
 
-                    // Strategy 1 (preferred): use LLM to reason about the gap
-                    let explored = if !self.cognitive.is_degraded() {
-                        match self.cognitive.answer_from_memories(&signal.description, "") {
-                            Ok(answer) => {
-                                let cleaned = answer
-                                    .strip_prefix("<think>")
-                                    .and_then(|s| s.split("</think>").next())
-                                    .unwrap_or(&answer)
-                                    .trim()
-                                    .to_string();
-                                if cleaned.len() > 20 {
-                                    Some((cleaned, "llm_reasoning"))
-                                } else {
-                                    None
-                                }
-                            }
-                            Err(_) => None,
+                    let question = signal
+                        .evidence
+                        .iter()
+                        .find_map(|id| self.api_get_node(*id))
+                        .map(|memory| {
+                            memory
+                                .content
+                                .strip_prefix("[knowledge-gap] 待学习：")
+                                .unwrap_or(&memory.content)
+                                .trim()
+                                .to_string()
+                        })
+                        .filter(|question| !question.is_empty())
+                        .unwrap_or_else(|| signal.description.clone());
+                    let excluded_ids: HashSet<u64> = signal.evidence.iter().copied().collect();
+                    let recall = self.api_recall(&question, 2);
+                    let mut evidence = match recall {
+                        Ok(result) => recalled_drive_evidence(&result),
+                        Err(error) => {
+                            tracing::warn!("[L0] local explore recall failed: {}", error);
+                            Vec::new()
                         }
-                    } else {
-                        None
                     };
 
-                    // Strategy 2 (fallback): use local memory recall — no LLM needed.
-                    // Find related memories and synthesize a conclusion from associations.
-                    let explored = explored.or_else(|| {
-                        tracing::info!("[L0] self-explore: LLM degraded, using local recall fallback");
-                        match self.api_recall(&signal.description, 2) {
-                            Ok(result) => {
-                                // Extract text from recall sections
-                                let sections = result.get("sections").and_then(|s| s.as_array());
-                                if let Some(sections) = sections {
-                                    let items: Vec<String> = sections.iter()
-                                        .flat_map(|sec| {
-                                            sec.get("items").and_then(|i| i.as_array())
-                                                .map(|arr| arr.iter().filter_map(|item| {
-                                                    item.get("content").and_then(|c| c.as_str()).map(|s| s.to_string())
-                                                }).collect::<Vec<_>>())
-                                                .unwrap_or_default()
-                                        })
-                                        .take(3)
-                                        .collect();
-
-                                    if !items.is_empty() {
-                                        let conclusion = format!(
-                                            "Based on {} related memories, I found connections to this topic:\n{}",
-                                            items.len(),
-                                            items.iter().map(|m| format!("- {}", m.chars().take(100).collect::<String>()))
-                                                .collect::<Vec<_>>().join("\n")
-                                        );
-                                        Some((conclusion, "local_recall"))
-                                    } else { None }
-                                } else { None }
-                            }
-                            Err(_) => None
+                    evidence.retain_mut(|item| {
+                        if excluded_ids.contains(&item.id) {
+                            return false;
                         }
+                        let Some(memory) = self.api_get_node(item.id) else {
+                            return false;
+                        };
+                        if !super::drive::memory_is_current(&memory, now)
+                            || memory.labels.iter().any(|label| {
+                                label == "superseded"
+                                    || label == "quarantine"
+                                    || label == "l0-exempt"
+                                    || label == "auto-generated"
+                            })
+                        {
+                            return false;
+                        }
+                        item.content = memory.content;
+                        item.timestamp = memory.timestamp;
+                        true
                     });
 
-                    if let Some((conclusion, method)) = explored {
-                        let mem_content = format!(
-                            "[self-driven exploration] Question: {}\nConclusion: {}",
-                            signal.description.chars().take(200).collect::<String>(),
-                            conclusion.chars().take(500).collect::<String>()
-                        );
-                        // P1-4 intake 守卫: 标记为 auto-generated + 较低 importance
-                        // 让搜索评分自动施加 auto_penalty, 并在 noise-candidates 中可筛选
-                        let labels = vec![
-                            "self-driven".to_string(),
-                            "exploration".to_string(),
-                            "auto-generated".to_string(),
-                            "l0-exempt".to_string(),
-                        ];
-
-                        match self.api_remember_with_labels(&mem_content, labels) {
-                            Ok((id, _)) => {
-                                // P1-4 intake 守卫: auto-generated 记忆 importance 降至 0.3
-                                let _ = self.space.update_importance(id, 0.3);
-                                if let Some(t) = self.space.get_tetrahedron(id) {
-                                    let _ = self.storage.upsert_tetra(&t);
-                                }
-                                tracing::info!(
-                                    "[L0] self-explore complete: stored insight as memory #{} via {} ({} chars)",
-                                    id, method, conclusion.len()
-                                );
-                                for eid in &signal.evidence {
-                                    let _ = self.api_add_labels(*eid, &["l0-exempt"]);
-                                    let _ = self.api_forget_memory(*eid);
-                                }
-                                let _ = self.drive_queue.mark_consumed(
-                                    signal.id,
-                                    super::drive::DriveFeedback {
-                                        responded_at: chrono::Utc::now().timestamp(),
-                                        executed: true,
-                                        outcome: format!(
-                                            "Self-explored via {} and stored as memory #{} ({} chars)",
-                                            method, id, conclusion.len()
-                                        ),
-                                        reflection: Some(
-                                            "I explored this topic using my accumulated memories and recorded my conclusion.".to_string()
-                                        ),
-                                    }
-                                );
-                                self.save_drive_queue();
-                            }
-                            Err(e) => {
-                                tracing::warn!("[L0] self-explore store failed: {}", e);
-                                let _ = self.drive_queue.mark_consumed(
-                                    signal.id,
-                                    super::drive::DriveFeedback {
-                                        responded_at: chrono::Utc::now().timestamp(),
-                                        executed: false,
-                                        outcome: format!("Failed to store: {}", e),
-                                        reflection: None,
-                                    },
-                                );
+                    let mut conflicts = HashSet::new();
+                    for item in &evidence {
+                        for (other_id, relation, _) in self.api_get_relations(item.id) {
+                            if relation.eq_ignore_ascii_case("contradicts")
+                                && self.api_get_node(other_id).is_some_and(|memory| {
+                                    super::drive::memory_is_current(&memory, now)
+                                })
+                            {
+                                conflicts.insert(item.id);
+                                conflicts.insert(other_id);
                             }
                         }
-                    } else {
-                        tracing::info!(
-                            "[L0] self-explore: no conclusion generated (drive #{})",
-                            signal.id
-                        );
+                    }
+                    let mut conflict_ids: Vec<u64> = conflicts.into_iter().collect();
+                    conflict_ids.sort_unstable();
+                    let explored = local_exploration_summary(&question, &evidence, &conflict_ids);
+
+                    match explored {
+                        Ok(conclusion) => {
+                            let evidence_ids = evidence
+                                .iter()
+                                .map(|item| format!("#{}", item.id))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            let mem_content = format!(
+                                "[self-driven exploration]\nQuestion: {}\nEvidence IDs: {}\n{}",
+                                question.chars().take(200).collect::<String>(),
+                                evidence_ids,
+                                conclusion.chars().take(800).collect::<String>()
+                            );
+                            let labels = vec![
+                                "self-driven".to_string(),
+                                "exploration".to_string(),
+                                "auto-generated".to_string(),
+                                "l0-exempt".to_string(),
+                            ];
+
+                            match self.api_remember_with_labels(&mem_content, labels) {
+                                Ok((id, _)) => {
+                                    let _ = self.space.update_importance(id, 0.3);
+                                    if let Some(t) = self.space.get_tetrahedron(id) {
+                                        let _ = self.storage.upsert_tetra(&t);
+                                    }
+                                    tracing::info!(
+                                        "[L0] self-explore complete: stored local source summary as memory #{} ({} chars)",
+                                        id,
+                                        conclusion.len()
+                                    );
+                                    let _ = self.drive_queue.mark_consumed(
+                                        signal.id,
+                                        super::drive::DriveFeedback {
+                                            responded_at: chrono::Utc::now().timestamp(),
+                                            executed: true,
+                                            outcome: format!(
+                                                "Stored local-memory summary as memory #{} with {} cited sources",
+                                                id,
+                                                evidence.len()
+                                            ),
+                                            reflection: Some(
+                                                "Summary retained source IDs and explicitly states that it is not independent verification."
+                                                    .to_string(),
+                                            ),
+                                        },
+                                    );
+                                    self.save_drive_queue();
+                                }
+                                Err(error) => {
+                                    tracing::warn!("[L0] self-explore store failed: {}", error);
+                                    let _ = self.drive_queue.mark_consumed(
+                                        signal.id,
+                                        super::drive::DriveFeedback {
+                                            responded_at: chrono::Utc::now().timestamp(),
+                                            executed: false,
+                                            outcome: format!(
+                                                "Failed to store local summary: {}",
+                                                error
+                                            ),
+                                            reflection: None,
+                                        },
+                                    );
+                                    self.save_drive_queue();
+                                }
+                            }
+                        }
+                        Err(reason) => {
+                            let outcome = match reason {
+                                ExploreBlockReason::NoCurrentEvidence => {
+                                    "Insufficient current local-memory evidence; no answer was stored."
+                                        .to_string()
+                                }
+                                ExploreBlockReason::ConflictingEvidence => format!(
+                                    "Conflicting current memory evidence {:?}; no answer was stored.",
+                                    conflict_ids
+                                ),
+                            };
+                            tracing::info!("[L0] self-explore withheld: {}", outcome);
+                            let _ = self.drive_queue.mark_consumed(
+                                signal.id,
+                                super::drive::DriveFeedback {
+                                    responded_at: chrono::Utc::now().timestamp(),
+                                    executed: false,
+                                    outcome,
+                                    reflection: Some(
+                                        "Kept the source gap memory; the signal remains retryable only under the existing retry limit."
+                                            .to_string(),
+                                    ),
+                                },
+                            );
+                            self.save_drive_queue();
+                        }
                     }
                 }
                 super::drive::DriveIntent::Suggest => {
@@ -4371,7 +4809,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                     "critical" => super::drive::DriveUrgency::Critical,
                     _ => super::drive::DriveUrgency::Medium,
                 };
-                let itype = match intent.as_str() {
+                let mut itype = match intent.as_str() {
                     "warn" => super::drive::DriveIntent::Warn,
                     "suggest" => super::drive::DriveIntent::Suggest,
                     "explore" => super::drive::DriveIntent::Explore,
@@ -4379,14 +4817,48 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                     "request" => super::drive::DriveIntent::Request,
                     _ => super::drive::DriveIntent::Share,
                 };
-                if let Err(why) = self.drive_queue.should_birth(&itype, evidence, description) {
+                let mut evidence = evidence.clone();
+                let now = chrono::Utc::now().timestamp();
+                let mut conflicts: Vec<u64> = evidence
+                    .iter()
+                    .flat_map(|id| self.active_contradiction_ids(*id, now))
+                    .collect();
+                conflicts.sort_unstable();
+                conflicts.dedup();
+                let mut desc = description.clone();
+                if !conflicts.is_empty() && matches!(itype, super::drive::DriveIntent::Suggest) {
+                    itype = super::drive::DriveIntent::Warn;
+                    desc = format!(
+                        "Potential contradiction in current memory evidence {:?}; withholding action-oriented proposal. Original proposal: {}",
+                        conflicts,
+                        description
+                    );
+                }
+                evidence.extend(conflicts.iter().copied());
+                evidence.sort_unstable();
+                evidence.dedup();
+                let grounding = self.grounding_for_evidence(
+                    &evidence,
+                    "Model-originated outward proposal; evidence IDs are references, not a confidence estimate.",
+                    &conflicts,
+                    None,
+                );
+                let has_complete_grounding = grounding
+                    .as_ref()
+                    .is_some_and(|grounding| grounding.complete && !grounding.evidence.is_empty());
+                if matches!(&itype, super::drive::DriveIntent::Suggest) && !has_complete_grounding {
+                    tracing::info!(
+                        "[L0] ActOutward suppressed: suggestion lacks complete persistent-memory evidence (ev={:?})",
+                        evidence
+                    );
+                } else if let Err(why) = self.drive_queue.should_birth(&itype, &evidence, &desc) {
                     tracing::info!("[L0] ActOutward valve {}: ev={:?}", why, evidence);
                 } else {
                     let signal = super::drive::DriveSignal {
                         id: 0,
                         timestamp: chrono::Utc::now().timestamp(),
                         intent_type: itype,
-                        description: description.clone(),
+                        description: desc,
                         evidence: evidence.clone(),
                         target_capability: target_capability.clone(),
                         emotion: None,
@@ -4398,10 +4870,18 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         urgency: urg,
                         enqueued_at_ms: 0,
                         time_budget_ms: None,
+                        grounding,
+                        terminal_reason: None,
                     };
-                    let did = self.drive_queue.enqueue(signal);
-                    self.save_drive_queue();
-                    tracing::info!("[L0] ActOutward: drive #{} intent={}", did, intent);
+                    match self.drive_queue.try_enqueue(signal) {
+                        Ok(id) => {
+                            self.save_drive_queue();
+                            tracing::info!("[L0] ActOutward: drive #{} intent={}", id, intent);
+                        }
+                        Err(error) => {
+                            tracing::warn!("[L0] ActOutward admission rejected: {:?}", error)
+                        }
+                    }
                 }
             }
         }
@@ -5640,14 +6120,24 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
         mut rx: broadcast::Receiver<EngineEvent>,
         cognitive: bool,
     ) {
+        let Some(_loop_permit) = self.loop_gate.try_acquire() else {
+            tracing::warn!("[Scheduler] duplicate loop start ignored");
+            return;
+        };
+
         loop {
             // 先克隆 interval 值再 drop 读锁，避免 select! 分支持锁跨整个 sleep 周期
             let tick_interval = *self.tick_interval.read();
             tokio::select! {
                 _ = tokio::time::sleep(tick_interval) => {
                     if cognitive {
+                        let Some(cycle_permit) = self.cycle_gate.try_acquire() else {
+                            tracing::debug!("[Scheduler] skipping tick while the previous scheduler cycle is still running");
+                            continue;
+                        };
                         let me = self.clone();
                         let handle = tokio::task::spawn_blocking(move || {
+                            let _cycle_permit = cycle_permit;
                             let thought = me.tick_and_maybe_think();
                             if let Some(ct) = thought {
                                 // 批次C：注入自适应参数+行动效果到认知引擎（断裂点5+6）
@@ -5692,6 +6182,10 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                             }
                         });
                     } else {
+                        let Some(_cycle_permit) = self.cycle_gate.try_acquire() else {
+                            tracing::debug!("[Scheduler] skipping quiet tick while the previous scheduler cycle is still running");
+                            continue;
+                        };
                         let count = self.tick_count.fetch_add(1, Ordering::SeqCst);
                         self.energy.replenish(12.0);
                         let tasks: Vec<ScheduledTask> = self.queue.lock().drain(..).collect();
@@ -5783,6 +6277,311 @@ mod tests {
     use crate::engine::GatewayCenter;
     use crate::engine::StorageManager;
     use std::sync::Arc;
+
+    #[test]
+    fn grounded_signal_expires_when_its_persistent_source_changes() {
+        let (scheduler, space, _) = build_scheduler();
+        let id = add_tetra_to_space(
+            &space,
+            Point3 {
+                x: 50.0,
+                y: 50.0,
+                z: 50.0,
+            },
+            "a current decision memory",
+            vec!["decision".into()],
+        );
+        let source = space.get_tetrahedron(id).unwrap();
+        let revision = super::super::drive::memory_revision(&source.data);
+        let signal = super::super::drive::DriveSignal {
+            id: 0,
+            timestamp: chrono::Utc::now().timestamp(),
+            intent_type: super::super::drive::DriveIntent::Suggest,
+            description: "Review a memory-backed decision".into(),
+            evidence: vec![id],
+            urgency: super::super::drive::DriveUrgency::Medium,
+            target_capability: Some("conversation".into()),
+            emotion: None,
+            origin_tick: 0,
+            status: super::super::drive::DriveStatus::Pending,
+            feedback: None,
+            retry_count: 0,
+            expires_at: None,
+            enqueued_at_ms: 0,
+            time_budget_ms: None,
+            grounding: Some(super::super::drive::DriveGrounding {
+                reason: "recent decision memory".into(),
+                evidence: vec![super::super::drive::DriveMemoryEvidence {
+                    id,
+                    revision: format!("{:016x}", revision),
+                    recorded_at: source.data.timestamp,
+                    last_reviewed_at: source.data.last_reviewed_ts,
+                    importance: source.data.importance,
+                }],
+                uncertainty: vec![
+                    super::super::drive::DriveGroundingUncertainty::SingleMemorySource,
+                ],
+                fresh_until: None,
+                complete: true,
+            }),
+            terminal_reason: None,
+        };
+        let now = chrono::Utc::now().timestamp();
+        assert!(scheduler.signal_evidence_is_current(&signal, now));
+        let drive_id = scheduler
+            .drive_queue()
+            .try_enqueue(signal)
+            .expect("grounded signal should be admitted");
+
+        let mut reviewed_memory = space.get_tetrahedron(id).unwrap().data;
+        reviewed_memory.last_reviewed_ts = Some(now);
+        space.update_payload(id, reviewed_memory).unwrap();
+        let mut projection = scheduler.drive_queue().get_signal(drive_id).unwrap();
+        scheduler.refresh_signal_grounding(&mut projection, now);
+        assert!(!projection
+            .grounding
+            .as_ref()
+            .unwrap()
+            .uncertainty
+            .contains(&super::super::drive::DriveGroundingUncertainty::NotReviewed));
+        assert!(scheduler.signal_evidence_is_current(&projection, now));
+
+        let mut updated = space.get_tetrahedron(id).unwrap().data;
+        updated.content = "the decision has changed".into();
+        updated.content_hash += 1;
+        space.update_payload(id, updated).unwrap();
+
+        let signal = scheduler.drive_queue().get_signal(drive_id).unwrap();
+        assert!(!scheduler.signal_evidence_is_current(&signal, now));
+        assert_eq!(
+            scheduler.drive_queue().expire_stale_evidence(&[drive_id]),
+            1
+        );
+        assert_eq!(scheduler.drive_queue().stats()["stale_evidence_expired"], 1);
+    }
+
+    #[test]
+    fn l0_label_selection_filters_stale_sources_before_applying_the_limit() {
+        let (scheduler, space, _) = build_scheduler();
+        let now = chrono::Utc::now().timestamp();
+        let labels = vec!["decision".to_string()];
+        let stale_id = add_tetra_to_space(
+            &space,
+            Point3 {
+                x: 60.0,
+                y: 60.0,
+                z: 60.0,
+            },
+            "newest but expired decision",
+            labels.clone(),
+        );
+        let current_id = add_tetra_to_space(
+            &space,
+            Point3 {
+                x: 70.0,
+                y: 70.0,
+                z: 70.0,
+            },
+            "older current decision",
+            labels.clone(),
+        );
+        let mut stale = space.get_tetrahedron(stale_id).unwrap().data;
+        stale.timestamp = now - 10;
+        stale.valid_from = now - 10;
+        stale.expired_at = Some(now - 1);
+        space.update_payload(stale_id, stale).unwrap();
+        scheduler.gateway.update_label_index(stale_id, &[], &labels);
+
+        let mut current = space.get_tetrahedron(current_id).unwrap().data;
+        current.timestamp = now - 100;
+        current.valid_from = now - 100;
+        space.update_payload(current_id, current).unwrap();
+        scheduler
+            .gateway
+            .update_label_index(current_id, &[], &labels);
+
+        assert_eq!(
+            scheduler.gateway.list_by_labels(&["decision"], 1)[0].0,
+            stale_id
+        );
+        let selected = scheduler
+            .gateway
+            .list_by_labels_matching(&["decision"], 1, |_, memory| {
+                super::super::drive::memory_is_recent(memory, now, 1_800)
+            });
+        assert_eq!(selected[0].0, current_id);
+    }
+
+    #[test]
+    fn new_contradiction_withholds_a_queued_action_suggestion() {
+        let (scheduler, space, knowledge) = build_scheduler();
+        let source_id = add_tetra_to_space(
+            &space,
+            Point3 {
+                x: 80.0,
+                y: 80.0,
+                z: 80.0,
+            },
+            "current decision source",
+            vec!["decision".into()],
+        );
+        let conflicting_id = add_tetra_to_space(
+            &space,
+            Point3 {
+                x: 90.0,
+                y: 90.0,
+                z: 90.0,
+            },
+            "current conflicting source",
+            vec!["decision".into()],
+        );
+        let source = space.get_tetrahedron(source_id).unwrap();
+        let signal = super::super::drive::DriveSignal {
+            id: 0,
+            timestamp: chrono::Utc::now().timestamp(),
+            intent_type: super::super::drive::DriveIntent::Suggest,
+            description: "Review a decision follow-up".into(),
+            evidence: vec![source_id],
+            urgency: super::super::drive::DriveUrgency::Medium,
+            target_capability: Some("conversation".into()),
+            emotion: None,
+            origin_tick: 0,
+            status: super::super::drive::DriveStatus::Pending,
+            feedback: None,
+            retry_count: 0,
+            expires_at: None,
+            enqueued_at_ms: 0,
+            time_budget_ms: None,
+            grounding: Some(super::super::drive::DriveGrounding {
+                reason: "recent decision memory".into(),
+                evidence: vec![super::super::drive::DriveMemoryEvidence {
+                    id: source_id,
+                    revision: format!(
+                        "{:016x}",
+                        super::super::drive::memory_revision(&source.data)
+                    ),
+                    recorded_at: source.data.timestamp,
+                    last_reviewed_at: source.data.last_reviewed_ts,
+                    importance: source.data.importance,
+                }],
+                uncertainty: vec![
+                    super::super::drive::DriveGroundingUncertainty::SingleMemorySource,
+                ],
+                fresh_until: None,
+                complete: true,
+            }),
+            terminal_reason: None,
+        };
+        let now = chrono::Utc::now().timestamp();
+        assert!(scheduler.signal_evidence_is_current(&signal, now));
+        let drive_id = scheduler
+            .drive_queue()
+            .try_enqueue(signal)
+            .expect("suggestion should be admitted before contradiction appears");
+
+        knowledge.add_relation(
+            source_id,
+            conflicting_id,
+            super::super::knowledge::RelationType::Contradicts,
+            0.5,
+        );
+
+        let signal = scheduler.drive_queue().get_signal(drive_id).unwrap();
+        assert!(!scheduler.signal_evidence_is_current(&signal, now));
+        assert_eq!(
+            scheduler.drive_queue().expire_stale_evidence(&[drive_id]),
+            1
+        );
+        assert_eq!(scheduler.drive_queue().stats()["stale_evidence_expired"], 1);
+    }
+
+    #[test]
+    fn l0_recall_fixture_preserves_real_sources_and_orders_by_retrieval_signal() {
+        let recall = serde_json::json!({
+            "results": {
+                "decision": [
+                    {"id": 12, "content": "Highest duplicate", "timestamp": 100, "relevance": [0.95, 0.1]},
+                    {"id": 12, "content": "Lower duplicate", "timestamp": 100, "relevance": [0.1, 0.1]},
+                    {"id": 13, "content": "Second relevance", "timestamp": 101, "relevance": [0.9, 0.2]},
+                    {"id": 14, "timestamp": 102, "relevance": [1.0, 0.0]}
+                ]
+            }
+        });
+
+        let evidence = recalled_drive_evidence(&recall);
+
+        assert_eq!(evidence.len(), 2);
+        assert_eq!(evidence[0].id, 12);
+        assert_eq!(evidence[0].content, "Highest duplicate");
+        assert_eq!(evidence[1].id, 13);
+        let summary = local_exploration_summary("question", &evidence, &[]).unwrap();
+        assert!(summary.contains("[#13]"));
+        assert!(summary.contains("[#12]"));
+        assert!(summary.contains("not independent verification"));
+    }
+
+    #[test]
+    fn sparse_or_conflicting_recall_never_becomes_an_answer_memory() {
+        assert_eq!(
+            local_exploration_summary("question", &[], &[]),
+            Err(ExploreBlockReason::NoCurrentEvidence)
+        );
+        let one_source = vec![RecalledDriveEvidence {
+            id: 42,
+            content: "One related source".into(),
+            timestamp: 100,
+            relevance: 0.1,
+        }];
+        let summary = local_exploration_summary("question", &one_source, &[]).unwrap();
+        assert!(summary.contains("One related memory only"));
+        assert!(summary.contains("[#42]"));
+        assert_eq!(
+            local_exploration_summary("question", &one_source, &[42, 43]),
+            Err(ExploreBlockReason::ConflictingEvidence)
+        );
+        assert!(recalled_drive_evidence(&serde_json::json!({"results": null})).is_empty());
+    }
+
+    #[test]
+    fn single_flight_gate_skips_overlapping_work_and_reopens_after_completion() {
+        const WORKERS: usize = 12;
+
+        let gate = Arc::new(SingleFlightGate::default());
+        let barrier = Arc::new(std::sync::Barrier::new(WORKERS + 1));
+        let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let peak_active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let workers: Vec<_> = (0..WORKERS)
+            .map(|_| {
+                let gate = Arc::clone(&gate);
+                let barrier = Arc::clone(&barrier);
+                let active = Arc::clone(&active);
+                let peak_active = Arc::clone(&peak_active);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let permit = gate.try_acquire();
+                    if permit.is_some() {
+                        let current = active.fetch_add(1, Ordering::Relaxed) + 1;
+                        peak_active.fetch_max(current, Ordering::Relaxed);
+                    }
+                    barrier.wait();
+                    if permit.is_some() {
+                        active.fetch_sub(1, Ordering::Relaxed);
+                    }
+                    drop(permit);
+                })
+            })
+            .collect();
+
+        barrier.wait();
+        barrier.wait();
+        for worker in workers {
+            worker.join().expect("worker should finish");
+        }
+
+        assert_eq!(peak_active.load(Ordering::Relaxed), 1);
+        assert_eq!(active.load(Ordering::Relaxed), 0);
+        assert!(gate.try_acquire().is_some());
+    }
 
     fn add_tetra_to_space(
         space: &Space,

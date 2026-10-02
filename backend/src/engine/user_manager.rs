@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
@@ -74,6 +75,12 @@ fn verify_password_legacy(password: &str, stored: &str) -> bool {
 
 const MAX_USERS: usize = 1000;
 const IDLE_TIMEOUT_SECS: u64 = 3600;
+
+fn claim_loop_start(loop_started: &AtomicBool) -> bool {
+    loop_started
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
 
 // ── 分级权限控制系统 ──────────────────────────────────────────────
 // 主账户天然 Owner(parent.is_none()); 子账户可被赋予四级角色。
@@ -1362,7 +1369,16 @@ impl UserManager {
             .unwrap_or(false)
     }
 
-    /// Phase 3 P0-2b: 标记 cognitive loop 已启动（once 去重）
+    /// Atomically claim the per-user cognitive loop start across concurrent request paths.
+    pub fn try_mark_loop_started(&self, user_id: &str) -> bool {
+        let slots = self.slots.read();
+        slots
+            .get(user_id)
+            .map(|s| claim_loop_start(&s.loop_started))
+            .unwrap_or(false)
+    }
+
+    /// Mark the cognitive loop started unconditionally.
     pub fn mark_loop_started(&self, user_id: &str) {
         let mut slots = self.slots.write();
         if let Some(s) = slots.get_mut(user_id) {
@@ -1625,5 +1641,30 @@ mod rbac_tests {
         }
         assert_eq!(UserRole::Admin.permissions().len(), 8);
         assert_eq!(UserRole::Viewer.permissions().len(), 1);
+    }
+
+    #[test]
+    fn single_flight_loop_start_claims() {
+        const WORKERS: usize = 16;
+        let loop_started = Arc::new(AtomicBool::new(false));
+        let barrier = Arc::new(std::sync::Barrier::new(WORKERS));
+        let workers: Vec<_> = (0..WORKERS)
+            .map(|_| {
+                let loop_started = Arc::clone(&loop_started);
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    claim_loop_start(&loop_started)
+                })
+            })
+            .collect();
+
+        let successful_claims = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("worker should finish"))
+            .filter(|claimed| *claimed)
+            .count();
+
+        assert_eq!(successful_claims, 1);
     }
 }

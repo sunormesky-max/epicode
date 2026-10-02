@@ -4,7 +4,11 @@ import { useCognitiveState } from '@/components/useCognitiveState';
 import DashboardLayout from '@/components/DashboardLayout';
 import { MarkdownText } from '@/components/MarkdownText';
 import { stripThinkTags } from '@/lib/think-tags';
-import { canAcknowledgeDriveSignal, presentDriveDescription } from '@/lib/drive-signals';
+import {
+  canAcknowledgeDriveSignal,
+  presentDriveDescription,
+  presentDriveGrounding,
+} from '@/lib/drive-signals';
 import { AUTH_CHANGE_EVENT, getDrivePolicy, getDriveInbox, ackDrive, getRuntimeStatus, registerRuntime, heartbeatRuntime, getUserId, normalizeDriveEnum, getKnowledgeCards, type DriveSignal, type KnowledgeCard } from '@/lib/api';
 import { Brain, Activity, Zap, MessageSquare, Wifi, WifiOff, Radio, CheckCircle2, XCircle, AlertTriangle, Lightbulb } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
@@ -27,6 +31,17 @@ const glassPanel: React.CSSProperties = {
   borderRadius: 14,
   boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5), 0 0 40px rgba(62, 207, 174, 0.06)',
 };
+
+function groundingUncertaintyLabel(value: string, t: (key: TranslationKey) => string): string {
+  const keys: Record<string, TranslationKey> = {
+    single_memory_source: 'dash.cog.driveUncertainty.singleMemorySource',
+    not_reviewed: 'dash.cog.driveUncertainty.notReviewed',
+    known_conflict: 'dash.cog.driveUncertainty.knownConflict',
+    unresolved_evidence: 'dash.cog.driveUncertainty.unresolvedEvidence',
+  };
+  const key = keys[value];
+  return key ? t(key) : value;
+}
 
 function EmotionPad({ emotion, t }: { emotion: EmotionState | null; t: (k: TranslationKey) => string }) {
   if (!emotion) return <p style={{ ...HUD_VAL, opacity: 0.5 }}>{t('dash.cog.emotionWaiting')}</p>;
@@ -332,6 +347,9 @@ export default function DashboardCognitive() {
               {t('dash.cog.refresh')}
             </button>
           </div>
+          <p style={{ color: 'var(--text-tertiary)', fontSize: 11, lineHeight: 1.5, margin: '0 0 12px' }}>
+            {t('dash.cog.driveSafetyNotice')}
+          </p>
 
           {ackError && (
             <p style={{ color: '#ff3860', fontSize: 11, marginBottom: 8, fontFamily: 'var(--font-mono)' }}>ack failed — {ackError}</p>
@@ -356,6 +374,11 @@ export default function DashboardCognitive() {
                   `[${sig.intent_type}] evidence: ${(sig.evidence || []).join(', ') || '无'}`,
                 );
                 const desc = description.text;
+                const grounding = presentDriveGrounding(sig, t('dash.cog.driveEncrypted'));
+                const sourceDetails = grounding?.evidence.map((source) => {
+                  const recordedAt = new Date(source.recorded_at * 1000).toISOString().slice(0, 16);
+                  return `#${source.id} @${recordedAt}`;
+                }).join(', ');
                 const ackDisabled = !canAcknowledgeDriveSignal(sig, canAck, ackLoading === sig.id);
                 const ttl = sig.expires_at ? Math.max(0, Math.round((sig.expires_at * 1000 - nowSnapshot) / 60000)) : null;
                 return (
@@ -391,6 +414,32 @@ export default function DashboardCognitive() {
                           {sig.evidence.slice(0, 3).map((eid) => (
                             <span key={eid} style={{ color: 'var(--text-tertiary)', fontSize: 9, background: 'rgba(62,207,174,0.04)', padding: '1px 5px', borderRadius: 3, fontFamily: 'var(--font-mono)' }}>#{eid}</span>
                           ))}
+                        </div>
+                      )}
+                      {grounding && (
+                        <div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 6, lineHeight: 1.5 }}>
+                          {grounding.encrypted ? (
+                            grounding.reason
+                          ) : (
+                            <>
+                              <div>
+                                {t('dash.cog.driveReason')}: {grounding.reason}
+                              </div>
+                              <div>
+                                {t('dash.cog.driveEvidence')}: {sourceDetails || sig.evidence.map(id => `#${id}`).join(', ') || t('dash.cog.driveEvidence.none')}
+                              </div>
+                              {grounding.uncertainty.length > 0 && (
+                                <div>
+                                  {t('dash.cog.driveUncertainty')}: {grounding.uncertainty.map((value) => groundingUncertaintyLabel(value, t)).join(', ')}
+                                </div>
+                              )}
+                              {grounding.freshUntil !== null && (
+                                <div>
+                                  fresh until {new Date(grounding.freshUntil * 1000).toLocaleString()}
+                                </div>
+                              )}
+                            </>
+                          )}
                         </div>
                       )}
                       {sig.status === 'pending' || sig.status === 'delivered' ? (

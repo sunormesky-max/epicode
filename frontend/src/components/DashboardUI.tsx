@@ -5,7 +5,7 @@ import { useI18nContext } from '@/i18n/useI18n';
 export function DashboardLoading() {
   const { t } = useI18nContext();
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '50vh', flexDirection: 'column', gap: 16 }}>
+    <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '50vh', flexDirection: 'column', gap: 16 }}>
       <div className="energy-loader">
         <span className="el-orbit" />
         <span className="el-core" />
@@ -89,7 +89,7 @@ export function StatCard({ label, value, sublabel, color = 'var(--accent-cyan)' 
 export function ErrorBanner({ message, onClose, onRetry }: { message: string; onClose?: () => void; onRetry?: () => void }) {
   const { t } = useI18nContext();
   return (
-    <div style={{
+    <div role="alert" style={{
       background: 'rgba(248,113,113,0.08)', color: 'var(--danger-red)',
       border: '1px solid rgba(248,113,113,0.15)', borderRadius: 12,
       padding: 12, marginBottom: 16, fontSize: 13,
@@ -116,7 +116,7 @@ export function ErrorBanner({ message, onClose, onRetry }: { message: string; on
 export function NoticeBanner({ message, onClose }: { message: string; onClose?: () => void }) {
   const { t } = useI18nContext();
   return (
-    <div style={{
+    <div role="status" style={{
       background: 'rgba(52,211,153,0.06)', color: 'var(--success-green)',
       border: '1px solid rgba(52,211,153,0.12)', borderRadius: 12,
       padding: 12, marginBottom: 16, fontSize: 13,

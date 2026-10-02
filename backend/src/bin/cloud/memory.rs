@@ -1684,7 +1684,7 @@ pub async fn list_docs(
 pub async fn drive_inbox(
     AuthedEngine(engine): AuthedEngine,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let polled = engine.scheduler().drive_queue().peek_unacked(50); // P1-6: 返回 Pending+Delivered, 不转状态, 让租户能多次 poll 直到 ack
+    let polled = engine.scheduler().current_drive_inbox(50);
     let stats = engine.scheduler().drive_queue().stats();
     let e2e_public_key = engine.scheduler().e2e_pubkey();
     let signals: Vec<serde_json::Value> = polled
@@ -3251,12 +3251,7 @@ pub async fn drive_ack(
         );
     }
     // D §14.5: e2e=false blocks high/critical urgency auto-execute
-    let signal_info = engine
-        .scheduler()
-        .drive_queue()
-        .peek_unacked(100)
-        .into_iter()
-        .find(|s| s.id == req.drive_id);
+    let signal_info = engine.scheduler().drive_queue().get_signal(req.drive_id);
     if let Some(ref sig) = signal_info {
         let is_high = matches!(
             sig.urgency,
@@ -3282,12 +3277,7 @@ pub async fn drive_ack(
         reflection: req.reflection.clone(),
     };
     // δ2: 预读 signal (retry_count + evidence), 用于空铃降权判断
-    let pre_signal = engine
-        .scheduler()
-        .drive_queue()
-        .peek_unacked(200)
-        .into_iter()
-        .find(|s| s.id == req.drive_id);
+    let pre_signal = signal_info.clone();
     let (success, first_ack) = engine
         .scheduler()
         .drive_queue()
@@ -3348,40 +3338,17 @@ pub async fn drive_ack(
 
     // δ1: REST ack 也走 DriveEngine reward (与 MCP 对齐, 环4数据面)
     if success && first_ack {
-        let o = req.outcome.to_lowercase();
-        let positive = [
-            "success",
-            "done",
-            "completed",
-            "effective",
-            "helpful",
-            "good",
-            "actioned",
-            "resolved",
-            "处理",
-            "完成",
-            "有效",
-            "采纳",
-        ]
-        .iter()
-        .any(|k| o.contains(k));
-        let negative = [
-            "ignored", "rejected", "failed", "error", "useless", "拒绝", "忽略", "无效",
-        ]
-        .iter()
-        .any(|k| o.contains(k));
-        let reward = if positive {
-            5.0
-        } else if negative {
-            -3.0
-        } else {
-            1.0
-        }; // δ1fix: 幅度x100 让 weights/history 可见变化
-        let mut de = engine.scheduler.drive_engine_lock();
-        de.reward(epicode::engine::drive::Drive::Vitality, reward);
-        de.reward(epicode::engine::drive::Drive::Coherence, reward * 0.7);
-        de.reward(epicode::engine::drive::Drive::Curiosity, reward * 0.5);
-        de.reward(epicode::engine::drive::Drive::Efficiency, reward * 0.3);
+        if let Some((drive, multiplier)) = signal_info
+            .as_ref()
+            .and_then(|signal| signal.intent_type.feedback_target())
+        {
+            let reward =
+                epicode::engine::drive::DriveFeedback::sentiment_for_outcome(&req.outcome).reward();
+            engine
+                .scheduler
+                .drive_engine_lock()
+                .reward(drive, reward * multiplier);
+        }
     }
 
     let result = serde_json::json!({

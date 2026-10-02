@@ -3,6 +3,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use crate::domain::tetra::MemoryPayload;
+
 // ═══════════════════════════════════════════════════════════
 // Legacy Drive Engine (original drive system — kept for backward compat)
 // ═══════════════════════════════════════════════════════════
@@ -268,6 +270,142 @@ pub struct DriveSignal {
     /// 时间效性集成(L0汇合): 信号携带的时间预算(unix ms), None = 无预算语义
     #[serde(default)]
     pub time_budget_ms: Option<i64>,
+    /// Optional, versioned pointers to the persistent memories that justify this signal.
+    /// This intentionally contains no memory text and no confidence score.
+    #[serde(default)]
+    pub grounding: Option<DriveGrounding>,
+    #[serde(default)]
+    pub terminal_reason: Option<DriveTerminalReason>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct DriveGrounding {
+    pub reason: String,
+    pub evidence: Vec<DriveMemoryEvidence>,
+    #[serde(default)]
+    pub uncertainty: Vec<DriveGroundingUncertainty>,
+    #[serde(default)]
+    pub fresh_until: Option<i64>,
+    /// False when one or more evidence IDs are not known persistent-memory IDs.
+    #[serde(default)]
+    pub complete: bool,
+}
+
+impl DriveGrounding {
+    pub fn is_fresh_at(&self, now: i64) -> bool {
+        self.fresh_until.is_none_or(|deadline| now < deadline)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct DriveMemoryEvidence {
+    pub id: u64,
+    /// Stable fingerprint of content and eligibility metadata, not a confidence value.
+    pub revision: String,
+    pub recorded_at: i64,
+    #[serde(default)]
+    pub last_reviewed_at: Option<i64>,
+    pub importance: f64,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum DriveGroundingUncertainty {
+    SingleMemorySource,
+    NotReviewed,
+    KnownConflict,
+    UnresolvedEvidence,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DriveTerminalReason {
+    TtlExpired,
+    EvidenceStale,
+    RetriesExhausted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriveOutcomeSentiment {
+    Positive,
+    Negative,
+    Neutral,
+}
+
+impl DriveOutcomeSentiment {
+    pub fn reward(self) -> f64 {
+        match self {
+            Self::Positive => 5.0,
+            Self::Negative => -3.0,
+            Self::Neutral => 1.0,
+        }
+    }
+}
+
+pub fn memory_is_current(memory: &MemoryPayload, now: i64) -> bool {
+    memory.timestamp <= now
+        && memory.importance.is_finite()
+        && memory.valid_to.is_none()
+        && memory.valid_from <= now
+        && memory.expired_at.is_none_or(|expired_at| expired_at > now)
+        && memory
+            .invalidated_at
+            .is_none_or(|invalidated_at| invalidated_at > now)
+}
+
+pub fn memory_is_recent(memory: &MemoryPayload, now: i64, window_secs: i64) -> bool {
+    memory.timestamp <= now
+        && memory.timestamp > now.saturating_sub(window_secs)
+        && memory_is_current(memory, now)
+}
+
+pub fn memory_revision(memory: &MemoryPayload) -> u64 {
+    fn update(hash: &mut u64, bytes: &[u8]) {
+        for byte in bytes {
+            *hash ^= u64::from(*byte);
+            *hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+
+    fn update_optional_i64(hash: &mut u64, value: Option<i64>) {
+        match value {
+            Some(value) => {
+                update(hash, &[1]);
+                update(hash, &value.to_le_bytes());
+            }
+            None => update(hash, &[0]),
+        }
+    }
+
+    fn update_optional_string(hash: &mut u64, value: Option<&str>) {
+        match value {
+            Some(value) => {
+                update(hash, &[1]);
+                update(hash, &(value.len() as u64).to_le_bytes());
+                update(hash, value.as_bytes());
+            }
+            None => update(hash, &[0]),
+        }
+    }
+
+    // FNV-1a keeps the persisted fingerprint stable across process restarts.
+    let mut hash = 0xcbf29ce484222325;
+    update(&mut hash, &memory.content_hash.to_le_bytes());
+    update(&mut hash, &memory.timestamp.to_le_bytes());
+    update(&mut hash, &memory.valid_from.to_le_bytes());
+    update_optional_i64(&mut hash, memory.valid_to);
+    update_optional_i64(&mut hash, memory.expired_at);
+    update_optional_i64(&mut hash, memory.invalidated_at);
+    update(&mut hash, &memory.importance.to_bits().to_le_bytes());
+    let mut labels = memory.labels.clone();
+    labels.sort_unstable();
+    for label in labels {
+        update(&mut hash, &(label.len() as u64).to_le_bytes());
+        update(&mut hash, label.as_bytes());
+    }
+    update_optional_string(&mut hash, memory.memory_type.as_deref());
+    update_optional_string(&mut hash, memory.memory_class.as_deref());
+    hash
 }
 
 impl DriveSignal {
@@ -302,10 +440,15 @@ impl DriveSignal {
             .expect("DriveSignal serialization is infallible for this struct");
         let (description, encrypted_description) =
             self.description_transport_fields(e2e_public_key);
+        let (grounding, encrypted_grounding) = self.grounding_transport_fields(e2e_public_key);
         if let Some(fields) = value.as_object_mut() {
             fields.insert("description".to_string(), description);
             if let Some(ciphertext) = encrypted_description {
                 fields.insert("description_e2e".to_string(), serde_json::json!(ciphertext));
+            }
+            fields.insert("grounding".to_string(), grounding);
+            if let Some(ciphertext) = encrypted_grounding {
+                fields.insert("grounding_e2e".to_string(), serde_json::json!(ciphertext));
             }
             fields.insert(
                 "retryable".to_string(),
@@ -315,9 +458,40 @@ impl DriveSignal {
         value
     }
 
+    fn grounding_transport_fields(
+        &self,
+        e2e_public_key: Option<&str>,
+    ) -> (serde_json::Value, Option<String>) {
+        let Some(grounding) = &self.grounding else {
+            return (serde_json::Value::Null, None);
+        };
+        let Some(public_key) = e2e_public_key else {
+            return (
+                serde_json::to_value(grounding)
+                    .expect("DriveGrounding serialization is infallible for this struct"),
+                None,
+            );
+        };
+        let plaintext = match serde_json::to_vec(grounding) {
+            Ok(plaintext) => plaintext,
+            Err(error) => {
+                tracing::error!("[γ2] drive grounding serialization failed: {}", error);
+                return (serde_json::Value::Null, None);
+            }
+        };
+        match super::e2e::encrypt_for(&plaintext, public_key) {
+            Ok(ciphertext) => (serde_json::Value::Null, Some(ciphertext)),
+            Err(error) => {
+                tracing::error!("[γ2] drive grounding encryption failed: {}", error);
+                (serde_json::Value::Null, None)
+            }
+        }
+    }
+
     pub fn sse_value(&self, e2e_public_key: Option<&str>) -> serde_json::Value {
         let (description, encrypted_description) =
             self.description_transport_fields(e2e_public_key);
+        let (grounding, encrypted_grounding) = self.grounding_transport_fields(e2e_public_key);
         serde_json::json!({
             "id": self.id,
             "intent_type": self.intent_type,
@@ -326,6 +500,8 @@ impl DriveSignal {
             "description": description,
             "description_e2e": encrypted_description,
             "evidence": self.evidence,
+            "grounding": grounding,
+            "grounding_e2e": encrypted_grounding,
             "enqueued_at_ms": self.enqueued_at_ms,
         })
     }
@@ -340,6 +516,19 @@ pub enum DriveIntent {
     Constrain,
     Request,
     Share,
+}
+
+impl DriveIntent {
+    /// Keep outcome learning tied to the drive that produced the acknowledged signal.
+    pub fn feedback_target(&self) -> Option<(Drive, f64)> {
+        match self {
+            Self::Warn => Some((Drive::Vitality, 1.0)),
+            Self::Suggest => Some((Drive::Coherence, 0.7)),
+            Self::Explore => Some((Drive::Curiosity, 0.5)),
+            Self::Constrain => Some((Drive::Efficiency, 0.3)),
+            Self::Request | Self::Share => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -398,6 +587,60 @@ pub struct DriveFeedback {
     pub outcome: String,
     #[serde(default)]
     pub reflection: Option<String>,
+}
+
+impl DriveFeedback {
+    pub fn sentiment(&self) -> DriveOutcomeSentiment {
+        Self::sentiment_for_outcome(&self.outcome)
+    }
+
+    pub fn sentiment_for_outcome(outcome: &str) -> DriveOutcomeSentiment {
+        let outcome = outcome.to_lowercase();
+        let positive = [
+            "success",
+            "done",
+            "completed",
+            "effective",
+            "helpful",
+            "good",
+            "actioned",
+            "resolved",
+            "处理",
+            "完成",
+            "有效",
+            "采纳",
+        ];
+        let negative = [
+            "ignored",
+            "rejected",
+            "failed",
+            "error",
+            "useless",
+            "not helpful",
+            "unhelpful",
+            "not effective",
+            "not useful",
+            "not done",
+            "拒绝",
+            "忽略",
+            "无效",
+        ];
+        if negative.iter().any(|word| outcome.contains(word)) {
+            DriveOutcomeSentiment::Negative
+        } else if positive.iter().any(|word| outcome.contains(word)) {
+            DriveOutcomeSentiment::Positive
+        } else {
+            DriveOutcomeSentiment::Neutral
+        }
+    }
+
+    pub fn learning_success(&self) -> bool {
+        match self.sentiment() {
+            DriveOutcomeSentiment::Positive => true,
+            DriveOutcomeSentiment::Negative => false,
+            DriveOutcomeSentiment::Neutral => self.executed,
+        }
+    }
 }
 
 pub fn will_content_closed(text: &str) -> bool {
@@ -504,15 +747,33 @@ pub fn will_text_reject(description: &str) -> Option<&'static str> {
     None
 }
 
+pub const MAX_QUEUE_SIGNALS: usize = 2_000;
+const TERMINAL_PRUNE_BATCH: usize = 100;
+
+fn urgency_rank(urgency: &DriveUrgency) -> u8 {
+    match urgency {
+        DriveUrgency::Critical => 3,
+        DriveUrgency::High => 2,
+        DriveUrgency::Medium => 1,
+        DriveUrgency::Low => 0,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriveEnqueueError {
+    QueueFull,
+}
+
 pub struct DriveQueue {
     signals: Mutex<Vec<DriveSignal>>,
     next_id: AtomicU64,
-    /// Counters for learning: how many signals of each intent were executed vs rejected.
-    /// This feeds back into the DriveEngine to adjust future signal generation.
+    /// Explicit positive/negative outcome bins keyed by intent and evidence.
+    /// These feed back into future signal admission.
     stats_executed: AtomicU64,
     stats_duplicate_ack: AtomicU64,
     stats_rejected: AtomicU64,
     sweep_total: AtomicU64,
+    capacity_rejected: AtomicU64,
     // D1: push notification for drive signal enqueue
     notify: Arc<tokio::sync::Notify>,
     ingested: Mutex<HashSet<u64>>,
@@ -536,6 +797,7 @@ impl DriveQueue {
             stats_executed: AtomicU64::new(0),
             stats_duplicate_ack: AtomicU64::new(0),
             stats_rejected: AtomicU64::new(0),
+            capacity_rejected: AtomicU64::new(0),
             ingested: Mutex::new(HashSet::new()),
             policy: Mutex::new(HashMap::new()),
             policy_version: AtomicU64::new(1),
@@ -546,33 +808,28 @@ impl DriveQueue {
     pub fn notify_handle(&self) -> Arc<tokio::sync::Notify> {
         self.notify.clone()
     }
-    pub fn enqueue(&self, mut signal: DriveSignal) -> u64 {
-        // 审计修复: id 碰撞防御 — 若 Vec 已有该 id(异常竞态), 自旋跳到空闲 id
-        loop {
-            let candidate = self.next_id.fetch_add(1, Ordering::SeqCst);
-            let exists = self.signals.lock().iter().any(|s| s.id == candidate);
-            if !exists {
-                signal.id = candidate;
-                break;
+    /// Compatibility helper for older callers; returns 0 when the queue is full.
+    /// New code should use `try_enqueue` so it can observe backpressure directly.
+    pub fn enqueue(&self, signal: DriveSignal) -> u64 {
+        match self.try_enqueue(signal) {
+            Ok(id) => id,
+            Err(error) => {
+                tracing::warn!("[Drive] signal admission rejected: {:?}", error);
+                0
             }
         }
-        signal.status = DriveStatus::Pending;
-        signal.enqueued_at_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
-        let id = signal.id;
+    }
+
+    pub fn try_enqueue(&self, mut signal: DriveSignal) -> Result<u64, DriveEnqueueError> {
         let mut signals = self.signals.lock();
-        if signals.len() >= 2000 {
-            // Cap修复: 只清终态(Executed/Rejected/Expired)中最旧的, 不清活的(Pending/Delivered)
-            // 之前清Pending导致新信号被吃 → inbox幽灵空
+        if signals.len() >= MAX_QUEUE_SIGNALS {
             let mut removed = 0;
             signals.retain(|s| {
                 let is_terminal = matches!(
                     s.status,
                     DriveStatus::Executed | DriveStatus::Rejected | DriveStatus::Expired
                 );
-                if removed < 100 && is_terminal {
+                if removed < TERMINAL_PRUNE_BATCH && is_terminal {
                     removed += 1;
                     false
                 } else {
@@ -580,6 +837,24 @@ impl DriveQueue {
                 }
             });
         }
+        if signals.len() >= MAX_QUEUE_SIGNALS {
+            self.capacity_rejected.fetch_add(1, Ordering::Relaxed);
+            return Err(DriveEnqueueError::QueueFull);
+        }
+        loop {
+            let candidate = self.next_id.fetch_add(1, Ordering::SeqCst);
+            if !signals.iter().any(|s| s.id == candidate) {
+                signal.id = candidate;
+                break;
+            }
+        }
+        signal.status = DriveStatus::Pending;
+        signal.terminal_reason = None;
+        signal.enqueued_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let id = signal.id;
         let desc: String = signal.description.chars().take(80).collect();
         let itype = signal.intent_type.clone();
         let urg = signal.urgency.clone();
@@ -592,7 +867,7 @@ impl DriveQueue {
             urg,
             desc
         );
-        id
+        Ok(id)
     }
 
     pub fn poll(&self, limit: usize) -> Vec<DriveSignal> {
@@ -636,9 +911,8 @@ impl DriveQueue {
                 if let Some(exp) = s.expires_at {
                     if now > exp {
                         s.status = DriveStatus::Expired;
+                        s.terminal_reason = Some(DriveTerminalReason::TtlExpired);
                         expired_count += 1;
-                        self.sweep_total
-                            .fetch_add(expired_count as u64, std::sync::atomic::Ordering::Relaxed);
                         tracing::info!(
                             "[Drive] signal #{} expired via sweep (TTL {}s ago)",
                             s.id,
@@ -660,11 +934,20 @@ impl DriveQueue {
     }
 
     pub fn peek_pending(&self, limit: usize) -> Vec<DriveSignal> {
+        self.peek_pending_matching(limit, |_| true)
+    }
+
+    /// Apply the consumer filter before the limit so unrelated pending work cannot starve it.
+    pub(crate) fn peek_pending_matching(
+        &self,
+        limit: usize,
+        predicate: impl Fn(&DriveSignal) -> bool,
+    ) -> Vec<DriveSignal> {
         self.sweep_expired();
         let signals = self.signals.lock();
         signals
             .iter()
-            .filter(|s| matches!(s.status, DriveStatus::Pending))
+            .filter(|s| matches!(s.status, DriveStatus::Pending) && predicate(s))
             .take(limit)
             .cloned()
             .collect()
@@ -675,18 +958,67 @@ impl DriveQueue {
     pub fn peek_unacked(&self, limit: usize) -> Vec<DriveSignal> {
         self.sweep_expired();
         let signals = self.signals.lock();
-        // P1-6: 新优先 — Pending 排前面, 然后按 ID 降序 (最新的 delivered 先看到)
-        let mut unacked: Vec<&DriveSignal> = signals
+        // Keep pending ahead of delivered. Within each status, cycle through urgency
+        // classes from highest to lowest and use FIFO within each class.
+        let unacked: Vec<&DriveSignal> = signals
             .iter()
             .filter(|s| matches!(s.status, DriveStatus::Pending | DriveStatus::Delivered))
             .collect();
-        // Pending 优先, 同状态内按 ID 降序
-        unacked.sort_by(|a, b| {
-            let a_pending = matches!(a.status, DriveStatus::Pending);
-            let b_pending = matches!(b.status, DriveStatus::Pending);
-            b_pending.cmp(&a_pending).then_with(|| b.id.cmp(&a.id))
-        });
-        unacked.into_iter().take(limit).cloned().collect()
+        let mut ordered = Vec::with_capacity(unacked.len());
+        for pending_status in [true, false] {
+            let mut urgency_buckets: [Vec<&DriveSignal>; 4] = std::array::from_fn(|_| Vec::new());
+            for signal in &unacked {
+                if matches!(signal.status, DriveStatus::Pending) == pending_status {
+                    urgency_buckets[urgency_rank(&signal.urgency) as usize].push(signal);
+                }
+            }
+            for bucket in &mut urgency_buckets {
+                bucket.sort_by(|a, b| {
+                    a.enqueued_at_ms
+                        .cmp(&b.enqueued_at_ms)
+                        .then_with(|| a.id.cmp(&b.id))
+                });
+            }
+            let rounds = urgency_buckets
+                .iter()
+                .map(Vec::len)
+                .max()
+                .unwrap_or_default();
+            for index in 0..rounds {
+                for urgency in (0..urgency_buckets.len()).rev() {
+                    if let Some(signal) = urgency_buckets[urgency].get(index) {
+                        ordered.push(*signal);
+                    }
+                }
+            }
+        }
+        ordered.into_iter().take(limit).cloned().collect()
+    }
+
+    pub fn get_signal(&self, drive_id: u64) -> Option<DriveSignal> {
+        self.sweep_expired();
+        self.signals
+            .lock()
+            .iter()
+            .find(|signal| signal.id == drive_id)
+            .cloned()
+    }
+
+    pub fn expire_stale_evidence(&self, drive_ids: &[u64]) -> usize {
+        if drive_ids.is_empty() {
+            return 0;
+        }
+        let stale_ids: HashSet<u64> = drive_ids.iter().copied().collect();
+        let mut expired = 0;
+        let mut signals = self.signals.lock();
+        for signal in signals.iter_mut() {
+            if stale_ids.contains(&signal.id) && signal.is_retryable() {
+                signal.status = DriveStatus::Expired;
+                signal.terminal_reason = Some(DriveTerminalReason::EvidenceStale);
+                expired += 1;
+            }
+        }
+        expired
     }
 
     /// Mark a signal as consumed (skip Delivered state — go straight to Executed/Rejected).
@@ -716,6 +1048,7 @@ impl DriveQueue {
                 }
                 if feedback.executed {
                     signal.status = DriveStatus::Executed;
+                    signal.terminal_reason = None;
                     self.stats_executed.fetch_add(1, Ordering::SeqCst);
                 } else {
                     signal.retry_count += 1;
@@ -725,11 +1058,16 @@ impl DriveQueue {
                         // P1闸接线: 拒绝耗尽 → Rejected(死信专态)。曾进Expired与TTL过期混同,
                         // Rejected枚举从未被产生("死状态") — evidence_done 无法识别"被执行端否决"
                         signal.status = DriveStatus::Rejected;
+                        signal.terminal_reason = Some(DriveTerminalReason::RetriesExhausted);
                         self.stats_rejected.fetch_add(1, Ordering::SeqCst);
                     }
                 }
                 signal.feedback = Some(feedback.clone());
-                self.learn_outcome(&signal.intent_type, &signal.evidence, feedback.executed);
+                self.learn_outcome(
+                    &signal.intent_type,
+                    &signal.evidence,
+                    feedback.learning_success(),
+                );
                 return (true, true);
             }
         }
@@ -809,7 +1147,15 @@ impl DriveQueue {
             .count();
         let ttl_expired_count = signals
             .iter()
-            .filter(|s| matches!(s.status, DriveStatus::Expired) && s.retry_count == 0)
+            .filter(|s| {
+                matches!(s.status, DriveStatus::Expired)
+                    && (matches!(s.terminal_reason, Some(DriveTerminalReason::TtlExpired))
+                        || (s.terminal_reason.is_none() && s.retry_count == 0))
+            })
+            .count();
+        let stale_evidence_expired = signals
+            .iter()
+            .filter(|s| matches!(s.terminal_reason, Some(DriveTerminalReason::EvidenceStale)))
             .count();
         let unique_executed = executed; // 当前无去重计数器，executed 本身就是唯一
         let duplicate_ack_suppressed = self.stats_duplicate_ack.load(Ordering::SeqCst);
@@ -827,10 +1173,13 @@ impl DriveQueue {
             "max_retries": Self::MAX_RETRIES,
             "dead_letter_count": dead_letter_count,
             "ttl_expired_count": ttl_expired_count,
+            "stale_evidence_expired": stale_evidence_expired,
             "unique_executed": unique_executed,
             "duplicate_ack_suppressed": duplicate_ack_suppressed,
             "retry_attempts": signals.iter().map(|s| s.retry_count as u64).sum::<u64>(),
             "sweep_applied": self.sweep_total.load(Ordering::Relaxed),
+            "capacity": MAX_QUEUE_SIGNALS,
+            "capacity_rejected": self.capacity_rejected.load(Ordering::Relaxed),
         })
     }
 
@@ -936,11 +1285,11 @@ impl DriveQueue {
         }
     }
 
-    pub fn learn_outcome(&self, intent: &DriveIntent, evidence: &[u64], executed: bool) {
+    pub fn learn_outcome(&self, intent: &DriveIntent, evidence: &[u64], successful: bool) {
         let fp = Self::fingerprint(intent, evidence);
         let mut pol = self.policy.lock();
         let entry = pol.entry(fp).or_insert((0, 0));
-        if executed {
+        if successful {
             entry.0 = entry.0.saturating_add(1);
         } else {
             entry.1 = entry.1.saturating_add(1);
@@ -1013,6 +1362,8 @@ mod will_valve_tests {
             expires_at: None,
             enqueued_at_ms: 0,
             time_budget_ms: None,
+            grounding: None,
+            terminal_reason: None,
         }
     }
 
@@ -1085,6 +1436,61 @@ mod will_valve_tests {
 mod tests {
     use super::*;
 
+    fn pending_signal(intent_type: DriveIntent, description: &str) -> DriveSignal {
+        DriveSignal {
+            id: 0,
+            timestamp: 0,
+            intent_type,
+            description: description.to_string(),
+            evidence: Vec::new(),
+            urgency: DriveUrgency::Medium,
+            target_capability: None,
+            emotion: None,
+            origin_tick: 0,
+            status: DriveStatus::Pending,
+            feedback: None,
+            retry_count: 0,
+            expires_at: None,
+            enqueued_at_ms: 0,
+            time_budget_ms: None,
+            grounding: None,
+            terminal_reason: None,
+        }
+    }
+
+    #[test]
+    fn filtered_pending_peek_does_not_starve_later_matching_signals() {
+        let queue = DriveQueue::new();
+        for index in 0..12 {
+            queue.enqueue(pending_signal(
+                DriveIntent::Warn,
+                &format!("external warning {index}"),
+            ));
+        }
+        let explore_ids: Vec<_> = (0..4)
+            .map(|index| {
+                queue.enqueue(pending_signal(
+                    DriveIntent::Explore,
+                    &format!("self-driving exploration {index}"),
+                ))
+            })
+            .collect();
+
+        let selected = queue.peek_pending_matching(3, |signal| {
+            matches!(signal.intent_type, DriveIntent::Explore)
+        });
+        assert_eq!(
+            selected.iter().map(|signal| signal.id).collect::<Vec<_>>(),
+            explore_ids[..3]
+        );
+
+        let external_pending = queue.peek_pending(10);
+        assert_eq!(external_pending.len(), 10);
+        assert!(external_pending
+            .iter()
+            .all(|signal| matches!(signal.intent_type, DriveIntent::Warn)));
+    }
+
     #[test]
     fn drive_signal_inbox_json_includes_retryability_and_snake_case_enums() {
         let signal = DriveSignal {
@@ -1103,12 +1509,33 @@ mod tests {
             expires_at: Some(1_780_000_100),
             enqueued_at_ms: 1_780_000_000_000,
             time_budget_ms: None,
+            grounding: Some(DriveGrounding {
+                reason: "recent search-gap memory".into(),
+                evidence: vec![DriveMemoryEvidence {
+                    id: 10,
+                    revision: "0000000000000014".into(),
+                    recorded_at: 1_780_000_000,
+                    last_reviewed_at: None,
+                    importance: 1.0,
+                }],
+                uncertainty: vec![
+                    DriveGroundingUncertainty::SingleMemorySource,
+                    DriveGroundingUncertainty::NotReviewed,
+                ],
+                fresh_until: Some(1_780_003_600),
+                complete: true,
+            }),
+            terminal_reason: None,
         };
 
         let value = signal.inbox_value();
         assert_eq!(value["intent_type"], "explore");
         assert_eq!(value["status"], "delivered");
         assert_eq!(value["evidence"], serde_json::json!([10, 20]));
+        assert_eq!(
+            value["grounding"]["uncertainty"],
+            serde_json::json!(["single_memory_source", "not_reviewed"])
+        );
         assert_eq!(value["retryable"], true);
 
         let mut terminal = signal;
@@ -1117,7 +1544,7 @@ mod tests {
     }
 
     #[test]
-    fn drive_inbox_and_sse_share_e2e_description_protection() {
+    fn drive_inbox_and_sse_encrypt_descriptions_and_grounding() {
         use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
         use rsa::RsaPrivateKey;
 
@@ -1146,6 +1573,20 @@ mod tests {
             expires_at: None,
             enqueued_at_ms: 1_780_000_000_100,
             time_budget_ms: None,
+            grounding: Some(DriveGrounding {
+                reason: "private memory-derived suggestion".into(),
+                evidence: vec![DriveMemoryEvidence {
+                    id: 22,
+                    revision: "0000000000000017".into(),
+                    recorded_at: 1_780_000_000,
+                    last_reviewed_at: Some(1_780_000_010),
+                    importance: 3.0,
+                }],
+                uncertainty: vec![DriveGroundingUncertainty::SingleMemorySource],
+                fresh_until: Some(1_780_000_600),
+                complete: true,
+            }),
+            terminal_reason: None,
         };
 
         let inbox = signal.inbox_value_with_e2e(Some(&public_pem));
@@ -1159,8 +1600,24 @@ mod tests {
                 signal.description.as_bytes()
             );
         }
+        let grounding_plaintext = serde_json::to_vec(signal.grounding.as_ref().unwrap()).unwrap();
+        for encrypted in [
+            inbox["grounding_e2e"]
+                .as_str()
+                .expect("inbox grounding ciphertext"),
+            sse["grounding_e2e"]
+                .as_str()
+                .expect("SSE grounding ciphertext"),
+        ] {
+            assert_eq!(
+                crate::engine::e2e::decrypt_with(encrypted, &private_pem).unwrap(),
+                grounding_plaintext
+            );
+        }
         assert_eq!(inbox["description"], serde_json::Value::Null);
         assert_eq!(sse["description"], serde_json::Value::Null);
+        assert_eq!(inbox["grounding"], serde_json::Value::Null);
+        assert_eq!(sse["grounding"], serde_json::Value::Null);
         assert_eq!(inbox["retryable"], true);
     }
 
@@ -1184,6 +1641,8 @@ mod tests {
             expires_at: None,
             enqueued_at_ms: 0,
             time_budget_ms: None,
+            grounding: None,
+            terminal_reason: None,
         };
         let id = q.enqueue(sig);
         // 拒绝 MAX_RETRIES+1 次 → 前3次回Pending重试, 第4次进Rejected(死信)
@@ -1208,5 +1667,325 @@ mod tests {
             "rebirth after rejection must be blocked: {:?}",
             verdict
         );
+    }
+
+    #[test]
+    fn existing_recency_fixture_excludes_temporally_invalid_memory() {
+        let now = 1_800_000_000;
+        let memory = |timestamp, importance| MemoryPayload {
+            timestamp,
+            valid_from: timestamp,
+            importance,
+            ..MemoryPayload::default()
+        };
+        let mut fresh = memory(now - 60, 3.0);
+        let stale = memory(now - 3_600, 3.0);
+        let mut superseded = memory(now - 60, 3.0);
+        superseded.valid_to = Some(now - 1);
+        let mut expired = memory(now - 60, 3.0);
+        expired.expired_at = Some(now - 1);
+        let mut invalidated = memory(now - 60, 3.0);
+        invalidated.invalidated_at = Some(now - 1);
+        let future = memory(now + 60, 3.0);
+        let low_importance = memory(now - 60, 2.0);
+        fresh.content_hash = 1;
+
+        let fixture = [
+            (1, fresh),
+            (2, stale),
+            (3, superseded),
+            (4, expired),
+            (5, invalidated),
+            (6, future),
+            (7, low_importance),
+        ];
+        let before: Vec<_> = fixture
+            .iter()
+            .filter(|(_, memory)| {
+                memory.timestamp > now - 600
+                    && memory.importance >= 2.5
+                    && memory.valid_to.is_none()
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        let after: Vec<_> = fixture
+            .iter()
+            .filter(|(_, memory)| memory.importance >= 2.5 && memory_is_recent(memory, now, 600))
+            .map(|(id, _)| *id)
+            .collect();
+
+        assert_eq!(before, vec![1, 4, 5, 6]);
+        assert_eq!(after, vec![1]);
+    }
+
+    #[test]
+    fn memory_revision_tracks_content_and_relevance_metadata_but_not_review_access() {
+        let mut memory = MemoryPayload::default();
+        memory.timestamp = 1_800_000_000;
+        memory.valid_from = memory.timestamp;
+        memory.content_hash = 10;
+        memory.labels = vec!["decision".into()];
+        memory.importance = 2.5;
+        let revision = memory_revision(&memory);
+
+        memory.last_reviewed_ts = Some(memory.timestamp + 10);
+        assert_eq!(memory_revision(&memory), revision);
+        memory.labels.push("architecture".into());
+        assert_ne!(memory_revision(&memory), revision);
+    }
+
+    #[test]
+    fn grounding_freshness_closes_at_its_source_deadline() {
+        let grounding = DriveGrounding {
+            reason: "recent decision memory".into(),
+            evidence: Vec::new(),
+            uncertainty: Vec::new(),
+            fresh_until: Some(100),
+            complete: true,
+        };
+        assert!(grounding.is_fresh_at(99));
+        assert!(!grounding.is_fresh_at(100));
+    }
+
+    #[test]
+    fn explicit_outcome_sentiment_overrides_the_executed_flag_for_learning() {
+        let not_helpful = DriveFeedback {
+            responded_at: 1,
+            executed: true,
+            outcome: "useless despite being executed".into(),
+            reflection: None,
+        };
+        let helpful = DriveFeedback {
+            responded_at: 1,
+            executed: false,
+            outcome: "helpful but not actioned".into(),
+            reflection: None,
+        };
+        let neutral = DriveFeedback {
+            responded_at: 1,
+            executed: false,
+            outcome: "deferred".into(),
+            reflection: None,
+        };
+
+        assert!(!not_helpful.learning_success());
+        assert!(helpful.learning_success());
+        assert!(!neutral.learning_success());
+        assert_eq!(
+            DriveFeedback::sentiment_for_outcome("later"),
+            DriveOutcomeSentiment::Neutral
+        );
+        assert_eq!(
+            DriveFeedback::sentiment_for_outcome("not helpful"),
+            DriveOutcomeSentiment::Negative
+        );
+    }
+
+    #[test]
+    fn queue_policy_learns_usefulness_separately_from_execution_status() {
+        let queue = DriveQueue::new();
+        let mut suggestion = pending_signal(DriveIntent::Suggest, "suggestion");
+        suggestion.evidence = vec![10];
+        let id = queue.enqueue(suggestion);
+        let signal = queue.get_signal(id).unwrap();
+        queue.acknowledge(
+            id,
+            DriveFeedback {
+                responded_at: 1,
+                executed: true,
+                outcome: "useless after execution".into(),
+                reflection: None,
+            },
+        );
+
+        assert_eq!(queue.stats()["policy_success"], 0);
+        assert_eq!(queue.stats()["policy_fail"], 1);
+        assert!(queue.should_emit(&signal.intent_type, &signal.evidence));
+    }
+
+    #[test]
+    fn outcome_policy_survives_queue_state_serialization() {
+        let queue = DriveQueue::new();
+        queue.learn_outcome(&DriveIntent::Suggest, &[10, 20], true);
+        let encoded = serde_json::to_string(&queue.policy_snapshot()).unwrap();
+        let restored_policy = serde_json::from_str(&encoded).unwrap();
+        let restored = DriveQueue::new();
+        restored.restore_policy(restored_policy);
+
+        assert!(!restored.should_emit(&DriveIntent::Suggest, &[10, 20]));
+        assert!(restored.should_emit(&DriveIntent::Suggest, &[10, 21]));
+    }
+
+    #[test]
+    fn feedback_rewards_only_the_drive_for_the_signal_intent() {
+        assert_eq!(
+            DriveIntent::Warn.feedback_target(),
+            Some((Drive::Vitality, 1.0))
+        );
+        assert_eq!(
+            DriveIntent::Suggest.feedback_target(),
+            Some((Drive::Coherence, 0.7))
+        );
+        assert_eq!(
+            DriveIntent::Explore.feedback_target(),
+            Some((Drive::Curiosity, 0.5))
+        );
+        assert_eq!(
+            DriveIntent::Constrain.feedback_target(),
+            Some((Drive::Efficiency, 0.3))
+        );
+        assert_eq!(DriveIntent::Share.feedback_target(), None);
+    }
+
+    #[test]
+    fn queue_round_robins_urgency_classes_with_fifo_within_each_class() {
+        let queue = DriveQueue::new();
+        let critical = queue.enqueue(pending_signal(DriveIntent::Warn, "critical"));
+        let high_first = queue.enqueue(pending_signal(DriveIntent::Warn, "high old"));
+        let high_second = queue.enqueue(pending_signal(DriveIntent::Warn, "high new"));
+        let medium = queue.enqueue(pending_signal(DriveIntent::Suggest, "medium"));
+        let low = queue.enqueue(pending_signal(DriveIntent::Explore, "low"));
+        {
+            let mut signals = queue.signals.lock();
+            signals
+                .iter_mut()
+                .find(|s| s.id == critical)
+                .unwrap()
+                .urgency = DriveUrgency::Critical;
+            signals
+                .iter_mut()
+                .find(|s| s.id == high_first)
+                .unwrap()
+                .urgency = DriveUrgency::High;
+            signals
+                .iter_mut()
+                .find(|s| s.id == high_second)
+                .unwrap()
+                .urgency = DriveUrgency::High;
+            signals.iter_mut().find(|s| s.id == medium).unwrap().urgency = DriveUrgency::Medium;
+            signals.iter_mut().find(|s| s.id == low).unwrap().urgency = DriveUrgency::Low;
+            signals
+                .iter_mut()
+                .find(|s| s.id == high_first)
+                .unwrap()
+                .enqueued_at_ms = 10;
+            signals
+                .iter_mut()
+                .find(|s| s.id == high_second)
+                .unwrap()
+                .enqueued_at_ms = 20;
+        }
+
+        let ids: Vec<_> = queue
+            .peek_unacked(5)
+            .into_iter()
+            .map(|signal| signal.id)
+            .collect();
+        assert_eq!(ids, vec![critical, high_first, medium, low, high_second]);
+    }
+
+    #[test]
+    fn queue_backpressure_enforces_the_existing_hard_capacity_and_preserves_live_work() {
+        let queue = DriveQueue::new();
+        {
+            let mut signals = queue.signals.lock();
+            for id in 1..=MAX_QUEUE_SIGNALS as u64 {
+                let mut signal = pending_signal(DriveIntent::Warn, "live");
+                signal.id = id;
+                signals.push(signal);
+            }
+        }
+
+        assert_eq!(
+            queue.try_enqueue(pending_signal(DriveIntent::Suggest, "overflow")),
+            Err(DriveEnqueueError::QueueFull)
+        );
+        assert_eq!(queue.snapshot().len(), MAX_QUEUE_SIGNALS);
+        assert_eq!(queue.stats()["capacity"], MAX_QUEUE_SIGNALS);
+        assert_eq!(queue.stats()["capacity_rejected"], 1);
+    }
+
+    #[test]
+    fn queue_reclaims_terminal_records_before_rejecting_new_work() {
+        let queue = DriveQueue::new();
+        {
+            let mut signals = queue.signals.lock();
+            for id in 1..=MAX_QUEUE_SIGNALS as u64 {
+                let mut signal = pending_signal(DriveIntent::Warn, "signal");
+                signal.id = id;
+                if id <= TERMINAL_PRUNE_BATCH as u64 {
+                    signal.status = DriveStatus::Executed;
+                }
+                signals.push(signal);
+            }
+        }
+        queue
+            .next_id
+            .store(MAX_QUEUE_SIGNALS as u64 + 1, Ordering::SeqCst);
+
+        assert!(queue
+            .try_enqueue(pending_signal(DriveIntent::Suggest, "new"))
+            .is_ok());
+        let remaining = queue.snapshot();
+        assert_eq!(
+            remaining.len(),
+            MAX_QUEUE_SIGNALS - TERMINAL_PRUNE_BATCH + 1
+        );
+        assert!(remaining
+            .iter()
+            .all(|signal| signal.id > TERMINAL_PRUNE_BATCH as u64));
+    }
+
+    #[test]
+    fn expired_signal_sweep_counts_each_signal_once() {
+        let queue = DriveQueue::new();
+        let now = DriveQueue::now_ts();
+        for index in 0..3 {
+            let mut signal = pending_signal(DriveIntent::Warn, "expires");
+            signal.expires_at = Some(now - 1);
+            signal.origin_tick = index;
+            queue.enqueue(signal);
+        }
+
+        queue.sweep_expired();
+        assert_eq!(queue.sweep_applied(), 3);
+        queue.sweep_expired();
+        assert_eq!(queue.sweep_applied(), 3);
+    }
+
+    #[test]
+    fn grounding_round_trips_across_queue_restore_and_legacy_rows_default_cleanly() {
+        let queue = DriveQueue::new();
+        let mut signal = pending_signal(DriveIntent::Suggest, "grounded");
+        signal.evidence = vec![42];
+        signal.grounding = Some(DriveGrounding {
+            reason: "recent decision memory".into(),
+            evidence: vec![DriveMemoryEvidence {
+                id: 42,
+                revision: "0000000000000064".into(),
+                recorded_at: 1_800_000_000,
+                last_reviewed_at: None,
+                importance: 2.5,
+            }],
+            uncertainty: vec![
+                DriveGroundingUncertainty::SingleMemorySource,
+                DriveGroundingUncertainty::NotReviewed,
+            ],
+            fresh_until: Some(1_800_001_800),
+            complete: true,
+        });
+        let id = queue.enqueue(signal.clone());
+        let persisted = serde_json::to_string(&queue.snapshot()).unwrap();
+        let restored_signals: Vec<DriveSignal> = serde_json::from_str(&persisted).unwrap();
+        let restored = DriveQueue::new();
+        restored.restore(restored_signals);
+        assert_eq!(restored.get_signal(id).unwrap().grounding, signal.grounding);
+
+        let mut legacy = serde_json::to_value(signal).unwrap();
+        legacy.as_object_mut().unwrap().remove("grounding");
+        legacy.as_object_mut().unwrap().remove("terminal_reason");
+        let legacy: DriveSignal = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.grounding.is_none());
+        assert!(legacy.terminal_reason.is_none());
     }
 }

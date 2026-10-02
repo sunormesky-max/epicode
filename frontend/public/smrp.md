@@ -61,4 +61,4 @@ For exact search, `source` includes `bm25`; hybrid search uses `hybrid`; semanti
 - `POST /api/v1/recall` and MCP `memory_recall` return `tiers`, original `sections`, relevance counts, and `clusters_touched`.
 - `POST /api/v1/remember` and MCP `memory_create` return creation status, intake/classification, deduplication, and placement details.
 
-See the canonical specification for normative fields and conformance levels. SMRP does not define L0 drive semantics; those are described in [l0.md](l0.md).
+See the canonical specification for normative fields and conformance levels. SMRP does not define L0 drive semantics; those are described in [l0.md](l0.md). L0 inbox responses retain the same SMRP envelope while their tool-specific signal payload gains optional, backward-compatible memory-grounding provenance.

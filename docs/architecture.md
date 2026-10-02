@@ -113,8 +113,10 @@ Engine subsystems communicate asynchronously through a `broadcast::EventBus`:
 
 Long-running and periodic work is executed via `tokio::task`:
 
-- The scheduler spawns tasks for dream cycles, pulse propagation, and deduplication.
-- Tasks are cooperative and yield control to the async runtime.
+- The scheduler loop sequences pulse, fission, dream, eviction, and persistence maintenance.
+- Cloud startup atomically claims one scheduler loop per user, and `SchedulerCenter` rejects duplicate loop starts. Scheduler cycles use single-flight admission; full cognitive cycles run on the blocking pool, and if a cycle outlives its interval, later ticks are skipped rather than queued.
+- Self-driving selects `Explore` signals before applying its three-signal cycle limit, leaving other pending signal types available to external consumers.
+- The async loop remains available for events and shutdown while a full cognitive cycle is running.
 - CPU-intensive work (ONNX embedding inference) runs on dedicated threads to avoid blocking the async executor.
 
 ### Graph and Library Persistence

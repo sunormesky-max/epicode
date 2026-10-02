@@ -113,12 +113,7 @@ fn check_mcp_request_access(
     let drive_id = request["params"]["arguments"]["drive_id"]
         .as_u64()
         .unwrap_or(0);
-    let signal = engine
-        .scheduler()
-        .drive_queue()
-        .peek_unacked(200)
-        .into_iter()
-        .find(|signal| signal.id == drive_id);
+    let signal = engine.scheduler().drive_queue().get_signal(drive_id);
     if signal.is_some_and(|signal| {
         matches!(
             signal.urgency,
@@ -157,8 +152,7 @@ pub(super) fn start_cognitive_loop_if_needed(
     user_id: &str,
     engine: Arc<epicode::engine::Engine>,
 ) {
-    if !state.user_mgr.is_loop_started(user_id) {
-        state.user_mgr.mark_loop_started(user_id);
+    if state.user_mgr.try_mark_loop_started(user_id) {
         let uid = user_id.to_string();
         tokio::spawn(async move {
             if std::env::var("ENABLE_COGNITIVE").as_deref() == Ok("1") {
@@ -440,6 +434,81 @@ mod tests {
         assert_eq!(rejection.status, StatusCode::FORBIDDEN);
         assert_eq!(rejection.response["id"], "drive-ack-request");
         assert_eq!(rejection.response["error"]["code"], -32002);
+    }
+
+    #[test]
+    fn high_urgency_e2e_gate_checks_signals_beyond_the_inbox_page() {
+        let engine = epicode::engine::Engine::new();
+        let queue = engine.scheduler().drive_queue();
+        let now = chrono::Utc::now().timestamp();
+        let high_id = queue.enqueue(epicode::engine::drive::DriveSignal {
+            id: 0,
+            timestamp: now,
+            intent_type: epicode::engine::drive::DriveIntent::Warn,
+            description: "high urgency signal".into(),
+            evidence: Vec::new(),
+            urgency: epicode::engine::drive::DriveUrgency::High,
+            target_capability: None,
+            emotion: None,
+            origin_tick: 0,
+            status: epicode::engine::drive::DriveStatus::Pending,
+            feedback: None,
+            retry_count: 0,
+            expires_at: None,
+            enqueued_at_ms: 0,
+            time_budget_ms: None,
+            grounding: None,
+            terminal_reason: None,
+        });
+        assert_eq!(queue.poll(1).len(), 1);
+        for index in 0..200 {
+            queue.enqueue(epicode::engine::drive::DriveSignal {
+                id: 0,
+                timestamp: now,
+                intent_type: epicode::engine::drive::DriveIntent::Warn,
+                description: format!("pending signal {index}"),
+                evidence: Vec::new(),
+                urgency: epicode::engine::drive::DriveUrgency::Low,
+                target_capability: None,
+                emotion: None,
+                origin_tick: 0,
+                status: epicode::engine::drive::DriveStatus::Pending,
+                feedback: None,
+                retry_count: 0,
+                expires_at: None,
+                enqueued_at_ms: 0,
+                time_budget_ms: None,
+                grounding: None,
+                terminal_reason: None,
+            });
+        }
+        assert!(queue
+            .peek_unacked(200)
+            .iter()
+            .all(|signal| signal.id != high_id));
+
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 77,
+            "method": "tools/call",
+            "params": {
+                "name": "drive_ack",
+                "arguments": {"drive_id": high_id, "executed": true, "outcome": "done"}
+            }
+        });
+        let binding = ExecutorBinding {
+            agent_id: "authorized-executor".into(),
+            user_id: "user".into(),
+            capabilities: vec!["ack".into()],
+            registered_at: now,
+            last_heartbeat: now,
+            e2e_enabled: false,
+            e2e_public_key: None,
+        };
+        let rejection = check_mcp_request_access(&engine, Some(binding), true, &request).unwrap();
+
+        assert_eq!(rejection.status, StatusCode::FORBIDDEN);
+        assert_eq!(rejection.response["error"]["code"], -32003);
     }
 
     #[test]
