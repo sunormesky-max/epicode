@@ -22,9 +22,7 @@ fn bindings_path() -> std::path::PathBuf {
     std::path::PathBuf::from(data_dir).join("runtime_bindings.json")
 }
 
-fn save_bindings(
-    executors: &HashMap<String, super::state::ExecutorBinding>,
-) -> Result<(), String> {
+fn save_bindings(executors: &HashMap<String, super::state::ExecutorBinding>) -> Result<(), String> {
     let path = bindings_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("create {:?}: {e}", dir))?;
