@@ -658,6 +658,10 @@ export interface SubAccount {
   role?: string; // 分级角色: admin/developer/tester/viewer
   memories_used: number;
   created_at: number;
+  /** 账户级覆盖的权限点(null=未覆盖, 走角色默认) */
+  custom_permissions?: string[] | null;
+  /** 实际生效权限(覆盖或角色默认) */
+  effective_permissions?: string[];
 }
 
 /** 子账户可分配的角色(主账户=owner 不可分配) */
@@ -734,7 +738,8 @@ export async function loginUser(username: string, password: string): Promise<{ a
 export async function registerUser(
   username: string,
   password: string,
-  inviteCode?: string
+  inviteCode?: string,
+  email?: string
 ): Promise<{ user_id: string; api_key: string }> {
   const extraHeaders: Record<string, string> = {};
   if (inviteCode) {
@@ -742,7 +747,7 @@ export async function registerUser(
   }
   const data = await request<{ success: boolean; user_id: string; api_key: string; plan: string; max_memories: number }>('/register', {
     method: 'POST',
-    body: { user_id: username, password },
+    body: { user_id: username, password, email: email || undefined },
     public: true,
     extraHeaders,
   });
@@ -1138,6 +1143,21 @@ export function setSubAccountRole(user_id: string, role: SubRole): Promise<{ use
   return request(`/v1/subaccounts/${encodeURIComponent(user_id)}/role`, {
     method: 'PATCH',
     body: { role },
+  });
+}
+
+/** Human-configured grant set. Null restores the role template. */
+/** 后端八权限点清单(与 UserRole::permissions 黄金表一致) — 供权限配置UI遍历 */
+export const PERMISSIONS: string[] = [
+  'memory_read', 'memory_write', 'memory_delete', 'persona_import',
+  'skill_manage', 'library_manage', 'subaccount_manage', 'apikey_manage',
+];
+
+export function setSubAccountPermissions(user_id: string, permissions: string[] | null): Promise<{ user_id: string; effective_permissions: string[] }> {
+  invalidateCache('/v1/subaccounts');
+  return request(`/v1/subaccounts/${encodeURIComponent(user_id)}/permissions`, {
+    method: 'PATCH',
+    body: { permissions },
   });
 }
 

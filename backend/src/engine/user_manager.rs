@@ -115,6 +115,67 @@ pub enum UserRole {
     Viewer,
 }
 
+impl Permission {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Permission::MemoryRead => "memory_read",
+            Permission::MemoryWrite => "memory_write",
+            Permission::MemoryDelete => "memory_delete",
+            Permission::PersonaImport => "persona_import",
+            Permission::SkillManage => "skill_manage",
+            Permission::LibraryManage => "library_manage",
+            Permission::SubaccountManage => "subaccount_manage",
+            Permission::ApiKeyManage => "api_key_manage",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Permission> {
+        match s {
+            "memory_read" => Some(Permission::MemoryRead),
+            "memory_write" => Some(Permission::MemoryWrite),
+            "memory_delete" => Some(Permission::MemoryDelete),
+            "persona_import" => Some(Permission::PersonaImport),
+            "skill_manage" => Some(Permission::SkillManage),
+            "library_manage" => Some(Permission::LibraryManage),
+            "subaccount_manage" => Some(Permission::SubaccountManage),
+            "api_key_manage" => Some(Permission::ApiKeyManage),
+            _ => None,
+        }
+    }
+    pub fn all() -> [Permission; 8] {
+        [
+            Permission::MemoryRead,
+            Permission::MemoryWrite,
+            Permission::MemoryDelete,
+            Permission::PersonaImport,
+            Permission::SkillManage,
+            Permission::LibraryManage,
+            Permission::SubaccountManage,
+            Permission::ApiKeyManage,
+        ]
+    }
+}
+
+/// Normalize an email used as a login alias. Empty input is rejected by callers.
+pub fn normalize_email(raw: &str) -> Result<String, String> {
+    let email = raw.trim().to_ascii_lowercase();
+    if email.len() < 6 || email.len() > 254 || email.contains(' ') {
+        return Err("invalid email".into());
+    }
+    let Some((local, domain)) = email.split_once('@') else {
+        return Err("invalid email".into());
+    };
+    if local.is_empty()
+        || domain.len() < 3
+        || !domain.contains('.')
+        || domain.starts_with('.')
+        || domain.ends_with('.')
+        || email.matches('@').count() != 1
+    {
+        return Err("invalid email".into());
+    }
+    Ok(email)
+}
+
 impl UserRole {
     pub fn can(&self, p: Permission) -> bool {
         use Permission::*;
@@ -175,6 +236,34 @@ pub struct UserInfo {
     /// 子账户角色(主账户忽略此字段; 存量默认 developer 平滑迁移)
     #[serde(default)]
     pub role: UserRole,
+    /// Login alias. Empty for accounts created before email registration.
+    #[serde(default)]
+    pub email: String,
+    /// None: use the role matrix. Some: human-configured grant set, which wins over the role.
+    /// An empty list means the account was explicitly granted nothing.
+    #[serde(default)]
+    pub custom_permissions: Option<Vec<String>>,
+}
+
+impl UserInfo {
+    pub fn allows(&self, perm: Permission) -> bool {
+        if self.parent.is_none() {
+            return true;
+        }
+        if let Some(custom) = &self.custom_permissions {
+            return custom
+                .iter()
+                .any(|name| Permission::parse(name) == Some(perm));
+        }
+        self.role.can(perm)
+    }
+    pub fn effective_permissions(&self) -> Vec<&'static str> {
+        Permission::all()
+            .into_iter()
+            .filter(|p| self.allows(*p))
+            .map(Permission::as_str)
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -497,6 +586,7 @@ impl UserManager {
         api_key: &str,
         plan: UserPlan,
         password: &str,
+        email: Option<&str>,
     ) -> Result<UserInfo, String> {
         if password.len() < 6 {
             return Err("password must be at least 6 characters".into());
@@ -514,6 +604,13 @@ impl UserManager {
         if db.len() >= MAX_USERS {
             return Err("user limit reached".into());
         }
+        let email = match email {
+            Some(raw) if !raw.trim().is_empty() => normalize_email(raw)?,
+            _ => String::new(),
+        };
+        if !email.is_empty() && db.values().any(|u| u.email == email) {
+            return Err("email already registered".into());
+        }
         let max_mem = plan.max_memories();
         let info = UserInfo {
             user_id: user_id.to_string(),
@@ -526,6 +623,8 @@ impl UserManager {
             parent: None,
             sub_accounts: Vec::new(),
             role: UserRole::Admin, // 主账户字段忽略; Admin 仅表意"全权"
+            email,
+            custom_permissions: None,
         };
         db.insert(user_id.to_string(), info.clone());
         let snapshot = db.clone();
@@ -559,9 +658,17 @@ impl UserManager {
         found
     }
 
-    pub fn login(&self, user_id: &str, password: &str) -> Result<UserInfo, String> {
+    pub fn login(&self, account: &str, password: &str) -> Result<UserInfo, String> {
         let db = self.users_db.read();
-        let info = db.get(user_id).ok_or("user not found")?.clone();
+        let info = if account.contains('@') {
+            let email = normalize_email(account)?;
+            db.values()
+                .find(|u| u.email == email)
+                .cloned()
+                .ok_or("user not found")?
+        } else {
+            db.get(account).cloned().ok_or("user not found")?
+        };
         drop(db);
         if info.password_hash.is_empty() {
             return Err("password not set for this account, please contact admin".into());
@@ -569,7 +676,7 @@ impl UserManager {
         if !verify_password(password, &info.password_hash) {
             return Err("invalid password".into());
         }
-        tracing::info!("[UserManager] user {} logged in via password", user_id);
+        tracing::info!("[UserManager] user {} logged in via password", info.user_id);
         Ok(info)
     }
 
@@ -664,6 +771,8 @@ impl UserManager {
             parent: Some(parent_id.to_string()),
             sub_accounts: Vec::new(),
             role,
+            email: String::new(),
+            custom_permissions: None,
         };
         db.insert(sub_user_id.to_string(), sub_info.clone());
         if let Some(p) = db.get_mut(parent_id) {
@@ -774,6 +883,8 @@ impl UserManager {
             }
         }
         sub.role = role;
+        // Role is the template. Changing it clears a human override so the new role applies.
+        sub.custom_permissions = None;
         let updated = sub.clone();
         let snapshot = db.clone();
         drop(db);
@@ -785,6 +896,61 @@ impl UserManager {
             role.as_str(),
             actor_id
         );
+        Ok(updated)
+    }
+
+    /// Replace a sub-account's role matrix with an explicit grant list.
+    /// `None` restores the role template. Only a main account may grant subaccount_manage.
+    pub fn set_subaccount_permissions(
+        &self,
+        actor_id: &str,
+        sub_user_id: &str,
+        permissions: Option<Vec<String>>,
+    ) -> Result<UserInfo, String> {
+        let parsed = match &permissions {
+            None => None,
+            Some(names) => {
+                let mut out = Vec::new();
+                for name in names {
+                    let perm = Permission::parse(name)
+                        .ok_or_else(|| format!("unknown permission: {name}"))?;
+                    let label = perm.as_str().to_string();
+                    if !out.contains(&label) {
+                        out.push(label);
+                    }
+                }
+                Some(out)
+            }
+        };
+        let mut db = self.users_db.write();
+        let actor = db.get(actor_id).ok_or("actor not found")?.clone();
+        if actor.parent.is_some() && actor.role != UserRole::Admin {
+            return Err("insufficient role to manage sub-accounts".into());
+        }
+        if actor.parent.is_some()
+            && parsed
+                .as_ref()
+                .is_some_and(|p| p.iter().any(|n| n == "subaccount_manage"))
+        {
+            return Err("only the main account can grant subaccount_manage".into());
+        }
+        let sub = db.get_mut(sub_user_id).ok_or("sub-account not found")?;
+        if sub.parent.is_none() {
+            return Err("cannot change permissions of a main account".into());
+        }
+        if actor.parent.is_none() {
+            if sub.parent.as_deref() != Some(actor_id) {
+                return Err("not your sub-account".into());
+            }
+        } else if sub.parent != actor.parent {
+            return Err("not your sub-account".into());
+        }
+        sub.custom_permissions = parsed;
+        let updated = sub.clone();
+        let snapshot = db.clone();
+        drop(db);
+        self.save_users_db(&snapshot)
+            .map_err(|e| format!("failed to persist: {}", e))?;
         Ok(updated)
     }
 

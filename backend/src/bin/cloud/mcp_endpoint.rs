@@ -314,7 +314,9 @@ pub async fn mcp_endpoint(
     );
     // A01(审计#134): 子账户注入角色门 — 主账户不设(全权)
     if user_info.parent.is_some() {
-        handler = handler.with_role_gate(user_info.role);
+        handler = handler
+            .with_role_gate(user_info.role)
+            .with_custom_permissions(user_info.custom_permissions.clone());
     }
 
     // MCP规范(basic/transports): notification = 不含 id 字段的JSON-RPC请求,

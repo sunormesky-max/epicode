@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useMemo } from 'react';
-import { errMsg, getStats, getSubAccounts, createSubAccount, revokeSubAccount, setSubAccountRole, SUB_ROLES, type SubAccount, type SubRole, type StatsData } from '@/lib/api';
+import { errMsg, getStats, getSubAccounts, createSubAccount, revokeSubAccount, setSubAccountRole, setSubAccountPermissions, PERMISSIONS, SUB_ROLES, type SubAccount, type SubRole, type StatsData } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading } from '@/components/DashboardUI';
 import { Users, Plus, Trash2, Shield, Brain, Crown, AlertTriangle, UserCheck, Lock, X, Check, Minus } from 'lucide-react';
@@ -314,6 +314,33 @@ export default function DashboardSubAccounts() {
                 >
                   {SUB_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
+              </div>
+              <div style={{ gridColumn: '1 / -1', display: 'flex', flexWrap: 'wrap', gap: 8, paddingTop: 4 }}>
+                {PERMISSIONS.map(perm => {
+                  const selected = (acc.custom_permissions ?? acc.effective_permissions ?? []).includes(perm);
+                  return (
+                    <label key={perm} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: 'var(--text-secondary)' }}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={async (e) => {
+                          const current = new Set(acc.custom_permissions ?? acc.effective_permissions ?? []);
+                          if (e.target.checked) current.add(perm); else current.delete(perm);
+                          const permissions = [...current];
+                          await setSubAccountPermissions(acc.user_id, permissions);
+                          setAccounts(prev => prev.map(a => a.user_id === acc.user_id ? { ...a, custom_permissions: permissions, effective_permissions: permissions } : a));
+                        }}
+                      />
+                      {perm}
+                    </label>
+                  );
+                })}
+                <button type="button" onClick={async () => {
+                  await setSubAccountPermissions(acc.user_id, null);
+                  setAccounts(prev => prev.map(a => a.user_id === acc.user_id ? { ...a, custom_permissions: null } : a));
+                }} style={{ fontSize: 10.5, color: 'var(--text-tertiary)', background: 'none', border: 'none', cursor: 'pointer' }}>
+                  恢复角色默认
+                </button>
               </div>
               <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{new Date(acc.created_at * 1000).toLocaleDateString()}</span>
               <div style={{ textAlign: 'right' }}>
