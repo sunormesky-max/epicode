@@ -656,6 +656,10 @@ export interface SubAccount {
   role?: string; // 分级角色: admin/developer/tester/viewer
   memories_used: number;
   created_at: number;
+  /** 账户级覆盖的权限点(null=未覆盖, 走角色默认) */
+  custom_permissions?: string[] | null;
+  /** 实际生效权限(覆盖或角色默认) */
+  effective_permissions?: string[];
 }
 
 /** 子账户可分配的角色(主账户=owner 不可分配) */
