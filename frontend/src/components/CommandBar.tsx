@@ -3,7 +3,7 @@ import { useLocation } from 'react-router';
 import {
   LayoutDashboard, Brain, GitBranch, Wrench, Users, Archive, Activity, MessageSquare,
   Home, BookOpen, Compass, UsersRound, BarChart3, Network, Sparkles,
-  LogOut, Copy, Check, CornerDownLeft, Search, Radio,
+  LogOut, Copy, Check, CornerDownLeft, Search, Radio, X,
 } from 'lucide-react';
 import { getApiKey, logout } from '@/lib/api';
 import { copyText } from '@/lib/clipboard';
@@ -22,13 +22,17 @@ interface Cmd {
   run: () => void;
 }
 
-export default function CommandBar() {
+export default function CommandBar({ isMain = false }: { isMain?: boolean }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
   const [copyMsg, setCopyMsg] = useState(''); // 复制密钥反馈: '' | '已复制 ✓' | '复制失败' | '未找到密钥'
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const launcherRef = useRef<HTMLButtonElement>(null);
+  const restoreLauncherFocus = useRef(false);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const location = useLocation();
 
   const go = useCallback((hash: string) => { window.location.hash = hash; setOpen(false); }, []);
@@ -43,6 +47,7 @@ export default function CommandBar() {
       { id: 'cognitive', label: 'Cognitive Engine', hint: '认知引擎', group: 'NAVIGATE', icon: Activity, run: () => go('#/dashboard/cognitive') },
       { id: 'observe', label: 'Observation Deck', hint: '观测舱', group: 'NAVIGATE', icon: Radio, run: () => go('#/dashboard/observe') },
       { id: 'skills', label: 'Skills', hint: '技能', group: 'NAVIGATE', icon: Wrench, run: () => go('#/dashboard/skills') },
+      { id: 'library', label: 'Library', hint: '图书馆', group: 'NAVIGATE', icon: BookOpen, run: () => go('#/dashboard/library') },
       { id: 'accounts', label: 'Sub Accounts', hint: '子账号', group: 'NAVIGATE', icon: Users, run: () => go('#/dashboard/accounts') },
     ];
     const pub: Cmd[] = [
@@ -75,8 +80,8 @@ export default function CommandBar() {
         run: () => { logout(); window.location.hash = '#/'; setOpen(false); },
       },
     ];
-    return [...nav, ...pub, ...actions];
-  }, [go, copyMsg]);
+    return [...nav.filter(command => command.id !== 'accounts' || isMain), ...pub, ...actions];
+  }, [go, copyMsg, isMain]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -99,17 +104,40 @@ export default function CommandBar() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setOpen(o => { setQ(''); setSel(0); setCopyMsg(''); return !o; });
+        if (!open) returnFocusRef.current = document.activeElement as HTMLElement | null;
+        setQ(''); setSel(0); setCopyMsg(''); setOpen(!open);
       }
       if (e.key === 'Escape') setOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [open]);
 
   // 打开时聚焦
   useEffect(() => {
-    if (open) requestAnimationFrame(() => inputRef.current?.focus());
+    if (!open) {
+      if (restoreLauncherFocus.current) {
+        const previous = returnFocusRef.current;
+        if (previous?.isConnected && previous.getClientRects().length) previous.focus();
+        else launcherRef.current?.focus();
+      }
+      restoreLauncherFocus.current = false;
+      return;
+    }
+    restoreLauncherFocus.current = true;
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    const onTab = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const items = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('input, button') ?? []);
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener('keydown', onTab);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener('keydown', onTab);
+    };
   }, [open]);
 
   // 选中项滚动可见
@@ -124,7 +152,8 @@ export default function CommandBar() {
   if (!open) {
     return (
       <button
-        onClick={() => setOpen(true)}
+        ref={launcherRef}
+        onClick={event => { returnFocusRef.current = event.currentTarget; setOpen(true); }}
         aria-label="open command bar"
         className="fixed bottom-5 right-5 z-40 flex items-center gap-2 px-3 py-2 rounded-lg transition-all"
         style={{
@@ -134,7 +163,7 @@ export default function CommandBar() {
         }}
       >
         <Search size={13} />
-        <span className="hidden sm:inline">⌘K</span>
+        <span>搜索 / Search</span><kbd className="hidden sm:inline">Ctrl / ⌘ K</kbd>
       </button>
     );
   }
@@ -150,6 +179,10 @@ export default function CommandBar() {
   return (
     <div className="fixed inset-0 z-[70] flex items-start justify-center pt-[14vh] px-4" style={{ background: 'rgba(7,7,10,0.6)', backdropFilter: 'blur(4px)' }} onClick={() => setOpen(false)}>
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="搜索与操作 / Search and actions"
         className="w-full max-w-lg rounded-2xl overflow-hidden"
         style={{ background: 'rgba(16,16,24,0.97)', border: '1px solid var(--border-medium)', boxShadow: '0 24px 80px rgba(0,0,0,0.6)' }}
         onClick={(e) => e.stopPropagation()}
@@ -162,10 +195,11 @@ export default function CommandBar() {
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onInputKey}
             placeholder="Navigate or act…"
+            aria-label="搜索页面或操作 / Search pages or actions"
             className="w-full py-4 bg-transparent outline-none"
             style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)', fontSize: 15 }}
           />
-          <kbd style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', border: '1px solid var(--border-light)', borderRadius: 4, padding: '2px 6px' }}>ESC</kbd>
+          <button onClick={() => setOpen(false)} aria-label="关闭搜索 / Close search" className="p-2" style={{ color: 'var(--text-secondary)' }}><X size={16} /></button>
         </div>
 
         <div ref={listRef} className="max-h-[46vh] overflow-y-auto py-2">

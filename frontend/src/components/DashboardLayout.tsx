@@ -4,6 +4,7 @@ import { useI18nContext } from '@/i18n/useI18n';
 import { getApiKey, getStats, logout } from '@/lib/api';
 import { copyText } from '@/lib/clipboard';
 import CommandBar from '@/components/CommandBar';
+import ObservationStatus from '@/components/ObservationStatus';
 import {
   LayoutDashboard, Brain, GitBranch, Wrench, Users,
   LogOut, Check, Menu, X, Zap, Archive, Activity, MessageSquare, Radio, BookOpen
@@ -11,85 +12,8 @@ import {
 
 const RAIL_W = 64;
 
-// ── 遥测仪: 读背景SSE发布的实时认知状态 ──
-function Telemetry({ compact = false }: { compact?: boolean }) {
-  const [tele, setTele] = useState<{ energy: number; status: string; emotion: unknown } | null>(null);
-  useEffect(() => {
-    const h = (e: Event) => {
-      const d = (e as CustomEvent).detail as { energy: number; cognitiveStatus: string; emotion: unknown };
-      setTele({ energy: d.energy, status: d.cognitiveStatus, emotion: d.emotion ?? null });
-    };
-    window.addEventListener('cognitive-update', h);
-    return () => window.removeEventListener('cognitive-update', h);
-  }, []);
-  // emotion 可能是对象 {pleasure, arousal, dominance, label?, quadrant} — 只取安全字符串形式
-  const emoRaw = tele?.emotion;
-  const emoStr = typeof emoRaw === 'string'
-    ? emoRaw
-    : emoRaw && typeof emoRaw === 'object'
-      ? String((emoRaw as { label?: string }).label
-          ?? `P${Number((emoRaw as { pleasure?: number }).pleasure ?? 0).toFixed(2)} A${Number((emoRaw as { arousal?: number }).arousal ?? 0).toFixed(2)}`)
-      : null;
-  const pct = tele ? Math.min(100, (tele.energy / 10000) * 100) : 0;
-
-  if (compact) {
-    // 轨道模式: 垂直能量条 + 状态点
-    return (
-      <div className="flex flex-col items-center gap-1.5" title={`state: ${tele?.status ?? '—'}${emoStr ? ` · emotion: ${emoStr}` : ''} · energy: ${tele?.energy ?? '—'}`}>
-        <span style={{
-          width: 6, height: 6, borderRadius: '50%',
-          background: tele ? 'var(--accent-cyan)' : 'var(--text-tertiary)',
-          boxShadow: tele ? '0 0 8px rgba(62,207,174,0.8)' : 'none',
-        }} />
-        <div style={{ width: 3, height: 72, borderRadius: 2, background: 'rgba(245,244,240,0.06)', position: 'relative', overflow: 'hidden' }}>
-          <div style={{
-            position: 'absolute', bottom: 0, left: 0, right: 0, height: `${pct}%`,
-            background: 'var(--accent-cyan)', transition: 'height 0.8s ease',
-          }} />
-        </div>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-tertiary)', letterSpacing: '0.08em', writingMode: 'vertical-rl' }}>
-          {tele?.status?.slice(0, 8).toUpperCase() ?? 'IDLE'}
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="px-3 py-3 rounded-xl" style={{ background: 'rgba(62,207,174,0.04)', border: '1px solid var(--border-light)' }}>
-      <div className="flex items-center justify-between mb-2">
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.14em' }}>TELEMETRY</span>
-        <span className="flex items-center gap-1.5">
-          <span style={{ width: 5, height: 5, borderRadius: '50%', background: tele ? 'var(--accent-cyan)' : 'var(--text-tertiary)', boxShadow: tele ? '0 0 6px rgba(62,207,174,0.8)' : 'none' }} />
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: tele ? 'var(--accent-cyan)' : 'var(--text-tertiary)' }}>
-            {tele ? 'live' : 'idle'}
-          </span>
-        </span>
-      </div>
-      <div className="flex flex-col gap-1" style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-        <div className="flex justify-between">
-          <span style={{ color: 'var(--text-tertiary)' }}>state</span>
-          <span style={{ color: 'var(--text-secondary)' }}>{tele?.status ?? '—'}</span>
-        </div>
-        {emoStr && (
-          <div className="flex justify-between">
-            <span style={{ color: 'var(--text-tertiary)' }}>emotion</span>
-            <span style={{ color: 'var(--accent-purple)' }}>{emoStr}</span>
-          </div>
-        )}
-        <div className="flex justify-between items-center">
-          <span style={{ color: 'var(--text-tertiary)' }}>energy</span>
-          <span style={{ color: 'var(--text-secondary)' }}>{tele?.energy ?? '—'}</span>
-        </div>
-        <div style={{ height: 3, borderRadius: 2, background: 'rgba(245,244,240,0.06)', marginTop: 3, overflow: 'hidden' }}>
-          <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent-cyan)', borderRadius: 2, transition: 'width 0.8s ease' }} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { t } = useI18nContext();
+  const { t, lang } = useI18nContext();
   const location = useLocation();
   const path = location.pathname;
   const [copied, setCopied] = useState(false);
@@ -97,6 +21,34 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [mobileOpen, setMobileOpen] = useState(false);
   // 保守默认false: 子账户用户不再闪现"子账户管理"入口, 主账户在stats确认后出现(UX债修复)
   const [isMain, setIsMain] = useState(false);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const drawer = document.getElementById('dashboard-mobile-nav');
+    const desktop = window.matchMedia('(min-width: 768px)');
+    const onDesktop = () => { if (desktop.matches) setMobileOpen(false); };
+    desktop.addEventListener('change', onDesktop);
+    drawer?.querySelector<HTMLElement>('a, button')?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setMobileOpen(false); return; }
+      if (event.key !== 'Tab') return;
+      const items = Array.from(drawer?.querySelectorAll<HTMLElement>('a, button') ?? []);
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      desktop.removeEventListener('change', onDesktop);
+      document.removeEventListener('keydown', onKey);
+      if (previousFocus?.getClientRects().length) previousFocus.focus();
+      else document.getElementById('dashboard-content')?.focus();
+    };
+  }, [mobileOpen]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -148,11 +100,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         onMouseEnter={(e) => { if (!active && interactive) e.currentTarget.style.background = 'rgba(245,244,240,0.04)'; }}
         onMouseLeave={(e) => { if (!active && interactive) e.currentTarget.style.background = 'transparent'; }}
         aria-label={item.label}
+        aria-current={active ? 'page' : undefined}
       >
         <item.icon size={19} style={{ color: active ? 'var(--accent-cyan)' : 'var(--text-tertiary)' }} />
         {/* 悬停标签: 仪器轨道的读出 */}
         {interactive && (
-          <span className="absolute left-full ml-3 px-2.5 py-1 rounded-md whitespace-nowrap opacity-0 pointer-events-none transition-opacity duration-150 group-hover:opacity-100"
+          <span className="absolute left-full ml-3 px-2.5 py-1 rounded-md whitespace-nowrap opacity-0 pointer-events-none transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
             style={{ background: 'rgba(16,16,24,0.95)', border: '1px solid var(--border-light)', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
             {item.label}
           </span>
@@ -162,13 +115,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   });
 
   return (
-    <div className="relative min-h-screen" style={{ background: 'transparent' }}>
+    <div className="relative min-h-screen dashboard-shell" style={{ background: 'transparent' }}>
+      <a className="skip-to-content" href="#dashboard-content" onClick={event => { event.preventDefault(); document.getElementById('dashboard-content')?.focus(); }}>{lang === 'zh' ? '跳到内容' : 'Skip to content'}</a>
 
       {/* Mobile toggle */}
       <button
         onClick={() => setMobileOpen(!mobileOpen)}
         aria-label={mobileOpen ? t('common.closeMenu') : t('common.openMenu')}
         aria-expanded={mobileOpen}
+        aria-controls="dashboard-mobile-nav"
         className="fixed top-4 left-4 z-[60] md:hidden p-2 rounded-xl"
         style={{ background: 'rgba(10,10,15,0.85)', border: '1px solid var(--border-light)', color: 'var(--text-primary)' }}
       >
@@ -195,7 +150,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* 轨道底部: 紧凑遥测 + 密钥 + 退出 */}
         <div className="flex flex-col items-center gap-3 pt-3" style={{ borderTop: '1px solid var(--border-light)' }}>
-          <Telemetry compact />
+
           {apiKey && (
             <button onClick={handleCopyKey} aria-label="copy api key"
               className="flex items-center justify-center"
@@ -219,18 +174,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* 移动抽屉 */}
       {mobileOpen && (
         <aside
+          id="dashboard-mobile-nav"
+          role="dialog"
+          aria-modal="true"
+          aria-label={lang === 'zh' ? '导航菜单' : 'Navigation menu'}
           className="fixed top-0 left-0 bottom-0 z-50 md:hidden flex flex-col w-[240px] px-3 py-4"
           style={{ background: 'rgba(10, 10, 15, 0.97)', backdropFilter: 'blur(20px)', borderRight: '1px solid var(--border-light)' }}
         >
           <div className="flex items-center gap-2.5 px-2 pb-4 mb-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
             <img src="/logo.svg" alt="Epicode" style={{ width: 26, height: 26 }} />
             <span style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '0.02em' }}>EPICODE</span>
+            <button className="ml-auto p-2" onClick={() => setMobileOpen(false)} aria-label={t('common.closeMenu')}><X size={18} /></button>
           </div>
           <nav className="flex-1 flex flex-col gap-1 overflow-y-auto">
             {navItems.map((item) => {
               const active = path === item.href.replace('#', '') || path === item.href.replace('#', '') + '/';
               return (
-                <a key={item.href} href={item.href} onClick={() => setMobileOpen(false)}
+                <a key={item.href} href={item.href} aria-current={active ? 'page' : undefined} onClick={() => setMobileOpen(false)}
                   className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm no-underline"
                   style={{
                     color: active ? 'var(--accent-cyan-bright)' : 'var(--text-secondary)',
@@ -245,7 +205,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             })}
           </nav>
           <div className="pt-3 space-y-2" style={{ borderTop: '1px solid var(--border-light)' }}>
-            <Telemetry />
+
             <button onClick={handleLogout} className="flex items-center gap-2 w-full px-3 py-2 rounded-xl text-sm"
               style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--danger-red)' }}>
               <LogOut size={15} /> {t('nav.logout')}
@@ -256,10 +216,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* 内容 — 观测站取景框: 四角刻度标记,仪器视口 */}
       <main
+        id="dashboard-content"
+        tabIndex={-1}
         className="min-h-screen md:pl-[64px]"
         style={{ position: 'relative', zIndex: 1 }}
       >
         <div className="px-5 pt-16 pb-5 md:p-7 max-w-[1440px] mx-auto observatory-frame">
+          <header className="dashboard-header">
+            <div><span className="workspace-label">EPICODE / {lang === 'zh' ? '工作空间' : 'WORKSPACE'}</span><p>{navItems.find(item => item.href.replace('#', '') === path.replace(/\/$/, ''))?.label ?? t('nav.overview')}</p></div>
+            <ObservationStatus />
+          </header>
+          <nav className="dashboard-page-nav" aria-label={lang === 'zh' ? '工作空间页面' : 'Workspace pages'}>{navItems.map(item => <a key={item.href} href={item.href} aria-current={path.replace(/\/$/, '') === item.href.replace('#', '') ? 'page' : undefined}>{item.label}</a>)}</nav>
           <span className="of-corner-b left" aria-hidden="true" />
           <span className="of-corner-b right" aria-hidden="true" />
           {children}
@@ -272,7 +239,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       )}
 
       {/* 命令条: ⌘K / Ctrl+K, 观测站操作方式 */}
-      <CommandBar />
+      {!mobileOpen && <CommandBar isMain={isMain} />}
     </div>
   );
 }
