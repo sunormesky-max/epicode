@@ -2046,7 +2046,7 @@ impl McpHandler {
                     && revs < 1
                     && self.engine.storage.try_mark_reflection_pushed(task_id)
                 {
-                    let _ = self.engine.scheduler.drive_queue().enqueue(crate::engine::drive::DriveSignal {
+                    let signal = crate::engine::drive::DriveSignal {
                         id: 0,
                         timestamp: chrono::Utc::now().timestamp(),
                         intent_type: crate::engine::drive::DriveIntent::Suggest,
@@ -2063,7 +2063,15 @@ impl McpHandler {
                         expires_at: None,
                         enqueued_at_ms: chrono::Utc::now().timestamp_millis(),
                         time_budget_ms: None,
-                    });
+                        grounding: None,
+                        terminal_reason: None,
+                    };
+                    match self.engine.scheduler.drive_queue().try_enqueue(signal) {
+                        Ok(_) => self.engine.scheduler.save_drive_queue(),
+                        Err(error) => {
+                            tracing::warn!("[L0] reflection signal admission rejected: {:?}", error)
+                        }
+                    }
                 }
                 let mut overdue_gates: Vec<&str> = Vec::new();
                 if elapsed_pct >= 30.0 && !gate_explore {
@@ -2783,7 +2791,7 @@ impl McpHandler {
                     .reward(crate::engine::drive::Drive::Efficiency, reward);
                 // P2 L0汇合: 低利用率完成时, 校准建议信号携带预算入驱动收件箱
                 if low_utilization {
-                    let _ = self.engine.scheduler.drive_queue().enqueue(crate::engine::drive::DriveSignal {
+                    let signal = crate::engine::drive::DriveSignal {
                         id: 0,
                         timestamp: chrono::Utc::now().timestamp(),
                         intent_type: crate::engine::drive::DriveIntent::Suggest,
@@ -2799,7 +2807,16 @@ impl McpHandler {
                         expires_at: None,
                         enqueued_at_ms: chrono::Utc::now().timestamp_millis(),
                         time_budget_ms: Some(budget),
-                    });
+                        grounding: None,
+                        terminal_reason: None,
+                    };
+                    match self.engine.scheduler.drive_queue().try_enqueue(signal) {
+                        Ok(_) => self.engine.scheduler.save_drive_queue(),
+                        Err(error) => tracing::warn!(
+                            "[L0] time-calibration signal admission rejected: {:?}",
+                            error
+                        ),
+                    }
                 }
                 let goal_summary_json = if dw_items.is_empty() {
                     serde_json::Value::Null
@@ -6024,8 +6041,7 @@ impl McpHandler {
         let signals: Vec<serde_json::Value> = self
             .engine
             .scheduler()
-            .drive_queue()
-            .peek_unacked(limit)
+            .current_drive_inbox(limit)
             .iter()
             .map(|signal| signal.inbox_value_with_e2e(e2e_public_key.as_deref()))
             .collect();
@@ -6072,6 +6088,7 @@ impl McpHandler {
             .get("reflection")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+        let signal_info = self.engine.scheduler().drive_queue().get_signal(drive_id);
 
         let feedback = crate::engine::drive::DriveFeedback {
             responded_at: chrono::Utc::now().timestamp(),
@@ -6088,60 +6105,28 @@ impl McpHandler {
             self.engine.scheduler().save_drive_queue();
         }
 
-        // L0 Learning: adjust DriveEngine weights based on execution outcome.
+        // Attribute outcome value only to the drive associated with this signal.
         if success && first_ack {
-            let outcome_lower = outcome.to_lowercase();
-            let positive = outcome_lower.contains("success")
-                || outcome_lower.contains("done")
-                || outcome_lower.contains("completed")
-                || outcome_lower.contains("effective")
-                || outcome_lower.contains("helpful")
-                || outcome_lower.contains("good")
-                || outcome_lower.contains("actioned")
-                || outcome_lower.contains("resolved")
-                || outcome_lower.contains("处理")
-                || outcome_lower.contains("完成")
-                || outcome_lower.contains("有效")
-                || outcome_lower.contains("采纳");
-            let negative = outcome_lower.contains("ignored")
-                || outcome_lower.contains("rejected")
-                || outcome_lower.contains("failed")
-                || outcome_lower.contains("error")
-                || outcome_lower.contains("useless")
-                || outcome_lower.contains("拒绝")
-                || outcome_lower.contains("忽略")
-                || outcome_lower.contains("无效");
-
-            let reward = if positive {
-                5.0
-            } else if negative {
-                -3.0
-            } else {
-                1.0
-            }; // δ1fix
-
-            // Reward drives — personality learns that its signals are being received
-            // Map: warn→Vitality, suggest→Coherence, explore→Curiosity, constrain→Efficiency
-            let mut drive_engine = self.engine.scheduler().drive_engine_lock();
-            drive_engine.reward(crate::engine::drive::Drive::Vitality, reward); // warn executed → vitality up
-            drive_engine.reward(crate::engine::drive::Drive::Coherence, reward * 0.7); // suggest → coherence up (less)
-            drive_engine.reward(crate::engine::drive::Drive::Curiosity, reward * 0.5); // explore → curiosity up (least)
-            drive_engine.reward(crate::engine::drive::Drive::Efficiency, reward * 0.3); // constrain → efficiency up
-            drop(drive_engine);
-
-            tracing::info!(
-                "[L0] drive_ack reward: #{} executed={} reward={:+.3} sentiment={}",
-                drive_id,
-                executed,
-                reward,
-                if positive {
-                    "positive"
-                } else if negative {
-                    "negative"
-                } else {
-                    "neutral"
-                }
-            );
+            if let Some((drive, multiplier)) = signal_info
+                .as_ref()
+                .and_then(|signal| signal.intent_type.feedback_target())
+            {
+                let sentiment =
+                    crate::engine::drive::DriveFeedback::sentiment_for_outcome(&outcome);
+                let reward = sentiment.reward() * multiplier;
+                self.engine
+                    .scheduler()
+                    .drive_engine_lock()
+                    .reward(drive, reward);
+                tracing::info!(
+                    "[L0] drive_ack reward: #{} intent={:?} executed={} reward={:+.3} sentiment={:?}",
+                    drive_id,
+                    signal_info.as_ref().map(|signal| &signal.intent_type),
+                    executed,
+                    reward,
+                    sentiment
+                );
+            }
         }
 
         tracing::info!(
@@ -6270,6 +6255,8 @@ mod tests {
                 expires_at: None,
                 enqueued_at_ms: 1_780_000_000_000,
                 time_budget_ms: None,
+                grounding: None,
+                terminal_reason: None,
             });
         let handler = McpHandler::new(Arc::new(engine));
 
@@ -6295,6 +6282,10 @@ mod tests {
         );
         assert_eq!(
             response["data"]["signals"][0]["time_budget_ms"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            response["data"]["signals"][0]["grounding"],
             serde_json::Value::Null
         );
         assert_eq!(response["protocol"]["error"], serde_json::Value::Null);
@@ -6337,18 +6328,38 @@ mod tests {
                 expires_at: None,
                 enqueued_at_ms: 1_780_000_000_100,
                 time_budget_ms: None,
+                grounding: Some(crate::engine::drive::DriveGrounding {
+                    reason: "private memory evidence".into(),
+                    evidence: Vec::new(),
+                    uncertainty: vec![
+                        crate::engine::drive::DriveGroundingUncertainty::UnresolvedEvidence,
+                    ],
+                    fresh_until: None,
+                    complete: false,
+                }),
+                terminal_reason: None,
             });
         let handler = McpHandler::new(Arc::new(engine));
 
         let response = handler.tool_drive_inbox(&serde_json::json!({"limit": 1}));
         let signal = &response["data"]["signals"][0];
         assert_eq!(signal["description"], serde_json::Value::Null);
+        assert_eq!(signal["grounding"], serde_json::Value::Null);
         assert_eq!(signal["retryable"], true);
         let ciphertext = signal["description_e2e"].as_str().expect("E2E ciphertext");
         assert_eq!(
             crate::engine::e2e::decrypt_with(ciphertext, &private_pem).unwrap(),
             b"private MCP drive detail"
         );
+        let grounding_ciphertext = signal["grounding_e2e"]
+            .as_str()
+            .expect("E2E grounding ciphertext");
+        let grounding_plaintext =
+            crate::engine::e2e::decrypt_with(grounding_ciphertext, &private_pem).unwrap();
+        let decoded: crate::engine::drive::DriveGrounding =
+            serde_json::from_slice(&grounding_plaintext).unwrap();
+        assert_eq!(decoded.reason, "private memory evidence");
+        assert!(decoded.evidence.is_empty());
     }
 
     #[test]

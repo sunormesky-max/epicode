@@ -824,8 +824,7 @@ pub async fn sse_stream(
                 Some(slot) => slot
                     .engine
                     .scheduler()
-                    .drive_queue()
-                    .peek_unacked(200)
+                    .current_drive_inbox(200)
                     .iter()
                     .map(|s| s.id)
                     .max()
@@ -841,7 +840,7 @@ pub async fn sse_stream(
             let signals = {
                 let slots = st2.user_mgr.slots_read();
                 match slots.get(&uid2) {
-                    Some(slot) => slot.engine.scheduler().drive_queue().peek_unacked(200),
+                    Some(slot) => slot.engine.scheduler().current_drive_inbox(200),
                     None => continue,
                 }
             }; // slots dropped here
@@ -921,6 +920,8 @@ mod drive_sse_tests {
             expires_at: Some(1_780_000_100),
             enqueued_at_ms: 1_780_000_000_000,
             time_budget_ms: None,
+            grounding: None,
+            terminal_reason: None,
         };
 
         let value = drive_sse_signal(&signal, None);
@@ -930,6 +931,8 @@ mod drive_sse_tests {
         assert_eq!(value["description"], "Inspect the documented route");
         assert_eq!(value["description_e2e"], serde_json::Value::Null);
         assert_eq!(value["evidence"], serde_json::json!([10, 20]));
+        assert_eq!(value["grounding"], serde_json::Value::Null);
+        assert_eq!(value["grounding_e2e"], serde_json::Value::Null);
         assert_eq!(value["enqueued_at_ms"], 1_780_000_000_000i64);
         assert!(value.get("emotion").is_none());
         assert!(value.get("timestamp").is_none());
