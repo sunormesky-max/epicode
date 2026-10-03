@@ -4144,7 +4144,11 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
 
     pub fn horizon_status(&self) -> (String, f64, u32) {
         let horizon = self.horizon.lock();
-        (horizon.phase().as_str().to_string(), horizon.pressure(), horizon.debt())
+        (
+            horizon.phase().as_str().to_string(),
+            horizon.pressure(),
+            horizon.debt(),
+        )
     }
 
     /// α0.2: cloud runtime register/unregister 时更新; detect_prediction_errors 读取产生 body_missing

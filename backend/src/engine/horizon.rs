@@ -104,8 +104,12 @@ impl Horizon {
     pub fn phase(&self) -> HorizonPhase {
         self.phase
     }
-    pub fn pressure(&self) -> f64 { self.pressure }
-    pub fn debt(&self) -> u32 { self.debt }
+    pub fn pressure(&self) -> f64 {
+        self.pressure
+    }
+    pub fn debt(&self) -> u32 {
+        self.debt
+    }
 }
 
 #[cfg(test)]
