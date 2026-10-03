@@ -1,6 +1,7 @@
 // Core orchestration
 pub mod bus;
 pub mod scheduler;
+pub mod grains;
 
 // Memory lifecycle
 pub mod dream;

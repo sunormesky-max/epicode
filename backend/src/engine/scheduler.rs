@@ -231,6 +231,7 @@ pub struct SchedulerCenter {
     feedback_agg_cache: ParkMutex<Option<(usize, std::time::Instant, HashSet<u64>)>>,
     skill_feedback_agg_cache: ParkMutex<Option<(usize, std::time::Instant, HashSet<u64>)>>,
     drive_queue: Arc<super::drive::DriveQueue>,
+    grains: ParkMutex<super::grains::GrainLedger>,
 }
 
 impl SchedulerCenter {
@@ -313,6 +314,7 @@ impl SchedulerCenter {
             feedback_agg_cache: ParkMutex::new(None),
             skill_feedback_agg_cache: ParkMutex::new(None),
             drive_queue: Arc::new(super::drive::DriveQueue::new()),
+            grains: ParkMutex::new(super::grains::GrainLedger::default()),
         }
     }
 
@@ -343,6 +345,32 @@ impl SchedulerCenter {
     }
 
     /// D4: 时间感知创建(故事时间) — valid_from=timestamp, 系统时间由gateway内部记录
+
+    pub fn grain_recall(&self, valid_at: i64) -> Result<Vec<super::grains::RecallHit>, String> {
+        let subject = self.grain_subject();
+        self.grains.lock().recall(&subject, &subject, valid_at)
+    }
+
+    pub fn grain_correct(&self, assertion_id: u64, text: &str, valid_from: i64) -> Result<u64, String> {
+        let subject = self.grain_subject();
+        self.grains.lock().correct(&subject, assertion_id, text, &subject, valid_from, valid_from)
+    }
+
+    pub fn grain_grant(&self, scope: &str, action: &str, allow: bool) -> u64 {
+        let subject = self.grain_subject();
+        self.grains.lock().grant(&subject, scope, action, allow, &subject, 0)
+    }
+
+    pub fn grain_status(&self) -> (f64, usize) {
+        let grains = self.grains.lock();
+        (grains.pressure(), grains.projection_debt())
+    }
+
+    fn grain_subject(&self) -> String {
+        let owner = self.owner_user.lock();
+        if owner.is_empty() { "local".to_string() } else { owner.clone() }
+    }
+
     pub fn api_create_memory_at(
         &self,
         content: &str,
@@ -354,6 +382,12 @@ impl SchedulerCenter {
             .create_memory_with_time(content, labels, timestamp)?;
         self.persist_tetra(r.id);
         self.gateway.mark_dirty(r.id);
+        let subject = {
+            let owner = self.owner_user.lock();
+            if owner.is_empty() { "local".to_string() } else { owner.clone() }
+        };
+        let observed = if timestamp == 0 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0) } else { timestamp };
+        self.grains.lock().append_experience(&subject, content, "api", &subject, observed, observed);
         Ok((r.id, r.is_new))
     }
 
