@@ -345,7 +345,6 @@ impl SchedulerCenter {
     }
 
     /// D4: 时间感知创建(故事时间) — valid_from=timestamp, 系统时间由gateway内部记录
-
     pub fn grain_recall(&self, valid_at: i64) -> Result<Vec<super::grains::RecallHit>, String> {
         let subject = self.grain_subject();
         self.grains.lock().recall(&subject, &subject, valid_at)
