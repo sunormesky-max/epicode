@@ -242,7 +242,11 @@ impl GrainLedger {
     /// Once any grant exists, only an explicit allow matches. An empty scope
     /// allow-list therefore denies, instead of falling back to the default.
     pub fn allows(&self, subject: &str, _actor: &str, action: &str, text: &str) -> bool {
-        let relevant: Vec<&Grant> = self.grants.iter().filter(|g| g.subject == subject).collect();
+        let relevant: Vec<&Grant> = self
+            .grants
+            .iter()
+            .filter(|g| g.subject == subject)
+            .collect();
         if relevant.is_empty() {
             return true;
         }
@@ -253,13 +257,21 @@ impl GrainLedger {
         })
     }
 
-    pub fn recall(&self, subject: &str, actor: &str, valid_at: i64) -> Result<Vec<RecallHit>, String> {
+    pub fn recall(
+        &self,
+        subject: &str,
+        actor: &str,
+        valid_at: i64,
+    ) -> Result<Vec<RecallHit>, String> {
         if !self.grants.iter().any(|g| g.subject == subject) {
             // default allow
-        } else if !self.allows(subject, actor, "read", "*") && !self.allows(subject, actor, "read", subject) {
-            let any_read = self.assertions.values().any(|a| {
-                a.subject == subject && self.allows(subject, actor, "read", &a.text)
-            });
+        } else if !self.allows(subject, actor, "read", "*")
+            && !self.allows(subject, actor, "read", subject)
+        {
+            let any_read = self
+                .assertions
+                .values()
+                .any(|a| a.subject == subject && self.allows(subject, actor, "read", &a.text));
             if !any_read && !self.allows(subject, actor, "read", "*") {
                 return Err("grant denied".into());
             }
@@ -300,7 +312,8 @@ impl GrainLedger {
     }
 
     pub fn mark_projected(&mut self, experience_id: u64, kind: &str) {
-        self.debts.retain(|d| !(d.experience_id == experience_id && d.kind == kind));
+        self.debts
+            .retain(|d| !(d.experience_id == experience_id && d.kind == kind));
     }
 
     pub fn experience(&self, id: u64) -> Option<&Experience> {
@@ -338,17 +351,18 @@ mod tests {
     #[test]
     fn correction_does_not_rewrite_experience_and_splits_by_time() {
         let mut ledger = GrainLedger::default();
-        let (experience_id, assertion_id) = ledger.append_experience(
-            "owner",
-            "deadline is Friday",
-            "user",
-            "owner",
-            10,
-            10,
-        );
+        let (experience_id, assertion_id) =
+            ledger.append_experience("owner", "deadline is Friday", "user", "owner", 10, 10);
         let original = ledger.experience(experience_id).unwrap().payload.clone();
         let next = ledger
-            .correct("owner", assertion_id, "deadline is next month", "owner", 20, 20)
+            .correct(
+                "owner",
+                assertion_id,
+                "deadline is next month",
+                "owner",
+                20,
+                20,
+            )
             .unwrap();
         assert_eq!(ledger.experience(experience_id).unwrap().payload, original);
         assert!(ledger.experience(next_experience(&ledger, next)).is_some());

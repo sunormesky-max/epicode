@@ -351,14 +351,28 @@ impl SchedulerCenter {
         self.grains.lock().recall(&subject, &subject, valid_at)
     }
 
-    pub fn grain_correct(&self, assertion_id: u64, text: &str, valid_from: i64) -> Result<u64, String> {
+    pub fn grain_correct(
+        &self,
+        assertion_id: u64,
+        text: &str,
+        valid_from: i64,
+    ) -> Result<u64, String> {
         let subject = self.grain_subject();
-        self.grains.lock().correct(&subject, assertion_id, text, &subject, valid_from, valid_from)
+        self.grains.lock().correct(
+            &subject,
+            assertion_id,
+            text,
+            &subject,
+            valid_from,
+            valid_from,
+        )
     }
 
     pub fn grain_grant(&self, scope: &str, action: &str, allow: bool) -> u64 {
         let subject = self.grain_subject();
-        self.grains.lock().grant(&subject, scope, action, allow, &subject, 0)
+        self.grains
+            .lock()
+            .grant(&subject, scope, action, allow, &subject, 0)
     }
 
     pub fn grain_status(&self) -> (f64, usize) {
@@ -368,7 +382,11 @@ impl SchedulerCenter {
 
     fn grain_subject(&self) -> String {
         let owner = self.owner_user.lock();
-        if owner.is_empty() { "local".to_string() } else { owner.clone() }
+        if owner.is_empty() {
+            "local".to_string()
+        } else {
+            owner.clone()
+        }
     }
 
     pub fn api_create_memory_at(
@@ -384,10 +402,23 @@ impl SchedulerCenter {
         self.gateway.mark_dirty(r.id);
         let subject = {
             let owner = self.owner_user.lock();
-            if owner.is_empty() { "local".to_string() } else { owner.clone() }
+            if owner.is_empty() {
+                "local".to_string()
+            } else {
+                owner.clone()
+            }
         };
-        let observed = if timestamp == 0 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0) } else { timestamp };
-        self.grains.lock().append_experience(&subject, content, "api", &subject, observed, observed);
+        let observed = if timestamp == 0 {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0)
+        } else {
+            timestamp
+        };
+        self.grains
+            .lock()
+            .append_experience(&subject, content, "api", &subject, observed, observed);
         Ok((r.id, r.is_new))
     }
 
