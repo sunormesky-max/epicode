@@ -1,9 +1,10 @@
 use parking_lot::{Mutex, RwLock};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::Arc;
 
 use crate::domain::space::Space;
-use crate::domain::tetra::{MemoryPayload, TetraId};
+use crate::domain::tetra::{MemoryPayload, TetraId, Tetrahedron};
 use crate::engine::vector::VectorLayer;
 
 fn strip_session_prefix(text: &str) -> &str {
@@ -48,15 +49,29 @@ pub struct SearchEngineState {
     pub search_top_labels: Mutex<HashMap<String, u32>>,
     pub access_counts: Mutex<HashMap<TetraId, u32>>,
     df_cache: Mutex<Option<DfCache>>,
-    /// 文档 token 缓存：tetra_id → (tokens, doc_len)，避免 BM25 评分时重复 tokenize
-    doc_token_cache: Mutex<HashMap<TetraId, (Vec<String>, usize)>>,
+    /// Document tokens are reused only within the searchable-memory revision.
+    doc_token_cache: Mutex<DocTokenCache>,
 }
 
 struct DfCache {
-    df_map: HashMap<String, usize>,
+    search_revision: u64,
+    df_map: Arc<HashMap<String, usize>>,
     doc_count: usize,
     avg_dl: f64,
-    tetra_count: usize,
+}
+
+#[derive(Default)]
+struct DocTokenCache {
+    search_revision: Option<u64>,
+    documents: HashMap<TetraId, (Vec<String>, usize)>,
+}
+
+struct DfSearchData {
+    df_map: Arc<HashMap<String, usize>>,
+    doc_count: usize,
+    avg_dl: f64,
+    search_revision: u64,
+    space_snapshot: Option<Vec<Tetrahedron>>,
 }
 
 impl SearchEngineState {
@@ -70,7 +85,7 @@ impl SearchEngineState {
             search_top_labels: Mutex::new(HashMap::new()),
             access_counts: Mutex::new(HashMap::new()),
             df_cache: Mutex::new(None),
-            doc_token_cache: Mutex::new(HashMap::new()),
+            doc_token_cache: Mutex::new(DocTokenCache::default()),
         }
     }
 
@@ -84,14 +99,24 @@ impl SearchEngineState {
 
     pub fn invalidate_df_cache(&self) {
         *self.df_cache.lock() = None;
-        self.doc_token_cache.lock().clear();
+        *self.doc_token_cache.lock() = DocTokenCache::default();
     }
 
     /// 获取或构建文档 token（缓存），避免 BM25 评分时对同一文档重复 tokenize
-    fn get_doc_tokens(&self, tetra_id: TetraId, content: &str, aliases: &[String]) -> Vec<String> {
+    fn get_doc_tokens(
+        &self,
+        tetra_id: TetraId,
+        content: &str,
+        aliases: &[String],
+        search_revision: u64,
+    ) -> Vec<String> {
         {
-            let cache = self.doc_token_cache.lock();
-            if let Some((tokens, _)) = cache.get(&tetra_id) {
+            let mut cache = self.doc_token_cache.lock();
+            if cache.search_revision != Some(search_revision) {
+                cache.search_revision = Some(search_revision);
+                cache.documents.clear();
+            }
+            if let Some((tokens, _)) = cache.documents.get(&tetra_id) {
                 return tokens.clone();
             }
         }
@@ -100,30 +125,72 @@ impl SearchEngineState {
         let doc_text = format!("{} {}", content_lower, alias_text);
         let tokens = tokenize(&doc_text);
         let mut cache = self.doc_token_cache.lock();
-        cache.insert(tetra_id, (tokens.clone(), tokens.len()));
+        if cache.search_revision == Some(search_revision) {
+            cache
+                .documents
+                .insert(tetra_id, (tokens.clone(), tokens.len()));
+        }
         tokens
     }
 
     fn get_or_build_df(
         &self,
-        tetras: &[crate::domain::tetra::Tetrahedron],
-    ) -> (HashMap<String, usize>, usize, f64) {
-        // P4修复:复用 doc_token_cache 避免 build_df_map 重复 tokenize 全量文档。
-        // 先检查 df_cache(快路径),miss 时用 get_doc_tokens(命中 token 缓存)构建。
-        {
+        search_revision: u64,
+        load_snapshot: impl FnOnce() -> (u64, Vec<Tetrahedron>),
+    ) -> DfSearchData {
+        if let Some(cached) = self.cached_df(search_revision) {
+            return cached;
+        }
+
+        let (search_revision, tetras) = load_snapshot();
+        self.get_or_build_df_from_snapshot(search_revision, tetras)
+    }
+
+    fn cached_df(&self, search_revision: u64) -> Option<DfSearchData> {
+        let cached = {
             let cache = self.df_cache.lock();
-            if let Some(ref c) = *cache {
-                if c.tetra_count == tetras.len() {
-                    return (c.df_map.clone(), c.doc_count, c.avg_dl);
-                }
+            cache
+                .as_ref()
+                .filter(|c| c.search_revision == search_revision)
+                .map(|c| DfSearchData {
+                    df_map: Arc::clone(&c.df_map),
+                    doc_count: c.doc_count,
+                    avg_dl: c.avg_dl,
+                    search_revision: c.search_revision,
+                    space_snapshot: None,
+                })
+        };
+        cached
+    }
+
+    fn get_or_build_df_from_snapshot(
+        &self,
+        search_revision: u64,
+        tetras: Vec<Tetrahedron>,
+    ) -> DfSearchData {
+        if let Some(cached) = self.cached_df(search_revision) {
+            return DfSearchData {
+                space_snapshot: Some(tetras),
+                ..cached
+            };
+        }
+
+        // Revisions invalidate tokens as well as corpus statistics, including
+        // same-size content edits that the old tetra-count key could not detect.
+        {
+            let mut cache = self.doc_token_cache.lock();
+            if cache.search_revision != Some(search_revision) {
+                cache.search_revision = Some(search_revision);
+                cache.documents.clear();
             }
         }
-        // 用 doc_token_cache 复用已 tokenize 的结果(避免重新 tokenize 全量)
+
         let mut df: HashMap<String, usize> = HashMap::new();
         let mut total_dl: f64 = 0.0;
         let doc_count = tetras.len();
-        for t in tetras {
-            let doc_tokens = self.get_doc_tokens(t.id, &t.data.content, &t.data.aliases);
+        for t in &tetras {
+            let doc_tokens =
+                self.get_doc_tokens(t.id, &t.data.content, &t.data.aliases, search_revision);
             total_dl += doc_tokens.len() as f64;
             let mut seen = HashSet::new();
             for term in doc_tokens {
@@ -137,14 +204,21 @@ impl SearchEngineState {
         } else {
             0.0
         };
+        let df_map = Arc::new(df);
         let mut cache = self.df_cache.lock();
         *cache = Some(DfCache {
-            df_map: df.clone(),
+            search_revision,
+            df_map: Arc::clone(&df_map),
             doc_count,
             avg_dl,
-            tetra_count: doc_count,
         });
-        (df, doc_count, avg_dl)
+        DfSearchData {
+            df_map,
+            doc_count,
+            avg_dl,
+            search_revision,
+            space_snapshot: Some(tetras),
+        }
     }
 }
 
@@ -906,6 +980,65 @@ fn passes_filters_id(ctx: &SearchCtx, id: u64, filters: Option<&SearchFilters>) 
     }
 }
 
+fn candidate_tetrahedrons(
+    state: &SearchEngineState,
+    space: &Space,
+    search_data: &mut DfSearchData,
+    candidate_ids: &HashSet<TetraId>,
+) -> Vec<Tetrahedron> {
+    if let Some(tetras) = search_data.space_snapshot.take() {
+        return tetras
+            .into_iter()
+            .filter(|tetra| candidate_ids.contains(&tetra.id))
+            .collect();
+    }
+    if let Some(tetras) =
+        space.get_tetrahedrons_by_ids_at_search_revision(candidate_ids, search_data.search_revision)
+    {
+        return tetras;
+    }
+    full_space_tetrahedrons(state, space, search_data)
+        .into_iter()
+        .filter(|tetra| candidate_ids.contains(&tetra.id))
+        .collect()
+}
+
+fn first_tetrahedrons(
+    state: &SearchEngineState,
+    space: &Space,
+    search_data: &mut DfSearchData,
+    limit: usize,
+) -> Vec<Tetrahedron> {
+    if let Some(tetras) = search_data.space_snapshot.take() {
+        return tetras.into_iter().take(limit).collect();
+    }
+    if let Some(tetras) =
+        space.first_tetrahedrons_at_search_revision(limit, search_data.search_revision)
+    {
+        return tetras;
+    }
+    full_space_tetrahedrons(state, space, search_data)
+        .into_iter()
+        .take(limit)
+        .collect()
+}
+
+fn full_space_tetrahedrons(
+    state: &SearchEngineState,
+    space: &Space,
+    search_data: &mut DfSearchData,
+) -> Vec<Tetrahedron> {
+    if let Some(tetras) = search_data.space_snapshot.take() {
+        return tetras;
+    }
+    let (search_revision, tetras) = space.all_tetrahedrons_with_search_revision();
+    *search_data = state.get_or_build_df_from_snapshot(search_revision, tetras);
+    search_data
+        .space_snapshot
+        .take()
+        .expect("a full corpus snapshot is retained while rebuilding its search statistics")
+}
+
 /// Phase 1 检索可信度重建: Exact 模式专用搜索
 ///
 /// 契约:
@@ -929,10 +1062,9 @@ fn search_exact(
     // "MarkdownText" 或 "markdown" 的记忆(query 端扩展, 不破坏 df_cache)
     let query_tokens = expand_camel_query_tokens(&raw_tokens);
 
-    let all_tetras = ctx.space.all_tetrahedrons();
-    let (df_map, doc_count, avg_dl) = ctx.state.get_or_build_df(&all_tetras);
-    let df_map_ref = &df_map;
-    let state_ref = &ctx.state;
+    let mut search_data = ctx.state.get_or_build_df(ctx.space.search_revision(), || {
+        ctx.space.all_tetrahedrons_with_search_revision()
+    });
     let _access_counts_snapshot = ctx.state.access_counts.lock().clone();
 
     // 候选集: label_index 倒排(精确 token 命中的记忆) + label 子串匹配
@@ -962,44 +1094,37 @@ fn search_exact(
     // strict_filter 模式: 如果设了 label/project 过滤, 只在这些过滤集里找(不 fallback 全量)
     let strict = filters.map(|f| f.strict_filter).unwrap_or(false);
 
-    let scored: Vec<ScoredWithMatch> = if candidate_ids.is_empty() && !strict {
-        // 无 label 候选且非严格模式: 全量 BM25 fallback(exact 模式仍需扫全量找精确命中)
-        all_tetras
-            .into_iter()
-            .filter(|t| passes_filters(t, filters))
-            .map(|t| {
-                let doc_tokens = state_ref.get_doc_tokens(t.id, &t.data.content, &t.data.aliases);
-                score_tetra_exact(
-                    &t,
-                    &query_tokens,
-                    avg_dl,
-                    doc_count,
-                    df_map_ref,
-                    &doc_tokens,
-                )
-            })
-            .collect()
-    } else if candidate_ids.is_empty() {
-        // strict 模式但无候选: 返回空(不回填)
-        vec![]
+    // Exact mode retains its full BM25 fallback when no label candidate exists.
+    let candidates = if candidate_ids.is_empty() {
+        if strict {
+            Vec::new()
+        } else {
+            full_space_tetrahedrons(ctx.state, ctx.space, &mut search_data)
+        }
     } else {
-        all_tetras
-            .into_iter()
-            .filter(|t| candidate_ids.contains(&t.id))
-            .filter(|t| passes_filters(t, filters))
-            .map(|t| {
-                let doc_tokens = state_ref.get_doc_tokens(t.id, &t.data.content, &t.data.aliases);
-                score_tetra_exact(
-                    &t,
-                    &query_tokens,
-                    avg_dl,
-                    doc_count,
-                    df_map_ref,
-                    &doc_tokens,
-                )
-            })
-            .collect()
+        candidate_tetrahedrons(ctx.state, ctx.space, &mut search_data, &candidate_ids)
     };
+    let df_map_ref = search_data.df_map.as_ref();
+    let doc_count = search_data.doc_count;
+    let avg_dl = search_data.avg_dl;
+    let search_revision = search_data.search_revision;
+    let scored: Vec<ScoredWithMatch> = candidates
+        .into_iter()
+        .filter(|t| passes_filters(t, filters))
+        .map(|t| {
+            let doc_tokens =
+                ctx.state
+                    .get_doc_tokens(t.id, &t.data.content, &t.data.aliases, search_revision);
+            score_tetra_exact(
+                &t,
+                &query_tokens,
+                avg_dl,
+                doc_count,
+                df_map_ref,
+                &doc_tokens,
+            )
+        })
+        .collect();
 
     // 排序: 分数降序
     let mut sorted = scored;
@@ -1074,9 +1199,9 @@ pub fn search(
         vec![]
     };
 
-    let all_tetras = ctx.space.all_tetrahedrons();
-    let (df_map, doc_count, avg_dl) = ctx.state.get_or_build_df(&all_tetras);
-    let df_map_ref = &df_map;
+    let mut search_data = ctx.state.get_or_build_df(ctx.space.search_revision(), || {
+        ctx.space.all_tetrahedrons_with_search_revision()
+    });
 
     // 预计算 query tokens 一次，所有评分函数复用（避免每候选重复 tokenize 6+ 次）
     let query_tokens = tokenize(&search_query);
@@ -1091,33 +1216,16 @@ pub fn search(
     // P1修复:评分前 clone access_counts 快照后立即释放锁,
     // 避免全程持锁跨评分+排序+LLM rerank 阻塞并发搜索和 flush。
     let access_counts_snapshot = ctx.state.access_counts.lock().clone();
-    let mut scored: Vec<(TetraId, f64, f64, MemoryPayload)> = if !hnsw_candidates.is_empty() {
+    let (candidates, use_bm25) = if !hnsw_candidates.is_empty() {
         // HNSW 路径：只取候选 tetra，避免遍历全部
-        let candidate_set: HashSet<u64> = hnsw_candidates.iter().map(|(id, _)| *id).collect();
-        all_tetras
-            .into_iter()
-            .filter(|t| candidate_set.contains(&t.id))
-            .filter(|t| passes_filters(t, filters))
-            .map(|t| {
-                let doc_tokens = state_ref.get_doc_tokens(t.id, &t.data.content, &t.data.aliases);
-                score_tetra(
-                    &t,
-                    &query_embedding,
-                    query_tokens_ref,
-                    avg_dl,
-                    doc_count,
-                    df_map_ref,
-                    false,
-                    &access_counts_snapshot,
-                    gibberish_query,
-                    &doc_tokens,
-                    now_ts_search,
-                )
-            })
-            .collect()
+        let candidate_set: HashSet<TetraId> = hnsw_candidates.iter().map(|(id, _)| *id).collect();
+        (
+            candidate_tetrahedrons(ctx.state, ctx.space, &mut search_data, &candidate_set),
+            false,
+        )
     } else {
         let label_idx = ctx.label_index.lock();
-        let mut candidate_ids: HashSet<u64> = HashSet::new();
+        let mut candidate_ids: HashSet<TetraId> = HashSet::new();
         for tok in query_tokens_ref {
             if let Some(ids) = label_idx.get(tok) {
                 for &id in ids {
@@ -1139,37 +1247,46 @@ pub fn search(
         }
         drop(label_idx);
 
-        if candidate_ids.is_empty() {
-            let cap = 2000;
-            candidate_ids = all_tetras.iter().take(cap).map(|t| t.id).collect();
+        let candidates = if candidate_ids.is_empty() {
+            const FALLBACK_LIMIT: usize = 2000;
+            let fallback =
+                first_tetrahedrons(ctx.state, ctx.space, &mut search_data, FALLBACK_LIMIT);
             tracing::warn!(
                 "[Search] no label candidates, using first {} of {} tetras as fallback",
-                cap,
-                all_tetras.len()
+                FALLBACK_LIMIT,
+                search_data.doc_count
             );
-        }
-        all_tetras
-            .into_iter()
-            .filter(|t| candidate_ids.contains(&t.id))
-            .filter(|t| passes_filters(t, filters))
-            .map(|t| {
-                let doc_tokens = state_ref.get_doc_tokens(t.id, &t.data.content, &t.data.aliases);
-                score_tetra(
-                    &t,
-                    &query_embedding,
-                    query_tokens_ref,
-                    avg_dl,
-                    doc_count,
-                    df_map_ref,
-                    true,
-                    &access_counts_snapshot,
-                    gibberish_query,
-                    &doc_tokens,
-                    now_ts_search,
-                )
-            })
-            .collect()
+            fallback
+        } else {
+            candidate_tetrahedrons(ctx.state, ctx.space, &mut search_data, &candidate_ids)
+        };
+        (candidates, true)
     };
+    let df_map_ref = search_data.df_map.as_ref();
+    let doc_count = search_data.doc_count;
+    let avg_dl = search_data.avg_dl;
+    let search_revision = search_data.search_revision;
+    let mut scored: Vec<(TetraId, f64, f64, MemoryPayload)> = candidates
+        .into_iter()
+        .filter(|t| passes_filters(t, filters))
+        .map(|t| {
+            let doc_tokens =
+                state_ref.get_doc_tokens(t.id, &t.data.content, &t.data.aliases, search_revision);
+            score_tetra(
+                &t,
+                &query_embedding,
+                query_tokens_ref,
+                avg_dl,
+                doc_count,
+                df_map_ref,
+                use_bm25,
+                &access_counts_snapshot,
+                gibberish_query,
+                &doc_tokens,
+                now_ts_search,
+            )
+        })
+        .collect();
 
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -1825,7 +1942,35 @@ fn score_tetra_exact(
 
 #[cfg(test)]
 mod search_mode_tests {
-    use super::SearchMode;
+    use super::{candidate_tetrahedrons, SearchEngineState, SearchMode, TetraId};
+    use crate::domain::space::Space;
+    use crate::domain::tetra::{MemoryPayload, Tetrahedron};
+    use crate::domain::vertex::Point3;
+    use crate::engine::hnsw::HnswIndex;
+    use std::cell::Cell;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    fn document(id: TetraId, content: &str) -> Tetrahedron {
+        let data = MemoryPayload {
+            content: content.to_string(),
+            ..MemoryPayload::default()
+        };
+        Tetrahedron {
+            id,
+            vertex_ids: [0; 4],
+            core: Point3::zero(),
+            data,
+            mass: 1.0,
+        }
+    }
+
+    fn insert_document(space: &Space, content: &str, center: Point3) -> TetraId {
+        let tetra = document(0, content);
+        space
+            .add_tetrahedron(&tetra, &Tetrahedron::compute_vertices(center))
+            .unwrap()
+    }
 
     #[test]
     fn public_search_modes_parse_to_their_implemented_variants() {
@@ -1835,5 +1980,92 @@ mod search_mode_tests {
         assert_eq!(SearchMode::from_str_lossy("graph"), SearchMode::Graph);
         assert_eq!(SearchMode::from_str_lossy("auto"), SearchMode::Auto);
         assert_eq!(SearchMode::from_str_lossy("fusion"), SearchMode::Fusion);
+    }
+
+    #[test]
+    fn search_bm25_cache_reuses_snapshot_until_revision_changes() {
+        let state = SearchEngineState::new(HnswIndex::new(4, 2, 10));
+        let space = Space::new();
+        let id = insert_document(&space, "alpha", Point3::zero());
+        let snapshot_loads = Cell::new(0);
+        let first = state.get_or_build_df(space.search_revision(), || {
+            snapshot_loads.set(snapshot_loads.get() + 1);
+            space.all_tetrahedrons_with_search_revision()
+        });
+
+        assert_eq!(snapshot_loads.get(), 1);
+        assert_eq!(first.doc_count, 1);
+        assert_eq!(first.df_map.get("alpha"), Some(&1));
+        assert!(first.space_snapshot.is_some());
+
+        let warm = state.get_or_build_df(space.search_revision(), || {
+            snapshot_loads.set(snapshot_loads.get() + 1);
+            space.all_tetrahedrons_with_search_revision()
+        });
+        assert_eq!(snapshot_loads.get(), 1);
+        assert!(warm.space_snapshot.is_none());
+        assert!(Arc::ptr_eq(&first.df_map, &warm.df_map));
+
+        let mut payload = space.get_tetrahedron(id).unwrap().data;
+        payload.content = "beta".to_string();
+        space.update_payload(id, payload).unwrap();
+        let updated = state.get_or_build_df(space.search_revision(), || {
+            snapshot_loads.set(snapshot_loads.get() + 1);
+            space.all_tetrahedrons_with_search_revision()
+        });
+        assert_eq!(snapshot_loads.get(), 2);
+        assert_eq!(updated.doc_count, 1);
+        assert_eq!(updated.df_map.get("beta"), Some(&1));
+        assert!(!updated.df_map.contains_key("alpha"));
+    }
+
+    #[test]
+    fn search_warm_candidate_selection_matches_the_snapshot_path() {
+        let state = SearchEngineState::new(HnswIndex::new(4, 2, 10));
+        let space = Space::new();
+        insert_document(&space, "first", Point3::zero());
+        let target_id = insert_document(&space, "target", Point3::new(10.0, 0.0, 0.0));
+        let candidate_ids = HashSet::from([target_id]);
+
+        let _cold = state.get_or_build_df(space.search_revision(), || {
+            space.all_tetrahedrons_with_search_revision()
+        });
+        let mut warm_data = state.get_or_build_df(space.search_revision(), || {
+            space.all_tetrahedrons_with_search_revision()
+        });
+        let warm_candidates =
+            candidate_tetrahedrons(&state, &space, &mut warm_data, &candidate_ids);
+
+        state.invalidate_df_cache();
+        let mut cold_data = state.get_or_build_df(space.search_revision(), || {
+            space.all_tetrahedrons_with_search_revision()
+        });
+        let snapshot_candidates =
+            candidate_tetrahedrons(&state, &space, &mut cold_data, &candidate_ids);
+
+        assert_eq!(warm_candidates.len(), 1);
+        assert_eq!(warm_candidates[0].id, target_id);
+        assert_eq!(warm_candidates[0].data.content, "target");
+        assert_eq!(
+            warm_candidates
+                .iter()
+                .map(|tetra| tetra.id)
+                .collect::<Vec<_>>(),
+            snapshot_candidates
+                .iter()
+                .map(|tetra| tetra.id)
+                .collect::<Vec<_>>()
+        );
+
+        let mut stale_data = state.get_or_build_df(space.search_revision(), || {
+            space.all_tetrahedrons_with_search_revision()
+        });
+        let mut payload = space.get_tetrahedron(target_id).unwrap().data;
+        payload.content = "updated".to_string();
+        space.update_payload(target_id, payload).unwrap();
+        let refreshed = candidate_tetrahedrons(&state, &space, &mut stale_data, &candidate_ids);
+        assert_eq!(refreshed[0].data.content, "updated");
+        assert_eq!(stale_data.search_revision, space.search_revision());
+        assert_eq!(stale_data.df_map.get("updated"), Some(&1));
     }
 }

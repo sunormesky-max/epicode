@@ -40,6 +40,8 @@ struct SpaceInner {
     cylinder: Cylinder,
     /// 结构版本：tetra 增删/relocate 递增，用于 cluster 缓存失效（避免重复 find_clusters O(N)）。
     structure_version: u64,
+    /// 搜索语料版本：增删及 content/alias 变更递增；通用 payload 更新保守递增。
+    search_revision: u64,
 }
 
 // ── Space ──
@@ -116,6 +118,7 @@ impl Space {
                 next_tetra_id: 0,
                 cylinder,
                 structure_version: 0,
+                search_revision: 0,
             }),
             cluster_cache: RwLock::new(None),
         }
@@ -136,6 +139,7 @@ impl Space {
         inner.next_tetra_id += 1;
         Self::insert_tetra(&mut inner, tetra, id, positions)?;
         inner.structure_version += 1;
+        inner.search_revision += 1;
         Ok(id)
     }
 
@@ -156,6 +160,7 @@ impl Space {
             inner.next_tetra_id = tetra.id + 1;
         }
         inner.structure_version += 1;
+        inner.search_revision += 1;
         Ok(tetra.id)
     }
 
@@ -299,6 +304,7 @@ impl Space {
         inner.cylinder.release_port(id);
 
         inner.structure_version += 1;
+        inner.search_revision += 1;
         Ok(tetra)
     }
 
@@ -307,8 +313,52 @@ impl Space {
         self.inner.read().structure_version
     }
 
+    /// Searchable-memory version, independent from the topology/cluster version.
+    pub fn search_revision(&self) -> u64 {
+        self.inner.read().search_revision
+    }
+
+    /// Clone the corpus and its version under one read lock for cache rebuilds.
+    pub fn all_tetrahedrons_with_search_revision(&self) -> (u64, Vec<Tetrahedron>) {
+        let inner = self.inner.read();
+        (
+            inner.search_revision,
+            inner.tetrahedrons.values().cloned().collect(),
+        )
+    }
+
     pub fn get_tetrahedron(&self, id: TetraId) -> Option<Tetrahedron> {
         self.inner.read().tetrahedrons.get(&id).cloned()
+    }
+
+    /// Read a candidate set only if the searchable corpus still has this revision.
+    pub fn get_tetrahedrons_by_ids_at_search_revision(
+        &self,
+        ids: &std::collections::HashSet<TetraId>,
+        search_revision: u64,
+    ) -> Option<Vec<Tetrahedron>> {
+        let inner = self.inner.read();
+        if inner.search_revision != search_revision {
+            return None;
+        }
+        Some(
+            ids.iter()
+                .filter_map(|id| inner.tetrahedrons.get(id).cloned())
+                .collect(),
+        )
+    }
+
+    /// Clone only the bounded fallback window if the corpus revision still matches.
+    pub fn first_tetrahedrons_at_search_revision(
+        &self,
+        limit: usize,
+        search_revision: u64,
+    ) -> Option<Vec<Tetrahedron>> {
+        let inner = self.inner.read();
+        if inner.search_revision != search_revision {
+            return None;
+        }
+        Some(inner.tetrahedrons.values().take(limit).cloned().collect())
     }
 
     pub fn update_mass(&self, id: TetraId, delta: f64) -> Result<(), String> {
@@ -325,11 +375,21 @@ impl Space {
 
     pub fn update_aliases(&self, id: TetraId, aliases: Vec<String>) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner
-            .tetrahedrons
-            .get_mut(&id)
-            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
-        tetra.data.aliases = aliases;
+        let changed = {
+            let tetra = inner
+                .tetrahedrons
+                .get_mut(&id)
+                .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+            if tetra.data.aliases == aliases {
+                false
+            } else {
+                tetra.data.aliases = aliases;
+                true
+            }
+        };
+        if changed {
+            inner.search_revision += 1;
+        }
         Ok(())
     }
 
@@ -339,11 +399,19 @@ impl Space {
         payload: crate::domain::tetra::MemoryPayload,
     ) -> Result<(), String> {
         let mut inner = self.inner.write();
-        let tetra = inner
-            .tetrahedrons
-            .get_mut(&id)
-            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
-        tetra.data = payload;
+        let searchable_changed = {
+            let tetra = inner
+                .tetrahedrons
+                .get_mut(&id)
+                .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+            let changed =
+                tetra.data.content != payload.content || tetra.data.aliases != payload.aliases;
+            tetra.data = payload;
+            changed
+        };
+        if searchable_changed {
+            inner.search_revision += 1;
+        }
         Ok(())
     }
 
@@ -354,13 +422,16 @@ impl Space {
         F: FnOnce(&mut crate::domain::tetra::MemoryPayload) -> bool,
     {
         let mut inner = self.inner.write();
-        let tetra = inner
-            .tetrahedrons
-            .get_mut(&id)
-            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
-        let changed = f(&mut tetra.data);
+        let changed = {
+            let tetra = inner
+                .tetrahedrons
+                .get_mut(&id)
+                .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+            f(&mut tetra.data)
+        };
         if changed {
             inner.structure_version += 1;
+            inner.search_revision += 1;
         }
         Ok(())
     }
@@ -1091,6 +1162,44 @@ mod tests {
             mass: 1.0,
         };
         (tetra, positions)
+    }
+
+    #[test]
+    fn search_revision_tracks_searchable_memory_changes() {
+        let space = Space::new();
+        let (mut tetra, positions) = make_tetra(0, Point3::zero());
+        tetra.data.content = "alpha".to_string();
+        let id = space.add_tetrahedron(&tetra, &positions).unwrap();
+        let topology_revision = space.structure_version();
+        assert_eq!(space.search_revision(), 1);
+
+        let mut payload = space.get_tetrahedron(id).unwrap().data;
+        payload.content = "beta".to_string();
+        space.update_payload(id, payload).unwrap();
+        assert_eq!(space.search_revision(), 2);
+        assert_eq!(space.structure_version(), topology_revision);
+
+        let mut payload = space.get_tetrahedron(id).unwrap().data;
+        payload.labels.push("metadata-only".to_string());
+        space.update_payload(id, payload).unwrap();
+        assert_eq!(space.search_revision(), 2);
+
+        let aliases = vec!["synonym".to_string()];
+        space.update_aliases(id, aliases.clone()).unwrap();
+        assert_eq!(space.search_revision(), 3);
+        space.update_aliases(id, aliases).unwrap();
+        assert_eq!(space.search_revision(), 3);
+
+        space
+            .with_tetra_mut(id, |payload| {
+                payload.content = "gamma".to_string();
+                true
+            })
+            .unwrap();
+        assert_eq!(space.search_revision(), 4);
+
+        space.remove_tetrahedron(id).unwrap();
+        assert_eq!(space.search_revision(), 5);
     }
 
     #[test]
