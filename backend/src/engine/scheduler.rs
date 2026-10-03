@@ -204,6 +204,7 @@ pub struct SchedulerCenter {
     cycle_gate: Arc<SingleFlightGate>,
     tx: EventSender,
     tick_interval: parking_lot::RwLock<Duration>,
+    horizon: parking_lot::Mutex<super::horizon::Horizon>,
     tick_count: AtomicU64,
     recent_events: ParkMutex<Vec<String>>,
     decision_history: ParkMutex<Vec<super::cognitive::DecisionRecord>>,
@@ -231,7 +232,6 @@ pub struct SchedulerCenter {
     feedback_agg_cache: ParkMutex<Option<(usize, std::time::Instant, HashSet<u64>)>>,
     skill_feedback_agg_cache: ParkMutex<Option<(usize, std::time::Instant, HashSet<u64>)>>,
     drive_queue: Arc<super::drive::DriveQueue>,
-    grains: ParkMutex<super::grains::GrainLedger>,
 }
 
 impl SchedulerCenter {
@@ -290,6 +290,7 @@ impl SchedulerCenter {
             cycle_gate: Arc::new(SingleFlightGate::default()),
             tx,
             tick_interval: parking_lot::RwLock::new(Duration::from_millis(tick_interval_ms)),
+            horizon: parking_lot::Mutex::new(super::horizon::Horizon::new(tick_interval_ms)),
             tick_count: AtomicU64::new(0),
             recent_events: ParkMutex::new(Vec::new()),
             decision_history: ParkMutex::new(Vec::new()),
@@ -314,7 +315,6 @@ impl SchedulerCenter {
             feedback_agg_cache: ParkMutex::new(None),
             skill_feedback_agg_cache: ParkMutex::new(None),
             drive_queue: Arc::new(super::drive::DriveQueue::new()),
-            grains: ParkMutex::new(super::grains::GrainLedger::default()),
         }
     }
 
@@ -345,49 +345,6 @@ impl SchedulerCenter {
     }
 
     /// D4: 时间感知创建(故事时间) — valid_from=timestamp, 系统时间由gateway内部记录
-    pub fn grain_recall(&self, valid_at: i64) -> Result<Vec<super::grains::RecallHit>, String> {
-        let subject = self.grain_subject();
-        self.grains.lock().recall(&subject, &subject, valid_at)
-    }
-
-    pub fn grain_correct(
-        &self,
-        assertion_id: u64,
-        text: &str,
-        valid_from: i64,
-    ) -> Result<u64, String> {
-        let subject = self.grain_subject();
-        self.grains.lock().correct(
-            &subject,
-            assertion_id,
-            text,
-            &subject,
-            valid_from,
-            valid_from,
-        )
-    }
-
-    pub fn grain_grant(&self, scope: &str, action: &str, allow: bool) -> u64 {
-        let subject = self.grain_subject();
-        self.grains
-            .lock()
-            .grant(&subject, scope, action, allow, &subject, 0)
-    }
-
-    pub fn grain_status(&self) -> (f64, usize) {
-        let grains = self.grains.lock();
-        (grains.pressure(), grains.projection_debt())
-    }
-
-    fn grain_subject(&self) -> String {
-        let owner = self.owner_user.lock();
-        if owner.is_empty() {
-            "local".to_string()
-        } else {
-            owner.clone()
-        }
-    }
-
     pub fn api_create_memory_at(
         &self,
         content: &str,
@@ -399,25 +356,6 @@ impl SchedulerCenter {
             .create_memory_with_time(content, labels, timestamp)?;
         self.persist_tetra(r.id);
         self.gateway.mark_dirty(r.id);
-        let subject = {
-            let owner = self.owner_user.lock();
-            if owner.is_empty() {
-                "local".to_string()
-            } else {
-                owner.clone()
-            }
-        };
-        let observed = if timestamp == 0 {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0)
-        } else {
-            timestamp
-        };
-        self.grains
-            .lock()
-            .append_experience(&subject, content, "api", &subject, observed, observed);
         Ok((r.id, r.is_new))
     }
 
@@ -4201,6 +4139,16 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
     pub fn set_tick_interval(&self, ms: u64) {
         let mut interval = self.tick_interval.write();
         *interval = Duration::from_millis(ms);
+        self.horizon.lock().set_base_ms(ms);
+    }
+
+    pub fn horizon_status(&self) -> (String, f64, u32) {
+        let horizon = self.horizon.lock();
+        (
+            horizon.phase().as_str().to_string(),
+            horizon.pressure(),
+            horizon.debt(),
+        )
     }
 
     /// α0.2: cloud runtime register/unregister 时更新; detect_prediction_errors 读取产生 body_missing
@@ -6191,12 +6139,22 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
 
         loop {
             // 先克隆 interval 值再 drop 读锁，避免 select! 分支持锁跨整个 sleep 周期
-            let tick_interval = *self.tick_interval.read();
+            let plan = self.horizon.lock().plan(cognitive);
+            tracing::debug!(
+                "[Horizon] phase={} sleep_ms={} pressure={:.2} debt={}",
+                plan.phase.as_str(),
+                plan.sleep_ms,
+                plan.pressure,
+                plan.debt
+            );
+            let tick_interval = Duration::from_millis(plan.sleep_ms);
+            let commit = cognitive && plan.phase == super::horizon::HorizonPhase::Commit;
             tokio::select! {
                 _ = tokio::time::sleep(tick_interval) => {
-                    if cognitive {
+                    if commit {
                         let Some(cycle_permit) = self.cycle_gate.try_acquire() else {
-                            tracing::debug!("[Scheduler] skipping tick while the previous scheduler cycle is still running");
+                            self.horizon.lock().note_defer();
+                            tracing::debug!("[Horizon] commit deferred; previous cycle still running");
                             continue;
                         };
                         let me = self.clone();
@@ -6247,7 +6205,8 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         });
                     } else {
                         let Some(_cycle_permit) = self.cycle_gate.try_acquire() else {
-                            tracing::debug!("[Scheduler] skipping quiet tick while the previous scheduler cycle is still running");
+                            self.horizon.lock().note_defer();
+                            tracing::debug!("[Horizon] attend deferred; previous cycle still running");
                             continue;
                         };
                         let count = self.tick_count.fetch_add(1, Ordering::SeqCst);
@@ -6277,6 +6236,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                             break;
                         }
                         Ok(EngineEvent::TetrahedronCreated(id)) => {
+                            self.horizon.lock().note_stimulus(0.4);
                             self.log_event(format!("created({})", id));
                             if self.tick_count.load(Ordering::SeqCst).is_multiple_of(3) { self.auto_save(); }
                         }

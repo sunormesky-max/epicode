@@ -101,6 +101,10 @@ Core domain structures use interior mutability via `RwLock`:
 
 Read-heavy operations (search, recall, stats) acquire read locks. Write operations (remember, update, delete) acquire write locks. This design maximizes read parallelism while serializing writes.
 
+### Search Read Path
+
+BM25 document frequencies and tokenized documents are cached against a per-space searchable-memory revision. Inserts, deletes, and content or alias edits invalidate the cache; warm HNSW and label-index searches fetch only candidate memories by ID rather than cloning the full space. The existing bounded no-candidate fallback and exact-mode full fallback remain in place. Scoring, filters, and SMRP payloads are unchanged.
+
 ### Event-Driven Communication
 
 Engine subsystems communicate asynchronously through a `broadcast::EventBus`:

@@ -6,7 +6,7 @@ import SacredBackground from './SacredBackground';
 
 export default function PageBackground() {
   return (
-    <div className="fixed inset-0 z-0" style={{ background: '#030305' }}>
+    <div className="fixed inset-0 z-0" style={{ background: 'var(--bg-void)' }}>
       <SacredBackground />
     </div>
   );
