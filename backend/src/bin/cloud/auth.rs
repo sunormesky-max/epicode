@@ -270,6 +270,7 @@ fn record_api_call(st: &CloudState, api_key: &str) {
     *user_daily.entry(today).or_insert(0) += 1;
 }
 
+#[cfg(test)]
 mod tests {
     use super::has_conflicting_user_ids;
 
