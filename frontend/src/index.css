@@ -577,3 +577,188 @@ main h2, main h3, .heading-text, nav, .nav-link {
 .observatory-frame.dashboard-viewport-frame { height:100vh; height:100dvh; min-height:600px; display:flex; flex-direction:column; padding-bottom:80px; }
 .dashboard-viewport-frame > .dashboard-header, .dashboard-viewport-frame > .dashboard-page-nav { flex-shrink:0; }
 .dashboard-viewport-content { flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:auto; }
+
+
+/* Theme center. :root remains Synapse so older markup stays valid. */
+html[data-theme="paper"] {
+  color-scheme: light;
+  --bg-void: #efe7da;
+  --bg-primary: #f4efe6;
+  --bg-secondary: #fffaf3;
+  --bg-tertiary: #e7dfd2;
+  --bg-card: rgba(28, 25, 21, 0.04);
+  --bg-card-solid: #fffaf3;
+  --bg-dark: #f4efe6;
+  --bg-darker: #efe7da;
+  --text-primary: #1c1915;
+  --text-secondary: #5c564c;
+  --text-tertiary: #8a8174;
+  --accent-blue: #6b7c4a;
+  --accent-blue-bright: #4f5d36;
+  --accent-cyan: #6b7c4a;
+  --accent-cyan-bright: #4f5d36;
+  --accent-purple: #7d6b58;
+  --accent-magenta: #7d6b58;
+  --accent-pink: #7d6b58;
+  --accent-gold: #a68445;
+  --accent-gold-bright: #8a6b32;
+  --accent-gold-dim: #8a6b32;
+  --neural-primary: #6b7c4a;
+  --neural-secondary: #7d6b58;
+  --neural-tertiary: #8a8174;
+  --neural-glow: rgba(107, 124, 74, 0.2);
+  --neural-glow-purple: rgba(125, 107, 88, 0.16);
+  --border-light: rgba(28, 25, 21, 0.1);
+  --border-medium: rgba(28, 25, 21, 0.18);
+  --border-hologram: rgba(107, 124, 74, 0.35);
+  --success-green: #4f7a45;
+  --danger-red: #a94444;
+  --warning-orange: #a68445;
+  --chrome: rgba(244, 239, 230, 0.88);
+}
+html[data-theme="meridian"] {
+  color-scheme: dark;
+  --bg-void: #07090d;
+  --bg-primary: #0b0e13;
+  --bg-secondary: #10151c;
+  --bg-tertiary: #171d26;
+  --bg-card: rgba(231, 237, 244, 0.04);
+  --bg-card-solid: #121820;
+  --bg-dark: #0b0e13;
+  --bg-darker: #07090d;
+  --text-primary: #e7edf4;
+  --text-secondary: #a7b3c2;
+  --text-tertiary: #6d7b8c;
+  --accent-blue: #b7c4d4;
+  --accent-blue-bright: #e7edf4;
+  --accent-cyan: #b7c4d4;
+  --accent-cyan-bright: #e7edf4;
+  --accent-purple: #8ea0b8;
+  --accent-magenta: #8ea0b8;
+  --accent-pink: #8ea0b8;
+  --accent-gold: #d5deea;
+  --accent-gold-bright: #f4f7fb;
+  --accent-gold-dim: #8ea0b8;
+  --neural-primary: #b7c4d4;
+  --neural-secondary: #8ea0b8;
+  --neural-tertiary: #6d7b8c;
+  --neural-glow: rgba(183, 196, 212, 0.22);
+  --neural-glow-purple: rgba(142, 160, 184, 0.16);
+  --border-light: rgba(231, 237, 244, 0.08);
+  --border-medium: rgba(231, 237, 244, 0.16);
+  --border-hologram: rgba(183, 196, 212, 0.28);
+  --success-green: #9db4a8;
+  --danger-red: #e08b8b;
+  --warning-orange: #d5deea;
+  --chrome: rgba(11, 14, 19, 0.9);
+}
+html[data-theme="daylight"] {
+  color-scheme: light;
+  --bg-void: #eef1f4;
+  --bg-primary: #f6f7f9;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e6eaef;
+  --bg-card: rgba(22, 24, 29, 0.04);
+  --bg-card-solid: #ffffff;
+  --bg-dark: #f6f7f9;
+  --bg-darker: #eef1f4;
+  --text-primary: #16181d;
+  --text-secondary: #4d5561;
+  --text-tertiary: #7b8491;
+  --accent-blue: #1f6f62;
+  --accent-blue-bright: #164f47;
+  --accent-cyan: #1f6f62;
+  --accent-cyan-bright: #164f47;
+  --accent-purple: #5d6b86;
+  --accent-magenta: #5d6b86;
+  --accent-pink: #5d6b86;
+  --accent-gold: #8a6a32;
+  --accent-gold-bright: #6f5424;
+  --accent-gold-dim: #8a6a32;
+  --neural-primary: #1f6f62;
+  --neural-secondary: #5d6b86;
+  --neural-tertiary: #7b8491;
+  --neural-glow: rgba(31, 111, 98, 0.16);
+  --neural-glow-purple: rgba(93, 107, 134, 0.14);
+  --border-light: rgba(22, 24, 29, 0.1);
+  --border-medium: rgba(22, 24, 29, 0.18);
+  --border-hologram: rgba(31, 111, 98, 0.32);
+  --success-green: #1f6f62;
+  --danger-red: #b4232c;
+  --warning-orange: #8a6a32;
+  --chrome: rgba(246, 247, 249, 0.9);
+}
+html[data-theme="amber"] {
+  color-scheme: dark;
+  --bg-void: #100c08;
+  --bg-primary: #16110c;
+  --bg-secondary: #1a140f;
+  --bg-tertiary: #241c15;
+  --bg-card: rgba(246, 239, 228, 0.04);
+  --bg-card-solid: #1d1712;
+  --bg-dark: #16110c;
+  --bg-darker: #100c08;
+  --text-primary: #f6efe4;
+  --text-secondary: #cbbba6;
+  --text-tertiary: #8d7c68;
+  --accent-blue: #e0a45a;
+  --accent-blue-bright: #f0c48a;
+  --accent-cyan: #e0a45a;
+  --accent-cyan-bright: #f0c48a;
+  --accent-purple: #c48b62;
+  --accent-magenta: #c48b62;
+  --accent-pink: #c48b62;
+  --accent-gold: #e0a45a;
+  --accent-gold-bright: #f0c48a;
+  --accent-gold-dim: #b78442;
+  --neural-primary: #e0a45a;
+  --neural-secondary: #c48b62;
+  --neural-tertiary: #8d7c68;
+  --neural-glow: rgba(224, 164, 90, 0.24);
+  --neural-glow-purple: rgba(196, 139, 98, 0.16);
+  --border-light: rgba(246, 239, 228, 0.08);
+  --border-medium: rgba(246, 239, 228, 0.16);
+  --border-hologram: rgba(224, 164, 90, 0.3);
+  --success-green: #c4a36a;
+  --danger-red: #e08a78;
+  --warning-orange: #e0a45a;
+  --chrome: rgba(22, 17, 12, 0.9);
+}
+html[data-theme="archive"] {
+  color-scheme: dark;
+  --bg-void: #0c090b;
+  --bg-primary: #120e11;
+  --bg-secondary: #161014;
+  --bg-tertiary: #21181c;
+  --bg-card: rgba(246, 239, 232, 0.04);
+  --bg-card-solid: #1a1417;
+  --bg-dark: #120e11;
+  --bg-darker: #0c090b;
+  --text-primary: #f6efe8;
+  --text-secondary: #cbb8b4;
+  --text-tertiary: #8d7578;
+  --accent-blue: #d4535e;
+  --accent-blue-bright: #f0a0a6;
+  --accent-cyan: #d4535e;
+  --accent-cyan-bright: #f0a0a6;
+  --accent-purple: #b98992;
+  --accent-magenta: #b98992;
+  --accent-pink: #b98992;
+  --accent-gold: #e0c2a2;
+  --accent-gold-bright: #f0ddc8;
+  --accent-gold-dim: #b98992;
+  --neural-primary: #d4535e;
+  --neural-secondary: #b98992;
+  --neural-tertiary: #8d7578;
+  --neural-glow: rgba(212, 83, 94, 0.24);
+  --neural-glow-purple: rgba(185, 137, 146, 0.16);
+  --border-light: rgba(246, 239, 232, 0.08);
+  --border-medium: rgba(246, 239, 232, 0.16);
+  --border-hologram: rgba(212, 83, 94, 0.3);
+  --success-green: #c4898c;
+  --danger-red: #f0a0a6;
+  --warning-orange: #e0c2a2;
+  --chrome: rgba(18, 14, 17, 0.9);
+}
+html[data-theme="synapse"] { color-scheme: dark; --chrome: rgba(10, 10, 15, 0.9); }
+:root { --chrome: rgba(10, 10, 15, 0.9); }

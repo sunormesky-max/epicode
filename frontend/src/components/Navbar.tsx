@@ -2,6 +2,7 @@ import { useLocation } from 'react-router';
 import { useI18nContext } from '@/i18n/useI18n';
 import { isAuthenticated } from '@/lib/api';
 import { Menu, X } from 'lucide-react';
+import ThemeSwitcher from '@/components/ThemeSwitcher';
 import { useState, useEffect } from "react";
 
 export default function Navbar() {
@@ -26,6 +27,7 @@ export default function Navbar() {
     { path: '/l0', label: 'L0' },
     { path: '/community', label: t('nav.community') },
     { path: '/benchmarks', label: t('nav.benchmarks') },
+    { path: '/themes', label: '主题' },
   ];
 
   return (
@@ -33,7 +35,7 @@ export default function Navbar() {
       className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center px-2"
       style={{
         height: 'var(--navbar-height)',
-        background: 'rgba(10, 10, 15, 0.72)',
+        background: 'var(--chrome)',
         backdropFilter: 'blur(24px) saturate(180%)',
         WebkitBackdropFilter: 'blur(24px) saturate(180%)',
         border: `1px solid ${scrolled ? "rgba(62,207,174,0.25)" : "var(--border-light)"}`,
@@ -92,6 +94,7 @@ export default function Navbar() {
 
       {/* Right: CTA */}
       <div className="hidden md:flex items-center gap-2 ml-auto">
+        <ThemeSwitcher compact />
         {authed ? (
           <a href="#/dashboard" className="btn-primary text-xs py-2 px-4">
             {t('nav.console')}
@@ -130,7 +133,7 @@ export default function Navbar() {
         <div
           className="absolute top-full left-0 right-0 mt-2 md:hidden p-4 flex flex-col gap-1 rounded-2xl"
           style={{
-            background: 'rgba(10, 10, 15, 0.92)',
+            background: 'var(--chrome)',
             backdropFilter: 'blur(20px)',
             border: '1px solid var(--border-light)',
             boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
