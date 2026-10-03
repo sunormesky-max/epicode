@@ -66,9 +66,9 @@ impl Horizon {
     }
 
     pub fn plan(&mut self, cognitive: bool) -> HorizonPlan {
-        let mut phase = if self.debt > 0 && self.pressure >= 0.35 {
-            HorizonPhase::Commit
-        } else if self.pressure >= 0.55 {
+        // debt与高压力同归Commit(合并同分支, clippy if_same_then_else)
+        let commit = (self.debt > 0 && self.pressure >= 0.35) || self.pressure >= 0.55;
+        let mut phase = if commit {
             HorizonPhase::Commit
         } else if self.pressure >= 0.18 {
             HorizonPhase::Attend
