@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0](https://github.com/sunormesky-max/epicode/compare/v1.3.0...v1.4.0) (2026-10-03)
+
+
+### Features
+
+* append-only grain ledger beside tetra placement ([#151](https://github.com/sunormesky-max/epicode/issues/151)) ([86a1795](https://github.com/sunormesky-max/epicode/commit/86a17953a12fe003d88bb936d858eb1a5f2803d6))
+* horizon cadence for the central scheduler ([#153](https://github.com/sunormesky-max/epicode/issues/153)) ([5eb49af](https://github.com/sunormesky-max/epicode/commit/5eb49af0b465f0088b4e45ffc4286c5f2bd9cfb4))
+* shared theme center for the site and console ([#152](https://github.com/sunormesky-max/epicode/issues/152)) ([396e821](https://github.com/sunormesky-max/epicode/commit/396e821a246c1774e0b94859ce56a323219556d4))
+
+
+### Bug Fixes
+
+* **backend:** gate cloud auth tests module with cfg(test) to fix clippy unused_imports ([#155](https://github.com/sunormesky-max/epicode/issues/155)) ([9d902fd](https://github.com/sunormesky-max/epicode/commit/9d902fd61bc4648d17eef41996d75fff3aa9df42))
+
+
+### Documentation
+
+* state that retrieval is BM25 plus HNSW ([#154](https://github.com/sunormesky-max/epicode/issues/154)) ([59032bf](https://github.com/sunormesky-max/epicode/commit/59032bfb792ceebb3b5caa848eebee41f90d78d0))
+
 ## [1.3.0](https://github.com/sunormesky-max/epicode/compare/v1.2.0...v1.3.0) (2026-10-02)
 
 
