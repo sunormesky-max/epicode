@@ -7,7 +7,7 @@ import CommandBar from '@/components/CommandBar';
 import ObservationStatus from '@/components/ObservationStatus';
 import {
   LayoutDashboard, Brain, GitBranch, Wrench, Users,
-  LogOut, Check, Menu, X, Zap, Archive, Activity, MessageSquare, Radio, BookOpen
+  LogOut, Check, Menu, X, Zap, Archive, Activity, MessageSquare, Radio, BookOpen, Palette
 } from 'lucide-react';
 
 const RAIL_W = 64;
@@ -70,6 +70,7 @@ export default function DashboardLayout({ children, viewport = false }: { childr
     { href: '#/dashboard/skills', label: t('nav.skills'), icon: Wrench },
     { href: '#/dashboard/library', label: t('nav.library'), icon: BookOpen },
     ...(isMain ? [{ href: '#/dashboard/accounts', label: t('nav.subAccounts'), icon: Users }] : []),
+    { href: '#/dashboard/themes', label: lang === 'zh' ? '主题' : 'Themes', icon: Palette },
   ];
 
   function handleCopyKey() {
@@ -125,7 +126,7 @@ export default function DashboardLayout({ children, viewport = false }: { childr
         aria-expanded={mobileOpen}
         aria-controls="dashboard-mobile-nav"
         className="fixed top-4 left-4 z-[60] md:hidden p-2 rounded-xl"
-        style={{ background: 'rgba(10,10,15,0.85)', border: '1px solid var(--border-light)', color: 'var(--text-primary)' }}
+        style={{ background: 'var(--chrome)', border: '1px solid var(--border-light)', color: 'var(--text-primary)' }}
       >
         {mobileOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
       </button>
@@ -135,7 +136,7 @@ export default function DashboardLayout({ children, viewport = false }: { childr
         className="hidden md:flex fixed top-0 left-0 bottom-0 z-50 flex-col items-center py-4"
         style={{
           width: RAIL_W,
-          background: 'rgba(10, 10, 15, 0.92)',
+          background: 'var(--chrome)',
           backdropFilter: 'blur(20px)',
           borderRight: '1px solid var(--border-light)',
         }}
@@ -179,7 +180,7 @@ export default function DashboardLayout({ children, viewport = false }: { childr
           aria-modal="true"
           aria-label={lang === 'zh' ? '导航菜单' : 'Navigation menu'}
           className="fixed top-0 left-0 bottom-0 z-50 md:hidden flex flex-col w-[240px] px-3 py-4"
-          style={{ background: 'rgba(10, 10, 15, 0.97)', backdropFilter: 'blur(20px)', borderRight: '1px solid var(--border-light)' }}
+          style={{ background: 'var(--chrome)', backdropFilter: 'blur(20px)', borderRight: '1px solid var(--border-light)' }}
         >
           <div className="flex items-center gap-2.5 px-2 pb-4 mb-2" style={{ borderBottom: '1px solid var(--border-light)' }}>
             <img src="/logo.svg" alt="Epicode" style={{ width: 26, height: 26 }} />

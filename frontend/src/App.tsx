@@ -25,10 +25,11 @@ const Community = lazy(() => import('@/pages/Community'));
 const Benchmarks = lazy(() => import('@/pages/Benchmarks'));
 const SmrpProtocol = lazy(() => import('@/pages/SmrpProtocol'));
 const L0Protocol = lazy(() => import('@/pages/L0Protocol'));
+const ThemeCenter = lazy(() => import('@/pages/ThemeCenter'));
 
 function Loading() {
   return (
-    <div className="min-h-screen relative" style={{ background: '#07070a' }}>
+    <div className="min-h-screen relative" style={{ background: 'var(--bg-void)' }}>
       <div className="relative z-10 flex flex-col items-center justify-center min-h-screen gap-4">
         <div style={{ width: 28, height: 28, border: '2px solid rgba(62,207,174,0.25)', borderTopColor: 'var(--accent-cyan)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)', letterSpacing: '0.2em' }}>ENTERING FIELD</span>
@@ -48,7 +49,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center" style={{ background: '#07070a' }}>
+        <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-void)' }}>
           <div className="text-center max-w-md px-6">
             <h1 className="text-3xl font-bold mb-3" style={{ color: '#f87171' }}>出错了</h1>
             <p className="mb-2" style={{ color: '#9ca3af', fontSize: 14 }}>{this.state.message}</p>
@@ -125,6 +126,8 @@ export default function App() {
             <Route path="/guide" element={<Guide />} />
             <Route path="/community" element={<Community />} />
             <Route path="/benchmarks" element={<Benchmarks />} />
+            <Route path="/themes" element={<ThemeCenter />} />
+            <Route path="/dashboard/themes" element={<ProtectedRoute><ThemeCenter /></ProtectedRoute>} />
             <Route path="/smrp" element={<SmrpProtocol />} />
             <Route path="/l0" element={<L0Protocol />} />
             <Route path="*" element={<NotFound />} />
