@@ -25,7 +25,7 @@
 
 ---
 
-Epicode is an **open-source spatial AI memory system**. It stores AI memories as tetrahedrons in continuous 3D space, automatically extracts relationships into a knowledge graph, and gives AI agents persistent, cross-session memory.
+Epicode is an open-source memory service for AI agents. Retrieval is BM25 plus HNSW. Memories also have a tetrahedral placement used for clustering and visualization, a knowledge graph, validity windows, and an MCP endpoint for cross-session recall. Placement is not the retrieval index.
 
 ## Quick Start
 
@@ -63,7 +63,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/search \
 
 ## Key Features
 
-- **Spatial Memory** — memories stored as tetrahedrons in 3D space for natural clustering.
+- **Spatial placement** — memories can be placed as tetrahedrons for clustering and visualization. This is not the retrieval index.
 - **Semantic Search** — BM25 + HNSW hybrid search for natural-language retrieval.
 - **Knowledge Graph** — automatic relationship extraction and dynamic graph updates.
 - **Temporal Validity** — every memory supports `valid_from` / `valid_until` windows and freshness decay scoring. This is a storage/filter feature, not a claim of parity with Zep/Graphiti on a shared benchmark.
