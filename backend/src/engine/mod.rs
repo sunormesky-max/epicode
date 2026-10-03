@@ -1,5 +1,6 @@
 // Core orchestration
 pub mod bus;
+pub mod horizon;
 pub mod scheduler;
 
 // Memory lifecycle
