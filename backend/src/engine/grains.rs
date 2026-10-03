@@ -273,7 +273,9 @@ impl GrainLedger {
                 .values()
                 .any(|a| a.subject == subject && self.allows(subject, actor, "read", &a.text));
             if !any_read && !self.allows(subject, actor, "read", "*") {
-                return Err("grant denied".into());
+                // 授权拒绝=可见性过滤(空结果), 不是调用方错误 — 测试
+                // explicit_grant_list_does_not_fall_back 的期望语义
+                return Ok(Vec::new());
             }
         }
         let mut hits: Vec<RecallHit> = self
