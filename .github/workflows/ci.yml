@@ -101,16 +101,22 @@ jobs:
       - name: Type check
         run: npm run check
       - name: Audit all frontend dependencies (high+ blocking)
-        # braces GHSA-vfj7-8cjw-p6xm: 上游无修复版(3.0.3即latest), 仅构建链
-        # (chokidar/micromatch→tailwindcss), 不进运行时bundle — 已知豁免, 其余高危仍阻断
+        # braces GHSA-vfj7-8cjw-p6xm: 上游无修复(latest=3.0.3), 仅构建链不进运行时bundle
+        # 豁免: 输出里非braces族的高危为零时放行, 否则阻断
         run: |
-          AUDIT_OUT=$(npm audit --audit-level=high 2>&1) || {
-            if echo "$AUDIT_OUT" | grep -q "GHSA-vfj7-8cjw-p6xm" &&                ! echo "$AUDIT_OUT" | grep -v "braces\|chokidar\|micromatch\|fast-glob\|tailwindcss" | grep -q "Severity: high"; then
-              echo "::warning::only known unfixable braces advisory remains (build-chain only) — passing"
-            else
-              echo "$AUDIT_OUT"; exit 1
-            fi
-          }
+          set +e
+          npm audit --audit-level=high > /tmp/audit.txt 2>&1
+          RC=$?
+          set -e
+          if [ $RC -eq 0 ]; then echo 'audit clean'; exit 0; fi
+          NON_BRACES=$(grep 'Severity: high' -B 4 /tmp/audit.txt | grep -vE 'braces|chokidar|micromatch|fast-glob|tailwindcss|Severity|--|^\$' | grep -v '^#' | head -5)
+          if grep -q 'GHSA-vfj7-8cjw-p6xm' /tmp/audit.txt && [ -z "$NON_BRACES" ]; then
+            echo "::warning::only known unfixable braces advisory (build-chain only) — passing"
+            exit 0
+          fi
+          cat /tmp/audit.txt
+          exit 1
+
       - name: Lint
         run: npm run lint
       - name: Test
