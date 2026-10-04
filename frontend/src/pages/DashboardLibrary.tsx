@@ -4,6 +4,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading, ErrorBanner, NoticeBanner } from '@/components/DashboardUI';
 import { Search, Send, Inbox, Check, X, Clock, FileText } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
+import { promptRequestNote } from '@/lib/library-request';
 
 const inputStyle: React.CSSProperties = {
   width: '100%', background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)',
@@ -79,10 +80,8 @@ export default function DashboardLibrary() {
   }
 
   async function handleRequest(id: number, action: 'accepted' | 'rejected') {
-    const note = action === 'accepted'
-      ? (prompt('处理备注(可选, 回车跳过):') || '')
-      : (prompt('拒绝原因(可选):') || '');
-    if (action === 'rejected' && note === null) return;
+    const note = promptRequestNote(action, (message) => prompt(message));
+    if (note === null) return; // 用户点了取消:不提交
     setHandling(id);
     try {
       const { libHandleRequest } = await import('@/lib/api');
