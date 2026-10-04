@@ -5362,19 +5362,26 @@ fn serialize_mcp_response(response: McpResponse, request_id: Option<serde_json::
 }
 
 fn strip_html(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut in_tag = false;
-    for ch in s.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => {
-                in_tag = false;
+    // 仅当 '<' 后紧跟字母 / '/' / '!' 且存在闭合 '>' 时才视为标签；
+    // 孤立 '<'(如 "a < b")保持原样,避免吞掉后续内容。
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '<'
+            && chars
+                .get(i + 1)
+                .is_some_and(|c| c.is_ascii_alphabetic() || *c == '/' || *c == '!')
+        {
+            if let Some(off) = chars[i + 1..].iter().position(|c| *c == '>') {
+                i += off + 2;
+                continue;
             }
-            _ if !in_tag => result.push(ch),
-            _ => {}
         }
+        out.push(chars[i]);
+        i += 1;
     }
-    result
+    out
 }
 
 fn sanitize_label(s: &str) -> String {
@@ -6169,6 +6176,30 @@ impl McpHandler {
 mod tests {
     use super::*;
     use crate::engine::Engine;
+
+    #[test]
+    fn strip_html_keeps_lone_lt_and_following_text() {
+        assert_eq!(
+            strip_html("if a < b then keep this tail"),
+            "if a < b then keep this tail"
+        );
+        assert_eq!(
+            strip_html("price<5 and more text after"),
+            "price<5 and more text after"
+        );
+        assert_eq!(strip_html("1 < 2"), "1 < 2");
+        assert_eq!(strip_html("<"), "<");
+        assert_eq!(strip_html("a<b"), "a<b");
+        assert_eq!(strip_html("a <3 b"), "a <3 b");
+        assert_eq!(strip_html("x < y > z"), "x < y > z");
+        assert_eq!(strip_html("<b>bold</b> text"), "bold text");
+        assert_eq!(strip_html("a<script>alert(1)</script>b"), "aalert(1)b");
+        assert_eq!(strip_html("<!-- c -->ok"), "ok");
+        assert_eq!(
+            strip_html("中文 <i>斜体</i> 与 a < b 之后"),
+            "中文 斜体 与 a < b 之后"
+        );
+    }
 
     #[test]
     fn mcp_initialize() {
