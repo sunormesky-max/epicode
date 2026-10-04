@@ -419,9 +419,19 @@ pub async fn mcp_endpoint(
 mod tests {
     use super::*;
 
+    /// 测试专用:每次调用使用全新的唯一临时数据目录,不再共享 `./data`。
+    fn isolated_engine() -> epicode::engine::Engine {
+        let dir = std::env::temp_dir().join(format!(
+            "epicode-mcp-endpoint-test-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        epicode::engine::Engine::with_data_dir(dir)
+    }
+
     #[test]
     fn shared_mcp_gate_requires_executor_for_drive_ack_and_preserves_id() {
-        let engine = epicode::engine::Engine::new();
+        let engine = isolated_engine();
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": "drive-ack-request",
@@ -440,7 +450,7 @@ mod tests {
 
     #[test]
     fn high_urgency_e2e_gate_checks_signals_beyond_the_inbox_page() {
-        let engine = epicode::engine::Engine::new();
+        let engine = isolated_engine();
         let queue = engine.scheduler().drive_queue();
         let now = chrono::Utc::now().timestamp();
         let high_id = queue.enqueue(epicode::engine::drive::DriveSignal {
@@ -515,7 +525,7 @@ mod tests {
 
     #[test]
     fn shared_mcp_gate_keeps_memory_ask_available_without_executor_binding() {
-        let engine = epicode::engine::Engine::new();
+        let engine = isolated_engine();
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
