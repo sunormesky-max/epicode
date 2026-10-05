@@ -573,7 +573,7 @@ mod tests {
     fn constitutional_floor_constants_documented() {
         assert!((IMPORTANCE_FLOOR - 0.3).abs() < 1e-9);
         assert!((FORGET_IMPORTANCE - 0.01).abs() < 1e-9);
-        assert!(FORGET_IMPORTANCE < IMPORTANCE_FLOOR);
+        const _: () = assert!(FORGET_IMPORTANCE < IMPORTANCE_FLOOR);
         assert!((clamp_live_importance(0.05) - IMPORTANCE_FLOOR).abs() < 1e-9);
         assert!((clamp_live_importance(2.5) - 2.5).abs() < 1e-9);
         assert!((clamp_live_importance(9.0) - 3.0).abs() < 1e-9);
