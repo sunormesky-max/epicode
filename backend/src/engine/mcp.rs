@@ -1026,14 +1026,25 @@ impl McpHandler {
                 },
                 {
                     "name": "skills_sync",
-                    "description": "List all skills in your private library. Default format 'manifest' returns a lightweight index (name, slug, version, description, size) — call it at session start to see what exists, then fetch full content on demand via skill_get(name). Full-export formats 'opencode'/'raw'/'json' return everything and can exceed context budget on large libraries.",
+                    "description": "List skills in your private library. Default format 'manifest' is a paginated lightweight index (limit default 100; pass limit=0 for all). Fetch full content via skill_get(name). Full-export formats can exceed context — paginate or avoid them in agent loops.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "format": {
                                 "type": "string",
-                                "description": "Output format. Default 'manifest' = lightweight index without content. 'opencode' = SKILL.md files with frontmatter, 'raw' = plain markdown, 'json' = structured data.",
-                                "enum": ["manifest", "opencode", "raw", "json"]
+                                "description": "Output format. Default 'manifest' = lightweight index without content. 'opencode'/'raw'/'json' = full export (prefer pagination).",
+                                "enum": ["manifest", "opencode", "raw", "json"],
+                                "default": "manifest"
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "default": 100,
+                                "description": "Max skills to return. Default 100 for manifest (and for other formats). Pass 0 for unlimited (escape hatch)."
+                            },
+                            "offset": {
+                                "type": "integer",
+                                "default": 0,
+                                "description": "Pagination offset into the skill list (default 0)."
                             }
                         }
                     }
@@ -5242,12 +5253,50 @@ impl McpHandler {
             skills_data
         };
 
+        let total = skills_data_final.len();
+        // Agent UX: paginate by default so manifest does not dump hundreds of skills
+        // into the agent context. limit=0 means unlimited (explicit escape hatch).
+        let offset = args["offset"].as_u64().unwrap_or(0) as usize;
+        let limit_arg = args.get("limit").and_then(|v| v.as_u64());
+        let limit = match limit_arg {
+            Some(0) => usize::MAX, // unlimited
+            Some(n) => (n as usize).min(1000),
+            None => 100, // default page size for all formats
+        };
+        let page: Vec<serde_json::Value> = skills_data_final
+            .into_iter()
+            .skip(offset)
+            .take(if limit == usize::MAX {
+                total.saturating_sub(offset)
+            } else {
+                limit
+            })
+            .collect();
+        let returned = page.len();
+        let truncated = offset + returned < total;
+        let next_offset = if truncated {
+            Some(offset + returned)
+        } else {
+            None
+        };
+
         let mut payload = serde_json::json!({
             "status": "success",
-            "total": skills_data_final.len(),
-            "skills": skills_data_final,
+            "total": total,
+            "returned": returned,
+            "offset": offset,
+            "truncated": truncated,
+            "skills": page,
         });
-        if format == "manifest" {
+        if let Some(n) = next_offset {
+            payload["next_offset"] = serde_json::json!(n);
+            if format == "manifest" {
+                payload["next_step"] = serde_json::json!(format!(
+                    "Manifest truncated ({}/{}). Call skills_sync(offset:{}, limit:...) for more, or skill_get(name) for full content.",
+                    returned, total, n
+                ));
+            }
+        } else if format == "manifest" {
             payload["next_step"] = serde_json::json!(
                 "Call skill_get(name) to fetch any skill's full content on demand."
             );
@@ -6633,6 +6682,49 @@ mod tests {
             search_output
         );
         assert!(search_output.contains("content"));
+    }
+
+    #[tokio::test]
+    async fn mcp_skills_sync_manifest_paginates_by_default() {
+        let mut eng = Engine::new();
+        eng.start();
+        let h = McpHandler::new(Arc::new(eng));
+        for step in 1..=5 {
+            let val = if step == 1 { "SkillsAgent" } else { "test" };
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            );
+            h.process_json(&raw);
+        }
+        h.process_json(r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#);
+
+        let out = h.process_json(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"skills_sync","arguments":{"format":"manifest","limit":1}}}"#,
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let data = &v["result"]["structuredContent"]["data"];
+        // limit=1 should return at most 1 skill (system manual may or may not be present)
+        let returned = data["returned"].as_u64().unwrap_or(999);
+        assert!(returned <= 1, "limit=1 must return <=1: {data}");
+        assert!(data.get("total").is_some());
+        assert!(data.get("truncated").is_some());
+        assert_eq!(data["offset"], 0);
+
+        // Schema advertises pagination defaults
+        let list = h.handle(McpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(serde_json::json!(2)),
+            method: "tools/list".into(),
+            params: None,
+        });
+        let tools = list.result.unwrap()["tools"].as_array().unwrap().clone();
+        let sync = tools
+            .iter()
+            .find(|t| t["name"] == "skills_sync")
+            .expect("skills_sync");
+        assert_eq!(sync["inputSchema"]["properties"]["limit"]["default"], 100);
+        assert_eq!(sync["inputSchema"]["properties"]["offset"]["default"], 0);
     }
 
     #[tokio::test]
