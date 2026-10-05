@@ -30,6 +30,7 @@ struct FloorStats {
     live_illegally_near_tombstone: usize,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_mem(
     space: &Space,
     core: Point3,
