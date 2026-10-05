@@ -685,7 +685,7 @@ impl McpHandler {
                     },
                     {
                         "name": "memory_search",
-                    "description": "Search personal memories; returns SMRP tiers with provenance. Prefer compact defaults (no flat results duplicate). Use memory_recall for graph associations or memory_ask for a synthesized answer.",
+                    "description": "Search personal memories and inspect ranked evidence with tier and retrieval provenance. Use memory_recall for associative context or memory_ask for a synthesized answer. Supports pagination and exact, semantic, graph, auto, and fusion modes.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -696,24 +696,20 @@ impl McpHandler {
                             "min_importance": { "type": "number", "description": "Filter: minimum importance score" },
                             "project": { "type": "string", "description": "Filter: project name" },
                             "since_days": { "type": "integer", "description": "Filter: only memories from the last N days" },
-                            "mode": { "type": "string", "enum": ["hybrid", "exact", "semantic", "graph", "auto", "fusion"], "default": "hybrid", "description": "Search mode: hybrid (vector+BM25), exact (BM25), semantic, graph (PPR), auto, fusion (RRF)." },
-                            "strict_filter": { "type": "boolean", "default": false, "description": "Strict filter mode — no semantic backfill. Combine with mode=exact for database-like lookups." },
-                            "include_flat_results": { "type": "boolean", "default": false, "description": "If true, also include a flat `results` array (duplicates tier contents). Default false to save tokens." },
-                            "max_content_chars": { "type": "integer", "default": 500, "description": "Truncate each memory content to this many chars (0 = no truncate). Truncated items set content_truncated=true." }
+                            "mode": { "type": "string", "enum": ["hybrid", "exact", "semantic", "graph", "auto", "fusion"], "default": "hybrid", "description": "Search mode: hybrid (vector+BM25 blend), exact (pure BM25 for identifiers and known phrases), semantic (vector similarity), graph (hybrid-search seeds expanded/reranked with knowledge-graph PPR), auto (routes temporal/aggregation queries to graph and other queries to semantic), fusion (reciprocal-rank fusion of semantic and graph results)." },
+                            "strict_filter": { "type": "boolean", "default": false, "description": "Phase 1: strict filter mode — no semantic backfill, only return exact filter matches. Combine with mode=exact for database-like lookups." }
                         },
                         "required": ["query"]
                     }
                 },
                 {
                     "name": "memory_recall",
-                    "description": "Expand through knowledge-graph associations into SMRP tiers. Default omits duplicate `sections` and truncates content — pass include_sections=true for the raw label map. Prefer depth=1 for large spaces.",
+                    "description": "Search and expand through knowledge-graph associations. Returns SMRP tiers, source memories, provenance, and emotion context. Use memory_search for ranked direct matches or memory_ask for a synthesized answer.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "query": { "type": "string", "description": "The recall query" },
-                            "depth": { "type": "integer", "default": 1, "minimum": 0, "maximum": 3, "description": "Association depth (default 1, max 3). Use 1 unless you need deeper expansion." },
-                            "include_sections": { "type": "boolean", "default": false, "description": "If true, also include raw label-keyed `sections` (duplicates tier contents). Default false to save tokens." },
-                            "max_content_chars": { "type": "integer", "default": 500, "description": "Truncate each fragment content to this many chars (0 = no truncate). Truncated items set content_truncated=true." }
+                            "depth": { "type": "integer", "description": "Association depth (default 2, max 3)" }
                         },
                         "required": ["query"]
                     }
@@ -1030,14 +1026,25 @@ impl McpHandler {
                 },
                 {
                     "name": "skills_sync",
-                    "description": "List all skills in your private library. Default format 'manifest' returns a lightweight index (name, slug, version, description, size) — call it at session start to see what exists, then fetch full content on demand via skill_get(name). Full-export formats 'opencode'/'raw'/'json' return everything and can exceed context budget on large libraries.",
+                    "description": "List skills in your private library. Default format 'manifest' is a paginated lightweight index (limit default 100; pass limit=0 for all). Fetch full content via skill_get(name). Full-export formats can exceed context — paginate or avoid them in agent loops.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "format": {
                                 "type": "string",
-                                "description": "Output format. Default 'manifest' = lightweight index without content. 'opencode' = SKILL.md files with frontmatter, 'raw' = plain markdown, 'json' = structured data.",
-                                "enum": ["manifest", "opencode", "raw", "json"]
+                                "description": "Output format. Default 'manifest' = lightweight index without content. 'opencode'/'raw'/'json' = full export (prefer pagination).",
+                                "enum": ["manifest", "opencode", "raw", "json"],
+                                "default": "manifest"
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "default": 100,
+                                "description": "Max skills to return. Default 100 for manifest (and for other formats). Pass 0 for unlimited (escape hatch)."
+                            },
+                            "offset": {
+                                "type": "integer",
+                                "default": 0,
+                                "description": "Pagination offset into the skill list (default 0)."
                             }
                         }
                     }
@@ -1200,6 +1207,9 @@ impl McpHandler {
         if let Some(tools) = result["tools"].as_array_mut() {
             for tool in tools {
                 tool["outputSchema"] = output_schema.clone();
+                if let Some(name) = tool.get("name").and_then(|v| v.as_str()) {
+                    tool["annotations"] = Self::tool_annotations(name);
+                }
             }
         }
         McpResponse {
@@ -1208,6 +1218,57 @@ impl McpHandler {
             result: Some(result),
             error: None,
         }
+    }
+
+    /// MCP ToolAnnotations (spec): hints so clients can auto-approve safe reads
+    /// and warn on destructive calls. Pure metadata — no runtime behavior change.
+    fn tool_annotations(name: &str) -> serde_json::Value {
+        let (read_only, destructive, idempotent, open_world) = match name {
+            // Pure reads
+            "memory_search"
+            | "memory_recall"
+            | "memory_ask"
+            | "memory_get"
+            | "memory_list"
+            | "memory_export"
+            | "library_search"
+            | "space_stats"
+            | "concepts"
+            | "knowledge_relations"
+            | "pattern_recall"
+            | "enforced_rules"
+            | "project_list"
+            | "embedding_diagnostic"
+            | "kg_quality"
+            | "doc_list"
+            | "session_list"
+            | "skills_sync"
+            | "skill_get"
+            | "skill_execute"
+            | "task_status"
+            | "drive_inbox"
+            | "ctx_load" => (true, false, true, false),
+            // Destructive / hard-to-reverse
+            "memory_delete" | "memory_forget" | "dream_cycle" | "embedding_migrate"
+            | "identity_finalize" => (false, true, false, false),
+            // Re-runnable writes (idempotent-ish)
+            "memory_update" | "identity_confirm" | "drive_ack" | "skill_feedback"
+            | "feedback_submit" | "task_check" => (false, false, true, false),
+            // Other writes / side-effects
+            "memory_create" | "memory_restore" | "memory_improve" | "ctx_save"
+            | "pattern_learn" | "decision_record" | "bug_memory" | "session_summary"
+            | "context_observe" | "identity_step" | "task_start" | "task_complete"
+            | "task_alert" | "skill_auto_extract" | "doc_import" | "epicode_handshake" => {
+                (false, false, false, false)
+            }
+            _ => (false, false, false, false),
+        };
+        serde_json::json!({
+            "readOnlyHint": read_only,
+            "destructiveHint": destructive,
+            "idempotentHint": idempotent,
+            "openWorldHint": open_world,
+        })
     }
 
     fn smrp_output_schema() -> serde_json::Value {
@@ -3385,8 +3446,6 @@ impl McpHandler {
                         .collect::<Vec<_>>()
                 };
                 let score_base = super::smrp::search_score_base(search_mode);
-                let include_flat = args["include_flat_results"].as_bool().unwrap_or(false);
-                let max_content_chars = args["max_content_chars"].as_u64().unwrap_or(500) as usize;
                 let mut data = serde_json::json!({
                     "query": query,
                     "tiers": {
@@ -3395,6 +3454,7 @@ impl McpHandler {
                         "experiential": experiential,
                         "hub": [],
                     },
+                    "results": flat,
                     "count": picked.len(),
                     "total_found": total_found,
                     "offset": offset,
@@ -3408,15 +3468,6 @@ impl McpHandler {
                         ],
                     },
                 });
-                if include_flat {
-                    data["results"] = serde_json::json!(flat);
-                }
-                if max_content_chars > 0 {
-                    let n = super::smrp::truncate_content_fields(&mut data, max_content_chars);
-                    if n > 0 {
-                        data["contents_truncated"] = serde_json::json!(n);
-                    }
-                }
                 if requested_limit > 200 {
                     data["warning"] = serde_json::json!(
                         "limit capped at 200; request a higher offset to paginate"
@@ -3433,10 +3484,7 @@ impl McpHandler {
         if query.is_empty() {
             return self.smrp_err("memory_recall", 400, "query is required");
         }
-        // Agent UX: default depth 1 (was 2) — deep expansion balloons token use.
-        let depth = args["depth"].as_u64().unwrap_or(1).min(3) as usize;
-        let include_sections = args["include_sections"].as_bool().unwrap_or(false);
-        let max_content_chars = args["max_content_chars"].as_u64().unwrap_or(500) as usize;
+        let depth = args["depth"].as_u64().unwrap_or(2).min(3) as usize;
         // P0 相位机: 深度回忆同样计入探索相证据
         if let Some(tid) = self
             .engine
@@ -3447,20 +3495,7 @@ impl McpHandler {
         }
         match self.engine.scheduler.api_recall(query, depth) {
             Ok(result) => {
-                let mut data = super::smrp::recall_data(&self.engine, &result, query, depth);
-                if !include_sections {
-                    if let Some(obj) = data.as_object_mut() {
-                        obj.remove("sections");
-                    }
-                }
-                if max_content_chars > 0 {
-                    let n = super::smrp::truncate_content_fields(&mut data, max_content_chars);
-                    if n > 0 {
-                        if let Some(obj) = data.as_object_mut() {
-                            obj.insert("contents_truncated".into(), serde_json::json!(n));
-                        }
-                    }
-                }
+                let data = super::smrp::recall_data(&self.engine, &result, query, depth);
                 self.smrp_ok("memory_recall", data)
             }
             Err(e) => self.smrp_err("memory_recall", 500, &e),
@@ -4826,7 +4861,10 @@ impl McpHandler {
     }
 
     fn tool_feedback_submit(&self, args: &serde_json::Value) -> serde_json::Value {
-        let ids: Vec<u64> = args["memory_ids"]
+        const MAX_FEEDBACK_IDS: usize = 32;
+        const MAX_CONCEPT_LINKS: usize = 32;
+
+        let mut ids: Vec<u64> = args["memory_ids"]
             .as_array()
             .map(|a| a.iter().filter_map(|v| v.as_u64()).collect())
             .unwrap_or_default();
@@ -4837,6 +4875,11 @@ impl McpHandler {
                 "memory_ids is required and must be non-empty",
             );
         }
+        ids.truncate(MAX_FEEDBACK_IDS);
+        // Stable unique order preserves first-seen ranking from search/recall.
+        let mut seen = std::collections::HashSet::new();
+        ids.retain(|id| seen.insert(*id));
+
         let relevance = args["relevance"].as_str().unwrap_or("irrelevant");
         let outcome = args["outcome"].as_str().unwrap_or("no_action_needed");
         let query = args["query"].as_str().unwrap_or("");
@@ -4878,11 +4921,12 @@ impl McpHandler {
 
         let total_delta = mass_delta + outcome_bonus;
         let mut affected = 0usize;
+        let gateway = self.engine.scheduler.gateway_handle();
         for &id in &ids {
-            let had_tetra = self.engine.space.get_tetrahedron(id).is_some();
-            if !had_tetra {
+            let Some(before) = self.engine.space.get_tetrahedron(id) else {
                 continue;
-            }
+            };
+            let old_labels = before.data.labels.clone();
 
             let _ = self.engine.space.update_mass(id, total_delta);
             if let Some(t) = self.engine.space.get_tetrahedron(id) {
@@ -4909,6 +4953,7 @@ impl McpHandler {
                         .labels
                         .retain(|l| l != "outdated" && l != "superseded");
                 }
+                let labels_changed = payload.labels != old_labels;
                 let _ = self.engine.space.update_payload(id, payload.clone());
                 let _ = self
                     .engine
@@ -4916,13 +4961,15 @@ impl McpHandler {
                     .storage_handle()
                     .update_importance(id, final_delta);
                 // 管道完整性：is_correction 和 is_restored 都改变标签，都需要持久化
-                if is_correction || is_restored {
+                if labels_changed {
                     let _ = self
                         .engine
                         .scheduler
                         .storage_handle()
                         .update_labels(id, &payload.labels);
+                    gateway.update_label_index(id, &old_labels, &payload.labels);
                 }
+                gateway.mark_dirty(id);
                 tracing::info!(
                     "[Feedback] id={} importance {:.2} -> {:.2}{}",
                     id,
@@ -4937,6 +4984,69 @@ impl McpHandler {
             }
 
             affected += 1;
+        }
+
+        // Retrieval-quality → graph: co-retrieved highly_relevant memories reinforce
+        // existing edges or form a light SimilarTo bridge so next PPR/multi_hop prefers them.
+        let mut edges_reinforced = 0usize;
+        let mut edges_created = 0usize;
+        if matches!(relevance, "highly_relevant" | "partially_relevant") && ids.len() >= 2 {
+            let kg = self.engine.scheduler.kg_handle();
+            let strength = if relevance == "highly_relevant" {
+                0.65
+            } else {
+                0.45
+            };
+            let mut pairs: Vec<(u64, u64)> = Vec::new();
+            for w in ids.windows(2) {
+                pairs.push((w[0], w[1]));
+            }
+            // Dense clique only for small result sets to keep O(n^2) bounded.
+            if ids.len() <= 5 {
+                for i in 0..ids.len() {
+                    for j in (i + 1)..ids.len() {
+                        let a = ids[i];
+                        let b = ids[j];
+                        if !pairs
+                            .iter()
+                            .any(|(x, y)| (*x == a && *y == b) || (*x == b && *y == a))
+                        {
+                            pairs.push((a, b));
+                        }
+                    }
+                }
+            }
+            let before_hits: std::collections::HashMap<(u64, u64), u16> = kg
+                .all_relations()
+                .into_iter()
+                .map(|r| {
+                    let key = if r.source < r.target {
+                        (r.source, r.target)
+                    } else {
+                        (r.target, r.source)
+                    };
+                    (key, r.hits)
+                })
+                .collect();
+            for &(a, b) in &pairs {
+                if a == b {
+                    continue;
+                }
+                if self.engine.space.get_tetrahedron(a).is_none()
+                    || self.engine.space.get_tetrahedron(b).is_none()
+                {
+                    continue;
+                }
+                let key = if a < b { (a, b) } else { (b, a) };
+                let existed = before_hits.contains_key(&key);
+                if existed {
+                    kg.reinforce_edges(&[(a, b)]);
+                    edges_reinforced += 1;
+                } else {
+                    kg.add_relation(a, b, super::knowledge::RelationType::SimilarTo, strength);
+                    edges_created += 1;
+                }
+            }
         }
 
         if !notes.is_empty() || !query.is_empty() {
@@ -4955,17 +5065,16 @@ impl McpHandler {
         }
 
         tracing::info!(
-            "[Feedback] relevance={} outcome={} ids={:?} mass_delta={:.3} importance_delta={:.3} affected={}",
-            relevance, outcome, ids, total_delta, importance_delta, affected
+            "[Feedback] relevance={} outcome={} ids={:?} mass_delta={:.3} importance_delta={:.3} affected={} edges_reinforced={} edges_created={}",
+            relevance, outcome, ids, total_delta, importance_delta, affected, edges_reinforced, edges_created
         );
 
-        // 智能突破3: concept_link — 用户标注"A和B相关"时直接建KG边
-        // 用户反馈真正塑造知识结构 → 下次 multi_hop 检索就能跨概念关联
+        // concept_link — schema uses from_id/to_id; accept legacy a/b for compatibility.
         let mut links_formed = 0usize;
         if let Some(links) = args["concept_links"].as_array() {
-            for link in links {
-                let id_a = link["a"].as_u64();
-                let id_b = link["b"].as_u64();
+            for link in links.iter().take(MAX_CONCEPT_LINKS) {
+                let id_a = link["from_id"].as_u64().or_else(|| link["a"].as_u64());
+                let id_b = link["to_id"].as_u64().or_else(|| link["b"].as_u64());
                 let relation = link["relation"].as_str().unwrap_or("similar");
                 if let (Some(a), Some(b)) = (id_a, id_b) {
                     if a != b
@@ -4999,6 +5108,8 @@ impl McpHandler {
                 "importance_adjustment": importance_delta,
                 "feedback_learned": !notes.is_empty() || !query.is_empty(),
                 "concept_links_formed": links_formed,
+                "edges_reinforced": edges_reinforced,
+                "edges_created": edges_created,
             }),
         )
     }
@@ -5272,12 +5383,50 @@ impl McpHandler {
             skills_data
         };
 
+        let total = skills_data_final.len();
+        // Agent UX: paginate by default so manifest does not dump hundreds of skills
+        // into the agent context. limit=0 means unlimited (explicit escape hatch).
+        let offset = args["offset"].as_u64().unwrap_or(0) as usize;
+        let limit_arg = args.get("limit").and_then(|v| v.as_u64());
+        let limit = match limit_arg {
+            Some(0) => usize::MAX, // unlimited
+            Some(n) => (n as usize).min(1000),
+            None => 100, // default page size for all formats
+        };
+        let page: Vec<serde_json::Value> = skills_data_final
+            .into_iter()
+            .skip(offset)
+            .take(if limit == usize::MAX {
+                total.saturating_sub(offset)
+            } else {
+                limit
+            })
+            .collect();
+        let returned = page.len();
+        let truncated = offset + returned < total;
+        let next_offset = if truncated {
+            Some(offset + returned)
+        } else {
+            None
+        };
+
         let mut payload = serde_json::json!({
             "status": "success",
-            "total": skills_data_final.len(),
-            "skills": skills_data_final,
+            "total": total,
+            "returned": returned,
+            "offset": offset,
+            "truncated": truncated,
+            "skills": page,
         });
-        if format == "manifest" {
+        if let Some(n) = next_offset {
+            payload["next_offset"] = serde_json::json!(n);
+            if format == "manifest" {
+                payload["next_step"] = serde_json::json!(format!(
+                    "Manifest truncated ({}/{}). Call skills_sync(offset:{}, limit:...) for more, or skill_get(name) for full content.",
+                    returned, total, n
+                ));
+            }
+        } else if format == "manifest" {
             payload["next_step"] = serde_json::json!(
                 "Call skill_get(name) to fetch any skill's full content on demand."
             );
@@ -5392,19 +5541,26 @@ fn serialize_mcp_response(response: McpResponse, request_id: Option<serde_json::
 }
 
 fn strip_html(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut in_tag = false;
-    for ch in s.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => {
-                in_tag = false;
+    // 仅当 '<' 后紧跟字母 / '/' / '!' 且存在闭合 '>' 时才视为标签；
+    // 孤立 '<'(如 "a < b")保持原样,避免吞掉后续内容。
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '<'
+            && chars
+                .get(i + 1)
+                .is_some_and(|c| c.is_ascii_alphabetic() || *c == '/' || *c == '!')
+        {
+            if let Some(off) = chars[i + 1..].iter().position(|c| *c == '>') {
+                i += off + 2;
+                continue;
             }
-            _ if !in_tag => result.push(ch),
-            _ => {}
         }
+        out.push(chars[i]);
+        i += 1;
     }
-    result
+    out
 }
 
 fn sanitize_label(s: &str) -> String {
@@ -6200,9 +6356,59 @@ mod tests {
     use super::*;
     use crate::engine::Engine;
 
+    /// 测试专用:每次调用使用全新的唯一临时数据目录,
+    /// 避免多个测试(及多次运行)共享并持久化 `./data`(identity.json / tetramem.db)
+    /// 而互相影响。
+    fn isolated_engine() -> Engine {
+        let dir = std::env::temp_dir().join(format!(
+            "epicode-mcp-test-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        Engine::with_data_dir(dir)
+    }
+
+    /// 测试专用:通过 MCP 的 identity_step / identity_finalize 在当前(隔离的)
+    /// 引擎中确认身份,使测试不再依赖其他测试遗留在 `./data` 里的 identity.json。
+    fn confirm_test_identity(h: &McpHandler) {
+        for step in 1..=5 {
+            let val = if step == 1 { "TestAgent" } else { "test" };
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            );
+            h.process_json(&raw);
+        }
+        h.process_json(r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#);
+    }
+
+    #[test]
+    fn strip_html_keeps_lone_lt_and_following_text() {
+        assert_eq!(
+            strip_html("if a < b then keep this tail"),
+            "if a < b then keep this tail"
+        );
+        assert_eq!(
+            strip_html("price<5 and more text after"),
+            "price<5 and more text after"
+        );
+        assert_eq!(strip_html("1 < 2"), "1 < 2");
+        assert_eq!(strip_html("<"), "<");
+        assert_eq!(strip_html("a<b"), "a<b");
+        assert_eq!(strip_html("a <3 b"), "a <3 b");
+        assert_eq!(strip_html("x < y > z"), "x < y > z");
+        assert_eq!(strip_html("<b>bold</b> text"), "bold text");
+        assert_eq!(strip_html("a<script>alert(1)</script>b"), "aalert(1)b");
+        assert_eq!(strip_html("<!-- c -->ok"), "ok");
+        assert_eq!(
+            strip_html("中文 <i>斜体</i> 与 a < b 之后"),
+            "中文 斜体 与 a < b 之后"
+        );
+    }
+
     #[test]
     fn mcp_initialize() {
-        let eng = Engine::new();
+        let eng = isolated_engine();
         let h = McpHandler::new(Arc::new(eng));
         let resp = h.handle(McpRequest {
             jsonrpc: "2.0".into(),
@@ -6217,7 +6423,7 @@ mod tests {
 
     #[test]
     fn mcp_tools_list() {
-        let eng = Engine::new();
+        let eng = isolated_engine();
         let h = McpHandler::new(Arc::new(eng));
         let resp = h.handle(McpRequest {
             jsonrpc: "2.0".into(),
@@ -6264,22 +6470,36 @@ mod tests {
             drive_inbox["inputSchema"]["properties"]["limit"]["default"],
             50
         );
-        assert_eq!(
-            memory_search["inputSchema"]["properties"]["include_flat_results"]["default"],
-            false
-        );
-        let memory_recall = tools
+        // Agent UX: every tool must advertise MCP annotations for client auto-approve.
+        for tool in tools {
+            let name = tool["name"].as_str().unwrap_or("?");
+            let ann = tool.get("annotations").unwrap_or(&serde_json::Value::Null);
+            assert!(
+                ann.get("readOnlyHint").and_then(|v| v.as_bool()).is_some(),
+                "tool {name} missing readOnlyHint"
+            );
+            assert!(
+                ann.get("destructiveHint")
+                    .and_then(|v| v.as_bool())
+                    .is_some(),
+                "tool {name} missing destructiveHint"
+            );
+            assert!(
+                ann.get("idempotentHint")
+                    .and_then(|v| v.as_bool())
+                    .is_some(),
+                "tool {name} missing idempotentHint"
+            );
+        }
+        let memory_search_ann = memory_search["annotations"].clone();
+        assert_eq!(memory_search_ann["readOnlyHint"], true);
+        assert_eq!(memory_search_ann["destructiveHint"], false);
+        let memory_delete = tools
             .iter()
-            .find(|tool| tool["name"] == "memory_recall")
-            .expect("memory_recall tool must be listed");
-        assert_eq!(
-            memory_recall["inputSchema"]["properties"]["include_sections"]["default"],
-            false
-        );
-        assert_eq!(
-            memory_recall["inputSchema"]["properties"]["depth"]["default"],
-            1
-        );
+            .find(|tool| tool["name"] == "memory_delete")
+            .expect("memory_delete tool must be listed");
+        assert_eq!(memory_delete["annotations"]["destructiveHint"], true);
+        assert_eq!(memory_delete["annotations"]["readOnlyHint"], false);
 
         assert!(drive_inbox["description"]
             .as_str()
@@ -6295,7 +6515,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_drive_inbox_includes_the_shared_retryable_signal_contract() {
-        let mut engine = Engine::new();
+        let mut engine = isolated_engine();
         engine.start();
         engine
             .scheduler()
@@ -6367,7 +6587,7 @@ mod tests {
             .to_public_key()
             .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
             .unwrap();
-        let mut engine = Engine::new();
+        let mut engine = isolated_engine();
         engine.start();
         engine.scheduler().set_e2e_pubkey(Some(&public_pem));
         engine
@@ -6425,7 +6645,7 @@ mod tests {
 
     #[test]
     fn mcp_unknown_method() {
-        let eng = Engine::new();
+        let eng = isolated_engine();
         let h = McpHandler::new(Arc::new(eng));
         let resp = h.handle(McpRequest {
             jsonrpc: "2.0".into(),
@@ -6438,7 +6658,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_process_json_roundtrip() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":null}"#;
@@ -6449,7 +6669,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_memory_ask_returns_structured_smrp_and_marks_tool_errors() {
-        let mut engine = Engine::new();
+        let mut engine = isolated_engine();
         engine.start();
         let handler = McpHandler::new(Arc::new(engine));
 
@@ -6496,7 +6716,7 @@ mod tests {
 
     #[test]
     fn oversized_mcp_requests_and_responses_return_jsonrpc_errors() {
-        let handler = McpHandler::new(Arc::new(Engine::new()));
+        let handler = McpHandler::new(Arc::new(isolated_engine()));
         let oversized_request = format!(
             r#"{{"jsonrpc":"2.0","id":"too-large","method":"ping","padding":"{}"}}"#,
             "x".repeat(MAX_MCP_REQUEST_BYTES)
@@ -6534,7 +6754,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_memory_create() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
         let init_raw = r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_step","arguments":{"step":1,"value":"TestAgent"}}}"#;
@@ -6559,9 +6779,10 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_space_stats() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"space_stats","arguments":{}}}"#;
         let output = h.process_json(raw);
         assert!(
@@ -6574,9 +6795,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_ctx_save_and_load() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
 
         let save_raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ctx_save","arguments":{"summary":"Use parking_lot for all mutexes","category":"pattern","project":"Epicode"}}}"#;
         let save_output = h.process_json(save_raw);
@@ -6594,9 +6816,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_decision_record() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"decision_record","arguments":{"title":"Use SQLite","chosen":"SQLite with WAL","alternatives":"PostgreSQL, RocksDB","rationale":"Embedded, zero-config, WAL mode is fast enough","project":"Epicode"}}}"#;
         let output = h.process_json(raw);
         assert!(
@@ -6609,9 +6832,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_bug_memory() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"bug_memory","arguments":{"symptoms":"tests hang on CI","root_cause":"ureq blocking async runtime","fix":"wrap in spawn_blocking","module":"gateway.rs","project":"Epicode"}}}"#;
         let output = h.process_json(raw);
         assert!(
@@ -6623,9 +6847,10 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_session_summary() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"session_summary","arguments":{"accomplished":"Fixed 6 critical rollback issues","next_steps":"Deploy to cloud, run benchmarks","blockers":"none","project":"Epicode"}}}"#;
         let output = h.process_json(raw);
         assert!(
@@ -6637,9 +6862,10 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_pattern_learn_and_recall() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
 
         let learn_raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"pattern_learn","arguments":{"pattern":"All DB writes use transactions","language":"rust","project":"Epicode","example":"conn.unchecked_transaction()?"}}}"#;
         let learn_output = h.process_json(learn_raw);
@@ -6656,7 +6882,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_memory_search_returns_content() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
         for step in 1..=5 {
@@ -6683,12 +6909,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_memory_search_omits_flat_results_by_default() {
+    async fn mcp_skills_sync_manifest_paginates_by_default() {
         let mut eng = Engine::new();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
         for step in 1..=5 {
-            let val = if step == 1 { "CompactAgent" } else { "test" };
+            let val = if step == 1 { "SkillsAgent" } else { "test" };
             let raw = format!(
                 r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
                 step, val
@@ -6696,74 +6922,38 @@ mod tests {
             h.process_json(&raw);
         }
         h.process_json(r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#);
-        h.process_json(r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"Compact search unique phrase about tetrahedral clustering","labels":["test","compact"]}}}"#);
 
-        let default_out = h.process_json(
-            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_search","arguments":{"query":"tetrahedral clustering","limit":5}}}"#,
+        let out = h.process_json(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"skills_sync","arguments":{"format":"manifest","limit":1}}}"#,
         );
-        let default_v: serde_json::Value = serde_json::from_str(&default_out).unwrap();
-        let sc = &default_v["result"]["structuredContent"]["data"];
-        assert!(
-            sc.get("results").is_none(),
-            "default search must omit flat results: {sc}"
-        );
-        assert!(sc.get("tiers").is_some(), "tiers must remain");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let data = &v["result"]["structuredContent"]["data"];
+        // limit=1 should return at most 1 skill (system manual may or may not be present)
+        let returned = data["returned"].as_u64().unwrap_or(999);
+        assert!(returned <= 1, "limit=1 must return <=1: {data}");
+        assert!(data.get("total").is_some());
+        assert!(data.get("truncated").is_some());
+        assert_eq!(data["offset"], 0);
 
-        let flat_out = h.process_json(
-            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory_search","arguments":{"query":"tetrahedral clustering","limit":5,"include_flat_results":true}}}"#,
-        );
-        let flat_v: serde_json::Value = serde_json::from_str(&flat_out).unwrap();
-        assert!(
-            flat_v["result"]["structuredContent"]["data"]
-                .get("results")
-                .and_then(|r| r.as_array())
-                .is_some(),
-            "include_flat_results=true must restore results"
-        );
-    }
-
-    #[tokio::test]
-    async fn mcp_memory_recall_omits_sections_by_default() {
-        let mut eng = Engine::new();
-        eng.start();
-        let h = McpHandler::new(Arc::new(eng));
-        for step in 1..=5 {
-            let val = if step == 1 { "RecallAgent" } else { "test" };
-            let raw = format!(
-                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
-                step, val
-            );
-            h.process_json(&raw);
-        }
-        h.process_json(r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#);
-        h.process_json(r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"Recall compact unique phrase about knowledge graph hubs","labels":["test","recall"]}}}"#);
-
-        let default_out = h.process_json(
-            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"knowledge graph hubs","depth":1}}}"#,
-        );
-        let default_v: serde_json::Value = serde_json::from_str(&default_out).unwrap();
-        let sc = &default_v["result"]["structuredContent"]["data"];
-        assert!(
-            sc.get("sections").is_none(),
-            "default recall must omit sections: {sc}"
-        );
-        assert!(sc.get("tiers").is_some(), "tiers must remain");
-
-        let full_out = h.process_json(
-            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"knowledge graph hubs","depth":1,"include_sections":true,"max_content_chars":0}}}"#,
-        );
-        let full_v: serde_json::Value = serde_json::from_str(&full_out).unwrap();
-        assert!(
-            full_v["result"]["structuredContent"]["data"]
-                .get("sections")
-                .is_some(),
-            "include_sections=true must restore sections"
-        );
+        // Schema advertises pagination defaults
+        let list = h.handle(McpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(serde_json::json!(2)),
+            method: "tools/list".into(),
+            params: None,
+        });
+        let tools = list.result.unwrap()["tools"].as_array().unwrap().clone();
+        let sync = tools
+            .iter()
+            .find(|t| t["name"] == "skills_sync")
+            .expect("skills_sync");
+        assert_eq!(sync["inputSchema"]["properties"]["limit"]["default"], 100);
+        assert_eq!(sync["inputSchema"]["properties"]["offset"]["default"], 0);
     }
 
     #[tokio::test]
     async fn mcp_initialized_notification() {
-        let eng = Engine::new();
+        let eng = isolated_engine();
         let h = McpHandler::new(Arc::new(eng));
         let resp = h.handle(McpRequest {
             jsonrpc: "2.0".into(),
@@ -6774,12 +6964,136 @@ mod tests {
         assert!(resp.error.is_none());
     }
 
+    fn identity_ritual(h: &McpHandler) {
+        for step in 1..=5 {
+            let val = if step == 1 { "FeedbackAgent" } else { "test" };
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            );
+            h.process_json(&raw);
+        }
+        h.process_json(
+            r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#,
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_feedback_submit_creates_edges_and_accepts_from_id() {
+        let dir = std::env::temp_dir().join(format!("epicode-fb-{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mut eng = Engine::with_data_dir(dir.clone());
+        eng.start();
+        let engine = Arc::new(eng);
+        let h = McpHandler::new(engine.clone());
+        identity_ritual(&h);
+
+        let c1 = h.process_json(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"alpha feedback seed memory about SQLite WAL","labels":["db","sqlite"]}}}"#,
+        );
+        let c2 = h.process_json(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"beta feedback seed memory about embedded databases","labels":["db","embedded"]}}}"#,
+        );
+        assert!(c1.contains("created") || c1.contains("exists"), "c1={c1}");
+        assert!(c2.contains("created") || c2.contains("exists"), "c2={c2}");
+
+        let ids: Vec<u64> = engine
+            .space
+            .all_tetrahedrons()
+            .into_iter()
+            .filter(|t| t.data.content.contains("feedback seed"))
+            .map(|t| t.id)
+            .collect();
+        assert!(ids.len() >= 2, "need two seed memories, got {ids:?}");
+        let a = ids[0];
+        let b = ids[1];
+        let before_imp = engine
+            .space
+            .get_tetrahedron(a)
+            .map(|t| t.data.importance)
+            .unwrap_or(0.0);
+
+        let fb = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{{"name":"feedback_submit","arguments":{{"memory_ids":[{a},{b}],"relevance":"highly_relevant","outcome":"task_completed","query":"sqlite embedded","concept_links":[{{"from_id":{a},"to_id":{b},"relation":"related"}}]}}}}}}"#
+        );
+        let out = h.process_json(&fb);
+        assert!(
+            out.contains("\"edges_created\"") || out.contains("edges_created"),
+            "output missing edges_created: {out}"
+        );
+        assert!(
+            out.contains("\"concept_links_formed\":1") || out.contains("concept_links_formed\": 1"),
+            "from_id/to_id must form a link: {out}"
+        );
+        // Either reinforced existing or created co-retrieval SimilarTo.
+        assert!(
+            out.contains("\"edges_created\":1")
+                || out.contains("\"edges_reinforced\":1")
+                || out.contains("edges_created\": 1")
+                || out.contains("edges_reinforced\": 1"),
+            "expected retrieval-quality edge update: {out}"
+        );
+        let after_imp = engine
+            .space
+            .get_tetrahedron(a)
+            .map(|t| t.data.importance)
+            .unwrap_or(0.0);
+        assert!(
+            after_imp > before_imp,
+            "highly_relevant+task_completed should bump importance ({before_imp} -> {after_imp})"
+        );
+        let rels = engine.scheduler.kg_handle().all_relations();
+        assert!(
+            rels.iter()
+                .any(|r| { (r.source == a && r.target == b) || (r.source == b && r.target == a) }),
+            "expected KG edge between {a} and {b}, got {rels:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn mcp_feedback_submit_accepts_legacy_ab_concept_links() {
+        let dir = std::env::temp_dir().join(format!("epicode-fb-ab-{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mut eng = Engine::with_data_dir(dir.clone());
+        eng.start();
+        let engine = Arc::new(eng);
+        let h = McpHandler::new(engine.clone());
+        identity_ritual(&h);
+        h.process_json(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"legacy link memory one","labels":["legacy"]}}}"#,
+        );
+        h.process_json(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"legacy link memory two","labels":["legacy"]}}}"#,
+        );
+        let ids: Vec<u64> = engine
+            .space
+            .all_tetrahedrons()
+            .into_iter()
+            .filter(|t| t.data.content.contains("legacy link memory"))
+            .map(|t| t.id)
+            .collect();
+        assert!(ids.len() >= 2);
+        let a = ids[0];
+        let b = ids[1];
+        let fb = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{{"name":"feedback_submit","arguments":{{"memory_ids":[{a}],"relevance":"partially_relevant","outcome":"no_action_needed","concept_links":[{{"a":{a},"b":{b},"relation":"similar"}}]}}}}}}"#
+        );
+        let out = h.process_json(&fb);
+        assert!(
+            out.contains("\"concept_links_formed\":1") || out.contains("concept_links_formed\": 1"),
+            "legacy a/b links must still work: {out}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_context_observe_extracts_decision() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
 
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"context_observe","arguments":{"context":"User: What DB should we use?\nAssistant: We decided to use SQLite with WAL mode because it is embedded and zero-config, going with SQLite instead of PostgreSQL for simplicity","project":"Epicode","role":"designing"}}}"#;
         let output = h.process_json(raw);
@@ -6790,9 +7104,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_context_observe_extracts_bug() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
 
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"context_observe","arguments":{"context":"The tests were hanging because ureq was blocking the async runtime, fixed by wrapping in spawn_blocking. The root cause was synchronous HTTP inside tokio context."}}}"#;
         let output = h.process_json(raw);
@@ -6802,9 +7117,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_context_observe_empty() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
 
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"context_observe","arguments":{"context":"ok","role":"coding"}}}"#;
         let output = h.process_json(raw);
@@ -6815,9 +7131,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_context_observe_dedup() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
 
         let ctx_raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"context_observe","arguments":{"context":"We decided to use SQLite with WAL mode for all database operations because it provides great performance with zero configuration overhead","project":"Epicode"}}}"#;
         let out1 = h.process_json(ctx_raw);

@@ -1,5 +1,6 @@
 # macOS
 .DS_Store
+._*
 
 # Dependencies
 node_modules/
@@ -41,6 +42,11 @@ models/
 
 # Security
 KEYS.txt
+
+# deploy_secure.sh 生成的密钥与运行配置(含密钥,切勿提交)
+.master_key
+.admin_key
+docker-compose.secure.yml
 
 # IDE
 .vscode/
