@@ -3837,10 +3837,10 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
     }
 
     pub fn api_dream(&self, dry_run: bool) -> Result<String, String> {
-        if !dry_run {
-            self.security
-                .check_energy(self.energy.available(), 15.0)
-                .map_err(|_| "insufficient energy (need 15.0)".to_string())?;
+        // R4-S04: align with auto_pipeline::auto_dream — actually consume, not only check.
+        // dry_run stays free so agents can preview consolidation without draining budget.
+        if !dry_run && !self.energy.consume(15.0) {
+            return Err("insufficient energy (need 15.0)".to_string());
         }
         let report =
             super::dream::DreamEngine::cycle(&self.space, &self.knowledge, 0.3, 5, dry_run);
@@ -4148,6 +4148,17 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             horizon.phase().as_str().to_string(),
             horizon.pressure(),
             horizon.debt(),
+        )
+    }
+
+    /// Tick observability: phase / pressure / debt / cumulative missed commits.
+    pub fn horizon_observability(&self) -> (String, f64, u32, u64) {
+        let horizon = self.horizon.lock();
+        (
+            horizon.phase().as_str().to_string(),
+            horizon.pressure(),
+            horizon.debt(),
+            horizon.missed_commits(),
         )
     }
 
@@ -5284,7 +5295,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
         let drive = self.drive.lock();
         let should_pulse = drive.should_pulse();
         let should_fission = drive.should_fission();
-        let _should_dream = drive.should_dream();
+        let should_dream = drive.should_dream();
         let should_evict = drive.should_evict();
         drop(drive);
 
@@ -5302,10 +5313,17 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             self.auto_skills(&snap);
         }
 
-        if count.is_multiple_of(30) && count > 0 && self.energy.available() >= 50.0 {
-            let pre_snap = self.build_snapshot();
-            self.auto_dream();
-            self.record_outcome(ActionType::Dream, &pre_snap, count);
+        // Honor DecisionCenter/drive dream hook: Coherence-dominant ticks may dream
+        // on a 10-tick cadence; otherwise keep the periodic 30-tick floor.
+        // auto_dream still respects DreamInterval + energy.consume(15).
+        if count > 0 && self.energy.available() >= 50.0 {
+            let due_periodic = count.is_multiple_of(30);
+            let due_drive = should_dream && count.is_multiple_of(10);
+            if due_periodic || due_drive {
+                let pre_snap = self.build_snapshot();
+                self.auto_dream();
+                self.record_outcome(ActionType::Dream, &pre_snap, count);
+            }
         }
 
         if count.is_multiple_of(30) && count > 0 {
@@ -6153,8 +6171,15 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                 _ = tokio::time::sleep(tick_interval) => {
                     if commit {
                         let Some(cycle_permit) = self.cycle_gate.try_acquire() else {
-                            self.horizon.lock().note_defer();
-                            tracing::debug!("[Horizon] commit deferred; previous cycle still running");
+                            let missed = {
+                                let mut h = self.horizon.lock();
+                                h.note_defer();
+                                h.missed_commits()
+                            };
+                            tracing::info!(
+                                "[Horizon] commit deferred (missed_commits={}); previous cycle still running",
+                                missed
+                            );
                             continue;
                         };
                         let me = self.clone();
@@ -6205,8 +6230,15 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         });
                     } else {
                         let Some(_cycle_permit) = self.cycle_gate.try_acquire() else {
-                            self.horizon.lock().note_defer();
-                            tracing::debug!("[Horizon] attend deferred; previous cycle still running");
+                            let missed = {
+                                let mut h = self.horizon.lock();
+                                h.note_defer();
+                                h.missed_commits()
+                            };
+                            tracing::debug!(
+                                "[Horizon] attend deferred (missed_commits={}); previous cycle still running",
+                                missed
+                            );
                             continue;
                         };
                         let count = self.tick_count.fetch_add(1, Ordering::SeqCst);
@@ -7232,6 +7264,58 @@ mod tests {
                 cluster.tetra_ids.len()
             );
         }
+    }
+
+    // ---- Test: tick observability (missed commits) ----
+
+    #[test]
+    fn horizon_observability_tracks_missed_commits() {
+        let (sched, _space, _kg) = build_scheduler();
+        let (phase, _p, debt, missed) = sched.horizon_observability();
+        assert_eq!(missed, 0);
+        assert_eq!(debt, 0);
+        assert!(!phase.is_empty());
+        sched.horizon.lock().note_defer();
+        let (_phase2, _p2, debt2, missed2) = sched.horizon_observability();
+        assert_eq!(missed2, 1);
+        assert_eq!(debt2, 1);
+    }
+
+    // ---- Test: api_dream energy gate (R4-S04) ----
+
+    #[test]
+    fn api_dream_consumes_energy_and_dry_run_does_not() {
+        let (sched, _space, _kg) = build_scheduler();
+        let before = sched.energy.available();
+        assert!(before >= 15.0);
+        sched.api_dream(true).expect("dry_run dream");
+        assert!(
+            (sched.energy.available() - before).abs() < 0.01,
+            "dry_run must not consume energy"
+        );
+        sched.api_dream(false).expect("dream with energy");
+        let after = sched.energy.available();
+        assert!(
+            (before - after - 15.0).abs() < 0.01,
+            "api_dream should consume 15.0 energy (before={before}, after={after})"
+        );
+    }
+
+    #[test]
+    fn api_dream_rejects_when_energy_insufficient() {
+        let (sched, _space, _kg) = build_scheduler();
+        let available = sched.energy.available();
+        if available > 14.0 {
+            assert!(
+                sched.energy.consume(available - 14.0),
+                "should drain to just under dream cost"
+            );
+        }
+        assert!(sched.energy.available() < 15.0);
+        let err = sched.api_dream(false).expect_err("must reject");
+        assert!(err.contains("insufficient energy"), "got: {err}");
+        // Failed attempt must not further drain the remaining budget.
+        assert!((sched.energy.available() - 14.0).abs() < 0.01);
     }
 
     // ---- Test: Large-scale scenario (100 memories) ----
