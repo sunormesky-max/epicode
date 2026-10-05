@@ -698,7 +698,7 @@ impl McpHandler {
                             "since_days": { "type": "integer", "description": "Filter: only memories from the last N days" },
                             "mode": { "type": "string", "enum": ["hybrid", "exact", "semantic", "graph", "auto", "fusion"], "default": "hybrid", "description": "Search mode: hybrid (vector+BM25 blend), exact (pure BM25 for identifiers and known phrases), semantic (vector similarity), graph (hybrid-search seeds expanded/reranked with knowledge-graph PPR), auto (routes temporal/aggregation queries to graph and other queries to semantic), fusion (reciprocal-rank fusion of semantic and graph results)." },
                             "strict_filter": { "type": "boolean", "default": false, "description": "Phase 1: strict filter mode — no semantic backfill, only return exact filter matches. Combine with mode=exact for database-like lookups." },
-                            "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "full", "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections/results duplicates). Also enabled by EPICODE_SLIM_ENVELOPE=1." }
+                            "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "full", "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections/results duplicates); retains valid + timestamp fields when present. Also enabled by EPICODE_SLIM_ENVELOPE=1." }
                         },
                         "required": ["query"]
                     }
@@ -711,7 +711,7 @@ impl McpHandler {
                         "properties": {
                             "query": { "type": "string", "description": "The recall query" },
                             "depth": { "type": "integer", "description": "Association depth (default 2, max 3)" },
-                            "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "full", "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections duplicates). Also enabled by EPICODE_SLIM_ENVELOPE=1." }
+                            "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "full", "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections duplicates); retains valid + timestamp fields when present. Also enabled by EPICODE_SLIM_ENVELOPE=1." }
                         },
                         "required": ["query"]
                     }
