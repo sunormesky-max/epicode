@@ -8,6 +8,8 @@ pub mod scheduler;
 pub mod dream;
 pub mod gateway;
 pub mod governor;
+#[cfg(test)]
+mod importance_floor_bench;
 pub mod intake;
 pub mod janitor;
 pub mod storage;

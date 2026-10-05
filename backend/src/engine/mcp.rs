@@ -1147,7 +1147,7 @@ impl McpHandler {
                 },
                 {
                     "name": "memory_forget",
-                    "description": "Explicitly forget a memory by marking it superseded (valid_to) and dropping importance to 0.01. Unlike auto-decay, this is a deliberate Agent/user decision. Enforced memories cannot be forgotten.",
+                    "description": "Explicitly forget a memory by marking it superseded (valid_to) and dropping importance to FORGET_IMPORTANCE (0.01, explicit tombstone exception to the 0.3 live floor). Unlike auto-decay, this is a deliberate Agent/user decision. Enforced memories cannot be forgotten.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -5050,7 +5050,8 @@ impl McpHandler {
                 };
                 let old_importance = payload.importance;
                 let final_delta = importance_delta + correction_importance;
-                payload.importance = (old_importance + final_delta).clamp(0.1, 5.0);
+                payload.importance =
+                    (old_importance + final_delta).clamp(super::governor::IMPORTANCE_FLOOR, 5.0);
                 if is_correction && !payload.labels.iter().any(|l| l == "outdated") {
                     payload.labels.push("outdated".to_string());
                 }
