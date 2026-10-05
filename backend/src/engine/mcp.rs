@@ -1196,6 +1196,9 @@ impl McpHandler {
         if let Some(tools) = result["tools"].as_array_mut() {
             for tool in tools {
                 tool["outputSchema"] = output_schema.clone();
+                if let Some(name) = tool.get("name").and_then(|v| v.as_str()) {
+                    tool["annotations"] = Self::tool_annotations(name);
+                }
             }
         }
         McpResponse {
@@ -1204,6 +1207,57 @@ impl McpHandler {
             result: Some(result),
             error: None,
         }
+    }
+
+    /// MCP ToolAnnotations (spec): hints so clients can auto-approve safe reads
+    /// and warn on destructive calls. Pure metadata — no runtime behavior change.
+    fn tool_annotations(name: &str) -> serde_json::Value {
+        let (read_only, destructive, idempotent, open_world) = match name {
+            // Pure reads
+            "memory_search"
+            | "memory_recall"
+            | "memory_ask"
+            | "memory_get"
+            | "memory_list"
+            | "memory_export"
+            | "library_search"
+            | "space_stats"
+            | "concepts"
+            | "knowledge_relations"
+            | "pattern_recall"
+            | "enforced_rules"
+            | "project_list"
+            | "embedding_diagnostic"
+            | "kg_quality"
+            | "doc_list"
+            | "session_list"
+            | "skills_sync"
+            | "skill_get"
+            | "skill_execute"
+            | "task_status"
+            | "drive_inbox"
+            | "ctx_load" => (true, false, true, false),
+            // Destructive / hard-to-reverse
+            "memory_delete" | "memory_forget" | "dream_cycle" | "embedding_migrate"
+            | "identity_finalize" => (false, true, false, false),
+            // Re-runnable writes (idempotent-ish)
+            "memory_update" | "identity_confirm" | "drive_ack" | "skill_feedback"
+            | "feedback_submit" | "task_check" => (false, false, true, false),
+            // Other writes / side-effects
+            "memory_create" | "memory_restore" | "memory_improve" | "ctx_save"
+            | "pattern_learn" | "decision_record" | "bug_memory" | "session_summary"
+            | "context_observe" | "identity_step" | "task_start" | "task_complete"
+            | "task_alert" | "skill_auto_extract" | "doc_import" | "epicode_handshake" => {
+                (false, false, false, false)
+            }
+            _ => (false, false, false, false),
+        };
+        serde_json::json!({
+            "readOnlyHint": read_only,
+            "destructiveHint": destructive,
+            "idempotentHint": idempotent,
+            "openWorldHint": open_world,
+        })
     }
 
     fn smrp_output_schema() -> serde_json::Value {
@@ -6234,6 +6288,37 @@ mod tests {
             drive_inbox["inputSchema"]["properties"]["limit"]["default"],
             50
         );
+        // Agent UX: every tool must advertise MCP annotations for client auto-approve.
+        for tool in tools {
+            let name = tool["name"].as_str().unwrap_or("?");
+            let ann = tool.get("annotations").unwrap_or(&serde_json::Value::Null);
+            assert!(
+                ann.get("readOnlyHint").and_then(|v| v.as_bool()).is_some(),
+                "tool {name} missing readOnlyHint"
+            );
+            assert!(
+                ann.get("destructiveHint")
+                    .and_then(|v| v.as_bool())
+                    .is_some(),
+                "tool {name} missing destructiveHint"
+            );
+            assert!(
+                ann.get("idempotentHint")
+                    .and_then(|v| v.as_bool())
+                    .is_some(),
+                "tool {name} missing idempotentHint"
+            );
+        }
+        let memory_search_ann = memory_search["annotations"].clone();
+        assert_eq!(memory_search_ann["readOnlyHint"], true);
+        assert_eq!(memory_search_ann["destructiveHint"], false);
+        let memory_delete = tools
+            .iter()
+            .find(|tool| tool["name"] == "memory_delete")
+            .expect("memory_delete tool must be listed");
+        assert_eq!(memory_delete["annotations"]["destructiveHint"], true);
+        assert_eq!(memory_delete["annotations"]["readOnlyHint"], false);
+
         assert!(drive_inbox["description"]
             .as_str()
             .unwrap_or_default()
