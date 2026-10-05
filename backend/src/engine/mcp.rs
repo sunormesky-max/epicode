@@ -685,7 +685,7 @@ impl McpHandler {
                     },
                     {
                         "name": "memory_search",
-                    "description": "Search personal memories and inspect ranked evidence with tier and retrieval provenance. Use memory_recall for associative context or memory_ask for a synthesized answer. Supports pagination and exact, semantic, graph, auto, and fusion modes.",
+                    "description": "Search personal memories; returns SMRP tiers with provenance. Prefer compact defaults (no flat results duplicate). Use memory_recall for graph associations or memory_ask for a synthesized answer.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -696,20 +696,24 @@ impl McpHandler {
                             "min_importance": { "type": "number", "description": "Filter: minimum importance score" },
                             "project": { "type": "string", "description": "Filter: project name" },
                             "since_days": { "type": "integer", "description": "Filter: only memories from the last N days" },
-                            "mode": { "type": "string", "enum": ["hybrid", "exact", "semantic", "graph", "auto", "fusion"], "default": "hybrid", "description": "Search mode: hybrid (vector+BM25 blend), exact (pure BM25 for identifiers and known phrases), semantic (vector similarity), graph (hybrid-search seeds expanded/reranked with knowledge-graph PPR), auto (routes temporal/aggregation queries to graph and other queries to semantic), fusion (reciprocal-rank fusion of semantic and graph results)." },
-                            "strict_filter": { "type": "boolean", "default": false, "description": "Phase 1: strict filter mode — no semantic backfill, only return exact filter matches. Combine with mode=exact for database-like lookups." }
+                            "mode": { "type": "string", "enum": ["hybrid", "exact", "semantic", "graph", "auto", "fusion"], "default": "hybrid", "description": "Search mode: hybrid (vector+BM25), exact (BM25), semantic, graph (PPR), auto, fusion (RRF)." },
+                            "strict_filter": { "type": "boolean", "default": false, "description": "Strict filter mode — no semantic backfill. Combine with mode=exact for database-like lookups." },
+                            "include_flat_results": { "type": "boolean", "default": false, "description": "If true, also include a flat `results` array (duplicates tier contents). Default false to save tokens." },
+                            "max_content_chars": { "type": "integer", "default": 500, "description": "Truncate each memory content to this many chars (0 = no truncate). Truncated items set content_truncated=true." }
                         },
                         "required": ["query"]
                     }
                 },
                 {
                     "name": "memory_recall",
-                    "description": "Search and expand through knowledge-graph associations. Returns SMRP tiers, source memories, provenance, and emotion context. Use memory_search for ranked direct matches or memory_ask for a synthesized answer.",
+                    "description": "Expand through knowledge-graph associations into SMRP tiers. Default omits duplicate `sections` and truncates content — pass include_sections=true for the raw label map. Prefer depth=1 for large spaces.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "query": { "type": "string", "description": "The recall query" },
-                            "depth": { "type": "integer", "description": "Association depth (default 2, max 3)" }
+                            "depth": { "type": "integer", "default": 1, "minimum": 0, "maximum": 3, "description": "Association depth (default 1, max 3). Use 1 unless you need deeper expansion." },
+                            "include_sections": { "type": "boolean", "default": false, "description": "If true, also include raw label-keyed `sections` (duplicates tier contents). Default false to save tokens." },
+                            "max_content_chars": { "type": "integer", "default": 500, "description": "Truncate each fragment content to this many chars (0 = no truncate). Truncated items set content_truncated=true." }
                         },
                         "required": ["query"]
                     }
@@ -3381,6 +3385,8 @@ impl McpHandler {
                         .collect::<Vec<_>>()
                 };
                 let score_base = super::smrp::search_score_base(search_mode);
+                let include_flat = args["include_flat_results"].as_bool().unwrap_or(false);
+                let max_content_chars = args["max_content_chars"].as_u64().unwrap_or(500) as usize;
                 let mut data = serde_json::json!({
                     "query": query,
                     "tiers": {
@@ -3389,7 +3395,6 @@ impl McpHandler {
                         "experiential": experiential,
                         "hub": [],
                     },
-                    "results": flat,
                     "count": picked.len(),
                     "total_found": total_found,
                     "offset": offset,
@@ -3403,6 +3408,15 @@ impl McpHandler {
                         ],
                     },
                 });
+                if include_flat {
+                    data["results"] = serde_json::json!(flat);
+                }
+                if max_content_chars > 0 {
+                    let n = super::smrp::truncate_content_fields(&mut data, max_content_chars);
+                    if n > 0 {
+                        data["contents_truncated"] = serde_json::json!(n);
+                    }
+                }
                 if requested_limit > 200 {
                     data["warning"] = serde_json::json!(
                         "limit capped at 200; request a higher offset to paginate"
@@ -3419,7 +3433,10 @@ impl McpHandler {
         if query.is_empty() {
             return self.smrp_err("memory_recall", 400, "query is required");
         }
-        let depth = args["depth"].as_u64().unwrap_or(2).min(3) as usize;
+        // Agent UX: default depth 1 (was 2) — deep expansion balloons token use.
+        let depth = args["depth"].as_u64().unwrap_or(1).min(3) as usize;
+        let include_sections = args["include_sections"].as_bool().unwrap_or(false);
+        let max_content_chars = args["max_content_chars"].as_u64().unwrap_or(500) as usize;
         // P0 相位机: 深度回忆同样计入探索相证据
         if let Some(tid) = self
             .engine
@@ -3430,7 +3447,20 @@ impl McpHandler {
         }
         match self.engine.scheduler.api_recall(query, depth) {
             Ok(result) => {
-                let data = super::smrp::recall_data(&self.engine, &result, query, depth);
+                let mut data = super::smrp::recall_data(&self.engine, &result, query, depth);
+                if !include_sections {
+                    if let Some(obj) = data.as_object_mut() {
+                        obj.remove("sections");
+                    }
+                }
+                if max_content_chars > 0 {
+                    let n = super::smrp::truncate_content_fields(&mut data, max_content_chars);
+                    if n > 0 {
+                        if let Some(obj) = data.as_object_mut() {
+                            obj.insert("contents_truncated".into(), serde_json::json!(n));
+                        }
+                    }
+                }
                 self.smrp_ok("memory_recall", data)
             }
             Err(e) => self.smrp_err("memory_recall", 500, &e),
@@ -6234,6 +6264,23 @@ mod tests {
             drive_inbox["inputSchema"]["properties"]["limit"]["default"],
             50
         );
+        assert_eq!(
+            memory_search["inputSchema"]["properties"]["include_flat_results"]["default"],
+            false
+        );
+        let memory_recall = tools
+            .iter()
+            .find(|tool| tool["name"] == "memory_recall")
+            .expect("memory_recall tool must be listed");
+        assert_eq!(
+            memory_recall["inputSchema"]["properties"]["include_sections"]["default"],
+            false
+        );
+        assert_eq!(
+            memory_recall["inputSchema"]["properties"]["depth"]["default"],
+            1
+        );
+
         assert!(drive_inbox["description"]
             .as_str()
             .unwrap_or_default()
@@ -6633,6 +6680,85 @@ mod tests {
             search_output
         );
         assert!(search_output.contains("content"));
+    }
+
+    #[tokio::test]
+    async fn mcp_memory_search_omits_flat_results_by_default() {
+        let mut eng = Engine::new();
+        eng.start();
+        let h = McpHandler::new(Arc::new(eng));
+        for step in 1..=5 {
+            let val = if step == 1 { "CompactAgent" } else { "test" };
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            );
+            h.process_json(&raw);
+        }
+        h.process_json(r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#);
+        h.process_json(r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"Compact search unique phrase about tetrahedral clustering","labels":["test","compact"]}}}"#);
+
+        let default_out = h.process_json(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_search","arguments":{"query":"tetrahedral clustering","limit":5}}}"#,
+        );
+        let default_v: serde_json::Value = serde_json::from_str(&default_out).unwrap();
+        let sc = &default_v["result"]["structuredContent"]["data"];
+        assert!(
+            sc.get("results").is_none(),
+            "default search must omit flat results: {sc}"
+        );
+        assert!(sc.get("tiers").is_some(), "tiers must remain");
+
+        let flat_out = h.process_json(
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory_search","arguments":{"query":"tetrahedral clustering","limit":5,"include_flat_results":true}}}"#,
+        );
+        let flat_v: serde_json::Value = serde_json::from_str(&flat_out).unwrap();
+        assert!(
+            flat_v["result"]["structuredContent"]["data"]
+                .get("results")
+                .and_then(|r| r.as_array())
+                .is_some(),
+            "include_flat_results=true must restore results"
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_memory_recall_omits_sections_by_default() {
+        let mut eng = Engine::new();
+        eng.start();
+        let h = McpHandler::new(Arc::new(eng));
+        for step in 1..=5 {
+            let val = if step == 1 { "RecallAgent" } else { "test" };
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            );
+            h.process_json(&raw);
+        }
+        h.process_json(r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#);
+        h.process_json(r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"Recall compact unique phrase about knowledge graph hubs","labels":["test","recall"]}}}"#);
+
+        let default_out = h.process_json(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"knowledge graph hubs","depth":1}}}"#,
+        );
+        let default_v: serde_json::Value = serde_json::from_str(&default_out).unwrap();
+        let sc = &default_v["result"]["structuredContent"]["data"];
+        assert!(
+            sc.get("sections").is_none(),
+            "default recall must omit sections: {sc}"
+        );
+        assert!(sc.get("tiers").is_some(), "tiers must remain");
+
+        let full_out = h.process_json(
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"knowledge graph hubs","depth":1,"include_sections":true,"max_content_chars":0}}}"#,
+        );
+        let full_v: serde_json::Value = serde_json::from_str(&full_out).unwrap();
+        assert!(
+            full_v["result"]["structuredContent"]["data"]
+                .get("sections")
+                .is_some(),
+            "include_sections=true must restore sections"
+        );
     }
 
     #[tokio::test]
