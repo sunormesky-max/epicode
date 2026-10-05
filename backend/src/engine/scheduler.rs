@@ -3837,10 +3837,10 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
     }
 
     pub fn api_dream(&self, dry_run: bool) -> Result<String, String> {
-        if !dry_run {
-            self.security
-                .check_energy(self.energy.available(), 15.0)
-                .map_err(|_| "insufficient energy (need 15.0)".to_string())?;
+        // R4-S04: align with auto_pipeline::auto_dream — actually consume, not only check.
+        // dry_run stays free so agents can preview consolidation without draining budget.
+        if !dry_run && !self.energy.consume(15.0) {
+            return Err("insufficient energy (need 15.0)".to_string());
         }
         let report =
             super::dream::DreamEngine::cycle(&self.space, &self.knowledge, 0.3, 5, dry_run);
@@ -7279,6 +7279,43 @@ mod tests {
         let (_phase2, _p2, debt2, missed2) = sched.horizon_observability();
         assert_eq!(missed2, 1);
         assert_eq!(debt2, 1);
+    }
+
+    // ---- Test: api_dream energy gate (R4-S04) ----
+
+    #[test]
+    fn api_dream_consumes_energy_and_dry_run_does_not() {
+        let (sched, _space, _kg) = build_scheduler();
+        let before = sched.energy.available();
+        assert!(before >= 15.0);
+        sched.api_dream(true).expect("dry_run dream");
+        assert!(
+            (sched.energy.available() - before).abs() < 0.01,
+            "dry_run must not consume energy"
+        );
+        sched.api_dream(false).expect("dream with energy");
+        let after = sched.energy.available();
+        assert!(
+            (before - after - 15.0).abs() < 0.01,
+            "api_dream should consume 15.0 energy (before={before}, after={after})"
+        );
+    }
+
+    #[test]
+    fn api_dream_rejects_when_energy_insufficient() {
+        let (sched, _space, _kg) = build_scheduler();
+        let available = sched.energy.available();
+        if available > 14.0 {
+            assert!(
+                sched.energy.consume(available - 14.0),
+                "should drain to just under dream cost"
+            );
+        }
+        assert!(sched.energy.available() < 15.0);
+        let err = sched.api_dream(false).expect_err("must reject");
+        assert!(err.contains("insufficient energy"), "got: {err}");
+        // Failed attempt must not further drain the remaining budget.
+        assert!((sched.energy.available() - 14.0).abs() < 0.01);
     }
 
     // ---- Test: Large-scale scenario (100 memories) ----
