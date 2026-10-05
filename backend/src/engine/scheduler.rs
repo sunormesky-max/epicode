@@ -4151,6 +4151,17 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
         )
     }
 
+    /// Tick observability: phase / pressure / debt / cumulative missed commits.
+    pub fn horizon_observability(&self) -> (String, f64, u32, u64) {
+        let horizon = self.horizon.lock();
+        (
+            horizon.phase().as_str().to_string(),
+            horizon.pressure(),
+            horizon.debt(),
+            horizon.missed_commits(),
+        )
+    }
+
     /// α0.2: cloud runtime register/unregister 时更新; detect_prediction_errors 读取产生 body_missing
     /// δ2: 空铃降权 — dead-letter 的 evidence 记忆 importance 衰减
     /// 语义: 同类 evidence 反复空铃 → 记忆降权 → 不再产出 drive (7日空铃下降机制)
@@ -5284,7 +5295,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
         let drive = self.drive.lock();
         let should_pulse = drive.should_pulse();
         let should_fission = drive.should_fission();
-        let _should_dream = drive.should_dream();
+        let should_dream = drive.should_dream();
         let should_evict = drive.should_evict();
         drop(drive);
 
@@ -5302,10 +5313,17 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             self.auto_skills(&snap);
         }
 
-        if count.is_multiple_of(30) && count > 0 && self.energy.available() >= 50.0 {
-            let pre_snap = self.build_snapshot();
-            self.auto_dream();
-            self.record_outcome(ActionType::Dream, &pre_snap, count);
+        // Honor DecisionCenter/drive dream hook: Coherence-dominant ticks may dream
+        // on a 10-tick cadence; otherwise keep the periodic 30-tick floor.
+        // auto_dream still respects DreamInterval + energy.consume(15).
+        if count > 0 && self.energy.available() >= 50.0 {
+            let due_periodic = count.is_multiple_of(30);
+            let due_drive = should_dream && count.is_multiple_of(10);
+            if due_periodic || due_drive {
+                let pre_snap = self.build_snapshot();
+                self.auto_dream();
+                self.record_outcome(ActionType::Dream, &pre_snap, count);
+            }
         }
 
         if count.is_multiple_of(30) && count > 0 {
@@ -6153,8 +6171,15 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                 _ = tokio::time::sleep(tick_interval) => {
                     if commit {
                         let Some(cycle_permit) = self.cycle_gate.try_acquire() else {
-                            self.horizon.lock().note_defer();
-                            tracing::debug!("[Horizon] commit deferred; previous cycle still running");
+                            let missed = {
+                                let mut h = self.horizon.lock();
+                                h.note_defer();
+                                h.missed_commits()
+                            };
+                            tracing::info!(
+                                "[Horizon] commit deferred (missed_commits={}); previous cycle still running",
+                                missed
+                            );
                             continue;
                         };
                         let me = self.clone();
@@ -6205,8 +6230,15 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         });
                     } else {
                         let Some(_cycle_permit) = self.cycle_gate.try_acquire() else {
-                            self.horizon.lock().note_defer();
-                            tracing::debug!("[Horizon] attend deferred; previous cycle still running");
+                            let missed = {
+                                let mut h = self.horizon.lock();
+                                h.note_defer();
+                                h.missed_commits()
+                            };
+                            tracing::debug!(
+                                "[Horizon] attend deferred (missed_commits={}); previous cycle still running",
+                                missed
+                            );
                             continue;
                         };
                         let count = self.tick_count.fetch_add(1, Ordering::SeqCst);
@@ -7232,6 +7264,21 @@ mod tests {
                 cluster.tetra_ids.len()
             );
         }
+    }
+
+    // ---- Test: tick observability (missed commits) ----
+
+    #[test]
+    fn horizon_observability_tracks_missed_commits() {
+        let (sched, _space, _kg) = build_scheduler();
+        let (phase, _p, debt, missed) = sched.horizon_observability();
+        assert_eq!(missed, 0);
+        assert_eq!(debt, 0);
+        assert!(!phase.is_empty());
+        sched.horizon.lock().note_defer();
+        let (_phase2, _p2, debt2, missed2) = sched.horizon_observability();
+        assert_eq!(missed2, 1);
+        assert_eq!(debt2, 1);
     }
 
     // ---- Test: api_dream energy gate (R4-S04) ----
