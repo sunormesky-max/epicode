@@ -6177,6 +6177,32 @@ mod tests {
     use super::*;
     use crate::engine::Engine;
 
+    /// 测试专用:每次调用使用全新的唯一临时数据目录,
+    /// 避免多个测试(及多次运行)共享并持久化 `./data`(identity.json / tetramem.db)
+    /// 而互相影响。
+    fn isolated_engine() -> Engine {
+        let dir = std::env::temp_dir().join(format!(
+            "epicode-mcp-test-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        Engine::with_data_dir(dir)
+    }
+
+    /// 测试专用:通过 MCP 的 identity_step / identity_finalize 在当前(隔离的)
+    /// 引擎中确认身份,使测试不再依赖其他测试遗留在 `./data` 里的 identity.json。
+    fn confirm_test_identity(h: &McpHandler) {
+        for step in 1..=5 {
+            let val = if step == 1 { "TestAgent" } else { "test" };
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            );
+            h.process_json(&raw);
+        }
+        h.process_json(r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#);
+    }
+
     #[test]
     fn strip_html_keeps_lone_lt_and_following_text() {
         assert_eq!(
@@ -6203,7 +6229,7 @@ mod tests {
 
     #[test]
     fn mcp_initialize() {
-        let eng = Engine::new();
+        let eng = isolated_engine();
         let h = McpHandler::new(Arc::new(eng));
         let resp = h.handle(McpRequest {
             jsonrpc: "2.0".into(),
@@ -6218,7 +6244,7 @@ mod tests {
 
     #[test]
     fn mcp_tools_list() {
-        let eng = Engine::new();
+        let eng = isolated_engine();
         let h = McpHandler::new(Arc::new(eng));
         let resp = h.handle(McpRequest {
             jsonrpc: "2.0".into(),
@@ -6279,7 +6305,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_drive_inbox_includes_the_shared_retryable_signal_contract() {
-        let mut engine = Engine::new();
+        let mut engine = isolated_engine();
         engine.start();
         engine
             .scheduler()
@@ -6351,7 +6377,7 @@ mod tests {
             .to_public_key()
             .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
             .unwrap();
-        let mut engine = Engine::new();
+        let mut engine = isolated_engine();
         engine.start();
         engine.scheduler().set_e2e_pubkey(Some(&public_pem));
         engine
@@ -6409,7 +6435,7 @@ mod tests {
 
     #[test]
     fn mcp_unknown_method() {
-        let eng = Engine::new();
+        let eng = isolated_engine();
         let h = McpHandler::new(Arc::new(eng));
         let resp = h.handle(McpRequest {
             jsonrpc: "2.0".into(),
@@ -6422,7 +6448,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_process_json_roundtrip() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":null}"#;
@@ -6433,7 +6459,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_memory_ask_returns_structured_smrp_and_marks_tool_errors() {
-        let mut engine = Engine::new();
+        let mut engine = isolated_engine();
         engine.start();
         let handler = McpHandler::new(Arc::new(engine));
 
@@ -6480,7 +6506,7 @@ mod tests {
 
     #[test]
     fn oversized_mcp_requests_and_responses_return_jsonrpc_errors() {
-        let handler = McpHandler::new(Arc::new(Engine::new()));
+        let handler = McpHandler::new(Arc::new(isolated_engine()));
         let oversized_request = format!(
             r#"{{"jsonrpc":"2.0","id":"too-large","method":"ping","padding":"{}"}}"#,
             "x".repeat(MAX_MCP_REQUEST_BYTES)
@@ -6518,7 +6544,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_memory_create() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
         let init_raw = r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_step","arguments":{"step":1,"value":"TestAgent"}}}"#;
@@ -6543,9 +6569,10 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_space_stats() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"space_stats","arguments":{}}}"#;
         let output = h.process_json(raw);
         assert!(
@@ -6558,9 +6585,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_ctx_save_and_load() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
 
         let save_raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ctx_save","arguments":{"summary":"Use parking_lot for all mutexes","category":"pattern","project":"Epicode"}}}"#;
         let save_output = h.process_json(save_raw);
@@ -6578,9 +6606,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_decision_record() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"decision_record","arguments":{"title":"Use SQLite","chosen":"SQLite with WAL","alternatives":"PostgreSQL, RocksDB","rationale":"Embedded, zero-config, WAL mode is fast enough","project":"Epicode"}}}"#;
         let output = h.process_json(raw);
         assert!(
@@ -6593,9 +6622,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_bug_memory() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"bug_memory","arguments":{"symptoms":"tests hang on CI","root_cause":"ureq blocking async runtime","fix":"wrap in spawn_blocking","module":"gateway.rs","project":"Epicode"}}}"#;
         let output = h.process_json(raw);
         assert!(
@@ -6607,9 +6637,10 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_session_summary() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"session_summary","arguments":{"accomplished":"Fixed 6 critical rollback issues","next_steps":"Deploy to cloud, run benchmarks","blockers":"none","project":"Epicode"}}}"#;
         let output = h.process_json(raw);
         assert!(
@@ -6621,9 +6652,10 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_pattern_learn_and_recall() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
 
         let learn_raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"pattern_learn","arguments":{"pattern":"All DB writes use transactions","language":"rust","project":"Epicode","example":"conn.unchecked_transaction()?"}}}"#;
         let learn_output = h.process_json(learn_raw);
@@ -6640,7 +6672,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_memory_search_returns_content() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
         for step in 1..=5 {
@@ -6668,7 +6700,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_initialized_notification() {
-        let eng = Engine::new();
+        let eng = isolated_engine();
         let h = McpHandler::new(Arc::new(eng));
         let resp = h.handle(McpRequest {
             jsonrpc: "2.0".into(),
@@ -6682,9 +6714,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_context_observe_extracts_decision() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
 
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"context_observe","arguments":{"context":"User: What DB should we use?\nAssistant: We decided to use SQLite with WAL mode because it is embedded and zero-config, going with SQLite instead of PostgreSQL for simplicity","project":"Epicode","role":"designing"}}}"#;
         let output = h.process_json(raw);
@@ -6695,9 +6728,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_context_observe_extracts_bug() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
 
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"context_observe","arguments":{"context":"The tests were hanging because ureq was blocking the async runtime, fixed by wrapping in spawn_blocking. The root cause was synchronous HTTP inside tokio context."}}}"#;
         let output = h.process_json(raw);
@@ -6707,9 +6741,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_context_observe_empty() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
 
         let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"context_observe","arguments":{"context":"ok","role":"coding"}}}"#;
         let output = h.process_json(raw);
@@ -6720,9 +6755,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "flaky: Engine::start()初始化竞态(CI单核必败, 生产路径日验)"]
     async fn mcp_context_observe_dedup() {
-        let mut eng = Engine::new();
+        let mut eng = isolated_engine();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        confirm_test_identity(&h);
 
         let ctx_raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"context_observe","arguments":{"context":"We decided to use SQLite with WAL mode for all database operations because it provides great performance with zero configuration overhead","project":"Epicode"}}}"#;
         let out1 = h.process_json(ctx_raw);
