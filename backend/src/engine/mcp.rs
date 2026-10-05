@@ -4796,7 +4796,10 @@ impl McpHandler {
     }
 
     fn tool_feedback_submit(&self, args: &serde_json::Value) -> serde_json::Value {
-        let ids: Vec<u64> = args["memory_ids"]
+        const MAX_FEEDBACK_IDS: usize = 32;
+        const MAX_CONCEPT_LINKS: usize = 32;
+
+        let mut ids: Vec<u64> = args["memory_ids"]
             .as_array()
             .map(|a| a.iter().filter_map(|v| v.as_u64()).collect())
             .unwrap_or_default();
@@ -4807,6 +4810,11 @@ impl McpHandler {
                 "memory_ids is required and must be non-empty",
             );
         }
+        ids.truncate(MAX_FEEDBACK_IDS);
+        // Stable unique order preserves first-seen ranking from search/recall.
+        let mut seen = std::collections::HashSet::new();
+        ids.retain(|id| seen.insert(*id));
+
         let relevance = args["relevance"].as_str().unwrap_or("irrelevant");
         let outcome = args["outcome"].as_str().unwrap_or("no_action_needed");
         let query = args["query"].as_str().unwrap_or("");
@@ -4848,11 +4856,12 @@ impl McpHandler {
 
         let total_delta = mass_delta + outcome_bonus;
         let mut affected = 0usize;
+        let gateway = self.engine.scheduler.gateway_handle();
         for &id in &ids {
-            let had_tetra = self.engine.space.get_tetrahedron(id).is_some();
-            if !had_tetra {
+            let Some(before) = self.engine.space.get_tetrahedron(id) else {
                 continue;
-            }
+            };
+            let old_labels = before.data.labels.clone();
 
             let _ = self.engine.space.update_mass(id, total_delta);
             if let Some(t) = self.engine.space.get_tetrahedron(id) {
@@ -4879,6 +4888,7 @@ impl McpHandler {
                         .labels
                         .retain(|l| l != "outdated" && l != "superseded");
                 }
+                let labels_changed = payload.labels != old_labels;
                 let _ = self.engine.space.update_payload(id, payload.clone());
                 let _ = self
                     .engine
@@ -4886,13 +4896,15 @@ impl McpHandler {
                     .storage_handle()
                     .update_importance(id, final_delta);
                 // 管道完整性：is_correction 和 is_restored 都改变标签，都需要持久化
-                if is_correction || is_restored {
+                if labels_changed {
                     let _ = self
                         .engine
                         .scheduler
                         .storage_handle()
                         .update_labels(id, &payload.labels);
+                    gateway.update_label_index(id, &old_labels, &payload.labels);
                 }
+                gateway.mark_dirty(id);
                 tracing::info!(
                     "[Feedback] id={} importance {:.2} -> {:.2}{}",
                     id,
@@ -4907,6 +4919,69 @@ impl McpHandler {
             }
 
             affected += 1;
+        }
+
+        // Retrieval-quality → graph: co-retrieved highly_relevant memories reinforce
+        // existing edges or form a light SimilarTo bridge so next PPR/multi_hop prefers them.
+        let mut edges_reinforced = 0usize;
+        let mut edges_created = 0usize;
+        if matches!(relevance, "highly_relevant" | "partially_relevant") && ids.len() >= 2 {
+            let kg = self.engine.scheduler.kg_handle();
+            let strength = if relevance == "highly_relevant" {
+                0.65
+            } else {
+                0.45
+            };
+            let mut pairs: Vec<(u64, u64)> = Vec::new();
+            for w in ids.windows(2) {
+                pairs.push((w[0], w[1]));
+            }
+            // Dense clique only for small result sets to keep O(n^2) bounded.
+            if ids.len() <= 5 {
+                for i in 0..ids.len() {
+                    for j in (i + 1)..ids.len() {
+                        let a = ids[i];
+                        let b = ids[j];
+                        if !pairs
+                            .iter()
+                            .any(|(x, y)| (*x == a && *y == b) || (*x == b && *y == a))
+                        {
+                            pairs.push((a, b));
+                        }
+                    }
+                }
+            }
+            let before_hits: std::collections::HashMap<(u64, u64), u16> = kg
+                .all_relations()
+                .into_iter()
+                .map(|r| {
+                    let key = if r.source < r.target {
+                        (r.source, r.target)
+                    } else {
+                        (r.target, r.source)
+                    };
+                    (key, r.hits)
+                })
+                .collect();
+            for &(a, b) in &pairs {
+                if a == b {
+                    continue;
+                }
+                if self.engine.space.get_tetrahedron(a).is_none()
+                    || self.engine.space.get_tetrahedron(b).is_none()
+                {
+                    continue;
+                }
+                let key = if a < b { (a, b) } else { (b, a) };
+                let existed = before_hits.contains_key(&key);
+                if existed {
+                    kg.reinforce_edges(&[(a, b)]);
+                    edges_reinforced += 1;
+                } else {
+                    kg.add_relation(a, b, super::knowledge::RelationType::SimilarTo, strength);
+                    edges_created += 1;
+                }
+            }
         }
 
         if !notes.is_empty() || !query.is_empty() {
@@ -4925,17 +5000,16 @@ impl McpHandler {
         }
 
         tracing::info!(
-            "[Feedback] relevance={} outcome={} ids={:?} mass_delta={:.3} importance_delta={:.3} affected={}",
-            relevance, outcome, ids, total_delta, importance_delta, affected
+            "[Feedback] relevance={} outcome={} ids={:?} mass_delta={:.3} importance_delta={:.3} affected={} edges_reinforced={} edges_created={}",
+            relevance, outcome, ids, total_delta, importance_delta, affected, edges_reinforced, edges_created
         );
 
-        // 智能突破3: concept_link — 用户标注"A和B相关"时直接建KG边
-        // 用户反馈真正塑造知识结构 → 下次 multi_hop 检索就能跨概念关联
+        // concept_link — schema uses from_id/to_id; accept legacy a/b for compatibility.
         let mut links_formed = 0usize;
         if let Some(links) = args["concept_links"].as_array() {
-            for link in links {
-                let id_a = link["a"].as_u64();
-                let id_b = link["b"].as_u64();
+            for link in links.iter().take(MAX_CONCEPT_LINKS) {
+                let id_a = link["from_id"].as_u64().or_else(|| link["a"].as_u64());
+                let id_b = link["to_id"].as_u64().or_else(|| link["b"].as_u64());
                 let relation = link["relation"].as_str().unwrap_or("similar");
                 if let (Some(a), Some(b)) = (id_a, id_b) {
                     if a != b
@@ -4969,6 +5043,8 @@ impl McpHandler {
                 "importance_adjustment": importance_delta,
                 "feedback_learned": !notes.is_empty() || !query.is_empty(),
                 "concept_links_formed": links_formed,
+                "edges_reinforced": edges_reinforced,
+                "edges_created": edges_created,
             }),
         )
     }
@@ -6646,6 +6722,129 @@ mod tests {
             params: None,
         });
         assert!(resp.error.is_none());
+    }
+
+    fn identity_ritual(h: &McpHandler) {
+        for step in 1..=5 {
+            let val = if step == 1 { "FeedbackAgent" } else { "test" };
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            );
+            h.process_json(&raw);
+        }
+        h.process_json(
+            r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#,
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_feedback_submit_creates_edges_and_accepts_from_id() {
+        let dir = std::env::temp_dir().join(format!("epicode-fb-{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mut eng = Engine::with_data_dir(dir.clone());
+        eng.start();
+        let engine = Arc::new(eng);
+        let h = McpHandler::new(engine.clone());
+        identity_ritual(&h);
+
+        let c1 = h.process_json(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"alpha feedback seed memory about SQLite WAL","labels":["db","sqlite"]}}}"#,
+        );
+        let c2 = h.process_json(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"beta feedback seed memory about embedded databases","labels":["db","embedded"]}}}"#,
+        );
+        assert!(c1.contains("created") || c1.contains("exists"), "c1={c1}");
+        assert!(c2.contains("created") || c2.contains("exists"), "c2={c2}");
+
+        let ids: Vec<u64> = engine
+            .space
+            .all_tetrahedrons()
+            .into_iter()
+            .filter(|t| t.data.content.contains("feedback seed"))
+            .map(|t| t.id)
+            .collect();
+        assert!(ids.len() >= 2, "need two seed memories, got {ids:?}");
+        let a = ids[0];
+        let b = ids[1];
+        let before_imp = engine
+            .space
+            .get_tetrahedron(a)
+            .map(|t| t.data.importance)
+            .unwrap_or(0.0);
+
+        let fb = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{{"name":"feedback_submit","arguments":{{"memory_ids":[{a},{b}],"relevance":"highly_relevant","outcome":"task_completed","query":"sqlite embedded","concept_links":[{{"from_id":{a},"to_id":{b},"relation":"related"}}]}}}}}}"#
+        );
+        let out = h.process_json(&fb);
+        assert!(
+            out.contains("\"edges_created\"") || out.contains("edges_created"),
+            "output missing edges_created: {out}"
+        );
+        assert!(
+            out.contains("\"concept_links_formed\":1") || out.contains("concept_links_formed\": 1"),
+            "from_id/to_id must form a link: {out}"
+        );
+        // Either reinforced existing or created co-retrieval SimilarTo.
+        assert!(
+            out.contains("\"edges_created\":1")
+                || out.contains("\"edges_reinforced\":1")
+                || out.contains("edges_created\": 1")
+                || out.contains("edges_reinforced\": 1"),
+            "expected retrieval-quality edge update: {out}"
+        );
+        let after_imp = engine
+            .space
+            .get_tetrahedron(a)
+            .map(|t| t.data.importance)
+            .unwrap_or(0.0);
+        assert!(
+            after_imp > before_imp,
+            "highly_relevant+task_completed should bump importance ({before_imp} -> {after_imp})"
+        );
+        let rels = engine.scheduler.kg_handle().all_relations();
+        assert!(
+            rels.iter()
+                .any(|r| { (r.source == a && r.target == b) || (r.source == b && r.target == a) }),
+            "expected KG edge between {a} and {b}, got {rels:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn mcp_feedback_submit_accepts_legacy_ab_concept_links() {
+        let dir = std::env::temp_dir().join(format!("epicode-fb-ab-{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mut eng = Engine::with_data_dir(dir.clone());
+        eng.start();
+        let engine = Arc::new(eng);
+        let h = McpHandler::new(engine.clone());
+        identity_ritual(&h);
+        h.process_json(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"legacy link memory one","labels":["legacy"]}}}"#,
+        );
+        h.process_json(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_create","arguments":{"content":"legacy link memory two","labels":["legacy"]}}}"#,
+        );
+        let ids: Vec<u64> = engine
+            .space
+            .all_tetrahedrons()
+            .into_iter()
+            .filter(|t| t.data.content.contains("legacy link memory"))
+            .map(|t| t.id)
+            .collect();
+        assert!(ids.len() >= 2);
+        let a = ids[0];
+        let b = ids[1];
+        let fb = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{{"name":"feedback_submit","arguments":{{"memory_ids":[{a}],"relevance":"partially_relevant","outcome":"no_action_needed","concept_links":[{{"a":{a},"b":{b},"relation":"similar"}}]}}}}}}"#
+        );
+        let out = h.process_json(&fb);
+        assert!(
+            out.contains("\"concept_links_formed\":1") || out.contains("concept_links_formed\": 1"),
+            "legacy a/b links must still work: {out}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
