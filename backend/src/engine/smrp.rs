@@ -213,10 +213,18 @@ pub fn status(engine: &Engine) -> serde_json::Value {
     };
     let tc = engine.space().tetra_count();
     let energy = engine.scheduler().api_stats().energy;
-    serde_json::json!({
+    let mut status = serde_json::json!({
         "identity": id_json,
         "space": {"memories": tc, "energy": (energy * 100.0).round() / 100.0}
-    })
+    });
+    // Spike S2: card meta only when EPICODE_MEMCARD=1
+    if crate::engine::memcard::memcard_enabled() {
+        status["memcards"] = serde_json::json!({
+            "count": engine.memcards.count(),
+            "cards": engine.memcards.meta_all(),
+        });
+    }
+    status
 }
 
 /// SMRP schema 版本 — 信封与协议卡统一引用, 升级只改一处(协议进化锚点)
@@ -391,11 +399,183 @@ pub fn recall_data(
     })
 }
 
+/// Default content truncation for Slim Envelope (chars).
+pub const SLIM_MAX_CONTENT_CHARS: usize = 280;
+
+/// Map provenance sources → Slim `why` enum.
+pub fn why_from_sources(sources: &[String]) -> &'static str {
+    let joined: Vec<&str> = sources.iter().map(|s| s.as_str()).collect();
+    if joined.contains(&"skill") {
+        return "skill";
+    }
+    if joined.iter().any(|s| *s == "profile" || *s == "memcard") {
+        return "profile";
+    }
+    if joined
+        .iter()
+        .any(|s| matches!(*s, "kg" | "kg-ppr" | "graph"))
+    {
+        return "graph";
+    }
+    if joined
+        .iter()
+        .any(|s| matches!(*s, "bm25" | "exact" | "lexical" | "label"))
+    {
+        return "lexical";
+    }
+    if joined
+        .iter()
+        .any(|s| matches!(*s, "vector" | "semantic" | "hybrid" | "rerank"))
+    {
+        return "semantic";
+    }
+    "semantic"
+}
+
+fn truncate_str(s: &str, max_chars: usize) -> (String, bool) {
+    if max_chars == 0 {
+        return (s.to_string(), false);
+    }
+    let char_len = s.chars().count();
+    if char_len <= max_chars {
+        return (s.to_string(), false);
+    }
+    let truncated: String = s.chars().take(max_chars).collect();
+    (
+        format!("{truncated}…[truncated {char_len}->{max_chars}]"),
+        true,
+    )
+}
+
+fn sources_of(item: &serde_json::Value) -> Vec<String> {
+    match &item["source"] {
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect(),
+        serde_json::Value::String(s) => vec![s.clone()],
+        _ => Vec::new(),
+    }
+}
+
+fn score_of(item: &serde_json::Value) -> f64 {
+    item["similarity"]
+        .as_f64()
+        .or_else(|| item["score"].as_f64())
+        .unwrap_or(0.0)
+}
+
+fn collect_flat_items(data: &serde_json::Value) -> Vec<serde_json::Value> {
+    // Prefer flat results if present; else flatten tiers; else sections.
+    if let Some(arr) = data.get("results").and_then(|v| v.as_array()) {
+        return arr.clone();
+    }
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    if let Some(tiers) = data.get("tiers").and_then(|v| v.as_object()) {
+        for key in ["primary", "hub", "experiential", "contextual"] {
+            if let Some(arr) = tiers.get(key).and_then(|v| v.as_array()) {
+                for item in arr {
+                    let id = item["id"].as_u64().unwrap_or(0);
+                    if seen.insert(id) {
+                        out.push(item.clone());
+                    }
+                }
+            }
+        }
+    }
+    if out.is_empty() {
+        if let Some(sections) = data.get("sections").and_then(|v| v.as_object()) {
+            for arr in sections.values() {
+                if let Some(frags) = arr.as_array() {
+                    for frag in frags {
+                        let id = frag["id"].as_u64().unwrap_or(0);
+                        if seen.insert(id) {
+                            out.push(frag.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Build Slim Envelope from a full search/recall `data` object.
+/// Returns compact `items[]` + `why` + `budget_spent`; no tiers/sections/results.
+pub fn to_slim_envelope(data: &serde_json::Value, max_chars: usize) -> serde_json::Value {
+    let flat = collect_flat_items(data);
+    let mut items = Vec::with_capacity(flat.len());
+    let mut why_counts: std::collections::BTreeMap<&'static str, usize> =
+        std::collections::BTreeMap::new();
+    for item in &flat {
+        let sources = sources_of(item);
+        let why = why_from_sources(&sources);
+        *why_counts.entry(why).or_insert(0) += 1;
+        let raw_content = item["content"].as_str().unwrap_or("");
+        let (content, truncated) = truncate_str(raw_content, max_chars);
+        let mut slim = serde_json::json!({
+            "id": item["id"],
+            "score": (score_of(item) * 100.0).round() / 100.0,
+            "why": why,
+            "content": content,
+            "source": if sources.is_empty() { serde_json::json!(["unknown"]) } else { serde_json::json!(sources) },
+        });
+        if truncated {
+            slim["content_truncated"] = serde_json::json!(true);
+        }
+        items.push(slim);
+    }
+    let items_json = serde_json::Value::Array(items);
+    let bytes = serde_json::to_vec(&items_json)
+        .map(|v| v.len())
+        .unwrap_or(0);
+    let est_tokens = bytes.div_ceil(4);
+    let mut why_summary = serde_json::Map::new();
+    for (k, v) in why_counts {
+        why_summary.insert(k.to_string(), serde_json::json!(v));
+    }
+    let mut out = serde_json::json!({
+        "items": items_json,
+        "why": why_summary,
+        "budget_spent": {
+            "bytes": bytes,
+            "est_tokens": est_tokens,
+            "items": flat.len(),
+            "max_content_chars": max_chars,
+        },
+        "envelope": "slim",
+    });
+    // Preserve useful scalar query metadata when present.
+    for key in [
+        "query",
+        "count",
+        "total_found",
+        "offset",
+        "depth",
+        "seed_count",
+        "associated_count",
+        "total_fragments",
+    ] {
+        if let Some(v) = data.get(key) {
+            out[key] = v.clone();
+        }
+    }
+    out
+}
+
+/// Estimate JSON byte size / tokens of a data payload (for benchmarks).
+pub fn estimate_payload_size(data: &serde_json::Value) -> (usize, usize) {
+    let bytes = serde_json::to_vec(data).map(|v| v.len()).unwrap_or(0);
+    (bytes, bytes.div_ceil(4))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        paginate_search_results, search_score_base, search_sources, tier_recall, tier_search,
-        tier_search_for_mode,
+        estimate_payload_size, paginate_search_results, search_score_base, search_sources,
+        tier_recall, tier_search, tier_search_for_mode, to_slim_envelope, why_from_sources,
+        SLIM_MAX_CONTENT_CHARS,
     };
     use crate::engine::search_engine::SearchMode;
 
@@ -498,5 +678,42 @@ mod tests {
             search_score_base(hybrid),
             "hybrid_vector_similarity + bm25 + intent_rerank"
         );
+    }
+
+    #[test]
+    fn why_from_sources_maps_provenance() {
+        assert_eq!(why_from_sources(&["bm25".into()]), "lexical");
+        assert_eq!(why_from_sources(&["vector".into()]), "semantic");
+        assert_eq!(why_from_sources(&["kg".into()]), "graph");
+        assert_eq!(why_from_sources(&["skill".into()]), "skill");
+    }
+
+    #[test]
+    fn slim_envelope_drops_duplicates_and_truncates() {
+        let long = "α".repeat(400);
+        let full = serde_json::json!({
+            "query": "q",
+            "tiers": {
+                "primary": [{"id": 1, "content": long, "similarity": 0.9, "source": ["vector"]}],
+                "contextual": [{"id": 1, "content": long, "similarity": 0.9, "source": ["vector"]}],
+            },
+            "sections": {"x": [{"id": 1, "content": long}]},
+            "results": [{"id": 1, "content": long, "similarity": 0.9, "source": ["vector"]}],
+            "count": 1,
+        });
+        let slim = to_slim_envelope(&full, 50);
+        assert_eq!(slim["envelope"], "slim");
+        assert!(slim.get("tiers").is_none());
+        assert!(slim.get("sections").is_none());
+        assert!(slim.get("results").is_none());
+        let items = slim["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["why"], "semantic");
+        assert_eq!(items[0]["content_truncated"], true);
+        let (full_b, _) = estimate_payload_size(&full);
+        let (slim_b, _) = estimate_payload_size(&slim);
+        assert!(slim_b < full_b, "slim {slim_b} should beat full {full_b}");
+        assert!(slim_b < full_b / 2 || slim["budget_spent"]["items"] == 1);
+        let _ = SLIM_MAX_CONTENT_CHARS;
     }
 }

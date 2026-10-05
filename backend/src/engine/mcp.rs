@@ -697,7 +697,8 @@ impl McpHandler {
                             "project": { "type": "string", "description": "Filter: project name" },
                             "since_days": { "type": "integer", "description": "Filter: only memories from the last N days" },
                             "mode": { "type": "string", "enum": ["hybrid", "exact", "semantic", "graph", "auto", "fusion"], "default": "hybrid", "description": "Search mode: hybrid (vector+BM25 blend), exact (pure BM25 for identifiers and known phrases), semantic (vector similarity), graph (hybrid-search seeds expanded/reranked with knowledge-graph PPR), auto (routes temporal/aggregation queries to graph and other queries to semantic), fusion (reciprocal-rank fusion of semantic and graph results)." },
-                            "strict_filter": { "type": "boolean", "default": false, "description": "Phase 1: strict filter mode — no semantic backfill, only return exact filter matches. Combine with mode=exact for database-like lookups." }
+                            "strict_filter": { "type": "boolean", "default": false, "description": "Phase 1: strict filter mode — no semantic backfill, only return exact filter matches. Combine with mode=exact for database-like lookups." },
+                            "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "full", "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections/results duplicates). Also enabled by EPICODE_SLIM_ENVELOPE=1." }
                         },
                         "required": ["query"]
                     }
@@ -709,7 +710,8 @@ impl McpHandler {
                         "type": "object",
                         "properties": {
                             "query": { "type": "string", "description": "The recall query" },
-                            "depth": { "type": "integer", "description": "Association depth (default 2, max 3)" }
+                            "depth": { "type": "integer", "description": "Association depth (default 2, max 3)" },
+                            "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "full", "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections duplicates). Also enabled by EPICODE_SLIM_ENVELOPE=1." }
                         },
                         "required": ["query"]
                     }
@@ -1192,6 +1194,36 @@ impl McpHandler {
                 },
             ]
         });
+        // Spike S2: expose blocks_get/set only when EPICODE_MEMCARD=1
+        if super::memcard::memcard_enabled() {
+            if let Some(tools) = result["tools"].as_array_mut() {
+                tools.push(serde_json::json!({
+                    "name": "blocks_get",
+                    "description": "Spike MemCard: get a persona/user/project/working card (≤2KB). Feature-flagged via EPICODE_MEMCARD.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "kind": { "type": "string", "enum": ["persona", "user", "project", "working"] },
+                            "project": { "type": "string", "description": "Optional project scope for project cards" }
+                        },
+                        "required": ["kind"]
+                    }
+                }));
+                tools.push(serde_json::json!({
+                    "name": "blocks_set",
+                    "description": "Spike MemCard: set a persona/user/project/working card (≤2KB, versioned). Feature-flagged via EPICODE_MEMCARD.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "kind": { "type": "string", "enum": ["persona", "user", "project", "working"] },
+                            "content": { "type": "string", "description": "Card content (max 2048 bytes)" },
+                            "project": { "type": "string", "description": "Optional project scope for project cards" }
+                        },
+                        "required": ["kind", "content"]
+                    }
+                }));
+            }
+        }
         let output_schema = Self::smrp_output_schema();
         if let Some(tools) = result["tools"].as_array_mut() {
             for tool in tools {
@@ -1378,6 +1410,8 @@ impl McpHandler {
             "drive_inbox" => self.tool_drive_inbox(&args),
             "drive_ack" => self.tool_drive_ack(&args),
             "memory_forget" => self.tool_memory_forget(&args),
+            "blocks_get" => self.tool_blocks_get(&args),
+            "blocks_set" => self.tool_blocks_set(&args),
             _ => return self.error(id, -32601, &format!("unknown tool: {}", name)),
         };
 
@@ -3381,6 +3415,12 @@ impl McpHandler {
                         .collect::<Vec<_>>()
                 };
                 let score_base = super::smrp::search_score_base(search_mode);
+                let adjustments = vec![
+                    serde_json::json!({"kind": "cluster_boost", "delta": 0.08, "applied_to": filter_ids(&notes.cluster_boosted)}),
+                    serde_json::json!({"kind": "importance_boost", "delta": 0.06, "applied_to": filter_ids(&notes.importance_boosted)}),
+                    serde_json::json!({"kind": "access_boost", "delta": 0.04, "applied_to": filter_ids(&notes.access_boosted)}),
+                    serde_json::json!({"kind": "outdated_penalty", "delta": -0.30, "applied_to": filter_ids(&notes.penalized)}),
+                ];
                 let mut data = serde_json::json!({
                     "query": query,
                     "tiers": {
@@ -3395,18 +3435,18 @@ impl McpHandler {
                     "offset": offset,
                     "score_notes": {
                         "base": score_base,
-                        "adjustments": [
-                            {"kind": "cluster_boost", "delta": 0.08, "applied_to": filter_ids(&notes.cluster_boosted)},
-                            {"kind": "importance_boost", "delta": 0.06, "applied_to": filter_ids(&notes.importance_boosted)},
-                            {"kind": "access_boost", "delta": 0.04, "applied_to": filter_ids(&notes.access_boosted)},
-                            {"kind": "outdated_penalty", "delta": -0.30, "applied_to": filter_ids(&notes.penalized)},
-                        ],
+                        "adjustments": adjustments,
                     },
                 });
                 if requested_limit > 200 {
                     data["warning"] = serde_json::json!(
                         "limit capped at 200; request a higher offset to paginate"
                     );
+                }
+                // Spike S1 Slim Envelope (flag/arg); default path unchanged.
+                if super::spike_flags::slim_envelope_requested(args) {
+                    data =
+                        super::smrp::to_slim_envelope(&data, super::smrp::SLIM_MAX_CONTENT_CHARS);
                 }
                 self.smrp_ok("memory_search", data)
             }
@@ -3430,7 +3470,12 @@ impl McpHandler {
         }
         match self.engine.scheduler.api_recall(query, depth) {
             Ok(result) => {
-                let data = super::smrp::recall_data(&self.engine, &result, query, depth);
+                let mut data = super::smrp::recall_data(&self.engine, &result, query, depth);
+                // Spike S1 Slim Envelope (flag/arg); default path unchanged.
+                if super::spike_flags::slim_envelope_requested(args) {
+                    data =
+                        super::smrp::to_slim_envelope(&data, super::smrp::SLIM_MAX_CONTENT_CHARS);
+                }
                 self.smrp_ok("memory_recall", data)
             }
             Err(e) => self.smrp_err("memory_recall", 500, &e),
@@ -4351,6 +4396,67 @@ impl McpHandler {
             labels,
             serde_json::json!({"accomplished": accomplished}),
         )
+    }
+
+    fn tool_blocks_get(&self, args: &serde_json::Value) -> serde_json::Value {
+        if !super::memcard::memcard_enabled() {
+            return self.smrp_err(
+                "blocks_get",
+                403,
+                "MemCard disabled — set EPICODE_MEMCARD=1 to enable",
+            );
+        }
+        let kind = args["kind"].as_str().unwrap_or("");
+        let project = args["project"].as_str();
+        match self.engine.memcards.get_parsed(kind, project) {
+            Ok(Some(card)) => self.smrp_ok(
+                "blocks_get",
+                serde_json::json!({
+                    "kind": card.kind.as_str(),
+                    "content": card.content,
+                    "version": card.version,
+                    "updated_at": card.updated_at,
+                    "project": card.project,
+                    "bytes": card.content.len(),
+                }),
+            ),
+            Ok(None) => self.smrp_ok(
+                "blocks_get",
+                serde_json::json!({
+                    "kind": kind,
+                    "content": null,
+                    "version": 0,
+                    "found": false,
+                }),
+            ),
+            Err(e) => self.smrp_err("blocks_get", 400, &e.to_string()),
+        }
+    }
+
+    fn tool_blocks_set(&self, args: &serde_json::Value) -> serde_json::Value {
+        if !super::memcard::memcard_enabled() {
+            return self.smrp_err(
+                "blocks_set",
+                403,
+                "MemCard disabled — set EPICODE_MEMCARD=1 to enable",
+            );
+        }
+        let kind = args["kind"].as_str().unwrap_or("");
+        let content = args["content"].as_str().unwrap_or("").to_string();
+        let project = args["project"].as_str();
+        match self.engine.memcards.set_parsed(kind, content, project) {
+            Ok(card) => self.smrp_ok(
+                "blocks_set",
+                serde_json::json!({
+                    "kind": card.kind.as_str(),
+                    "version": card.version,
+                    "updated_at": card.updated_at,
+                    "bytes": card.content.len(),
+                    "project": card.project,
+                }),
+            ),
+            Err(e) => self.smrp_err("blocks_set", 400, &e.to_string()),
+        }
     }
 
     fn tool_space_stats(&self) -> serde_json::Value {
@@ -6167,6 +6273,7 @@ impl McpHandler {
 
 #[cfg(test)]
 mod tests {
+    static SPIKE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     use super::*;
     use crate::engine::Engine;
 
@@ -6699,5 +6806,343 @@ mod tests {
 
         let out2 = h.process_json(ctx_raw);
         assert!(out2.contains("duplicates_skipped"));
+    }
+
+    /// Spike S1: verbosity=slim must shrink JSON vs default full envelope on same fixture.
+    #[tokio::test]
+    async fn spike_s1_slim_envelope_beats_baseline_size() {
+        let mut eng = Engine::new();
+        eng.start();
+        let h = McpHandler::new(Arc::new(eng));
+        for step in 1..=5 {
+            let val = if step == 1 { "SlimBenchAgent" } else { "test" };
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            );
+            h.process_json(&raw);
+        }
+        h.process_json(r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#);
+
+        // Long contents to amplify duplication cost of tiers+sections+results.
+        let long = "Lorem ipsum dolor sit amet, tetrahedral memory clustering. ".repeat(40);
+        for i in 0..8 {
+            let content = format!("{long} fixture-{i}-unique-token-slim-bench");
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"memory_create","arguments":{{"content":{},"labels":["spike","slim"]}}}}}}"#,
+                serde_json::to_string(&content).unwrap()
+            );
+            h.process_json(&raw);
+        }
+
+        let full_search = h.process_json(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_search","arguments":{"query":"tetrahedral memory clustering slim-bench","limit":10}}}"#,
+        );
+        let slim_search = h.process_json(
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory_search","arguments":{"query":"tetrahedral memory clustering slim-bench","limit":10,"verbosity":"slim"}}}"#,
+        );
+        let full_v: serde_json::Value = serde_json::from_str(&full_search).unwrap();
+        let slim_v: serde_json::Value = serde_json::from_str(&slim_search).unwrap();
+        let full_data = &full_v["result"]["structuredContent"]["data"];
+        let slim_data = &slim_v["result"]["structuredContent"]["data"];
+
+        assert!(full_data.get("tiers").is_some() || full_data.get("results").is_some());
+        assert_eq!(slim_data["envelope"], "slim");
+        assert!(slim_data.get("items").is_some());
+        assert!(slim_data.get("tiers").is_none());
+        assert!(slim_data.get("results").is_none());
+        assert!(slim_data.get("sections").is_none());
+        assert!(slim_data.get("budget_spent").is_some());
+
+        let (full_b, full_t) = super::super::smrp::estimate_payload_size(full_data);
+        let (slim_b, slim_t) = super::super::smrp::estimate_payload_size(slim_data);
+        assert!(
+            slim_b < full_b,
+            "slim search {slim_b}B should beat full {full_b}B"
+        );
+        // Strong win: expect ≤40% of baseline on this duplicated fixture.
+        assert!(
+            slim_b * 100 / full_b.max(1) <= 40,
+            "slim search ratio {}% of full (want ≤40%)",
+            slim_b * 100 / full_b.max(1)
+        );
+        eprintln!(
+            "[spike-s1] memory_search full={full_b}B/~{full_t}tok slim={slim_b}B~{slim_t}tok ratio={:.1}%",
+            slim_b as f64 * 100.0 / full_b as f64
+        );
+
+        let full_recall = h.process_json(
+            r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"tetrahedral memory clustering slim-bench","depth":2}}}"#,
+        );
+        let slim_recall = h.process_json(
+            r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"tetrahedral memory clustering slim-bench","depth":2,"verbosity":"slim"}}}"#,
+        );
+        let fr: serde_json::Value = serde_json::from_str(&full_recall).unwrap();
+        let sr: serde_json::Value = serde_json::from_str(&slim_recall).unwrap();
+        let frd = &fr["result"]["structuredContent"]["data"];
+        let srd = &sr["result"]["structuredContent"]["data"];
+        assert!(frd.get("tiers").is_some());
+        assert!(frd.get("sections").is_some());
+        assert_eq!(srd["envelope"], "slim");
+        assert!(srd.get("sections").is_none());
+        assert!(srd.get("tiers").is_none());
+        let (frb, frt) = super::super::smrp::estimate_payload_size(frd);
+        let (srb, srt) = super::super::smrp::estimate_payload_size(srd);
+        assert!(srb < frb, "slim recall {srb}B should beat full {frb}B");
+        eprintln!(
+            "[spike-s1] memory_recall full={frb}B~{frt}tok slim={srb}B~{srt}tok ratio={:.1}%",
+            srb as f64 * 100.0 / frb as f64
+        );
+    }
+
+    #[tokio::test]
+    async fn spike_s2_blocks_require_flag_and_roundtrip() {
+        let _guard = SPIKE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("EPICODE_MEMCARD");
+
+        let mut eng = Engine::new();
+        eng.start();
+        let h = McpHandler::new(Arc::new(eng));
+        let list_off = h.process_json(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
+        assert!(!list_off.contains("blocks_get"));
+        let denied = h.process_json(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"blocks_set","arguments":{"kind":"persona","content":"x"}}}"#,
+        );
+        assert!(
+            denied.contains("403")
+                || denied.contains("MemCard disabled")
+                || denied.contains("unknown tool")
+                || denied.contains("identity_not_confirmed")
+        );
+
+        std::env::set_var("EPICODE_MEMCARD", "1");
+        let tmp = std::env::temp_dir().join(format!(
+            "epicode-spike-s2-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let mut eng2 = Engine::with_data_dir(tmp);
+        eng2.start();
+        let h2 = McpHandler::new(Arc::new(eng2));
+        for step in 1..=5 {
+            let val = if step == 1 { "MemCardAgent" } else { "test" };
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            );
+            h2.process_json(&raw);
+        }
+        h2.process_json(
+            r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#,
+        );
+
+        let list_on = h2.process_json(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
+        assert!(list_on.contains("blocks_get"));
+        assert!(list_on.contains("blocks_set"));
+
+        let set_out = h2.process_json(
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"blocks_set","arguments":{"kind":"user","content":"prefers dark mode and terse answers"}}}"#,
+        );
+        let set_v: serde_json::Value = serde_json::from_str(&set_out).unwrap();
+        assert_eq!(
+            set_v["result"]["structuredContent"]["data"]["version"], 1,
+            "set_out={set_out}"
+        );
+        assert!(
+            set_v["result"]["structuredContent"]["status"]
+                .get("memcards")
+                .is_some(),
+            "status should include memcard meta when flag on"
+        );
+
+        let get_out = h2.process_json(
+            r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"blocks_get","arguments":{"kind":"user"}}}"#,
+        );
+        let get_v: serde_json::Value = serde_json::from_str(&get_out).unwrap();
+        assert_eq!(
+            get_v["result"]["structuredContent"]["data"]["content"],
+            "prefers dark mode and terse answers"
+        );
+        assert_eq!(get_v["result"]["structuredContent"]["data"]["version"], 1);
+
+        std::env::remove_var("EPICODE_MEMCARD");
+    }
+
+    /// Round-2 S2: MemCard preference A/B vs memory_search under long noise.
+    #[tokio::test]
+    async fn spike_s2_memcard_preference_ab_vs_search() {
+        let _guard = SPIKE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("EPICODE_MEMCARD", "1");
+
+        let tmp = std::env::temp_dir().join(format!(
+            "epicode-spike-s2-pref-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let mut eng = Engine::with_data_dir(tmp);
+        eng.start();
+        let h = McpHandler::new(Arc::new(eng));
+        for step in 1..=5 {
+            let val = if step == 1 {
+                "PrefHarnessAgent"
+            } else {
+                "test"
+            };
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            );
+            h.process_json(&raw);
+        }
+        h.process_json(
+            r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#,
+        );
+
+        let card = r#"User preferences:
+1. UI theme: dark mode
+2. Preferred editor: neovim
+3. Code comments language: 中文
+4. Shell: fish
+5. Package manager: pnpm
+6. Test runner: cargo nextest
+7. Commit style: conventional commits
+8. Reply length: terse
+9. Keyboard layout: colemak
+10. Favorite snacks: 辣条
+"#;
+        let qa: Vec<(&str, &[&str])> = vec![
+            ("What UI theme does the user prefer?", &["dark"]),
+            ("Which editor does the user prefer?", &["neovim"]),
+            ("What language for code comments?", &["中文"]),
+            ("Which shell does the user use?", &["fish"]),
+            ("Preferred package manager?", &["pnpm"]),
+            ("What test runner is preferred?", &["nextest"]),
+            ("Commit message style?", &["conventional"]),
+            ("Does the user want long or terse replies?", &["terse"]),
+            ("Keyboard layout preference?", &["colemak"]),
+            ("Favorite snacks?", &["辣条"]),
+        ];
+
+        // Seed MemCard.
+        let set_raw = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"blocks_set","arguments":{{"kind":"user","content":{}}}}}}}"#,
+            serde_json::to_string(card).unwrap()
+        );
+        let set_out = h.process_json(&set_raw);
+        let set_v: serde_json::Value = serde_json::from_str(&set_out).unwrap();
+        assert_eq!(
+            set_v["result"]["structuredContent"]["data"]["version"], 1,
+            "blocks_set failed: {set_out}"
+        );
+
+        // Seed SAME prefs as memories + long distractors that share question keywords.
+        for (i, line) in card.lines().skip(1).enumerate() {
+            let l = line.trim();
+            if l.is_empty() {
+                continue;
+            }
+            let content = format!("[preference] {l}");
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{{"name":"memory_create","arguments":{{"content":{},"labels":["preference","spike-pref"]}}}}}}"#,
+                serde_json::to_string(&content).unwrap()
+            );
+            h.process_json(&raw);
+            let _ = i;
+        }
+        let noise = "Lorem ipsum editor theme shell package manager test runner commit keyboard snacks reply language comments UI user prefers vscode emacs bash npm yarn jest mocha long verbose qwerty chocolate cookies. ".repeat(40);
+        for i in 0..10 {
+            let content = format!(
+                "{noise} distractor-{i}: UI theme light mode; editor vscode; shell bash; package manager npm; test runner jest; commit style freeform; reply length verbose; keyboard qwerty; snacks chocolate; comments English."
+            );
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{{"name":"memory_create","arguments":{{"content":{},"labels":["noise","spike-pref"]}}}}}}"#,
+                serde_json::to_string(&content).unwrap()
+            );
+            h.process_json(&raw);
+        }
+
+        // Baseline: answer only via memory_search top-k (flag MemCard still on for blocks, but we ignore card).
+        let mut base_hits = 0usize;
+        let mut base_bytes = 0usize;
+        for (q, expected) in &qa {
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{{"name":"memory_search","arguments":{{"query":{},"limit":5}}}}}}"#,
+                serde_json::to_string(q).unwrap()
+            );
+            let out = h.process_json(&raw);
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            let data = &v["result"]["structuredContent"]["data"];
+            let (b, _) = super::super::smrp::estimate_payload_size(data);
+            base_bytes += b;
+            let mut blob = String::new();
+            if let Some(results) = data.get("results").and_then(|r| r.as_array()) {
+                for item in results.iter().take(5) {
+                    if let Some(c) = item.get("content").and_then(|c| c.as_str()) {
+                        blob.push_str(c);
+                        blob.push('\n');
+                    }
+                }
+            }
+            if super::super::memcard::pref_answer_hits(&blob, expected) {
+                base_hits += 1;
+            }
+        }
+
+        // MemCard path: answer from blocks_get ONLY (no vector recall).
+        let get_out = h.process_json(
+            r#"{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"blocks_get","arguments":{"kind":"user"}}}"#,
+        );
+        let get_v: serde_json::Value = serde_json::from_str(&get_out).unwrap();
+        let card_content = get_v["result"]["structuredContent"]["data"]["content"]
+            .as_str()
+            .expect("card content")
+            .to_string();
+        let mut mem_hits = 0usize;
+        let mut mem_bytes = 0usize;
+        for (q, expected) in &qa {
+            let ans = super::super::memcard::answer_prefs_from_card(&card_content, q);
+            mem_bytes += ans.len();
+            // Also count structured blocks_get envelope once amortized — use answer text bytes
+            // (card is the only retrieval surface).
+            if super::super::memcard::pref_answer_hits(&ans, expected) {
+                mem_hits += 1;
+            }
+        }
+        // Include one blocks_get envelope for fair "tool return" accounting.
+        let (get_b, _) = super::super::smrp::estimate_payload_size(
+            &get_v["result"]["structuredContent"]["data"],
+        );
+        let mem_bytes_with_envelope = mem_bytes + get_b;
+
+        eprintln!(
+            "[spike-s2-ab] memcard hits={mem_hits}/10 answer_bytes={mem_bytes} (+envelope {get_b} => {mem_bytes_with_envelope}); baseline hits={base_hits}/10 search_bytes={base_bytes}; ratio={:.1}%",
+            mem_bytes_with_envelope as f64 * 100.0 / base_bytes.max(1) as f64
+        );
+
+        assert_eq!(mem_hits, 10, "MemCard must answer 10/10 from blocks only");
+        assert!(
+            mem_hits >= base_hits,
+            "MemCard accuracy {mem_hits} must be ≥ baseline {base_hits}"
+        );
+        assert!(
+            mem_bytes_with_envelope * 100 / base_bytes.max(1) <= 20,
+            "MemCard bytes {mem_bytes_with_envelope} should be ≤20% of baseline {base_bytes}"
+        );
+        if base_hits < 10 {
+            eprintln!(
+                "[spike-s2-ab] baseline missed {} prefs — long distractors drowned preference memories",
+                10 - base_hits
+            );
+        }
+
+        std::env::remove_var("EPICODE_MEMCARD");
     }
 }
