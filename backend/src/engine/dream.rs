@@ -27,6 +27,10 @@ impl DreamEngine {
             .as_secs() as f64;
 
         for t in &tetras {
+            // Live-memory floor policy: do not rewrite enforced or already-tombstoned rows.
+            if t.data.enforced || t.data.valid_to.is_some() {
+                continue;
+            }
             let access = *access_counts.get(&t.id).unwrap_or(&0) as f64;
             let age_days = (now_ts - t.data.timestamp as f64) / 86400.0;
             let mut new_importance = t.data.importance;
@@ -53,10 +57,11 @@ impl DreamEngine {
             }
 
             if content_lower.contains("测试") && content_lower.len() < 30 {
-                new_importance = new_importance.min(0.3);
+                new_importance = new_importance.min(super::governor::IMPORTANCE_FLOOR);
             }
 
-            new_importance = new_importance.clamp(0.1, 3.0);
+            // Constitutional live floor (was 0.1 — conflicted with governor IMPORTANCE_FLOOR=0.3)
+            new_importance = super::governor::clamp_live_importance(new_importance);
             if (new_importance - t.data.importance).abs() > 0.01 {
                 if let Some(mut tetra) = space.get_tetrahedron(t.id) {
                     tetra.data.importance = new_importance;
@@ -565,5 +570,78 @@ mod tests {
             jq.data.labels.iter().any(|l| l == "quarantine"),
             "junk not labeled quarantine"
         );
+    }
+
+    #[test]
+    fn recompute_importance_respects_constitutional_floor() {
+        use crate::engine::governor::IMPORTANCE_FLOOR;
+        let space = Space::new();
+        let now = chrono::Utc::now().timestamp();
+        // Old, never-accessed memory — dream path would previously clamp to 0.1
+        let core = Point3::new(0.0, 0.0, 0.0);
+        let pos = Tetrahedron::compute_vertices(core);
+        let t = Tetrahedron {
+            id: 0,
+            vertex_ids: [0; 4],
+            core,
+            data: MemoryPayload {
+                content: "minor note without keywords".to_string(),
+                timestamp: now - 86400 * 45,
+                importance: 0.35,
+                access_count: 0,
+                ..Default::default()
+            },
+            mass: 1.0,
+        };
+        let id = space.add_tetrahedron(&t, &pos).unwrap();
+        let counts = std::collections::HashMap::new();
+        let _ = DreamEngine::recompute_importance(&space, &counts);
+        let after = space.get_tetrahedron(id).unwrap();
+        assert!(
+            after.data.importance + 1e-9 >= IMPORTANCE_FLOOR,
+            "dream recompute must not go below IMPORTANCE_FLOOR, got {}",
+            after.data.importance
+        );
+    }
+
+    #[test]
+    fn recompute_skips_enforced_and_tombstoned() {
+        let space = Space::new();
+        let now = chrono::Utc::now().timestamp();
+        for (i, (enforced, valid_to, imp)) in [(true, None, 0.5), (false, Some(now - 10), 0.5)]
+            .into_iter()
+            .enumerate()
+        {
+            let core = Point3::new(i as f64, 1.0, 0.0);
+            let pos = Tetrahedron::compute_vertices(core);
+            let t = Tetrahedron {
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: MemoryPayload {
+                    content: format!("protected row {}", i),
+                    timestamp: now - 86400 * 45,
+                    importance: imp,
+                    access_count: 0,
+                    enforced,
+                    valid_to,
+                    ..Default::default()
+                },
+                mass: 1.0,
+            };
+            space.add_tetrahedron(&t, &pos).unwrap();
+        }
+        let before: Vec<_> = space
+            .all_tetrahedrons()
+            .into_iter()
+            .map(|t| (t.id, t.data.importance))
+            .collect();
+        let counts = std::collections::HashMap::new();
+        let n = DreamEngine::recompute_importance(&space, &counts);
+        assert_eq!(n, 0, "enforced/tombstoned must not be rewritten");
+        for (id, imp) in before {
+            let after = space.get_tetrahedron(id).unwrap();
+            assert!((after.data.importance - imp).abs() < 1e-9);
+        }
     }
 }
