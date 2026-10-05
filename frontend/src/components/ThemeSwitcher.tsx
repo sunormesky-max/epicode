@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { THEMES, readStoredTheme, setTheme, type ThemeId } from '@/lib/themes';
+import { THEMES, activeTheme, setTheme, themeName, type ThemeId } from '@/lib/themes';
+import { useI18nContext } from '@/i18n/useI18n';
 
 export default function ThemeSwitcher({ compact = false }: { compact?: boolean }) {
+  const { lang } = useI18nContext();
   const [current, setCurrent] = useState<ThemeId>('synapse');
   useEffect(() => {
-    setCurrent(readStoredTheme());
+    setCurrent(activeTheme());
     const onChange = (event: Event) => {
       const next = (event as CustomEvent<ThemeId>).detail;
       if (next) setCurrent(next);
@@ -17,7 +19,7 @@ export default function ThemeSwitcher({ compact = false }: { compact?: boolean }
     <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       {!compact && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.12em', color: 'var(--text-tertiary)' }}>THEME</span>}
       <select
-        aria-label="主题"
+        aria-label={lang === 'zh' ? '主题' : 'Theme'}
         value={current}
         onChange={(event) => {
           const next = event.target.value as ThemeId;
@@ -35,7 +37,7 @@ export default function ThemeSwitcher({ compact = false }: { compact?: boolean }
         }}
       >
         {THEMES.map((theme) => (
-          <option key={theme.id} value={theme.id}>{theme.name}</option>
+          <option key={theme.id} value={theme.id}>{themeName(theme, lang)}</option>
         ))}
       </select>
     </label>

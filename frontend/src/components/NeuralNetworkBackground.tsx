@@ -19,9 +19,23 @@ interface SNode { x: number; y: number; vx: number; vy: number; r: number; ph: n
 interface Rise { x: number; y: number; vy: number; lf: number; mlf: number; r: number }
 interface Pulse { s: number; p: number; sp: number }
 
-const TEAL = { r: 62, g: 207, b: 174 };
-const TEAL_HI = { r: 151, g: 235, b: 214 };
-const VIOLET = { r: 139, g: 126, b: 200 };
+interface RGB { r: number; g: number; b: number }
+
+// 默认调色板(突触青/潜意识紫),即原硬编码值。主题可通过 CSS 变量覆盖:
+// --nn-primary(连线/节点光晕)、--nn-hi(节点/脉冲亮点)、--nn-secondary(潜意识场)、--nn-fade(渐变透明端)。
+// 变量缺失(旧主题)时回退到这里的值,像素与改动前一致。
+const TEAL_DEFAULT: RGB = { r: 62, g: 207, b: 174 };
+const TEAL_HI_DEFAULT: RGB = { r: 151, g: 235, b: 214 };
+const VIOLET_DEFAULT: RGB = { r: 139, g: 126, b: 200 };
+const FADE_DEFAULT: RGB = { r: 0, g: 0, b: 0 };
+
+function readRgbVar(name: string, fallback: RGB): RGB {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const m = /^#([0-9a-f]{6})$/i.exec(raw);
+  if (!m) return fallback;
+  const n = parseInt(m[1], 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
 
 export default function NeuralNetworkBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -42,6 +56,14 @@ export default function NeuralNetworkBackground() {
     if (!ctx) return;
 
     let W = 0, H = 0, horizon = 0;
+    let TEAL = TEAL_DEFAULT, TEAL_HI = TEAL_HI_DEFAULT, VIOLET = VIOLET_DEFAULT, FADE = FADE_DEFAULT;
+    function refreshPalette() {
+      TEAL = readRgbVar('--nn-primary', TEAL_DEFAULT);
+      TEAL_HI = readRgbVar('--nn-hi', TEAL_HI_DEFAULT);
+      VIOLET = readRgbVar('--nn-secondary', VIOLET_DEFAULT);
+      FADE = readRgbVar('--nn-fade', FADE_DEFAULT);
+    }
+    refreshPalette();
     let cn: CNode[] = [], syn: { a: number; b: number; st: number; pulses: Pulse[] }[] = [];
     let sub: SNode[] = [], rises: Rise[] = [];
     const probes: { x: number; y: number; lf: number }[] = [];
@@ -239,7 +261,7 @@ export default function NeuralNetworkBackground() {
         if (n.lit > 0.1) {
           const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r * 8);
           g.addColorStop(0, `rgba(${TEAL.r},${TEAL.g},${TEAL.b},${n.lit * 0.3})`);
-          g.addColorStop(1, 'rgba(0,0,0,0)');
+          g.addColorStop(1, `rgba(${FADE.r},${FADE.g},${FADE.b},0)`);
           ctx.fillStyle = g;
           ctx.beginPath(); ctx.arc(n.x, n.y, n.r * 8, 0, Math.PI * 2); ctx.fill();
         }
@@ -256,7 +278,7 @@ export default function NeuralNetworkBackground() {
         const fade = Math.sin((r.lf / r.mlf) * Math.PI);
         const g = ctx.createRadialGradient(r.x, r.y, 0, r.x, r.y, 10);
         g.addColorStop(0, `rgba(${col.r | 0},${col.g | 0},${col.b | 0},${fade * 0.7})`);
-        g.addColorStop(1, 'rgba(0,0,0,0)');
+        g.addColorStop(1, `rgba(${FADE.r},${FADE.g},${FADE.b},0)`);
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(r.x, r.y, 10, 0, Math.PI * 2); ctx.fill();
         // 上升尾迹
@@ -280,7 +302,7 @@ export default function NeuralNetworkBackground() {
       const hy = horizon + Math.sin(horizonPhase) * 3;
       const bandH = 60 + breathe * 30 + energy * 40;
       const hg = ctx.createLinearGradient(0, hy - bandH / 2, 0, hy + bandH / 2);
-      hg.addColorStop(0, 'rgba(62,207,174,0)');
+      hg.addColorStop(0, `rgba(${TEAL.r},${TEAL.g},${TEAL.b},0)`);
       hg.addColorStop(0.45, `rgba(${TEAL.r},${TEAL.g},${TEAL.b},${0.04 + energy * 0.05})`);
       hg.addColorStop(0.5, `rgba(${TEAL_HI.r},${TEAL_HI.g},${TEAL_HI.b},${0.1 + energy * 0.12 + driveFlash.current * 0.2})`);
       hg.addColorStop(0.55, `rgba(${VIOLET.r},${VIOLET.g},${VIOLET.b},${0.05 + energy * 0.04})`);
@@ -303,7 +325,7 @@ export default function NeuralNetworkBackground() {
         ctx.lineWidth = 2;
         ctx.strokeRect(1, 1, W - 2, H - 2);
         const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.72);
-        vg.addColorStop(0, 'rgba(0,0,0,0)');
+        vg.addColorStop(0, `rgba(${FADE.r},${FADE.g},${FADE.b},0)`);
         vg.addColorStop(1, `rgba(${TEAL.r},${TEAL.g},${TEAL.b},${fa * 0.9})`);
         ctx.fillStyle = vg;
         ctx.fillRect(0, 0, W, H);
@@ -346,8 +368,10 @@ export default function NeuralNetworkBackground() {
       }
     }
     const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    // 主题管理中心可关闭背景:<html data-nn-bg="off"> 时停掉动画循环并清空画布(不只是隐藏)。
+    const bgEnabled = () => document.documentElement.dataset.nnBg !== 'off';
     function startLoop() {
-      if (document.hidden) return;
+      if (document.hidden || !bgEnabled()) return;
       if (motionPreference.matches) { draw(); return; }
       if (!rafRef.current) { lastTime = 0; rafRef.current = requestAnimationFrame(loop); }
     }
@@ -376,6 +400,18 @@ export default function NeuralNetworkBackground() {
       }
     };
     window.addEventListener('field-probe', onProbe);
+    // 主题切换:setTheme 会派发 epicode-theme 事件,但 applyTheme 也可能被直接调用(首屏/其他入口),
+    // 因此同时观察 <html data-theme> 属性变化,确保 canvas 总能重新读取 --nn-* 变量。
+    const onTheme = () => {
+      if (!bgEnabled()) { stopLoop(); ctx.clearRect(0, 0, c.width, c.height); return; }
+      refreshPalette();
+      if (motionPreference.matches) draw(); else startLoop();
+    };
+    window.addEventListener('epicode-theme', onTheme);
+    const themeObserver = typeof MutationObserver !== 'undefined'
+      ? new MutationObserver(onTheme)
+      : null;
+    themeObserver?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-nn-bg'] });
     const onScrub = (ev: Event) => { scrubBoost.current = ((ev as CustomEvent).detail as { v?: number })?.v ?? 0; };
     window.addEventListener('scrub-depth', onScrub);
     const onM = (e: MouseEvent) => { mouse.current.x = e.clientX; mouse.current.y = e.clientY; };
@@ -445,6 +481,8 @@ export default function NeuralNetworkBackground() {
       stream.stop();
       cancelAnimationFrame(rafRef.current);
       clearTimeout(resizeTimer);
+      window.removeEventListener('epicode-theme', onTheme);
+      themeObserver?.disconnect();
       window.removeEventListener('resize', onR);
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("mousemove", onM);
@@ -453,5 +491,5 @@ export default function NeuralNetworkBackground() {
     };
   }, []);
 
-  return <canvas ref={canvasRef} style={{ position: 'fixed', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 }} />;
+  return <canvas ref={canvasRef} style={{ position: 'fixed', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0, opacity: 'calc(var(--nn-opacity, 1) * var(--nn-intensity, 1))' }} />;
 }

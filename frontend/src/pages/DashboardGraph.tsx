@@ -1122,7 +1122,7 @@ export default function DashboardGraph() {
 
   // 玻璃态浮动面板基础样式
   const glassPanel: React.CSSProperties = {
-    background: 'rgba(6, 6, 20, 0.72)',
+    background: 'var(--glass-bg, rgba(6, 6, 20, 0.72))',
     backdropFilter: 'blur(20px) saturate(160%)',
     WebkitBackdropFilter: 'blur(20px) saturate(160%)',
     border: '1px solid rgba(62, 207, 174, 0.18)',

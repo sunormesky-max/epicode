@@ -102,7 +102,7 @@ export default function Login() {
             {t('login.title')}
           </h2>
 
-          <div style={{ background: 'rgba(16, 16, 24, 0.6)', backdropFilter: 'blur(16px)',
+          <div style={{ background: 'var(--glass-bg, rgba(16, 16, 24, 0.6))', backdropFilter: 'blur(16px)',
             border: '1px solid var(--border-light)', borderRadius: 'var(--radius-xl)', padding: 32 }}>
             {expired && (
               <p className="mb-4 px-3 py-2 rounded-lg" style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--accent-gold)', background: 'rgba(230,200,120,0.06)', border: '1px solid rgba(230,200,120,0.2)' }}>

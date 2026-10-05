@@ -109,7 +109,7 @@ export default function AudioField() {
       aria-label="toggle field sound"
       className="fixed bottom-5 left-5 z-40 flex items-center gap-2 px-3 py-2 rounded-lg"
       style={{
-        background: 'rgba(16, 16, 24, 0.85)', backdropFilter: 'blur(12px)',
+        background: 'var(--glass-bg, rgba(16, 16, 24, 0.85))', backdropFilter: 'blur(12px)',
         border: `1px solid ${on ? 'rgba(62,207,174,0.35)' : 'var(--border-medium)'}`,
         color: on ? 'var(--accent-cyan)' : 'var(--text-tertiary)',
         fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.1em',

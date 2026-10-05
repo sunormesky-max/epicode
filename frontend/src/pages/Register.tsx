@@ -141,7 +141,7 @@ export default function Register() {
             {t('register.title')}
           </h2>
 
-          <div style={{ background: 'rgba(16, 16, 24, 0.6)', backdropFilter: 'blur(16px)',
+          <div style={{ background: 'var(--glass-bg, rgba(16, 16, 24, 0.6))', backdropFilter: 'blur(16px)',
             border: '1px solid var(--border-light)', borderRadius: 'var(--radius-xl)', padding: 32 }}>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
