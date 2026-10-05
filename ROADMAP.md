@@ -26,6 +26,19 @@ This roadmap describes the direction of the Epicode project. Items closer to the
 - [ ] Web-based model management and embedding fine-tuning UI.
 - [ ] Migration path from v1 to future storage formats.
 
+
+## Memory OS — next
+
+Epicode already ships SMRP tiers with provenance, hybrid BM25/HNSW/graph PPR retrieval, a knowledge graph, bi-temporal fields on memories, dream consolidation (supersede instead of hard delete), and skills as procedural memory. The next work is correctness and agent context economics—not another vector stack.
+
+Tracking issue: [#170 Memory roadmap (Mem0 / Zep / Letta / HippoRAG)](https://github.com/sunormesky-max/epicode/issues/170). Related MCP agent-UX PRs: [#167](https://github.com/sunormesky-max/epicode/pull/167), [#168](https://github.com/sunormesky-max/epicode/pull/168), [#169](https://github.com/sunormesky-max/epicode/pull/169) (prefer landing #168 soon).
+
+Suggested next kernel PRs (see #170 for full P0/P1/P2):
+
+- [ ] Dream: respect `enforced` on merge/link; disable Jaccard-only supersede when embeddings are missing
+- [ ] Knowledge: make concept membership / `member_count` idempotent
+- [ ] Memory: `memory_improve` preserves full content and refreshes embeddings
+
 ## How to influence the roadmap
 
 - Open a [Discussion](https://github.com/sunormesky-max/epicode/discussions) to propose a new item.
