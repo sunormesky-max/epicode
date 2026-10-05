@@ -709,7 +709,9 @@ impl SchedulerCenter {
         let mut updated = tetra.data.clone();
         let now = chrono::Utc::now().timestamp();
         updated.valid_to = Some(now); // 标记失效
-        updated.importance = 0.01; // 降到最低重要性
+                                      // Explicit exception to IMPORTANCE_FLOOR: forget is a deliberate tombstone
+                                      // (valid_to set). Live decay paths must not use this value.
+        updated.importance = super::governor::FORGET_IMPORTANCE;
         updated.invalidated_at = Some(now);
 
         match self.space.update_payload(id, updated) {
@@ -722,7 +724,7 @@ impl SchedulerCenter {
                     }
                 }
                 tracing::info!(
-                    "[Forget] memory #{} explicitly forgotten (valid_to set, importance→0.01)",
+                    "[Forget] memory #{} explicitly forgotten (valid_to set, importance→FORGET_IMPORTANCE)",
                     id
                 );
                 Ok(serde_json::json!({
@@ -1123,7 +1125,7 @@ impl SchedulerCenter {
                         if let Some(tetra) = self.space.get_tetrahedron(*id) {
                             let mut data = tetra.data.clone();
                             data.valid_to = Some(now);
-                            data.importance = 0.01;
+                            data.importance = super::governor::FORGET_IMPORTANCE;
                             let _ = self.space.update_payload(*id, data);
                             self.persist_tetra(*id);
                             duplicates += 1;
@@ -1144,7 +1146,7 @@ impl SchedulerCenter {
             if t.data.content.trim().len() < 5 && t.data.valid_to.is_none() {
                 let mut data = t.data.clone();
                 data.valid_to = Some(now);
-                data.importance = 0.01;
+                data.importance = super::governor::FORGET_IMPORTANCE;
                 let _ = self.space.update_payload(t.id, data);
                 self.persist_tetra(t.id);
                 empties += 1;
@@ -1154,11 +1156,11 @@ impl SchedulerCenter {
             report.push(format!("碎片记忆（<5字）：{}条已 supersede", empties));
         }
 
-        // 3. 已 superseded 的高 importance 降权
+        // 3. 已 superseded 的高 importance 降权 (tombstone floor)
         for t in &all {
-            if t.data.valid_to.is_some() && t.data.importance > 0.1 {
+            if t.data.valid_to.is_some() && t.data.importance > super::governor::FORGET_IMPORTANCE {
                 let mut data = t.data.clone();
-                data.importance = 0.01;
+                data.importance = super::governor::FORGET_IMPORTANCE;
                 let _ = self.space.update_payload(t.id, data);
                 self.persist_tetra(t.id);
                 stale_superseded += 1;
@@ -1166,7 +1168,7 @@ impl SchedulerCenter {
         }
         if stale_superseded > 0 {
             report.push(format!(
-                "已失效但高重要性：{}条已降权到0.01",
+                "已失效但高重要性：{}条已降权到 FORGET_IMPORTANCE",
                 stale_superseded
             ));
         }
@@ -5740,7 +5742,8 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         let mut data = tetra.data.clone();
                         let old_imp = data.importance;
                         let adj = (*total_delta * 0.3).clamp(-0.5, 0.5);
-                        data.importance = (data.importance + adj).clamp(0.1, 5.0);
+                        data.importance =
+                            (data.importance + adj).clamp(super::governor::IMPORTANCE_FLOOR, 5.0);
                         if let Err(e) = self.space.update_payload(*id, data) {
                             tracing::warn!("[Scheduler] update_payload {} failed: {}", *id, e);
                         }

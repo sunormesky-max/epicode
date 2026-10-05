@@ -2,10 +2,26 @@ use crate::domain::space::Space;
 use crate::domain::tetra::MemoryPayload;
 use crate::engine::knowledge::KnowledgeGraph;
 
-/// 重要性下限宪法(O-A, 推演v2病灶A): 所有自动降权路径的统一地板。
+/// 重要性下限宪法(O-A, 推演v2病灶A): 所有**活记忆**自动降权路径的统一地板。
+///
+/// # Constitutional policy
+/// - **Live floor** = `IMPORTANCE_FLOOR` (0.3): governor decay, dream `recompute_importance`,
+///   quarantine demotion, write-time supersede ×0.15, feedback clamps.
+/// - **Tombstone** = `FORGET_IMPORTANCE` (0.01): **explicit exception** only when the path
+///   also sets `valid_to` (explicit forget, zombie/session/bridge TTL, merge absorb, janitor).
+///
 /// 生产实证: supersede(×0.15)/quarantine(min 0.1)/自探索(0.3)曾绕过 governor 的 0.3,
 /// 66% 记忆塌缩到 ≈0 → 检索重要性信号失声。地板含义: 记忆可被降籍, 不可被检索除名。
 pub const IMPORTANCE_FLOOR: f64 = 0.3;
+
+/// Tombstone importance for paths that also set `valid_to`.
+/// Explicit exception to `IMPORTANCE_FLOOR` — see module docs on `IMPORTANCE_FLOOR`.
+pub const FORGET_IMPORTANCE: f64 = 0.01;
+
+/// Clamp a live (non-tombstone) importance to the constitutional floor / ceiling.
+pub fn clamp_live_importance(importance: f64) -> f64 {
+    importance.clamp(IMPORTANCE_FLOOR, 3.0)
+}
 
 pub struct GovernorResult {
     pub recurrent_ids: Vec<u64>,
@@ -123,7 +139,7 @@ impl LifecycleGovernor {
             {
                 let mut data = tetra.data.clone();
                 data.valid_to = Some(now);
-                data.importance = 0.01;
+                data.importance = FORGET_IMPORTANCE; // tombstone + valid_to
                 let _ = space.update_payload(tetra.id, data);
                 mutated.push(tetra.id);
                 continue;
@@ -132,7 +148,7 @@ impl LifecycleGovernor {
             if class == "session" && tetra.data.valid_to.is_none() && age_days > 7 {
                 let mut data = tetra.data.clone();
                 data.valid_to = Some(now);
-                data.importance = 0.05;
+                data.importance = FORGET_IMPORTANCE; // tombstone + valid_to (was 0.05)
                 let _ = space.update_payload(tetra.id, data);
                 mutated.push(tetra.id); // S3
                 continue;
@@ -141,7 +157,7 @@ impl LifecycleGovernor {
             if class == "bridge" && tetra.data.valid_to.is_none() && age_days > 1 {
                 let mut data = tetra.data.clone();
                 data.valid_to = Some(now);
-                data.importance = 0.01;
+                data.importance = FORGET_IMPORTANCE; // tombstone + valid_to
                 let _ = space.update_payload(tetra.id, data);
                 mutated.push(tetra.id); // S3
                 continue;
@@ -402,7 +418,7 @@ impl LifecycleGovernor {
                     data.labels.push("superseded".to_string());
                 }
                 data.valid_to = Some(now_ts);
-                data.importance = (data.importance * 0.15).max(0.01);
+                data.importance = (data.importance * 0.15).max(FORGET_IMPORTANCE); // tombstone + valid_to
                 let _ = space.update_payload(candidate.remove_id, data);
                 let _ = space.update_mass(candidate.remove_id, 0.05);
                 let _ = space.update_validity(candidate.remove_id, Some(now_ts));
@@ -550,6 +566,93 @@ mod tests {
         assert!(
             !candidates.is_empty(),
             "should find exact duplicate merge candidates"
+        );
+    }
+
+    #[test]
+    fn constitutional_floor_constants_documented() {
+        assert!((IMPORTANCE_FLOOR - 0.3).abs() < 1e-9);
+        assert!((FORGET_IMPORTANCE - 0.01).abs() < 1e-9);
+        assert!(FORGET_IMPORTANCE < IMPORTANCE_FLOOR);
+        assert!((clamp_live_importance(0.05) - IMPORTANCE_FLOOR).abs() < 1e-9);
+        assert!((clamp_live_importance(2.5) - 2.5).abs() < 1e-9);
+        assert!((clamp_live_importance(9.0) - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn apply_decay_respects_importance_floor() {
+        let space = Space::new();
+        // session class so governor does not skip as permanent; old + unaccessed → decay
+        let core = Point3::new(0.0, 0.0, 0.0);
+        let pos = Tetrahedron::compute_vertices(core);
+        let data = MemoryPayload {
+            content: "session scratch note that should decay".to_string(),
+            timestamp: chrono::Utc::now().timestamp() - 86400 * 40,
+            importance: 1.0,
+            access_count: 0,
+            memory_class: Some("session".to_string()),
+            last_reviewed_ts: Some(chrono::Utc::now().timestamp() - 86400 * 40),
+            ..Default::default()
+        };
+        let t = Tetrahedron {
+            id: 0,
+            vertex_ids: [0; 4],
+            core,
+            data,
+            mass: 1.0,
+        };
+        let id = space.add_tetrahedron(&t, &pos).unwrap();
+        let kg = KnowledgeGraph::new();
+        let _ = LifecycleGovernor::evaluate(&space, &kg);
+        let after = space.get_tetrahedron(id).unwrap();
+        // Either still decaying toward floor, or tombstoned via session TTL (>7d).
+        if after.data.valid_to.is_some() {
+            assert!(
+                (after.data.importance - FORGET_IMPORTANCE).abs() < 1e-9,
+                "session TTL tombstone must use FORGET_IMPORTANCE, got {}",
+                after.data.importance
+            );
+        } else {
+            assert!(
+                after.data.importance + 1e-9 >= IMPORTANCE_FLOOR,
+                "live decay must not go below IMPORTANCE_FLOOR, got {}",
+                after.data.importance
+            );
+        }
+    }
+
+    #[test]
+    fn zombie_tombstone_uses_forget_importance() {
+        let space = Space::new();
+        let core = Point3::new(1.0, 0.0, 0.0);
+        let pos = Tetrahedron::compute_vertices(core);
+        let data = MemoryPayload {
+            content: "zombie low importance memory".to_string(),
+            timestamp: chrono::Utc::now().timestamp() - 86400 * 90,
+            importance: 0.1, // below 0.15 zombie threshold
+            access_count: 0,
+            memory_class: Some("session".to_string()),
+            ..Default::default()
+        };
+        let t = Tetrahedron {
+            id: 0,
+            vertex_ids: [0; 4],
+            core,
+            data,
+            mass: 1.0,
+        };
+        let id = space.add_tetrahedron(&t, &pos).unwrap();
+        let kg = KnowledgeGraph::new();
+        let _ = LifecycleGovernor::evaluate(&space, &kg);
+        let after = space.get_tetrahedron(id).unwrap();
+        assert!(
+            after.data.valid_to.is_some(),
+            "zombie/session should set valid_to"
+        );
+        assert!(
+            (after.data.importance - FORGET_IMPORTANCE).abs() < 1e-9,
+            "tombstone importance must be FORGET_IMPORTANCE, got {}",
+            after.data.importance
         );
     }
 
