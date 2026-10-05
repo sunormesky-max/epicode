@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0](https://github.com/sunormesky-max/epicode/compare/v1.4.0...v1.5.0) (2026-10-05)
+
+
+### Features
+
+* **mcp:** add Tool annotations (readOnlyHint/destructiveHint/idempotentHint) ([#167](https://github.com/sunormesky-max/epicode/issues/167)) ([ebcc58b](https://github.com/sunormesky-max/epicode/commit/ebcc58b7b8f4d49a2652389b94c4f2b7fb29441c))
+* **mcp:** compact memory_recall/search responses + timestamp_iso ([#168](https://github.com/sunormesky-max/epicode/issues/168)) ([332028b](https://github.com/sunormesky-max/epicode/commit/332028b369a2e91f41c0e587b5f12e465923f4f7))
+* **mcp:** paginate skills_sync manifest (limit/offset) ([#169](https://github.com/sunormesky-max/epicode/issues/169)) ([75f8344](https://github.com/sunormesky-max/epicode/commit/75f83446c8b8922827c5308ee30a35e6d598df31))
+* **memory-os:** S1 slim envelope + S2 MemCard (flags default OFF) ([#175](https://github.com/sunormesky-max/epicode/issues/175)) ([153d3ff](https://github.com/sunormesky-max/epicode/commit/153d3ff4cde73aea18cbd82429e6932b54414804))
+* **scheduler:** honor should_dream and count missed commits ([#174](https://github.com/sunormesky-max/epicode/issues/174)) ([acb9a00](https://github.com/sunormesky-max/epicode/commit/acb9a007bcc928e4c8994038c6a8ea624ea5d87b))
+* **theme:** X 三主题 + 主题中心升级 / X themes (x-dark/x-light/x-dim) + Theme Center upgrade ([#166](https://github.com/sunormesky-max/epicode/issues/166)) ([c218086](https://github.com/sunormesky-max/epicode/commit/c21808677601eafe86facd264d6f1983bae9caf6))
+
+
+### Bug Fixes
+
+* **backend:** strip_html 遇孤立 '&lt;' 不再吞掉后续内容 ([#162](https://github.com/sunormesky-max/epicode/issues/162)) ([f960891](https://github.com/sunormesky-max/epicode/commit/f960891a1c406b4f38a4afb2185385a4ccc2ce34))
+* **frontend:** 图书馆收集请求审批点击取消后不再提交 ([#164](https://github.com/sunormesky-max/epicode/issues/164)) ([783a934](https://github.com/sunormesky-max/epicode/commit/783a9342d290f481ea8cf2cefa694ac36e5c9905))
+* **mcp:** feedback_submit reinforces edges and honors from_id/to_id ([#173](https://github.com/sunormesky-max/epicode/issues/173)) ([37c1393](https://github.com/sunormesky-max/epicode/commit/37c13932019874402848b28c42d7c3156f27999e))
+* **memory:** unify live importance floor at 0.3 ([#176](https://github.com/sunormesky-max/epicode/issues/176)) ([beb476b](https://github.com/sunormesky-max/epicode/commit/beb476be58a0fe50f321b99a966aa10da22f1e80))
+* **scheduler:** api_dream consumes energy (R4-S04) ([#172](https://github.com/sunormesky-max/epicode/issues/172)) ([b25e2cd](https://github.com/sunormesky-max/epicode/commit/b25e2cd6ef429f217fde8343a338e8e37ac36459))
+
+
+### Documentation
+
+* **roadmap:** add Memory OS next section linking [#170](https://github.com/sunormesky-max/epicode/issues/170) ([#171](https://github.com/sunormesky-max/epicode/issues/171)) ([7be6e42](https://github.com/sunormesky-max/epicode/commit/7be6e4229877f821fe66e26c2576873e7cb2c4e0))
+
 ## [1.4.0](https://github.com/sunormesky-max/epicode/compare/v1.3.0...v1.4.0) (2026-10-03)
 
 
