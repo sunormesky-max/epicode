@@ -157,7 +157,7 @@ export default function CommandBar({ isMain = false }: { isMain?: boolean }) {
         aria-label="open command bar"
         className="fixed bottom-5 right-5 z-40 flex items-center gap-2 px-3 py-2 rounded-lg transition-all"
         style={{
-          background: 'rgba(16, 16, 24, 0.85)', backdropFilter: 'blur(12px)',
+          background: 'var(--glass-bg, rgba(16, 16, 24, 0.85))', backdropFilter: 'blur(12px)',
           border: '1px solid var(--border-medium)', color: 'var(--text-tertiary)',
           fontFamily: 'var(--font-mono)', fontSize: 12,
         }}
@@ -184,7 +184,7 @@ export default function CommandBar({ isMain = false }: { isMain?: boolean }) {
         aria-modal="true"
         aria-label="搜索与操作 / Search and actions"
         className="w-full max-w-lg rounded-2xl overflow-hidden"
-        style={{ background: 'rgba(16,16,24,0.97)', border: '1px solid var(--border-medium)', boxShadow: '0 24px 80px rgba(0,0,0,0.6)' }}
+        style={{ background: 'var(--glass-bg-solid, rgba(16,16,24,0.97))', border: '1px solid var(--border-medium)', boxShadow: '0 24px 80px rgba(0,0,0,0.6)' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 px-4" style={{ borderBottom: '1px solid var(--border-light)' }}>
