@@ -39,6 +39,8 @@ pub struct Horizon {
     pressure: f64,
     debt: u32,
     phase: HorizonPhase,
+    /// Cumulative commit/attend beats skipped because a prior cycle still held the gate.
+    missed_commits: u64,
 }
 
 impl Horizon {
@@ -48,6 +50,7 @@ impl Horizon {
             pressure: 0.0,
             debt: 0,
             phase: HorizonPhase::Coast,
+            missed_commits: 0,
         }
     }
 
@@ -61,6 +64,7 @@ impl Horizon {
 
     pub fn note_defer(&mut self) {
         self.debt = self.debt.saturating_add(1);
+        self.missed_commits = self.missed_commits.saturating_add(1);
         self.pressure = (self.pressure + 0.15).min(1.0);
         self.phase = HorizonPhase::Deferred;
     }
@@ -110,6 +114,10 @@ impl Horizon {
     pub fn debt(&self) -> u32 {
         self.debt
     }
+
+    pub fn missed_commits(&self) -> u64 {
+        self.missed_commits
+    }
 }
 
 #[cfg(test)]
@@ -141,5 +149,21 @@ mod tests {
         let plan = horizon.plan(false);
         assert_eq!(plan.phase, HorizonPhase::Attend);
         assert_eq!(plan.sleep_ms, 500);
+    }
+
+    #[test]
+    fn defer_increments_missed_commits() {
+        let mut horizon = Horizon::new(1000);
+        assert_eq!(horizon.missed_commits(), 0);
+        horizon.note_defer();
+        horizon.note_defer();
+        assert_eq!(horizon.missed_commits(), 2);
+        assert_eq!(horizon.debt(), 2);
+        // Planning a commit clears debt but keeps the observability counter.
+        horizon.note_stimulus(1.0);
+        let plan = horizon.plan(true);
+        assert_eq!(plan.phase, HorizonPhase::Commit);
+        assert_eq!(plan.debt, 0);
+        assert_eq!(horizon.missed_commits(), 2);
     }
 }
