@@ -188,8 +188,12 @@ pub fn memory_item(
         .get_tetrahedron(id)
         .map(|t| t.mass)
         .unwrap_or(1.0);
+    let timestamp_iso = chrono::DateTime::from_timestamp(ts, 0)
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_default();
     let mut item = serde_json::json!({
         "id": id, "content": content, "labels": labels, "timestamp": ts,
+        "timestamp_iso": timestamp_iso,
         "tier": tier, "source": source,
         "similarity": (sim * 100.0).round() / 100.0,
         "metrics": {
@@ -391,11 +395,53 @@ pub fn recall_data(
     })
 }
 
+/// Agent UX: truncate long content strings in-place and mark truncation.
+/// Walks arrays/objects; only touches string values under key "content"
+/// (and "content_preview"). Returns number of fields truncated.
+pub fn truncate_content_fields(value: &mut serde_json::Value, max_chars: usize) -> usize {
+    if max_chars == 0 {
+        return 0;
+    }
+    let mut n = 0;
+    match value {
+        serde_json::Value::Object(map) => {
+            let keys: Vec<String> = map.keys().cloned().collect();
+            for k in keys {
+                if k == "content" || k == "content_preview" {
+                    if let Some(serde_json::Value::String(s)) = map.get(&k) {
+                        let char_len = s.chars().count();
+                        if char_len > max_chars {
+                            let truncated: String = s.chars().take(max_chars).collect();
+                            map.insert(
+                                k.clone(),
+                                serde_json::Value::String(format!(
+                                    "{truncated}…[truncated {char_len}->{max_chars} chars]"
+                                )),
+                            );
+                            map.insert("content_truncated".into(), serde_json::json!(true));
+                            n += 1;
+                        }
+                    }
+                } else if let Some(child) = map.get_mut(&k) {
+                    n += truncate_content_fields(child, max_chars);
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr.iter_mut() {
+                n += truncate_content_fields(item, max_chars);
+            }
+        }
+        _ => {}
+    }
+    n
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         paginate_search_results, search_score_base, search_sources, tier_recall, tier_search,
-        tier_search_for_mode,
+        tier_search_for_mode, truncate_content_fields,
     };
     use crate::engine::search_engine::SearchMode;
 
@@ -498,5 +544,18 @@ mod tests {
             search_score_base(hybrid),
             "hybrid_vector_similarity + bm25 + intent_rerank"
         );
+    }
+
+    #[test]
+    fn truncate_content_fields_marks_long_strings() {
+        let mut v = serde_json::json!({
+            "tiers": {"primary": [{"id": 1, "content": "abcdefghij"}]}
+        });
+        let n = truncate_content_fields(&mut v, 5);
+        assert_eq!(n, 1);
+        let c = v["tiers"]["primary"][0]["content"].as_str().unwrap();
+        assert!(c.starts_with("abcde"));
+        assert!(c.contains("truncated"));
+        assert_eq!(v["tiers"]["primary"][0]["content_truncated"], true);
     }
 }
