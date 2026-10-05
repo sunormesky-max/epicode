@@ -55,7 +55,9 @@ pub mod drive;
 pub mod dynamics;
 pub mod emotion;
 pub mod layer_pipeline;
+pub mod memcard;
 pub mod outcome;
+pub mod spike_flags;
 
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -91,6 +93,9 @@ pub struct Engine {
     data_path: std::path::PathBuf,
     /// P4-3 项目隔离：当前激活项目（None = 全局，不做过滤）
     pub current_project: parking_lot::RwLock<Option<String>>,
+    /// Spike S2: MemCard store (persona/user/project/working). Always constructed;
+    /// MCP/status surface gated by EPICODE_MEMCARD.
+    pub memcards: self::memcard::SharedMemCards,
 }
 
 impl Default for Engine {
@@ -414,6 +419,13 @@ impl Engine {
             skills.set_vector(vec);
         }
 
+        // Spike S2: avoid shared sqlite lock on default `data/` when flag is off.
+        let memcards = std::sync::Arc::new(if self::memcard::memcard_enabled() {
+            self::memcard::MemCardStore::open(&data_path)
+        } else {
+            self::memcard::MemCardStore::in_memory()
+        });
+
         Self {
             space,
             bus,
@@ -428,6 +440,7 @@ impl Engine {
             user_id: uid.to_string(),
             data_path: data_path.clone(),
             current_project: parking_lot::RwLock::new(restored_project),
+            memcards,
         }
     }
 
