@@ -16,7 +16,7 @@ export default function ThemeSwitcher({ compact = false }: { compact?: boolean }
   }, []);
 
   return (
-    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
       {!compact && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.12em', color: 'var(--text-tertiary)' }}>THEME</span>}
       <select
         aria-label={lang === 'zh' ? '主题' : 'Theme'}

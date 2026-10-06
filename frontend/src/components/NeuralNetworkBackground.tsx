@@ -300,20 +300,20 @@ export default function NeuralNetworkBackground() {
 
       // ── 地平线: 呼吸的能量边界 ──
       const hy = horizon + Math.sin(horizonPhase) * 3;
-      const bandH = 60 + breathe * 30 + energy * 40;
+      const bandH = 48 + breathe * 20 + energy * 24;
       const hg = ctx.createLinearGradient(0, hy - bandH / 2, 0, hy + bandH / 2);
       hg.addColorStop(0, `rgba(${TEAL.r},${TEAL.g},${TEAL.b},0)`);
-      hg.addColorStop(0.45, `rgba(${TEAL.r},${TEAL.g},${TEAL.b},${0.04 + energy * 0.05})`);
-      hg.addColorStop(0.5, `rgba(${TEAL_HI.r},${TEAL_HI.g},${TEAL_HI.b},${0.1 + energy * 0.12 + driveFlash.current * 0.2})`);
-      hg.addColorStop(0.55, `rgba(${VIOLET.r},${VIOLET.g},${VIOLET.b},${0.05 + energy * 0.04})`);
+      hg.addColorStop(0.45, `rgba(${TEAL.r},${TEAL.g},${TEAL.b},${0.03 + energy * 0.035})`);
+      hg.addColorStop(0.5, `rgba(${TEAL_HI.r},${TEAL_HI.g},${TEAL_HI.b},${0.07 + energy * 0.07 + driveFlash.current * 0.15})`);
+      hg.addColorStop(0.55, `rgba(${VIOLET.r},${VIOLET.g},${VIOLET.b},${0.04 + energy * 0.03})`);
       hg.addColorStop(1, `rgba(${VIOLET.r},${VIOLET.g},${VIOLET.b},0)`);
       ctx.fillStyle = hg;
       ctx.fillRect(0, hy - bandH / 2, W, bandH);
       // 核心细线 — 不均匀亮度(用渐变横轴模拟)
       const lg = ctx.createLinearGradient(0, 0, W, 0);
       lg.addColorStop(0, `rgba(${TEAL.r},${TEAL.g},${TEAL.b},0.08)`);
-      lg.addColorStop(0.3, `rgba(${TEAL_HI.r},${TEAL_HI.g},${TEAL_HI.b},${0.28 + energy * 0.2})`);
-      lg.addColorStop(0.7, `rgba(${TEAL.r},${TEAL.g},${TEAL.b},${0.22 + energy * 0.15})`);
+      lg.addColorStop(0.3, `rgba(${TEAL_HI.r},${TEAL_HI.g},${TEAL_HI.b},${0.16 + energy * 0.14})`);
+      lg.addColorStop(0.7, `rgba(${TEAL.r},${TEAL.g},${TEAL.b},${0.13 + energy * 0.1})`);
       lg.addColorStop(1, `rgba(${VIOLET.r},${VIOLET.g},${VIOLET.b},0.08)`);
       ctx.fillStyle = lg;
       ctx.fillRect(0, hy, W, 1);
@@ -437,7 +437,9 @@ export default function NeuralNetworkBackground() {
           if (d.energy !== undefined) {
             sysState.current.energy = d.energy;
             sysState.current.memories = d.memories || 0;
-            sysState.current.pulseIntensity = 0.1 + (d.energy / 10000) * 0.7;
+            // 曲线压缩: 能量满格(10000)时视觉强度只到 0.40, 避免地平线
+            // 光带高亮度横穿正文透明区被感知为"穿模"。
+            sysState.current.pulseIntensity = 0.12 + Math.min(1, d.energy / 10000) * 0.28;
             sysState.current.connected = true;
           }
           if (d.cognitive_status) {
