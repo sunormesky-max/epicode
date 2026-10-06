@@ -7,7 +7,7 @@ import CommandBar from '@/components/CommandBar';
 import ObservationStatus from '@/components/ObservationStatus';
 import {
   LayoutDashboard, Brain, GitBranch, Wrench, Users,
-  LogOut, Check, Menu, X, Zap, Archive, Activity, MessageSquare, Radio, BookOpen, Palette
+  LogOut, Check, Menu, X, Zap, Archive, Activity, MessageSquare, Radio, BookOpen, Shield, Palette
 } from 'lucide-react';
 
 const RAIL_W = 64;
