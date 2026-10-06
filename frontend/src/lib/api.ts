@@ -1137,6 +1137,22 @@ export function createSubAccount(user_id: string, password: string, role: SubRol
   });
 }
 
+/** 账户设置(跟随账户): 主题偏好/自定义CSS/记忆输出策略 */
+export interface UserSettings {
+  theme?: string;
+  theme_custom_css?: string;
+  memory_output?: { mode?: string; [k: string]: unknown };
+  [k: string]: unknown;
+}
+
+export function getUserSettings(): Promise<{ settings: UserSettings; plan: string; can_theme_custom: boolean }> {
+  return request('/v1/settings', { skipCache: true });
+}
+
+export function setUserSettings(patch: UserSettings): Promise<{ settings: UserSettings }> {
+  return request('/v1/settings', { method: 'PUT', body: { patch } });
+}
+
 /** 分级权限: 变更子账户角色(仅主账户/admin) */
 export function setSubAccountRole(user_id: string, role: SubRole): Promise<{ user_id: string; role: string }> {
   invalidateCache('/v1/subaccounts');
@@ -1151,6 +1167,7 @@ export function setSubAccountRole(user_id: string, role: SubRole): Promise<{ use
 export const PERMISSIONS: string[] = [
   'memory_read', 'memory_write', 'memory_delete', 'persona_import',
   'skill_manage', 'library_manage', 'subaccount_manage', 'apikey_manage',
+  'theme_custom', 'memory_output_control', 'permission_edit',
 ];
 
 export function setSubAccountPermissions(user_id: string, permissions: string[] | null): Promise<{ user_id: string; effective_permissions: string[] }> {

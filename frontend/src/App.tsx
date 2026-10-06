@@ -26,6 +26,7 @@ const Benchmarks = lazy(() => import('@/pages/Benchmarks'));
 const SmrpProtocol = lazy(() => import('@/pages/SmrpProtocol'));
 const L0Protocol = lazy(() => import('@/pages/L0Protocol'));
 const ThemeCenter = lazy(() => import('@/pages/ThemeCenter'));
+const DashboardPermissions = lazy(() => import('@/pages/DashboardPermissions'));
 
 function Loading() {
   return (
@@ -128,6 +129,7 @@ export default function App() {
             <Route path="/benchmarks" element={<Benchmarks />} />
             <Route path="/themes" element={<ThemeCenter />} />
             <Route path="/dashboard/themes" element={<ProtectedRoute><ThemeCenter /></ProtectedRoute>} />
+            <Route path="/dashboard/permissions" element={<ProtectedRoute><DashboardPermissions /></ProtectedRoute>} />
             <Route path="/smrp" element={<SmrpProtocol />} />
             <Route path="/l0" element={<L0Protocol />} />
             <Route path="*" element={<NotFound />} />

@@ -7,7 +7,7 @@ import CommandBar from '@/components/CommandBar';
 import ObservationStatus from '@/components/ObservationStatus';
 import {
   LayoutDashboard, Brain, GitBranch, Wrench, Users,
-  LogOut, Check, Menu, X, Zap, Archive, Activity, MessageSquare, Radio, BookOpen, Palette
+  LogOut, Check, Menu, X, Zap, Archive, Activity, MessageSquare, Radio, BookOpen, Shield, Palette
 } from 'lucide-react';
 
 const RAIL_W = 64;
@@ -71,6 +71,7 @@ export default function DashboardLayout({ children, viewport = false }: { childr
     { href: '#/dashboard/library', label: t('nav.library'), icon: BookOpen },
     ...(isMain ? [{ href: '#/dashboard/accounts', label: t('nav.subAccounts'), icon: Users }] : []),
     { href: '#/dashboard/themes', label: lang === 'zh' ? '主题' : 'Themes', icon: Palette },
+    { href: '#/dashboard/permissions', label: lang === 'zh' ? '权限' : 'Perms', icon: Shield },
   ];
 
   function handleCopyKey() {
