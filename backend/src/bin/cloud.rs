@@ -461,6 +461,10 @@ async fn main() {
             axum::routing::patch(subaccount::set_subaccount_role),
         )
         .route(
+            "/v1/settings",
+            axum::routing::get(subaccount::get_user_settings).put(subaccount::set_user_settings),
+        )
+        .route(
             "/v1/subaccounts/:user_id/permissions",
             axum::routing::patch(subaccount::set_subaccount_permissions),
         )
