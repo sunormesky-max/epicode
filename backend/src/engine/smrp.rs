@@ -503,6 +503,9 @@ fn collect_flat_items(data: &serde_json::Value) -> Vec<serde_json::Value> {
 
 /// Build Slim Envelope from a full search/recall `data` object.
 /// Returns compact `items[]` + `why` + `budget_spent`; no tiers/sections/results.
+/// Retains `valid` (top-level or `metrics.valid`) and timestamp fields when present
+/// (`timestamp` / `timestamp_iso` / `valid_from` / `valid_to`) so agents can see
+/// superseded/expired memories.
 pub fn to_slim_envelope(data: &serde_json::Value, max_chars: usize) -> serde_json::Value {
     let flat = collect_flat_items(data);
     let mut items = Vec::with_capacity(flat.len());
@@ -523,6 +526,17 @@ pub fn to_slim_envelope(data: &serde_json::Value, max_chars: usize) -> serde_jso
         });
         if truncated {
             slim["content_truncated"] = serde_json::json!(true);
+        }
+        // Retain validity / temporal signals so agents do not treat superseded
+        // or expired memories as current. Prefer top-level `valid`, else metrics.valid
+        // (SMRP memory_item nests it). Copy timestamp fields only when present.
+        if let Some(v) = item.get("valid").or_else(|| item.pointer("/metrics/valid")) {
+            slim["valid"] = v.clone();
+        }
+        for key in ["timestamp", "timestamp_iso", "valid_from", "valid_to"] {
+            if let Some(v) = item.get(key) {
+                slim[key] = v.clone();
+            }
         }
         items.push(slim);
     }
@@ -715,5 +729,90 @@ mod tests {
         assert!(slim_b < full_b, "slim {slim_b} should beat full {full_b}");
         assert!(slim_b < full_b / 2 || slim["budget_spent"]["items"] == 1);
         let _ = SLIM_MAX_CONTENT_CHARS;
+    }
+
+    #[test]
+    fn slim_envelope_retains_valid_false_and_timestamps() {
+        let fat_content = "x".repeat(1200);
+        let full = serde_json::json!({
+            "query": "superseded-job",
+            "results": [{
+                "id": 42,
+                "content": fat_content,
+                "labels": ["job", "superseded"],
+                "timestamp": 1_700_000_000_i64,
+                "timestamp_iso": "2023-11-14T22:13:20Z",
+                "valid_from": 1_699_000_000_i64,
+                "valid_to": 1_700_100_000_i64,
+                "tier": "contextual",
+                "source": ["vector"],
+                "similarity": 0.91,
+                "metrics": {
+                    "importance": 0.01,
+                    "mass": 1.0,
+                    "memory_type": "episodic",
+                    "valid": false
+                },
+                "topology": {"cluster_id": 7, "neighbors": [1,2,3,4,5]},
+            }],
+            "tiers": {
+                "contextual": [{
+                    "id": 42,
+                    "content": "dup",
+                    "similarity": 0.91,
+                    "source": ["vector"],
+                    "metrics": {"valid": false},
+                    "timestamp": 1_700_000_000_i64
+                }]
+            },
+            "sections": {"noise": [{"id": 42, "content": "dup"}]},
+            "count": 1,
+        });
+        let slim = to_slim_envelope(&full, SLIM_MAX_CONTENT_CHARS);
+        let items = slim["items"].as_array().expect("items");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item["valid"], false, "valid:false must survive slim");
+        assert_eq!(item["timestamp"], 1_700_000_000_i64);
+        assert_eq!(item["timestamp_iso"], "2023-11-14T22:13:20Z");
+        assert_eq!(item["valid_from"], 1_699_000_000_i64);
+        assert_eq!(item["valid_to"], 1_700_100_000_i64);
+        assert!(
+            item.get("metrics").is_none(),
+            "slim must not carry full metrics blob"
+        );
+        assert!(
+            item.get("topology").is_none(),
+            "slim must not carry topology"
+        );
+        assert!(
+            item.get("labels").is_none(),
+            "slim stays compact: no labels"
+        );
+        let (full_b, _) = estimate_payload_size(&full);
+        let (slim_b, _) = estimate_payload_size(&slim);
+        assert_eq!(item["content_truncated"], true);
+        assert!(
+            slim_b * 2 < full_b,
+            "slim {slim_b} should stay much smaller than full {full_b}"
+        );
+    }
+
+    #[test]
+    fn slim_envelope_promotes_metrics_valid_when_top_level_absent() {
+        let full = serde_json::json!({
+            "results": [{
+                "id": 7,
+                "content": "alive",
+                "timestamp": 99,
+                "source": ["bm25"],
+                "similarity": 0.5,
+                "metrics": {"valid": true, "importance": 0.8}
+            }]
+        });
+        let slim = to_slim_envelope(&full, 50);
+        assert_eq!(slim["items"][0]["valid"], true);
+        assert_eq!(slim["items"][0]["timestamp"], 99);
+        assert!(slim["items"][0].get("valid_to").is_none());
     }
 }
