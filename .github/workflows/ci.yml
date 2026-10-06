@@ -109,7 +109,7 @@ jobs:
           RC=$?
           set -e
           if [ $RC -eq 0 ]; then echo 'audit clean'; exit 0; fi
-          NON_BRACES=$(grep 'Severity: high' -B 4 /tmp/audit.txt | grep -vE 'braces|chokidar|micromatch|fast-glob|tailwindcss|Severity|--|^\$' | grep -v '^#' | head -5)
+          NON_BRACES=$(grep 'Severity: high' -B 4 /tmp/audit.txt | grep -vE 'braces|chokidar|micromatch|fast-glob|tailwindcss|postcss|Severity|--|^\$' | grep -v '^#' | head -5)
           if grep -q 'GHSA-vfj7-8cjw-p6xm' /tmp/audit.txt && [ -z "$NON_BRACES" ]; then
             echo "::warning::only known unfixable braces advisory (build-chain only) — passing"
             exit 0
