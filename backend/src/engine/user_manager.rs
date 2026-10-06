@@ -97,6 +97,12 @@ pub enum Permission {
     LibraryManage,
     SubaccountManage,
     ApiKeyManage,
+    /// 主题自定义(上传CSS/覆盖token) — 计划门控(Pro+)之上再叠角色/覆盖
+    ThemeCustom,
+    /// 记忆输出控制(可见性/输出内容策略配置)
+    MemoryOutputControl,
+    /// 权限配置编辑(子账户权限点修改) — 仅主账户
+    PermissionEdit,
 }
 
 /// 子账户角色分级(主账户不取值本枚举, 天然全权)
@@ -126,6 +132,9 @@ impl Permission {
             Permission::LibraryManage => "library_manage",
             Permission::SubaccountManage => "subaccount_manage",
             Permission::ApiKeyManage => "api_key_manage",
+            Permission::ThemeCustom => "theme_custom",
+            Permission::MemoryOutputControl => "memory_output_control",
+            Permission::PermissionEdit => "permission_edit",
         }
     }
     pub fn parse(s: &str) -> Option<Permission> {
@@ -138,10 +147,13 @@ impl Permission {
             "library_manage" => Some(Permission::LibraryManage),
             "subaccount_manage" => Some(Permission::SubaccountManage),
             "api_key_manage" => Some(Permission::ApiKeyManage),
+            "theme_custom" => Some(Permission::ThemeCustom),
+            "memory_output_control" => Some(Permission::MemoryOutputControl),
+            "permission_edit" => Some(Permission::PermissionEdit),
             _ => None,
         }
     }
-    pub fn all() -> [Permission; 8] {
+    pub fn all() -> [Permission; 11] {
         [
             Permission::MemoryRead,
             Permission::MemoryWrite,
@@ -151,6 +163,9 @@ impl Permission {
             Permission::LibraryManage,
             Permission::SubaccountManage,
             Permission::ApiKeyManage,
+            Permission::ThemeCustom,
+            Permission::MemoryOutputControl,
+            Permission::PermissionEdit,
         ]
     }
 }
@@ -180,8 +195,8 @@ impl UserRole {
     pub fn can(&self, p: Permission) -> bool {
         use Permission::*;
         match self {
-            UserRole::Admin => true,
-            UserRole::Developer => !matches!(p, SubaccountManage),
+            UserRole::Admin => !matches!(p, PermissionEdit), // 权限编辑仅主账户
+            UserRole::Developer => !matches!(p, SubaccountManage | PermissionEdit),
             UserRole::Tester => matches!(p, MemoryRead | MemoryWrite | ApiKeyManage),
             UserRole::Viewer => matches!(p, MemoryRead),
         }
@@ -243,6 +258,9 @@ pub struct UserInfo {
     /// An empty list means the account was explicitly granted nothing.
     #[serde(default)]
     pub custom_permissions: Option<Vec<String>>,
+    /// 账户级设置(跟随账户): {"theme":"...","theme_custom_css":"...","memory_output":{...}}
+    #[serde(default)]
+    pub settings: Option<serde_json::Value>,
 }
 
 impl UserInfo {
@@ -274,6 +292,10 @@ pub enum UserPlan {
 }
 
 impl UserPlan {
+    /// 主题自定义是付费能力: Free 只能切换内置主题
+    pub fn allows_theme_custom(&self) -> bool {
+        !matches!(self, UserPlan::Free)
+    }
     pub fn max_memories(&self) -> usize {
         match self {
             UserPlan::Free => 1000,
@@ -625,6 +647,7 @@ impl UserManager {
             role: UserRole::Admin, // 主账户字段忽略; Admin 仅表意"全权"
             email,
             custom_permissions: None,
+            settings: None,
         };
         db.insert(user_id.to_string(), info.clone());
         let snapshot = db.clone();
@@ -773,6 +796,7 @@ impl UserManager {
             role,
             email: String::new(),
             custom_permissions: None,
+            settings: None,
         };
         db.insert(sub_user_id.to_string(), sub_info.clone());
         if let Some(p) = db.get_mut(parent_id) {
@@ -901,6 +925,63 @@ impl UserManager {
 
     /// Replace a sub-account's role matrix with an explicit grant list.
     /// `None` restores the role template. Only a main account may grant subaccount_manage.
+    /// 账户设置读取(跟随账户): None=默认(主题synapse/无自定义CSS/默认输出策略)
+    pub fn get_user_settings(&self, user_id: &str) -> Result<serde_json::Value, String> {
+        let db = self.users_db.read();
+        let u = db.get(user_id).ok_or("user not found")?;
+        Ok(u.settings.clone().unwrap_or_else(|| {
+            serde_json::json!({
+                "theme": "synapse",
+                "theme_custom_css": "",
+                "memory_output": { "mode": "full" }
+            })
+        }))
+    }
+
+    /// 账户设置写入(计划门控: Free不可写theme_custom_css)
+    pub fn set_user_settings(
+        &self,
+        user_id: &str,
+        patch: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let mut db = self.users_db.write();
+        let u = db.get_mut(user_id).ok_or("user not found")?;
+        let mut cur = u.settings.clone().unwrap_or_else(|| {
+            serde_json::json!({
+                "theme": "synapse",
+                "theme_custom_css": "",
+                "memory_output": { "mode": "full" }
+            })
+        });
+        let obj = cur.as_object_mut().ok_or("settings corrupt")?;
+        if let Some(patch_obj) = patch.as_object() {
+            for (k, v) in patch_obj {
+                // 计划门控: Free 只能换主题, 不能带自定义CSS
+                if k == "theme_custom_css" && !u.plan.allows_theme_custom() {
+                    let css = v.as_str().unwrap_or("");
+                    if !css.trim().is_empty() {
+                        return Err("theme customization requires a paid plan".into());
+                    }
+                }
+                if k == "theme" {
+                    let id = v.as_str().unwrap_or("synapse");
+                    // 免费用户只能选内置主题(非custom前缀)
+                    if id.starts_with("custom:") && !u.plan.allows_theme_custom() {
+                        return Err("custom themes require a paid plan".into());
+                    }
+                }
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+        let snapshot = cur.clone();
+        u.settings = Some(cur);
+        let db_snapshot = db.clone();
+        drop(db);
+        self.save_users_db(&db_snapshot)
+            .map_err(|e| format!("failed to persist settings: {}", e))?;
+        Ok(snapshot)
+    }
+
     pub fn set_subaccount_permissions(
         &self,
         actor_id: &str,
