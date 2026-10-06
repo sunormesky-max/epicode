@@ -188,6 +188,64 @@ pub async fn revoke_subaccount(
     }
 }
 
+/// GET /v1/settings — 账户设置(主题偏好/自定义CSS/记忆输出策略, 跟随账户)
+pub async fn get_user_settings(
+    State(st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match st.user_mgr.get_user_settings(&user.user_id) {
+        Ok(settings) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok_plain(
+                "user_settings_get",
+                serde_json::json!({
+                    "settings": settings,
+                    "plan": serde_json::to_value(&user.plan).unwrap_or_default(),
+                    "can_theme_custom": user.plan.allows_theme_custom(),
+                }),
+            )),
+        ),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "user_settings_get",
+                400,
+                &e,
+            )),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SettingsPatchRequest {
+    pub patch: serde_json::Value,
+}
+
+/// PUT /v1/settings — 账户设置写入(计划门控: Free不可自定义主题)
+pub async fn set_user_settings(
+    State(st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
+    Json(req): Json<SettingsPatchRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match st.user_mgr.set_user_settings(&user.user_id, req.patch) {
+        Ok(settings) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok_plain(
+                "user_settings_set",
+                serde_json::json!({ "settings": settings }),
+            )),
+        ),
+        Err(e) => (
+            StatusCode::FORBIDDEN,
+            Json(epicode::engine::smrp::envelope_err_plain(
+                "user_settings_set",
+                403,
+                &e,
+            )),
+        ),
+    }
+}
+
 #[derive(Deserialize)]
 pub struct SetRoleRequest {
     pub role: String,

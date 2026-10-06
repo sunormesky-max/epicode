@@ -925,6 +925,63 @@ impl UserManager {
 
     /// Replace a sub-account's role matrix with an explicit grant list.
     /// `None` restores the role template. Only a main account may grant subaccount_manage.
+    /// 账户设置读取(跟随账户): None=默认(主题synapse/无自定义CSS/默认输出策略)
+    pub fn get_user_settings(&self, user_id: &str) -> Result<serde_json::Value, String> {
+        let db = self.users_db.read();
+        let u = db.get(user_id).ok_or("user not found")?;
+        Ok(u.settings.clone().unwrap_or_else(|| {
+            serde_json::json!({
+                "theme": "synapse",
+                "theme_custom_css": "",
+                "memory_output": { "mode": "full" }
+            })
+        }))
+    }
+
+    /// 账户设置写入(计划门控: Free不可写theme_custom_css)
+    pub fn set_user_settings(
+        &self,
+        user_id: &str,
+        patch: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let mut db = self.users_db.write();
+        let u = db.get_mut(user_id).ok_or("user not found")?;
+        let mut cur = u.settings.clone().unwrap_or_else(|| {
+            serde_json::json!({
+                "theme": "synapse",
+                "theme_custom_css": "",
+                "memory_output": { "mode": "full" }
+            })
+        });
+        let obj = cur.as_object_mut().ok_or("settings corrupt")?;
+        if let Some(patch_obj) = patch.as_object() {
+            for (k, v) in patch_obj {
+                // 计划门控: Free 只能换主题, 不能带自定义CSS
+                if k == "theme_custom_css" && !u.plan.allows_theme_custom() {
+                    let css = v.as_str().unwrap_or("");
+                    if !css.trim().is_empty() {
+                        return Err("theme customization requires a paid plan".into());
+                    }
+                }
+                if k == "theme" {
+                    let id = v.as_str().unwrap_or("synapse");
+                    // 免费用户只能选内置主题(非custom前缀)
+                    if id.starts_with("custom:") && !u.plan.allows_theme_custom() {
+                        return Err("custom themes require a paid plan".into());
+                    }
+                }
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+        let snapshot = cur.clone();
+        u.settings = Some(cur);
+        let db_snapshot = db.clone();
+        drop(db);
+        self.save_users_db(&db_snapshot)
+            .map_err(|e| format!("failed to persist settings: {}", e))?;
+        Ok(snapshot)
+    }
+
     pub fn set_subaccount_permissions(
         &self,
         actor_id: &str,
