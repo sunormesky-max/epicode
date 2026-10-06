@@ -1040,3 +1040,7 @@ html[data-theme="x-dim"] {
   --chart-7: #17BFD6;
   --chart-8: #8B98A5;
 }
+
+/* ── 导航中链区: 空间不足时横向滑动(隐藏滚动条, 不换行不挤压CTA) ── */
+.nav-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+.nav-scroll::-webkit-scrollbar { display: none; }

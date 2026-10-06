@@ -40,13 +40,13 @@ export default function Navbar() {
         WebkitBackdropFilter: 'blur(24px) saturate(180%)',
         border: `1px solid ${scrolled ? "rgba(62,207,174,0.25)" : "var(--border-light)"}`,
         borderRadius: "var(--radius-full)",
-        maxWidth: '720px',
+        maxWidth: '800px',
         width: 'calc(100% - 2rem)',
         boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(245, 244, 240, 0.04)',
       }}
     >
       {/* Left: Brand (能量核心图标) */}
-      <a href="#/" className="flex items-center gap-2 no-underline px-3" aria-label={t('nav.ariaHome')}>
+      <a href="#/" className="flex items-center gap-2 no-underline px-3 flex-shrink-0" aria-label={t('nav.ariaHome')}>
         <div className="relative" style={{ width: 28, height: 28 }} aria-hidden="true">
           <img src="/logo.svg" alt="Epicode" style={{ width: '100%', height: '100%', filter: 'none' }} />
         </div>
@@ -58,13 +58,13 @@ export default function Navbar() {
         </span>
       </a>
 
-      {/* Center: Nav Links (Rajdhani 科技字体) */}
-      <div className="hidden md:flex items-center gap-0.5 mx-auto">
+      {/* Center: Nav Links (Rajdhani 科技字体) — 空间不足时横向滑动而非换行挤压CTA */}
+      <div className="nav-scroll hidden md:flex items-center gap-0.5 mx-auto min-w-0 overflow-x-auto">
         {navLinks.map((link) => (
           <a
             key={link.path}
             href={`#${link.path}`}
-            className="px-3 py-1.5 rounded-full text-xs no-underline transition-all duration-200"
+            className="px-3 py-1.5 rounded-full text-xs no-underline transition-all duration-200 whitespace-nowrap flex-shrink-0"
             style={{
               fontFamily: 'var(--font-heading)',
               color: currentPath === link.path ? 'var(--accent-cyan-bright)' : 'var(--text-secondary)',
@@ -93,24 +93,24 @@ export default function Navbar() {
       </div>
 
       {/* Right: CTA */}
-      <div className="hidden md:flex items-center gap-2 ml-auto">
+      <div className="hidden md:flex items-center gap-2 ml-auto flex-shrink-0">
         <ThemeSwitcher compact />
         {authed ? (
-          <a href="#/dashboard" className="btn-primary text-xs py-2 px-4">
+          <a href="#/dashboard" className="btn-primary text-xs py-2 px-4 whitespace-nowrap flex-shrink-0">
             {t('nav.console')}
           </a>
         ) : (
           <>
-            <a 
-              href="#/login" 
-              className="text-xs no-underline transition-colors duration-200 px-3 py-1.5"
+            <a
+              href="#/login"
+              className="text-xs no-underline transition-colors duration-200 px-3 py-1.5 whitespace-nowrap flex-shrink-0"
               style={{ color: 'var(--text-secondary)' }}
               onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-primary)'}
               onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-secondary)'}
             >
               {t('login.title')}
             </a>
-            <a href="#/register" className="btn-primary text-xs py-2 px-4">
+            <a href="#/register" className="btn-primary text-xs py-2 px-4 whitespace-nowrap flex-shrink-0">
               {t('nav.getStarted')}
             </a>
           </>
