@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0](https://github.com/sunormesky-max/epicode/compare/v1.5.0...v1.6.0) (2026-10-06)
+
+
+### Features
+
+* 主题账户跟随+自定义主题(免费锁)+权限体系重建(11权限点+记忆输出控制) ([#181](https://github.com/sunormesky-max/epicode/issues/181)) ([d20853a](https://github.com/sunormesky-max/epicode/commit/d20853ad758362c7ee0f0932e46fa76961f2cf7c))
+
+
+### Bug Fixes
+
+* **frontend:** npm audit fix for source-map-js and others ([#180](https://github.com/sunormesky-max/epicode/issues/180)) ([ba53b14](https://github.com/sunormesky-max/epicode/commit/ba53b149b99001b7e416648cd69d6ddaeb95a6ff))
+* **memory-os:** slim envelope retains valid + timestamps ([#179](https://github.com/sunormesky-max/epicode/issues/179)) ([25ecd05](https://github.com/sunormesky-max/epicode/commit/25ecd053ab7b610f39012a486fe2408720c0ecd9))
+* **ui:** 压缩能量→亮度曲线并下调地平线光带 — 修复满能量背景穿透正文的穿模 ([#183](https://github.com/sunormesky-max/epicode/issues/183)) ([4ba8618](https://github.com/sunormesky-max/epicode/commit/4ba8618d732af5f6368505613ecf2c90cb8bf1c1))
+
 ## [1.5.0](https://github.com/sunormesky-max/epicode/compare/v1.4.0...v1.5.0) (2026-10-05)
 
 
