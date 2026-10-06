@@ -5,7 +5,7 @@ import { DashboardLoading } from '@/components/DashboardUI';
 import { Shield, Lock, Check, Minus, Users, Eye } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
 
-const PERM_LABELS: Record<string, string> = {
+const PERM_LABELS: Record<string, Record<string, string>> = {
   memory_read: { zh: '记忆读取', en: 'Memory Read' },
   memory_write: { zh: '记忆写入', en: 'Memory Write' },
   memory_delete: { zh: '记忆删除', en: 'Memory Delete' },

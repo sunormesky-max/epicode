@@ -111,7 +111,7 @@ export default function ThemeCenter() {
   const [prefs, setPrefs] = useState<ThemePrefs>(() => readThemePrefs());
   const location = useLocation();
   const inConsole = location.pathname.startsWith('/dashboard');
-  const [accountSettings, setAccountSettings] = useState<UserSettings | null>(null);
+  const [, setAccountSettings] = useState<UserSettings | null>(null);
   const [canCustom, setCanCustom] = useState(false);
   const [planLabel, setPlanLabel] = useState('');
   const [cssDraft, setCssDraft] = useState('');
