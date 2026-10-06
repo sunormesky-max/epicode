@@ -17,6 +17,7 @@ import {
   type ThemePrefs,
   type ThemeSpec,
 } from '@/lib/themes';
+import { getUserSettings, setUserSettings, type UserSettings } from '@/lib/api';
 import { useI18nContext } from '@/i18n/useI18n';
 
 const mono: CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.12em', color: 'var(--text-tertiary)' };
@@ -110,6 +111,33 @@ export default function ThemeCenter() {
   const [prefs, setPrefs] = useState<ThemePrefs>(() => readThemePrefs());
   const location = useLocation();
   const inConsole = location.pathname.startsWith('/dashboard');
+  const [accountSettings, setAccountSettings] = useState<UserSettings | null>(null);
+  const [canCustom, setCanCustom] = useState(false);
+  const [planLabel, setPlanLabel] = useState('');
+  const [cssDraft, setCssDraft] = useState('');
+  const [saveMsg, setSaveMsg] = useState('');
+  const [saveErr, setSaveErr] = useState('');
+
+  useEffect(() => {
+    if (!inConsole) return;
+    let mounted = true;
+    getUserSettings()
+      .then((d) => {
+        if (!mounted) return;
+        setAccountSettings(d.settings || {});
+        setCanCustom(!!d.can_theme_custom);
+        setPlanLabel(d.plan || '');
+        setCssDraft((d.settings?.theme_custom_css as string) || '');
+        const serverTheme = d.settings?.theme as ThemeId | undefined;
+        if (serverTheme && serverTheme !== activeTheme()) {
+          setTheme(serverTheme);
+          setCurrent(serverTheme);
+          setPrefs(readThemePrefs());
+        }
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, [inConsole]);
 
   useEffect(() => {
     const onChange = (event: Event) => {
@@ -131,6 +159,28 @@ export default function ThemeCenter() {
     setTheme(id);
     setCurrent(id);
     setPrefs(readThemePrefs());
+    if (inConsole) {
+      setUserSettings({ theme: id }).catch(() => {});
+    }
+  };
+
+  const saveCustomCss = async () => {
+    setSaveMsg(''); setSaveErr('');
+    try {
+      const r = await setUserSettings({ theme_custom_css: cssDraft });
+      setAccountSettings(r.settings);
+      setSaveMsg(zh ? '已保存到账户 ✓' : 'Saved ✓');
+      const styleId = 'epicode-custom-css';
+      document.getElementById(styleId)?.remove();
+      if (cssDraft.trim()) {
+        const el = document.createElement('style');
+        el.id = styleId;
+        el.textContent = cssDraft;
+        document.head.appendChild(el);
+      }
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const groups: { family: ThemeFamily; title: string; hint: string }[] = [
@@ -147,10 +197,69 @@ export default function ThemeCenter() {
         <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(2rem, 5vw, 3.4rem)', margin: '0.4rem 0 0.6rem' }}>{zh ? '主题管理中心' : 'Theme Center'}</h1>
         <p style={{ maxWidth: 640, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
           {zh
-            ? '官网和控制台共用这一套选择。主题只改颜色、表面和强调色，不改信息结构。所有设置保存在这台浏览器里。'
+            ? `官网和控制台共用这一套选择。${inConsole ? '控制台内主题跟随账户设定，初始用户默认 Synapse 原始主题。' : '设置保存在这台浏览器里。'}`
             : 'The site and the console share one choice. A theme only changes colour, surfaces and accents, never the information structure. All settings are saved in this browser.'}
         </p>
 
+        {inConsole && (
+          <section aria-label={zh ? 'Custom theme' : 'Custom theme'} style={{ ...panel, marginTop: 28, opacity: canCustom ? 1 : 0.72 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 12 }}>
+              <span style={mono}>{zh ? '自定义主题 (跟随账户)' : 'CUSTOM THEME (follows account)'}</span>
+              <span style={{ ...mono, color: canCustom ? 'var(--success-green)' : 'var(--warning-orange)' }}>
+                {planLabel ? planLabel.toUpperCase() + ' ' : ''}{canCustom ? (zh ? '可用' : 'enabled') : (zh ? '免费版仅可切换内置主题' : 'Free: built-in only')}
+              </span>
+            </div>
+            <p style={{ color: 'var(--text-tertiary)', fontSize: 12.5, lineHeight: 1.7, margin: '0 0 10px' }}>
+              {zh ? '上传/粘贴自定义 CSS 覆盖主题 token。保存后跟随账户, 所有设备生效。' : 'Paste custom CSS to override theme tokens. Saved to your account.'}
+            </p>
+            <textarea
+              value={cssDraft}
+              onChange={(e) => { setCssDraft(e.target.value); setSaveMsg(''); setSaveErr(''); }}
+              disabled={!canCustom}
+              placeholder={canCustom ? ':root { --accent-cyan: #ff6b6b; }' : (zh ? '升级到 Pro 后解锁' : 'Upgrade to Pro')}
+              rows={7}
+              style={{
+                width: '100%', boxSizing: 'border-box',
+                background: 'rgba(0,0,0,0.35)', color: 'var(--text-primary)',
+                border: '1px solid var(--border-light)', borderRadius: 10,
+                padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: 12,
+                resize: 'vertical', cursor: canCustom ? 'text' : 'not-allowed',
+              }}
+            />
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={saveCustomCss}
+                disabled={!canCustom}
+                style={{ ...selectStyle, cursor: canCustom ? 'pointer' : 'not-allowed', opacity: canCustom ? 1 : 0.5 }}
+              >
+                {zh ? '保存到账户' : 'Save to account'}
+              </button>
+              <label
+                style={{ ...selectStyle, cursor: canCustom ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 6, opacity: canCustom ? 1 : 0.5 }}
+              >
+                {zh ? '上传 .css 文件' : 'Upload .css'}
+                <input
+                  type="file"
+                  accept=".css,text/css"
+                  disabled={!canCustom}
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file || !canCustom) return;
+                    if (file.size > 64 * 1024) { setSaveErr(zh ? '超过 64KB 上限' : 'Exceeds 64KB'); return; }
+                    const reader = new FileReader();
+                    reader.onload = () => { setCssDraft(String(reader.result || '')); setSaveMsg(''); };
+                    reader.readAsText(file);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              {saveMsg && <span style={{ color: 'var(--success-green)', fontSize: 12 }}>{saveMsg}</span>}
+              {saveErr && <span style={{ color: 'var(--warning-orange)', fontSize: 12 }}>{saveErr}</span>}
+            </div>
+          </section>
+        )}
         <section aria-label={zh ? '显示设置' : 'Display settings'} style={{ ...panel, marginTop: 28 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 12 }}>
             <span style={mono}>{zh ? '显示设置' : 'DISPLAY'}</span>
