@@ -202,6 +202,9 @@ pub struct SchedulerCenter {
     queue: ParkMutex<VecDeque<ScheduledTask>>,
     loop_gate: Arc<SingleFlightGate>,
     cycle_gate: Arc<SingleFlightGate>,
+    /// 所有 dream 入口(手动 api_dream / LLM Dream 动作 / auto_dream)共享:同一时刻只允许一个 dream 周期,
+    /// 否则两个周期基于各自快照写回 payload,互相覆盖(lost update)并重复扣能量。
+    dream_gate: Arc<SingleFlightGate>,
     tx: EventSender,
     tick_interval: parking_lot::RwLock<Duration>,
     horizon: parking_lot::Mutex<super::horizon::Horizon>,
@@ -288,6 +291,7 @@ impl SchedulerCenter {
             queue: ParkMutex::new(VecDeque::new()),
             loop_gate: Arc::new(SingleFlightGate::default()),
             cycle_gate: Arc::new(SingleFlightGate::default()),
+            dream_gate: Arc::new(SingleFlightGate::default()),
             tx,
             tick_interval: parking_lot::RwLock::new(Duration::from_millis(tick_interval_ms)),
             horizon: parking_lot::Mutex::new(super::horizon::Horizon::new(tick_interval_ms)),
@@ -3841,8 +3845,21 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
     pub fn api_dream(&self, dry_run: bool) -> Result<String, String> {
         // R4-S04: align with auto_pipeline::auto_dream — actually consume, not only check.
         // dry_run stays free so agents can preview consolidation without draining budget.
+        let _dream_permit = if dry_run {
+            None
+        } else {
+            match self.dream_gate.try_acquire() {
+                Some(p) => Some(p),
+                None => return Err("dream cycle already running".to_string()),
+            }
+        };
         if !dry_run && !self.energy.consume(15.0) {
             return Err("insufficient energy (need 15.0)".to_string());
+        }
+        if !dry_run {
+            // 手动 dream 也计入节拍,避免紧接着 auto_dream 重复跑一轮
+            self.last_dream_tick
+                .store(self.tick_count.load(Ordering::SeqCst), Ordering::SeqCst);
         }
         let report =
             super::dream::DreamEngine::cycle(&self.space, &self.knowledge, 0.3, 5, dry_run);
@@ -4580,6 +4597,10 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                 }
             }
             SchedulerAction::Dream => {
+                let Some(_dream_permit) = self.dream_gate.try_acquire() else {
+                    tracing::info!("[LLM] dream: another dream cycle is running, skipped");
+                    return;
+                };
                 if !self.energy.consume(15.0) {
                     tracing::warn!("[LLM] dream: insufficient energy");
                     return;
@@ -5609,6 +5630,10 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
     }
 
     fn auto_dream(&self) {
+        let Some(_dream_permit) = self.dream_gate.try_acquire() else {
+            tracing::debug!("[AutoDream] another dream cycle is running, skipped");
+            return;
+        };
         let tick = self.tick_count.load(Ordering::SeqCst);
         let last = self.last_dream_tick.load(Ordering::SeqCst);
 
@@ -7319,6 +7344,36 @@ mod tests {
         assert!(err.contains("insufficient energy"), "got: {err}");
         // Failed attempt must not further drain the remaining budget.
         assert!((sched.energy.available() - 14.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn api_dream_is_single_flight_with_other_dream_paths() {
+        let (sched, _space, _kg) = build_scheduler();
+        let before = sched.energy.available();
+        // 模拟 auto_dream / LLM Dream 正在进行
+        let held = sched.dream_gate.try_acquire().expect("gate free");
+        let err = sched
+            .api_dream(false)
+            .expect_err("must refuse concurrent dream");
+        assert!(err.contains("already running"), "got: {err}");
+        assert!(
+            (sched.energy.available() - before).abs() < 0.01,
+            "refused dream must not consume energy"
+        );
+        // dry_run 只读,不受闸门限制
+        sched.api_dream(true).expect("dry_run allowed");
+        drop(held);
+        sched.tick_count.store(42, Ordering::SeqCst);
+        sched.api_dream(false).expect("dream after gate released");
+        assert_eq!(
+            sched.last_dream_tick.load(Ordering::SeqCst),
+            42,
+            "manual dream must reset the auto-dream interval"
+        );
+        assert!(
+            sched.dream_gate.try_acquire().is_some(),
+            "gate released after api_dream"
+        );
     }
 
     // ---- Test: Large-scale scenario (100 memories) ----
