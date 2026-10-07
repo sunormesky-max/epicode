@@ -5,7 +5,8 @@
 //!   → (最终行动) remember/apply/notify 云端执行
 //! → 返回行动报告 (端侧身体显示 + ack)
 //!
-//! 安全: run 只读白名单 / read 路径白名单 / apply 限 src+自动备份
+//! 安全: 仅配置的平台特权主账户可唤醒有服务器委托能力的主意识；run 使用只读命令白名单，
+//!       read 路径白名单 / apply 限 src+自动备份
 //!       部署(编译+systemctl)不在任何白名单 — 大卫的手。
 
 use axum::extract::{Extension, State};
@@ -15,11 +16,15 @@ use serde::Deserialize;
 
 use super::helpers::AuthedEngine;
 use super::state::CloudState;
-use epicode::engine::user_manager::UserInfo;
+use epicode::engine::user_manager::{UserInfo, UserManager};
 
 #[derive(Deserialize)]
 pub struct ThinkRequest {
     pub signal_id: u64,
+}
+
+fn may_think(user: &UserInfo, is_privileged: fn(&str) -> bool) -> bool {
+    user.parent.is_none() && is_privileged(&user.user_id)
 }
 
 pub async fn think(
@@ -28,6 +33,19 @@ pub async fn think(
     Extension(user): Extension<UserInfo>,
     Json(req): Json<ThinkRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    // 思考结果可以触发共享服务器上的 delegate.run/read/apply。租户主账户
+    // 不等于平台管理员，因此在调用 LLM 前限制为配置的特权主账户。
+    if !may_think(&user, UserManager::is_privileged_id) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "consciousness_think",
+                403,
+                "configured platform operator account required for consciousness think",
+            )),
+        );
+    }
     let engine_inner = engine.clone();
     let uid = user.user_id.clone();
 
@@ -214,6 +232,53 @@ pub async fn think(
                     &m,
                 )),
             )
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use epicode::engine::user_manager::{UserPlan, UserRole};
+
+    fn user(id: &str, parent: Option<&str>, role: UserRole) -> UserInfo {
+        UserInfo {
+            user_id: id.into(),
+            api_key: "test-key".into(),
+            password_hash: String::new(),
+            plan: UserPlan::Free,
+            max_memories: 1000,
+            memories_used: 0,
+            created_at: 0,
+            parent: parent.map(str::to_owned),
+            sub_accounts: Vec::new(),
+            role,
+            email: String::new(),
+            custom_permissions: None,
+            settings: None,
+        }
+    }
+
+    #[test]
+    fn only_privileged_main_account_can_trigger_server_consciousness_tools() {
+        // Inject the configured-ID lookup so the policy test does not mutate
+        // process-wide environment variables or the production OnceLock cache.
+        let is_privileged: fn(&str) -> bool = |id| id == "platform-operator";
+        for role in [
+            UserRole::Admin,
+            UserRole::Developer,
+            UserRole::Tester,
+            UserRole::Viewer,
+        ] {
+            assert!(!may_think(&user("tenant-owner", None, role), is_privileged));
+            assert!(may_think(
+                &user("platform-operator", None, role),
+                is_privileged
+            ));
+            assert!(!may_think(
+                &user("platform-operator", Some("tenant-owner"), role),
+                is_privileged
+            ));
         }
     }
 }

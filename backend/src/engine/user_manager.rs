@@ -268,6 +268,11 @@ impl UserInfo {
         if self.parent.is_none() {
             return true;
         }
+        // Editing grants is reserved for the owner, even if a custom grant
+        // list contains the permission name.
+        if perm == Permission::PermissionEdit {
+            return false;
+        }
         if let Some(custom) = &self.custom_permissions {
             return custom
                 .iter()
@@ -1005,15 +1010,8 @@ impl UserManager {
         };
         let mut db = self.users_db.write();
         let actor = db.get(actor_id).ok_or("actor not found")?.clone();
-        if actor.parent.is_some() && actor.role != UserRole::Admin {
-            return Err("insufficient role to manage sub-accounts".into());
-        }
-        if actor.parent.is_some()
-            && parsed
-                .as_ref()
-                .is_some_and(|p| p.iter().any(|n| n == "subaccount_manage"))
-        {
-            return Err("only the main account can grant subaccount_manage".into());
+        if actor.parent.is_some() {
+            return Err("only the main account can edit permissions".into());
         }
         let sub = db.get_mut(sub_user_id).ok_or("sub-account not found")?;
         if sub.parent.is_none() {
@@ -1854,6 +1852,25 @@ mod rbac_tests {
         assert_eq!(u.role, UserRole::Developer);
         assert!(u.role.can(Permission::MemoryDelete));
         assert!(!u.role.can(Permission::SubaccountManage));
+    }
+
+    #[test]
+    fn permission_edit_is_owner_only_even_with_custom_grant() {
+        let mut user: UserInfo = serde_json::from_value(serde_json::json!({
+            "user_id": "admin-child",
+            "api_key": "tm-child",
+            "plan": "Free",
+            "max_memories": 0,
+            "memories_used": 0,
+            "created_at": 1,
+            "parent": "owner",
+            "role": "admin",
+            "custom_permissions": ["permission_edit"]
+        }))
+        .unwrap();
+        assert!(!user.allows(Permission::PermissionEdit));
+        user.parent = None;
+        assert!(user.allows(Permission::PermissionEdit));
     }
 
     /// 角色序列化往返 + parse

@@ -27,6 +27,7 @@ The 1 MiB native response limit counts the complete JSON-RPC response, including
 ## Authentication and Errors
 
 - Cloud HTTP authenticates before parsing the body. An invalid key returns HTTP `401` with JSON-RPC error `-32001` and a null ID. Cloud TCP authenticates the first `initialize` prelude; parseable auth failures preserve that request ID. Local stdio trusts the local MCP host and has no API-key challenge.
+- Cloud subaccount tools require an explicit permission classification; unclassified tools are denied. Read tools require `memory_read`, including when custom grants revoke it. `epicode_handshake` requires `memory_write` because it persists agent authorization and version state. Standard MCP `initialize` and `tools/list` remain available. Cloud TCP rechecks credentials and applies the current role/custom grants on every request, so a role downgrade takes effect without reconnecting or rotating the key.
 - After transport authentication, malformed JSON and unknown methods use the top-level JSON-RPC `error` object (`-32700` and `-32601`, respectively). Tool execution failures stay in SMRP (`protocol.ok: false`) and set MCP `isError: true`; callers should not confuse them with JSON-RPC protocol failures.
 - The Python bridge sends `EPICODE_API_KEY` to REST as `X-API-Key`; upstream HTTP/network failures become tool errors. Python and TypeScript SDKs throw `EpicodeError` for non-2xx responses and for a successful HTTP response carrying `protocol.ok: false`.
 

@@ -16,6 +16,11 @@ pub async fn list_skills(
     State(st): State<CloudState>,
     user: axum::extract::Extension<UserInfo>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) =
+        super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryRead)
+    {
+        return r;
+    }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
@@ -112,6 +117,11 @@ pub async fn get_skill(
     user: axum::extract::Extension<UserInfo>,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) =
+        super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryRead)
+    {
+        return r;
+    }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
@@ -290,6 +300,11 @@ pub async fn list_pending_skills(
     State(st): State<CloudState>,
     user: axum::extract::Extension<UserInfo>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) =
+        super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryRead)
+    {
+        return r;
+    }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
@@ -354,6 +369,11 @@ pub async fn search_skills(
     user: axum::extract::Extension<UserInfo>,
     Json(req): Json<SearchSkillsRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) =
+        super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryRead)
+    {
+        return r;
+    }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
@@ -439,6 +459,12 @@ pub async fn pull_public_skill(
     user: axum::extract::Extension<UserInfo>,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::SkillManage,
+    ) {
+        return r;
+    }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
