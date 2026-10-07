@@ -38,7 +38,7 @@ sha2 = "0.10"
 hmac = "0.12"
 base64 = "0.23"
 zeroize = { version = "1", features = ["derive"] }
-argon2 = { version = "0.5", features = ["password-hash"] }
+argon2 = { version = "0.6", features = ["password-hash"] }
 
 [profile.release]
 strip = true
