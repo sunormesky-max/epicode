@@ -59,7 +59,14 @@ pub fn auto_save(ctx: &JanitorCtx) {
     if !dirty.is_empty() {
         match ctx.storage.batch_upsert(ctx.space, &dirty) {
             Ok(n) => tracing::debug!("[Janitor] auto-save {} dirty tetras", n),
-            Err(e) => tracing::warn!("[Janitor] auto-save batch failed: {}", e),
+            Err(e) => {
+                // A failed transaction writes none of this batch. Reinsert through the
+                // set so marks added after drain_dirty remain queued too.
+                for id in dirty {
+                    ctx.gateway.mark_dirty(id);
+                }
+                tracing::warn!("[Janitor] auto-save batch failed (will retry): {}", e);
+            }
         }
     }
 }
@@ -77,9 +84,19 @@ pub fn mark_dirty_persist(ctx: &JanitorCtx, id: TetraId) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::tetra::{MemoryPayload, Tetrahedron};
+    use crate::domain::vertex::Point3;
+    use crate::engine::adaptive::AdaptiveParams;
+    use crate::engine::auto_pipeline::{self, AutoPipelineCtx};
+    use crate::engine::bus::EventBus;
+    use crate::engine::classifier::CategoryClassifier;
+    use crate::engine::cognitive::CognitiveEngine;
+    use crate::engine::embedding::EmbeddingService;
+    use crate::engine::energy::EnergyCenter;
     use crate::engine::knowledge::RelationType;
     use rusqlite::Connection;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
     fn temp_dir(name: &str) -> PathBuf {
         let nonce = std::time::SystemTime::now()
@@ -105,6 +122,173 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap()
+    }
+
+    struct PulseFixture {
+        data_dir: PathBuf,
+        space: Arc<Space>,
+        knowledge: Arc<KnowledgeGraph>,
+        gateway: GatewayCenter,
+        energy: Arc<EnergyCenter>,
+        storage: StorageManager,
+        ids: [TetraId; 2],
+    }
+
+    impl PulseFixture {
+        fn janitor_ctx(&self) -> JanitorCtx<'_> {
+            JanitorCtx {
+                space: &self.space,
+                storage: &self.storage,
+                knowledge: &self.knowledge,
+                gateway: &self.gateway,
+            }
+        }
+    }
+
+    fn pulse_fixture(name: &str) -> PulseFixture {
+        let data_dir = temp_dir(name);
+        let space = Arc::new(Space::new());
+        let knowledge = Arc::new(KnowledgeGraph::new());
+        let bus = EventBus::new(8);
+        let tx = bus.sender();
+        let energy = Arc::new(EnergyCenter::new(100.0, 0.0, tx.clone(), bus.subscribe()));
+        let gateway = GatewayCenter::new(
+            Arc::clone(&space),
+            Arc::clone(&energy),
+            Arc::new(CognitiveEngine::new("", "")),
+            Arc::new(CategoryClassifier::new("", "")),
+            tx,
+            bus.subscribe(),
+            Arc::clone(&knowledge),
+            Arc::new(EmbeddingService::from_env()),
+            None,
+        );
+        let storage = StorageManager::new(&data_dir).unwrap();
+        let mut ids = Vec::new();
+        for (i, x) in [0.0, 1.0].into_iter().enumerate() {
+            let core = Point3::new(x, 0.0, 0.0);
+            let tetra = Tetrahedron {
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: MemoryPayload {
+                    content: format!("pulse memory {i}"),
+                    content_hash: i as u64 + 1,
+                    labels: vec!["pulse-test".into()],
+                    embedding: vec![0.5; 4],
+                    ..Default::default()
+                },
+                mass: 1.0,
+            };
+            ids.push(
+                space
+                    .add_tetrahedron(&tetra, &Tetrahedron::compute_vertices(core))
+                    .unwrap(),
+            );
+        }
+        assert!(!space.find_shared_vertices(ids[0], ids[1]).is_empty());
+        storage.batch_upsert(&space, &ids).unwrap();
+        PulseFixture {
+            data_dir,
+            space,
+            knowledge,
+            gateway,
+            energy,
+            storage,
+            ids: [ids[0], ids[1]],
+        }
+    }
+
+    fn restart_masses(fixture: PulseFixture) -> [f64; 2] {
+        let data_dir = fixture.data_dir.clone();
+        let ids = fixture.ids;
+        drop(fixture);
+        let storage = StorageManager::new(&data_dir).unwrap();
+        let space = Space::new();
+        let knowledge = KnowledgeGraph::new();
+        let report = storage.load_all(&space, &knowledge);
+        assert!(
+            report.space_ok,
+            "restart load failed: {:?}",
+            report.space_error
+        );
+        let masses = ids.map(|id| space.get_tetrahedron(id).unwrap().mass);
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).unwrap();
+        masses
+    }
+
+    #[test]
+    fn manual_pulse_retries_failed_batch_and_survives_restart() {
+        let fixture = pulse_fixture("manual_pulse_retry");
+        let changed = fixture.gateway.pulse(fixture.ids[0], 2).unwrap();
+        assert!(changed.dirty_ids.contains(&fixture.ids[1]));
+        let pulsed_mass = fixture.space.get_tetrahedron(fixture.ids[1]).unwrap().mass;
+        assert!(pulsed_mass > 1.0);
+
+        let connection = Connection::open(fixture.data_dir.join("tetramem.db")).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER fail_pulse_save BEFORE INSERT ON tetrahedrons \
+                 BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;",
+            )
+            .unwrap();
+        auto_save(&fixture.janitor_ctx());
+        let mass_before_retry: f64 = connection
+            .query_row(
+                "SELECT mass FROM tetrahedrons WHERE id=?1",
+                [fixture.ids[1] as i64],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(mass_before_retry, 1.0);
+
+        connection
+            .execute_batch("DROP TRIGGER fail_pulse_save")
+            .unwrap();
+        // A new mark after the failed drain must coexist with the requeued ID.
+        fixture.space.update_mass(fixture.ids[0], 0.03).unwrap();
+        fixture.gateway.mark_dirty(fixture.ids[0]);
+        auto_save(&fixture.janitor_ctx());
+        drop(connection);
+
+        let masses = restart_masses(fixture);
+        assert!(masses[0] > 1.0);
+        assert!((masses[1] - pulsed_mass).abs() < 1e-12);
+    }
+
+    #[test]
+    fn automatic_pulse_mass_survives_restart() {
+        let fixture = pulse_fixture("automatic_pulse");
+        let adaptive = AdaptiveParams::new();
+        let ctx = AutoPipelineCtx {
+            tick: 0,
+            space: &fixture.space,
+            energy: &fixture.energy,
+            knowledge: &fixture.knowledge,
+            gateway: &fixture.gateway,
+            storage: &fixture.storage,
+            emotion_pleasure: 0.0,
+            emotion_arousal: 0.0,
+            adaptive: &adaptive,
+        };
+        let tetras = fixture.space.all_tetras_meta();
+        let clusters = fixture.space.find_clusters();
+        assert_eq!(clusters.len(), 1);
+        assert_eq!(
+            auto_pipeline::auto_pulse(&ctx, &tetras, &clusters, &Default::default()),
+            1
+        );
+        let in_memory = fixture
+            .ids
+            .map(|id| fixture.space.get_tetrahedron(id).unwrap().mass);
+        assert!(in_memory.iter().any(|mass| *mass > 1.0));
+
+        auto_save(&fixture.janitor_ctx());
+        let persisted = restart_masses(fixture);
+        for (expected, actual) in in_memory.into_iter().zip(persisted) {
+            assert!((expected - actual).abs() < 1e-12);
+        }
     }
 
     #[test]
