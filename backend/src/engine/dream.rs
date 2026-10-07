@@ -135,11 +135,12 @@ impl DreamEngine {
             .unwrap_or_default()
             .as_secs() as f64;
         for t in &tetras {
-            let is_junk = t
-                .data
-                .labels
-                .iter()
-                .any(|l| l == "junk" || l == "quarantine");
+            // 已隔离的记忆跳过:否则每轮都重复处理同一批(占满 10 条名额、使新垃圾饥饿,
+            // 且 update_mass 是增量,会让隔离记忆的 mass 每轮 +0.05)
+            if t.data.labels.iter().any(|l| l == "quarantine") {
+                continue;
+            }
+            let is_junk = t.data.labels.iter().any(|l| l == "junk");
             let is_low_mass = t.mass < 0.1;
             let age_days = (now_ts - t.data.timestamp as f64) / 86400.0;
             let is_old_low_importance = age_days > 30.0 && t.data.importance < 0.3;
@@ -175,13 +176,15 @@ impl DreamEngine {
             tetras
         };
 
+        // 已被 supersede 的记忆不再参与去重:否则同一对重复记忆每轮都被"再合并",
+        // 重复压低 importance、给保留方反复 +0.5 mass,并虚报 consolidated 数。
         let non_meta: Vec<usize> = (0..tetras.len())
             .filter(|i| {
-                !tetras[*i]
-                    .data
-                    .labels
+                let d = &tetras[*i].data;
+                !d.labels
                     .iter()
-                    .any(|l| l.starts_with("meta-"))
+                    .any(|l| l.starts_with("meta-") || l == "superseded")
+                    && d.valid_to.is_none()
             })
             .collect();
 
@@ -643,5 +646,95 @@ mod tests {
             let after = space.get_tetrahedron(id).unwrap();
             assert!((after.data.importance - imp).abs() < 1e-9);
         }
+    }
+}
+
+#[cfg(test)]
+mod idempotency_tests {
+    use super::*;
+    use crate::domain::tetra::{MemoryPayload, Tetrahedron};
+    use crate::domain::vertex::Point3;
+
+    fn add(space: &Space, x: f64, data: MemoryPayload, mass: f64) -> u64 {
+        let core = Point3::new(x, 0.0, 0.0);
+        let pos = Tetrahedron::compute_vertices(core);
+        let t = Tetrahedron {
+            id: 0,
+            vertex_ids: [0; 4],
+            core,
+            data,
+            mass,
+        };
+        space.add_tetrahedron(&t, &pos).unwrap()
+    }
+
+    fn normal(i: usize) -> MemoryPayload {
+        let mut emb = vec![0.0; 128];
+        emb[i % 128] = 1.0;
+        MemoryPayload {
+            content: format!("normal {i}"),
+            labels: vec![format!("n{i}")],
+            importance: 1.0,
+            timestamp: chrono::Utc::now().timestamp(),
+            embedding: emb,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn already_quarantined_memories_do_not_starve_new_junk() {
+        let space = Space::new();
+        for i in 0..3 {
+            add(&space, i as f64, normal(i), 1.0);
+        }
+        // 10 条已隔离(上一轮 dream 的产物) + 1 条新垃圾
+        for i in 0..10 {
+            let mut d = normal(3 + i);
+            d.labels = vec!["quarantine".into()];
+            d.importance = 0.05;
+            add(&space, 20.0 + i as f64, d, 0.1);
+        }
+        let mut fresh = normal(99);
+        fresh.labels = vec!["junk".into()];
+        let fresh_id = add(&space, 50.0, fresh, 1.0);
+
+        let r = DreamEngine::cycle(&space, &KnowledgeGraph::new(), 0.99, 5, false);
+        assert_eq!(
+            r.evicted_ids,
+            vec![fresh_id],
+            "only the new junk should be quarantined"
+        );
+        let all = space.all_tetrahedrons();
+        for t in all
+            .iter()
+            .filter(|t| t.id != fresh_id && t.data.labels == ["quarantine"])
+        {
+            assert!(
+                t.mass <= 0.1 + 1e-9,
+                "re-quarantine must not inflate mass: {}",
+                t.mass
+            );
+        }
+    }
+
+    #[test]
+    fn superseded_duplicate_is_not_merged_again() {
+        let space = Space::new();
+        let a = add(&space, 0.0, normal(0), 2.0);
+        let mut dup = normal(0);
+        dup.content = "normal 0 dup".into();
+        add(&space, 1.0, dup, 1.0);
+        add(&space, 2.0, normal(1), 1.0);
+
+        let r1 = DreamEngine::cycle(&space, &KnowledgeGraph::new(), 0.99, 5, false);
+        assert_eq!(r1.duplicates_merged, 1);
+        let mass_after_first = space.get_tetrahedron(a).unwrap().mass;
+        let r2 = DreamEngine::cycle(&space, &KnowledgeGraph::new(), 0.99, 5, false);
+        assert_eq!(
+            r2.duplicates_merged, 0,
+            "superseded pair re-merged: {:?}",
+            r2.insights
+        );
+        assert_eq!(space.get_tetrahedron(a).unwrap().mass, mass_after_first);
     }
 }
