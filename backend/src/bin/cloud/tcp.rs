@@ -4,6 +4,7 @@ use std::io::Write as IoWrite;
 use std::sync::Arc;
 
 use epicode::engine::mcp::{read_mcp_line, McpHandler};
+use epicode::engine::user_manager::UserInfo;
 
 use super::mcp_endpoint::{
     guard_mcp_request, persona_readiness_response, start_cognitive_loop_if_needed,
@@ -149,35 +150,33 @@ fn handle_tcp_connection(stream: std::net::TcpStream, state: &CloudState, peer: 
             }
         }
 
-        // A09: 会话验活 — 每消息重验key(密钥重置/撤销即断), O(1)哈希查
-        if let (Some(sk), Some(uid)) = (session_key.as_ref(), authenticated_user.as_ref()) {
-            let still_valid = state
-                .user_mgr
-                .authenticate(sk)
-                .map(|u| u.user_id == *uid)
-                .unwrap_or(false);
-            if !still_valid {
-                tracing::warn!(
-                    "[TCP] session invalidated for user '{}' (key rotated/revoked) — closing",
-                    uid
-                );
-                let resp = serde_json::json!({
-                    "jsonrpc": "2.0", "id": tcp_extract_id(trimmed),
-                    "error": {"code": -32001, "message": "session invalidated: credential rotated or revoked"}
-                });
-                let _ = writeln!(writer, "{}", resp);
-                let _ = writer.flush();
-                break;
-            }
+        // Re-authenticate each request so role/custom-permission changes take effect
+        // on an already-open TCP connection, even when the API key is unchanged.
+        let current_user = session_key
+            .as_deref()
+            .and_then(|key| state.user_mgr.authenticate(key));
+        if current_user.as_ref().map(|u| &u.user_id) != authenticated_user.as_ref() {
+            tracing::warn!(
+                "[TCP] session invalidated for user '{}' (key rotated/revoked) — closing",
+                authenticated_user.as_deref().unwrap_or("?")
+            );
+            let resp = serde_json::json!({
+                "jsonrpc": "2.0", "id": tcp_extract_id(trimmed),
+                "error": {"code": -32001, "message": "session invalidated: credential rotated or revoked"}
+            });
+            let _ = writeln!(writer, "{}", resp);
+            let _ = writer.flush();
+            break;
         }
 
-        if let Some(ref handler) = handler {
+        if let (Some(handler), Some(user)) = (handler.as_ref(), current_user.as_ref()) {
             if let Some(ref user_id) = authenticated_user {
                 state.user_mgr.touch(user_id);
             }
+            let current_handler = tcp_handler_for_user(handler.engine(), state, user);
             let request = serde_json::from_str::<serde_json::Value>(trimmed).ok();
             if let (Some(user_id), Some(request)) = (authenticated_user.as_deref(), request) {
-                let engine = handler.engine();
+                let engine = current_handler.engine();
                 if let Some(rejection) = guard_mcp_request(state, user_id, &engine, &request) {
                     if writeln!(writer, "{}", rejection.response).is_err() {
                         break;
@@ -189,7 +188,7 @@ fn handle_tcp_connection(stream: std::net::TcpStream, state: &CloudState, peer: 
                 }
             }
             let t = std::time::Instant::now();
-            let response = handler.process_json(trimmed);
+            let response = current_handler.process_json(trimmed);
             if t.elapsed().as_millis() > 100 {
                 tracing::warn!(
                     "slow TCP request from {} ({}): {}ms",
@@ -259,23 +258,7 @@ pub fn tcp_try_authenticate(
             })?;
 
         start_cognitive_loop_if_needed(state, &user_info.user_id, engine.clone());
-        // A01: 子账户注入角色门(主账户全权)
-        let handler = Arc::new(if user_info.parent.is_some() {
-            McpHandler::with_pub_skills(engine, state.pub_skills.clone())
-                .with_quota(epicode::engine::mcp::QuotaContext {
-                    user_mgr: Arc::clone(&state.user_mgr),
-                    user_id: user_info.user_id.clone(),
-                })
-                .with_role_gate(user_info.role)
-                .with_custom_permissions(user_info.custom_permissions.clone())
-        } else {
-            McpHandler::with_pub_skills(engine, state.pub_skills.clone()).with_quota(
-                epicode::engine::mcp::QuotaContext {
-                    user_mgr: Arc::clone(&state.user_mgr),
-                    user_id: user_info.user_id.clone(),
-                },
-            )
-        });
+        let handler = tcp_handler_for_user(engine, state, &user_info);
         tracing::info!("TCP user '{}' authenticated", user_info.user_id);
         Ok((user_info.user_id, handler))
     } else {
@@ -283,6 +266,30 @@ pub fn tcp_try_authenticate(
             tcp_extract_id(msg),
             "first message must be initialize with api_key",
         ))
+    }
+}
+
+fn tcp_handler_for_user(
+    engine: Arc<epicode::engine::Engine>,
+    state: &CloudState,
+    user: &UserInfo,
+) -> Arc<McpHandler> {
+    let handler = McpHandler::with_pub_skills(engine, state.pub_skills.clone()).with_quota(
+        epicode::engine::mcp::QuotaContext {
+            user_mgr: Arc::clone(&state.user_mgr),
+            user_id: user.user_id.clone(),
+        },
+    );
+    Arc::new(tcp_authorize_handler(handler, user))
+}
+
+fn tcp_authorize_handler(handler: McpHandler, user: &UserInfo) -> McpHandler {
+    if user.parent.is_some() {
+        handler
+            .with_role_gate(user.role)
+            .with_custom_permissions(user.custom_permissions.clone())
+    } else {
+        handler
     }
 }
 
@@ -303,4 +310,54 @@ fn tcp_extract_id(msg: &str) -> Option<serde_json::Value> {
     serde_json::from_str::<serde_json::Value>(msg)
         .ok()
         .and_then(|v| v.get("id").cloned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use epicode::engine::mcp::McpRequest;
+    use epicode::engine::user_manager::UserRole;
+
+    fn tool_error_code(handler: &McpHandler, name: &str) -> serde_json::Value {
+        handler
+            .handle(McpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(serde_json::json!(1)),
+                method: "tools/call".into(),
+                params: Some(serde_json::json!({"name": name, "arguments": {}})),
+            })
+            .result
+            .unwrap()["structuredContent"]["protocol"]["error"]["code"]
+            .clone()
+    }
+
+    #[test]
+    fn next_tcp_request_uses_updated_role_and_custom_permissions() {
+        let dir = std::env::temp_dir().join(format!("epicode-tcp-auth-{}", uuid::Uuid::new_v4()));
+        let engine = Arc::new(epicode::engine::Engine::with_data_dir(dir));
+        let mut user: UserInfo = serde_json::from_value(serde_json::json!({
+            "user_id": "child",
+            "api_key": "unchanged-key",
+            "plan": "Free",
+            "max_memories": 1000,
+            "memories_used": 0,
+            "created_at": 0,
+            "parent": "owner",
+            "role": "developer"
+        }))
+        .unwrap();
+
+        let first = tcp_authorize_handler(McpHandler::new(Arc::clone(&engine)), &user);
+        // The role allows this write; the next gate rejects unconfirmed identity.
+        assert_eq!(tool_error_code(&first, "ctx_save"), 4003);
+
+        user.role = UserRole::Viewer;
+        let downgraded = tcp_authorize_handler(McpHandler::new(Arc::clone(&engine)), &user);
+        assert_eq!(tool_error_code(&downgraded, "ctx_save"), 403);
+        assert_eq!(tool_error_code(&downgraded, "space_stats"), 4003);
+
+        user.custom_permissions = Some(Vec::new());
+        let revoked = tcp_authorize_handler(McpHandler::new(engine), &user);
+        assert_eq!(tool_error_code(&revoked, "space_stats"), 403);
+    }
 }

@@ -89,7 +89,10 @@ const TOOL_DOC: &str = r#"可用行动:
 - remember: 沉淀结论 {"action":"remember","remember_content":"...","remember_labels":[...]}
 - notify: 通知大卫 {"action":"notify","notify_message":"..."}
 - delegate.run: 在服务器执行只读诊断命令 {"action":"delegate","delegate_tool":"run","delegate_command":"..."}
-    允许前缀: systemctl status/show epicode, journalctl -u epicode, tail, head, grep, ls, cat, wc, ps, free, df, uptime, cargo --version
+    允许: systemctl status/show epicode, journalctl -u epicode [-n N], tail/head [-n N] 路径,
+          grep [-n] 单词 路径, ls [-la] [路径], cat/wc 路径, ps, free, df, uptime,
+          cargo --version, git status/log/diff/show 的只读参数; 不支持 shell 管道或引号
+    文件路径限下方 delegate.read 白名单; 命令直接执行，不经过 shell
     用途: 看自己的日志/状态/源码片段, 诊断自身问题
 - delegate.read: 读文件 {"action":"delegate","delegate_tool":"read","delegate_path":"绝对路径"}
     路径白名单: /home/ubuntu/epicode-build/ /var/log/epicode/ /opt/tetramem/
@@ -305,28 +308,6 @@ fn parse_json_loose(raw: &str) -> Result<serde_json::Value, String> {
 
 // ═══ 自我优化之手: 服务端沙箱执行 delegate ═══
 
-const RUN_PREFIXES: &[&str] = &[
-    "systemctl status epicode",
-    "systemctl show epicode",
-    "journalctl -u epicode",
-    "tail ",
-    "head ",
-    "grep ",
-    "ls ",
-    "cat ",
-    "wc ",
-    "ps ",
-    "free",
-    "df ",
-    "uptime",
-    "cargo --version",
-    // 版本控制只读(意识曾试图git log查自身修改史被拒 — 债#105187周期)
-    "git log",
-    "git diff",
-    "git show",
-    "git status",
-];
-
 const READ_PREFIXES: &[&str] = &[
     "/home/ubuntu/epicode-build/",
     "/var/log/epicode/",
@@ -334,6 +315,115 @@ const READ_PREFIXES: &[&str] = &[
 ];
 
 const APPLY_PREFIX: &str = "/home/ubuntu/epicode-build/src/";
+
+fn read_path_allowed(path: &str) -> bool {
+    !std::path::Path::new(path)
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir))
+        && READ_PREFIXES
+            .iter()
+            .any(|prefix| path == prefix.trim_end_matches('/') || path.starts_with(prefix))
+}
+
+fn canonical_allowed_path(path: &str, roots: &[&str]) -> Result<std::path::PathBuf, String> {
+    let candidate = std::path::Path::new(path);
+    if !candidate.is_absolute()
+        || candidate
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err("path must be absolute and contain no parent traversal".into());
+    }
+    let resolved = std::fs::canonicalize(candidate).map_err(|e| format!("resolve path: {e}"))?;
+    for root in roots {
+        let allowed_root = std::path::Path::new(root);
+        if candidate.starts_with(allowed_root) {
+            if let Ok(resolved_root) = std::fs::canonicalize(allowed_root) {
+                if resolved.starts_with(resolved_root) {
+                    return Ok(resolved);
+                }
+            }
+        }
+    }
+    Err("path escapes delegate whitelist".into())
+}
+
+fn bounded_count(value: &str, max: u16) -> bool {
+    value.parse::<u16>().is_ok_and(|n| n > 0 && n <= max)
+}
+
+/// Parse one explicitly supported diagnostic command into argv. Shell syntax is never passed
+/// to an interpreter, and the argument forms below do not expose write/follow options.
+fn parse_run_command(command: &str) -> Result<(&'static str, Vec<String>), String> {
+    if command.len() > 1024
+        || command.chars().any(|c| {
+            c.is_control()
+                || matches!(
+                    c,
+                    '|' | '&' | ';' | '<' | '>' | '`' | '$' | '\\' | '\'' | '"'
+                )
+        })
+    {
+        return Err("command contains forbidden shell syntax or is too long".into());
+    }
+
+    let parts: Vec<&str> = command.split_whitespace().collect();
+    let allowed = match parts.as_slice() {
+        ["systemctl", "status" | "show", "epicode"] => true,
+        ["journalctl", "-u", "epicode"] | ["journalctl", "-u", "epicode", "--no-pager"] => true,
+        ["journalctl", "-u", "epicode", "-n", n]
+        | ["journalctl", "-u", "epicode", "-n", n, "--no-pager"] => bounded_count(n, 500),
+        ["tail" | "head", path] => read_path_allowed(path),
+        ["tail" | "head", "-n", n, path] => bounded_count(n, 500) && read_path_allowed(path),
+        ["grep", pattern, path] | ["grep", "-n", pattern, path] => {
+            !pattern.starts_with('-') && read_path_allowed(path)
+        }
+        ["ls"] | ["ls", "-la"] => true,
+        ["ls", path] | ["ls", "-la", path] => read_path_allowed(path),
+        ["cat", path] | ["wc", path] | ["wc", "-l", path] => read_path_allowed(path),
+        ["ps"] | ["ps", "aux"] | ["ps", "-ef"] => true,
+        ["free"] | ["free", "-h"] | ["df"] | ["df", "-h"] | ["uptime"] => true,
+        ["cargo", "--version"] => true,
+        ["git", "status"] | ["git", "status", "--short"] => true,
+        ["git", "log"] | ["git", "log", "--oneline"] => true,
+        ["git", "log", "-n", n] => bounded_count(n, 100),
+        ["git", "diff"] | ["git", "diff", "--stat"] => true,
+        ["git", "show"] | ["git", "show", "--stat"] => true,
+        ["git", "show", revision] => {
+            revision.len() <= 80
+                && !revision.starts_with('-')
+                && revision.chars().all(|c| {
+                    c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '/' | '.' | '~' | '^')
+                })
+        }
+        _ => false,
+    };
+    if !allowed {
+        return Err("command not in read-only whitelist".into());
+    }
+
+    let program = match parts[0] {
+        "systemctl" => "systemctl",
+        "journalctl" => "journalctl",
+        "tail" => "tail",
+        "head" => "head",
+        "grep" => "grep",
+        "ls" => "ls",
+        "cat" => "cat",
+        "wc" => "wc",
+        "ps" => "ps",
+        "free" => "free",
+        "df" => "df",
+        "uptime" => "uptime",
+        "cargo" => "cargo",
+        "git" => "git",
+        _ => unreachable!("all permitted forms have a fixed executable"),
+    };
+    Ok((
+        program,
+        parts[1..].iter().map(|part| (*part).to_owned()).collect(),
+    ))
+}
 
 pub fn execute_delegate(
     tool: &str,
@@ -344,27 +434,17 @@ pub fn execute_delegate(
     match tool {
         "run" => {
             let cmd = command.ok_or("delegate.run requires delegate_command")?;
-            let cmd = cmd.trim();
-            if !RUN_PREFIXES.iter().any(|p| cmd.starts_with(p)) {
-                return Err(format!(
-                    "command not in whitelist: {}",
-                    &cmd[..cmd.len().min(60)]
-                ));
-            }
-            // 管道只允许只读链 (拒绝 ; && | 到写命令 — 简化: 拒绝 ; ` $ 和重定向)
-            // 允许 2>/dev/null (丢弃stderr); 其他重定向/元字符拒绝
-            let safe = cmd.replace("2>/dev/null", "").replace("2> /dev/null", "");
-            if safe.contains(';')
-                || safe.contains('`')
-                || safe.contains('>')
-                || safe.contains('<')
-                || safe.contains('$')
+            let (program, mut args) = parse_run_command(cmd)?;
+            if matches!(program, "tail" | "head" | "grep" | "cat" | "wc")
+                || (program == "ls" && args.last().is_some_and(|last| !last.starts_with('-')))
             {
-                return Err("command contains forbidden shell metacharacters".into());
+                let path = args.last_mut().expect("file command requires a path");
+                *path = canonical_allowed_path(path, READ_PREFIXES)?
+                    .to_string_lossy()
+                    .into_owned();
             }
-            let out = std::process::Command::new("bash")
-                .arg("-c")
-                .arg(cmd)
+            let out = std::process::Command::new(program)
+                .args(args)
                 .output()
                 .map_err(|e| format!("spawn: {}", e))?;
             let stdout = String::from_utf8_lossy(&out.stdout);
@@ -372,46 +452,127 @@ pub fn execute_delegate(
             Ok(format!(
                 "exit={}\nstdout:\n{}\nstderr:\n{}",
                 out.status.code().unwrap_or(-1),
-                &stdout[..stdout.len().min(4000)],
-                &stderr[..stderr.len().min(1000)]
+                stdout.chars().take(4000).collect::<String>(),
+                stderr.chars().take(1000).collect::<String>()
             ))
         }
         "read" => {
             let p = path.ok_or("delegate.read requires delegate_path")?;
-            if !READ_PREFIXES.iter().any(|pre| p.starts_with(pre)) {
-                return Err(format!("path not in whitelist: {}", &p[..p.len().min(60)]));
-            }
-            if p.contains("..") {
-                return Err("path traversal rejected".into());
-            }
-            let data = std::fs::read_to_string(p).map_err(|e| format!("read: {}", e))?;
+            let resolved = canonical_allowed_path(p, READ_PREFIXES)?;
+            let data = std::fs::read_to_string(resolved).map_err(|e| format!("read: {}", e))?;
             Ok(data.chars().take(8000).collect())
         }
         "apply" => {
             let p = path.ok_or("delegate.apply requires delegate_path")?;
             let new_content = content.ok_or("delegate.apply requires delegate_content")?;
-            if !p.starts_with(APPLY_PREFIX) || !p.ends_with(".rs") {
+            if !p.ends_with(".rs") {
                 return Err("apply only allowed under epicode-build/src/ *.rs".into());
             }
-            if p.contains("..") {
-                return Err("path traversal rejected".into());
-            }
-            if !std::path::Path::new(p).exists() {
-                return Err(format!("target file not found: {}", p));
+            let resolved = canonical_allowed_path(p, &[APPLY_PREFIX])?;
+            if resolved
+                .extension()
+                .and_then(|extension| extension.to_str())
+                != Some("rs")
+            {
+                return Err("apply target must resolve to a .rs file".into());
             }
             // 自动备份 (可回滚 = 失败不可怕的工程保障)
             let ts = chrono::Utc::now().timestamp();
-            let bak = format!("{}.bak_{}", p, ts);
-            std::fs::copy(p, &bak).map_err(|e| format!("backup failed: {}", e))?;
+            let bak = format!("{}.bak_{}", resolved.display(), ts);
+            std::fs::copy(&resolved, &bak).map_err(|e| format!("backup failed: {}", e))?;
             // 写入
-            std::fs::write(p, new_content)
+            std::fs::write(&resolved, new_content)
                 .map_err(|e| format!("write failed (backup at {}): {}", bak, e))?;
             let lines = new_content.lines().count();
             Ok(format!(
                 "APPLIED: {} ({} lines) — backup: {} — 需大卫批准: cargo build + 部署",
-                p, lines, bak
+                resolved.display(),
+                lines,
+                bak
             ))
         }
         _ => Err(format!("unknown delegate tool: {}", tool)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_commands_have_fixed_argv() {
+        assert_eq!(
+            parse_run_command("systemctl status epicode").unwrap(),
+            (
+                "systemctl",
+                vec!["status".to_string(), "epicode".to_string()]
+            )
+        );
+        assert_eq!(
+            parse_run_command("journalctl -u epicode -n 50").unwrap(),
+            (
+                "journalctl",
+                vec!["-u".into(), "epicode".into(), "-n".into(), "50".into()]
+            )
+        );
+        assert!(parse_run_command("grep -n error /var/log/epicode/server.log").is_ok());
+        assert!(parse_run_command("git diff --stat").is_ok());
+    }
+
+    #[test]
+    fn diagnostic_commands_reject_shell_and_write_options() {
+        for command in [
+            "ls /home/ubuntu/epicode-build | tee /tmp/leak",
+            "ls /home/ubuntu/epicode-build && touch /tmp/file",
+            "ls /home/ubuntu/epicode-build\ntouch /tmp/file",
+            "systemctl status epicode; systemctl stop epicode",
+            "git diff --output=/tmp/file",
+            "tail -f /var/log/epicode/server.log",
+            "cat /etc/shadow",
+            "cargo --version; id",
+        ] {
+            assert!(
+                parse_run_command(command).is_err(),
+                "unexpectedly permitted: {command}"
+            );
+            assert!(execute_delegate("run", Some(command), None, None).is_err());
+        }
+    }
+
+    #[test]
+    fn canonical_whitelist_keeps_reads_inside_the_allowed_root() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("epicode-delegate-{nonce}"));
+        let allowed = base.join("allowed");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&allowed).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let inside_file = allowed.join("inside.rs");
+        let outside_file = outside.join("outside.rs");
+        std::fs::write(&inside_file, "inside").unwrap();
+        std::fs::write(&outside_file, "outside").unwrap();
+        let root = allowed.to_str().unwrap();
+        assert_eq!(
+            canonical_allowed_path(inside_file.to_str().unwrap(), &[root]).unwrap(),
+            std::fs::canonicalize(&inside_file).unwrap()
+        );
+        assert!(canonical_allowed_path(outside_file.to_str().unwrap(), &[root]).is_err());
+
+        #[cfg(unix)]
+        {
+            let link = allowed.join("linked.rs");
+            std::os::unix::fs::symlink(&outside_file, &link).unwrap();
+            assert!(canonical_allowed_path(link.to_str().unwrap(), &[root]).is_err());
+            std::fs::remove_file(link).unwrap();
+        }
+
+        std::fs::remove_file(inside_file).unwrap();
+        std::fs::remove_file(outside_file).unwrap();
+        std::fs::remove_dir(allowed).unwrap();
+        std::fs::remove_dir(outside).unwrap();
+        std::fs::remove_dir(base).unwrap();
     }
 }

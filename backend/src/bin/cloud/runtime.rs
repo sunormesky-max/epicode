@@ -8,7 +8,7 @@ use chrono::Utc;
 use serde::Deserialize;
 use std::collections::HashMap;
 
-use epicode::engine::user_manager::UserInfo;
+use epicode::engine::user_manager::{Permission, UserInfo};
 // P0 隔离修复: runtime 控制面必须用【当前用户】的 engine 填 envelope,
 // 之前误用 first_engine(任意用户) 导致 status.identity 显示别人的身份
 
@@ -75,6 +75,9 @@ pub async fn register(
     Extension(user): Extension<UserInfo>,
     Json(req): Json<RegisterRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, Permission::MemoryWrite) {
+        return r;
+    }
     let now = Utc::now().timestamp();
     let caps = if req.capabilities.is_empty() {
         vec!["write".into(), "ack".into(), "forget".into()]
@@ -186,6 +189,9 @@ pub async fn unregister(
     State(st): State<CloudState>,
     Extension(user): Extension<UserInfo>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, Permission::MemoryWrite) {
+        return r;
+    }
     let removed = {
         let mut executors = st.primary_executors.write();
         let previous = executors.get(&user.user_id).cloned();
@@ -235,8 +241,11 @@ pub async fn status(
     State(st): State<CloudState>,
     Extension(user): Extension<UserInfo>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, Permission::MemoryRead) {
+        return r;
+    }
     let binding = {
-        let executors = st.primary_executors.write();
+        let executors = st.primary_executors.read();
         executors.get(&user.user_id).cloned()
     };
     let body = match binding {
@@ -270,6 +279,9 @@ pub async fn heartbeat(
     State(st): State<CloudState>,
     Extension(user): Extension<UserInfo>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(&user, Permission::MemoryWrite) {
+        return r;
+    }
     let now = Utc::now().timestamp();
     let updated = {
         let mut executors = st.primary_executors.write();
@@ -393,5 +405,119 @@ pub async fn manifest(
             )),
         ),
         None => (StatusCode::OK, Json(payload)),
+    }
+}
+
+#[cfg(test)]
+mod permission_tests {
+    use super::*;
+    use epicode::engine::user_manager::{UserManager, UserRole};
+    use epicode::engine::{library::LibraryStore, skills::SkillEngine, storage::StorageManager};
+    use parking_lot::{Mutex, RwLock};
+    use std::sync::{
+        atomic::{AtomicU32, AtomicU8},
+        Arc,
+    };
+
+    struct TestDirectory(std::path::PathBuf);
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            // This fixture exclusively owns its unique temporary directory.
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn fixture() -> (TestDirectory, CloudState, UserInfo) {
+        let dir =
+            std::env::temp_dir().join(format!("epicode-runtime-test-{}", uuid::Uuid::new_v4()));
+        let storage = Arc::new(StorageManager::new(&dir).unwrap());
+        let (insight_tx, _) = tokio::sync::broadcast::channel(8);
+        let st = CloudState {
+            user_mgr: Arc::new(UserManager::new(&dir)),
+            admin_key: String::new(),
+            rate_limits: Arc::new(Mutex::new(HashMap::new())),
+            active_tasks: Arc::new(AtomicU32::new(0)),
+            pub_skills: Arc::new(SkillEngine::new(storage)),
+            api_call_counts: Arc::new(Mutex::new(HashMap::new())),
+            api_calls_daily: Arc::new(Mutex::new(HashMap::new())),
+            insight_tx: Arc::new(insight_tx),
+            startup_phase: Arc::new(AtomicU8::new(1)),
+            primary_executors: Arc::new(RwLock::new(HashMap::new())),
+            stream_tickets: Arc::new(Mutex::new(HashMap::new())),
+            library: Arc::new(LibraryStore::open_in_data_dir(&dir, None).unwrap()),
+        };
+        let user = serde_json::from_value(serde_json::json!({
+            "user_id": "runtime-viewer", "api_key": "fixture-only", "plan": "Free",
+            "max_memories": 1000, "memories_used": 0, "created_at": 0,
+            "parent": "owner", "role": UserRole::Viewer,
+        }))
+        .unwrap();
+        (TestDirectory(dir), st, user)
+    }
+
+    fn denied(response: (StatusCode, Json<serde_json::Value>)) {
+        assert_eq!(response.0, StatusCode::FORBIDDEN);
+        assert_eq!(response.1 .0["code"], "FORBIDDEN_ROLE");
+    }
+
+    #[tokio::test]
+    async fn viewer_cannot_register_remove_or_revive_primary_binding() {
+        let (_dir, st, viewer) = fixture();
+        denied(
+            register(
+                State(st.clone()),
+                Extension(viewer.clone()),
+                Json(RegisterRequest {
+                    agent_id: "forbidden".into(),
+                    capabilities: Vec::new(),
+                    e2e_enabled: true,
+                    machine_fingerprint: None,
+                    manifest_version: None,
+                    e2e_public_key: None,
+                }),
+            )
+            .await,
+        );
+        assert!(st.primary_executors.read().is_empty());
+
+        let expired_at = Utc::now().timestamp() - 300;
+        st.primary_executors.write().insert(
+            viewer.user_id.clone(),
+            super::super::state::ExecutorBinding {
+                agent_id: "existing".into(),
+                user_id: viewer.user_id.clone(),
+                capabilities: vec!["ack".into()],
+                registered_at: expired_at,
+                last_heartbeat: expired_at,
+                e2e_enabled: false,
+                e2e_public_key: None,
+            },
+        );
+        denied(unregister(State(st.clone()), Extension(viewer.clone())).await);
+        denied(heartbeat(State(st.clone()), Extension(viewer.clone())).await);
+        let binding = st
+            .primary_executors
+            .read()
+            .get(&viewer.user_id)
+            .unwrap()
+            .clone();
+        assert_eq!(binding.agent_id, "existing");
+        assert_eq!(binding.last_heartbeat, expired_at);
+        assert!(binding.is_expired());
+    }
+
+    #[tokio::test]
+    async fn runtime_status_respects_revoked_read_permission() {
+        let (_dir, st, viewer) = fixture();
+        assert_eq!(
+            status(State(st.clone()), Extension(viewer.clone())).await.0,
+            StatusCode::OK
+        );
+        let revoked = UserInfo {
+            custom_permissions: Some(Vec::new()),
+            ..viewer
+        };
+        denied(status(State(st), Extension(revoked)).await);
     }
 }

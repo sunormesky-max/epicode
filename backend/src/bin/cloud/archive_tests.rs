@@ -138,15 +138,34 @@ async fn viewer_cannot_mutate_any_archive_handler() {
         "denied requests must not change content, labels or the archive tree"
     );
     assert_eq!(
-        archive_tree(AuthedEngine(engine.clone())).await.0,
-        StatusCode::OK
-    );
-    assert_eq!(
-        archive_get_node(AuthedEngine(engine.clone()), Path(first))
+        archive_tree(user(UserRole::Viewer, false), AuthedEngine(engine.clone()))
             .await
             .0,
         StatusCode::OK
     );
+    assert_eq!(
+        archive_get_node(
+            user(UserRole::Viewer, false),
+            AuthedEngine(engine.clone()),
+            Path(first)
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn revoked_memory_read_denies_archive_tree_and_node_without_side_effects() {
+    let (_dir, engine) = fixture();
+    let document = create(&engine, "Private archive document");
+    let before = snapshot(&engine);
+    let mut reader = user(UserRole::Viewer, false);
+    reader.custom_permissions = Some(Vec::new());
+
+    denied(archive_tree(reader.clone(), AuthedEngine(engine.clone())).await);
+    denied(archive_get_node(reader, AuthedEngine(engine.clone()), Path(document)).await);
+    assert_eq!(snapshot(&engine), before);
 }
 
 #[tokio::test]
