@@ -1286,12 +1286,12 @@ pub async fn timeline(
         .unwrap_or(0);
     let result: Result<Result<(usize, Vec<serde_json::Value>), String>, tokio::task::JoinError> = tokio::task::spawn_blocking(move || {
         let total_count = engine.scheduler.api_stats().tetra_count;
-        let all = engine.scheduler.api_list_nodes_limit(offset + limit);
-        let mut nodes: Vec<serde_json::Value> = all.into_iter().skip(offset).map(|(id, p)| {
+        // 底层是 HashMap,必须先全局按时间倒序排序再分页;
+        // 原实现"先取前 offset+limit 条(任意顺序) → skip → 再排序"导致翻页重复/漏项。
+        let page = paginate_timeline(engine.scheduler.api_list_nodes(), offset, limit);
+        let nodes: Vec<serde_json::Value> = page.into_iter().map(|(id, p)| {
             serde_json::json!({"id": id, "content": p.content, "labels": p.labels, "timestamp": p.timestamp})
         }).collect();
-        nodes.sort_by(|a, b| b["timestamp"].as_i64().cmp(&a["timestamp"].as_i64()));
-        nodes.truncate(limit);
         Ok((total_count, nodes))
     }).await;
     match result {
@@ -1327,6 +1327,79 @@ pub async fn timeline(
                 )),
             )
         }
+    }
+}
+
+/// 时间线分页:按 timestamp 倒序(同时间戳按 id 倒序,保证顺序稳定)后取 offset..offset+limit。
+fn paginate_timeline<P: TimelineItem>(
+    mut all: Vec<(u64, P)>,
+    offset: usize,
+    limit: usize,
+) -> Vec<(u64, P)> {
+    all.sort_unstable_by(|(ia, a), (ib, b)| b.ts().cmp(&a.ts()).then(ib.cmp(ia)));
+    all.into_iter().skip(offset).take(limit).collect()
+}
+
+trait TimelineItem {
+    fn ts(&self) -> i64;
+}
+
+impl TimelineItem for epicode::domain::tetra::MemoryPayload {
+    fn ts(&self) -> i64 {
+        self.timestamp
+    }
+}
+
+#[cfg(test)]
+mod timeline_tests {
+    use super::*;
+
+    impl TimelineItem for i64 {
+        fn ts(&self) -> i64 {
+            *self
+        }
+    }
+
+    #[test]
+    fn pages_are_globally_sorted_and_disjoint() {
+        // 模拟 HashMap 的任意顺序
+        let items: Vec<(u64, i64)> = vec![
+            (3, 30),
+            (9, 90),
+            (1, 10),
+            (7, 70),
+            (5, 50),
+            (2, 20),
+            (8, 80),
+            (4, 40),
+            (6, 60),
+        ];
+        let p0: Vec<u64> = paginate_timeline(items.clone(), 0, 3)
+            .into_iter()
+            .map(|x| x.0)
+            .collect();
+        let p1: Vec<u64> = paginate_timeline(items.clone(), 3, 3)
+            .into_iter()
+            .map(|x| x.0)
+            .collect();
+        let p2: Vec<u64> = paginate_timeline(items.clone(), 6, 3)
+            .into_iter()
+            .map(|x| x.0)
+            .collect();
+        assert_eq!(p0, vec![9, 8, 7]);
+        assert_eq!(p1, vec![6, 5, 4]);
+        assert_eq!(p2, vec![3, 2, 1]);
+        assert!(paginate_timeline(items, usize::MAX, 3).is_empty());
+    }
+
+    #[test]
+    fn equal_timestamps_have_stable_order() {
+        let items: Vec<(u64, i64)> = vec![(1, 5), (3, 5), (2, 5)];
+        let ids: Vec<u64> = paginate_timeline(items, 0, 10)
+            .into_iter()
+            .map(|x| x.0)
+            .collect();
+        assert_eq!(ids, vec![3, 2, 1]);
     }
 }
 
