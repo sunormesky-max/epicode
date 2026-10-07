@@ -76,9 +76,7 @@ fn check_mcp_request_access(
             .unwrap_or(true);
         if require_binding
             && engine.space.identity_info().is_some()
-            && !binding
-                .as_ref()
-                .is_some_and(|binding| !binding.is_expired())
+            && binding.as_ref().is_none_or(|binding| binding.is_expired())
         {
             return Some(mcp_gate_error(
                 StatusCode::FORBIDDEN,

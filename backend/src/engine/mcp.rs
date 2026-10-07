@@ -381,23 +381,52 @@ impl McpHandler {
     }
 
     /// 设置配额上下文(cloud.rs 的 mcp_endpoint / TCP 认证后调用)。
-    /// A01: 工具→权限映射(读类/身份仪式/任务/意志/诊断类放行=None)
+    /// Every callable tool needs an explicit permission. An unknown tool stays
+    /// unmapped and is rejected for subaccounts before it reaches the dispatcher.
     fn tool_permission(name: &str) -> Option<crate::engine::user_manager::Permission> {
         use crate::engine::user_manager::Permission as P;
         match name {
-            // 记忆写入
-            "memory_create" | "memory_update" | "memory_improve" | "doc_import"
-            | "pattern_learn" => Some(P::MemoryWrite),
-            // 记忆删除/恢复(restore=从quarantine移除)
+            // Read access includes contextual, diagnostic, task and drive views.
+            "skill_get"
+            | "task_status"
+            | "memory_search"
+            | "library_search"
+            | "memory_recall"
+            | "memory_ask"
+            | "memory_get"
+            | "memory_list"
+            | "ctx_load"
+            | "pattern_recall"
+            | "space_stats"
+            | "knowledge_relations"
+            | "concepts"
+            | "skill_execute"
+            | "enforced_rules"
+            | "project_list"
+            | "embedding_diagnostic"
+            | "kg_quality"
+            | "doc_list"
+            | "memory_export"
+            | "session_list"
+            | "drive_inbox"
+            | "blocks_get" => Some(P::MemoryRead),
+            // These tools change memories or persistent session/drive state.
+            "epicode_handshake" | "task_start" | "task_check" | "task_complete" | "task_alert"
+            | "memory_create" | "memory_update" | "ctx_save" | "pattern_learn"
+            | "decision_record" | "bug_memory" | "session_summary" | "context_observe"
+            | "feedback_submit" | "doc_import" | "memory_improve" | "drive_ack" | "blocks_set" => {
+                Some(P::MemoryWrite)
+            }
+            // Deletion, quarantine and restoration change protected memory state.
             "memory_delete" | "memory_forget" | "memory_restore" => Some(P::MemoryDelete),
-            // 技能管理(写侧)
+            // Skill and library management.
             "skill_auto_extract" | "skills_sync" | "skill_feedback" => Some(P::SkillManage),
-            // 图书馆写
             "library_ingest" => Some(P::LibraryManage),
-            // 梦循环(改变记忆空间结构)
             "dream_cycle" => Some(P::MemoryDelete),
-            // 嵌入迁移(批量改写存储)
-            "embedding_migrate" => Some(P::PersonaImport),
+            // Identity setup is immutable; migration rewrites stored embeddings.
+            "identity_confirm" | "identity_step" | "identity_finalize" | "embedding_migrate" => {
+                Some(P::PersonaImport)
+            }
             _ => None,
         }
     }
@@ -1340,30 +1369,30 @@ impl McpHandler {
             .cloned()
             .unwrap_or(serde_json::Value::Null);
 
-        // A01(审计#134 P1): 子账户角色门 — 工具→权限映射拒无权调用。
-        // 主账户(role_gate=None)与本地构造不设门; 读类/仪式/任务/意志工具放行。
+        // Subaccount role gate: an unmapped tool is denied until it is explicitly
+        // classified above. Owners and local handlers have no role gate.
         if let Some(role) = self.role_gate {
-            if let Some(perm) = Self::tool_permission(name) {
-                let allowed = if let Some(custom) = &self.custom_permissions {
+            let allowed = Self::tool_permission(name).is_some_and(|perm| {
+                if let Some(custom) = &self.custom_permissions {
                     custom.iter().any(|n| n == perm.as_str())
                 } else {
                     role.can(perm)
-                };
-                if !allowed {
-                    let denied = self.smrp_err(name, 403, "insufficient role for this tool");
-                    let text = serde_json::to_string(&denied).unwrap_or_default();
-                    return McpResponse {
-                        jsonrpc: "2.0".into(),
-                        id,
-                        result: Some(serde_json::json!({
-                            "content": [{ "type": "text", "text": text }],
-                            "structuredContent": denied,
-                            "isError": true,
-                            "resultType": "complete"
-                        })),
-                        error: None,
-                    };
                 }
+            });
+            if !allowed {
+                let denied = self.smrp_err(name, 403, "insufficient role for this tool");
+                let text = serde_json::to_string(&denied).unwrap_or_default();
+                return McpResponse {
+                    jsonrpc: "2.0".into(),
+                    id,
+                    result: Some(serde_json::json!({
+                        "content": [{ "type": "text", "text": text }],
+                        "structuredContent": denied,
+                        "isError": true,
+                        "resultType": "complete"
+                    })),
+                    error: None,
+                };
             }
         }
 
@@ -6619,6 +6648,121 @@ mod tests {
                 serde_json::json!(["protocol", "data", "status"])
             );
         }
+    }
+
+    #[test]
+    fn mcp_role_gate_classifies_every_advertised_tool() {
+        let h = McpHandler::new(Arc::new(isolated_engine()));
+        let listed = h.handle(McpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(serde_json::json!(1)),
+            method: "tools/list".into(),
+            params: None,
+        });
+        for tool in listed.result.unwrap()["tools"].as_array().unwrap() {
+            let name = tool["name"].as_str().unwrap();
+            assert!(
+                McpHandler::tool_permission(name).is_some(),
+                "listed MCP tool {name} must have an explicit permission"
+            );
+        }
+        // MemCard tools are hidden unless the feature flag is enabled.
+        assert_eq!(
+            McpHandler::tool_permission("blocks_get"),
+            Some(crate::engine::user_manager::Permission::MemoryRead)
+        );
+        assert_eq!(
+            McpHandler::tool_permission("blocks_set"),
+            Some(crate::engine::user_manager::Permission::MemoryWrite)
+        );
+        assert_eq!(McpHandler::tool_permission("future_write_tool"), None);
+    }
+
+    #[test]
+    fn mcp_role_gate_denies_viewer_writes_and_unknown_tools() {
+        use crate::engine::user_manager::UserRole;
+
+        let h = McpHandler::new(Arc::new(isolated_engine())).with_role_gate(UserRole::Viewer);
+        for name in [
+            "epicode_handshake",
+            "ctx_save",
+            "decision_record",
+            "bug_memory",
+            "session_summary",
+            "context_observe",
+            "feedback_submit",
+            "task_start",
+            "task_check",
+            "task_complete",
+            "task_alert",
+            "drive_ack",
+            "blocks_set",
+            "identity_finalize",
+            "future_write_tool",
+        ] {
+            let response = h.handle(McpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(serde_json::json!(name)),
+                method: "tools/call".into(),
+                params: Some(serde_json::json!({"name": name, "arguments": {}})),
+            });
+            assert_eq!(
+                response.result.unwrap()["structuredContent"]["protocol"]["error"]["code"],
+                403,
+                "viewer must not call {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_custom_permissions_apply_to_reads_and_writes() {
+        use crate::engine::user_manager::UserRole;
+
+        let engine = Arc::new(isolated_engine());
+        let no_permissions = McpHandler::new(Arc::clone(&engine))
+            .with_role_gate(UserRole::Viewer)
+            .with_custom_permissions(Some(vec![]));
+        for name in ["memory_search", "space_stats", "ctx_save"] {
+            let response = no_permissions.handle(McpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(serde_json::json!(name)),
+                method: "tools/call".into(),
+                params: Some(serde_json::json!({"name": name, "arguments": {}})),
+            });
+            assert_eq!(
+                response.result.unwrap()["structuredContent"]["protocol"]["error"]["code"],
+                403,
+                "explicit empty grant set must deny {name}"
+            );
+        }
+
+        // With the corresponding grant, authorization passes and the next
+        // check (unconfirmed identity in this isolated engine) supplies 4003.
+        let granted_write = McpHandler::new(Arc::clone(&engine))
+            .with_role_gate(UserRole::Viewer)
+            .with_custom_permissions(Some(vec!["memory_write".into()]));
+        let response = granted_write.handle(McpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(serde_json::json!("ctx_save")),
+            method: "tools/call".into(),
+            params: Some(serde_json::json!({"name": "ctx_save", "arguments": {}})),
+        });
+        assert_eq!(
+            response.result.unwrap()["structuredContent"]["protocol"]["error"]["code"],
+            4003
+        );
+
+        let viewer = McpHandler::new(engine).with_role_gate(UserRole::Viewer);
+        let response = viewer.handle(McpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(serde_json::json!("space_stats")),
+            method: "tools/call".into(),
+            params: Some(serde_json::json!({"name": "space_stats", "arguments": {}})),
+        });
+        assert_eq!(
+            response.result.unwrap()["structuredContent"]["protocol"]["error"]["code"],
+            4003
+        );
     }
 
     #[tokio::test]

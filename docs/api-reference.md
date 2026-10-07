@@ -6,6 +6,14 @@ This document describes the core HTTP endpoints and MCP tools exposed by the Epi
 
 Online deployments typically expose endpoints under the `/api/v1` public prefix. The Epicode backend itself serves the same endpoints under `/v1` directly; the included Nginx reverse proxy strips `/api` before forwarding traffic. Local deployments may also call the backend directly at `http://localhost:9111` using the `/v1` paths.
 
+## Account Authorization
+
+Cloud subaccounts use their role template or an explicit custom permission list. An empty custom list grants no permissions. Private memory, archive and skill reads require `memory_read`; memory/context writes and runtime binding changes require `memory_write`; quarantine, restore and destructive operation previews/confirmation require `memory_delete`. Skill installation requires `skill_manage`. Editing a subaccount's grants is reserved for its main account, even when a custom grant list includes `permission_edit`.
+
+`POST /v1/operations/dry-run` issues a random, five-minute confirmation token bound to the authenticated account, operation and exact ordered target ID list. Bulk endpoints reject a token when the operation or IDs differ. `/v1/operations/confirm` uses the operation and IDs saved in the token. A matching token is consumed once, and protected targets are checked again before execution. Clients must request a new preview after expiry or consumption.
+
+`POST /v1/consciousness/think` can invoke delegates against shared server files, so it is restricted to configured platform operators who are main accounts. The operator IDs use `TETRAMEM_OWNER_IDS` / `EPICODE_OWNER_IDS` (default `sunorme`); being an ordinary tenant main account does not grant this server capability. Diagnostic delegates execute fixed program/argument forms without a shell. Pipes, redirection, quoted arguments and unlisted options are rejected; file delegates also verify canonical path containment.
+
 ## Core Endpoints
 
 | Method | Path | Description |
@@ -62,6 +70,8 @@ curl -H "X-API-Key: your-api-key" \
 | `GET` | `/v1/stream?ticket=...` | Open the SSE stream; mint a fresh ticket after every disconnect. Never put a long-lived API key in the URL. |
 
 Runtime register, status, heartbeat, and unregister responses use an SMRP envelope when that account's engine is loaded; otherwise the endpoint returns the corresponding raw JSON payload. A heartbeat returns `success: false` when no binding exists.
+
+Register, heartbeat, unregister and drive acknowledgement require `memory_write`; runtime status requires `memory_read`. Drive acknowledgement additionally requires the existing active primary-executor and E2E checks.
 
 The MCP `drive_inbox` tool returns the same inbox data and defaults to a limit of 50. MCP `drive_ack` takes the same acknowledgement argument names. Both acknowledgement transports require an active primary executor; High/Critical signals additionally require E2E-enabled registration.
 

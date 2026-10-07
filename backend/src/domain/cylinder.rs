@@ -693,20 +693,14 @@ impl Cylinder {
             return;
         }
         match step {
-            1 => {
-                if !value.trim().is_empty() {
-                    self.pending_identity.name = Some(value);
-                }
+            1 if !value.trim().is_empty() => {
+                self.pending_identity.name = Some(value);
             }
-            2 => {
-                if !value.trim().is_empty() {
-                    self.pending_identity.mission = Some(value);
-                }
+            2 if !value.trim().is_empty() => {
+                self.pending_identity.mission = Some(value);
             }
-            3 => {
-                if !value.trim().is_empty() {
-                    self.pending_identity.author = Some(value);
-                }
+            3 if !value.trim().is_empty() => {
+                self.pending_identity.author = Some(value);
             }
             4 => {
                 self.pending_identity.personality = Some(value);

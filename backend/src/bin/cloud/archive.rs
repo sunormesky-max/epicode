@@ -13,8 +13,14 @@ use epicode::engine::user_manager::UserInfo;
 // ============================================================
 
 pub async fn archive_tree(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) =
+        super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryRead)
+    {
+        return r;
+    }
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || scheduler.api_archive_tree()).await;
     match result {
@@ -118,9 +124,15 @@ pub struct ArchiveEditRequest {
 }
 
 pub async fn archive_get_node(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) =
+        super::helpers::require_perm(&user, epicode::engine::user_manager::Permission::MemoryRead)
+    {
+        return r;
+    }
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || scheduler.api_get_node(id)).await;
     match result {

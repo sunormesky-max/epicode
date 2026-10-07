@@ -320,7 +320,7 @@ pub async fn set_subaccount_permissions(
     Path(sub_id): Path<String>,
     Json(req): Json<SetPermissionsRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if let Some(r) = require_perm(&user, Permission::SubaccountManage) {
+    if let Some(r) = require_perm(&user, Permission::PermissionEdit) {
         return r;
     }
     match st

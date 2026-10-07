@@ -18,6 +18,17 @@ use super::helpers::{
 };
 use super::state::CloudState;
 
+macro_rules! require_memory_read {
+    ($user:expr) => {
+        if let Some(response) = super::helpers::require_perm(
+            &$user,
+            epicode::engine::user_manager::Permission::MemoryRead,
+        ) {
+            return response;
+        }
+    };
+}
+
 // ---------- digest ----------
 
 #[derive(Deserialize)]
@@ -384,9 +395,11 @@ pub struct SearchRequest {
 
 pub async fn search(
     State(st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<SearchRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     if let Err(e) = validate_query(&req.query) {
         return error_response(StatusCode::BAD_REQUEST, &e);
     }
@@ -544,9 +557,11 @@ pub struct RecallRequest {
 }
 
 pub async fn recall(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<RecallRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     if let Err(e) = validate_query(&req.query) {
         return error_response(StatusCode::BAD_REQUEST, &e);
     }
@@ -586,9 +601,11 @@ pub struct AskRequest {
 }
 
 pub async fn ask(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<AskRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     if let Err(e) = validate_query(&req.question) {
         return error_response(StatusCode::BAD_REQUEST, &e);
     }
@@ -742,6 +759,7 @@ pub async fn get_node(
     user: axum::extract::Extension<UserInfo>,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
@@ -790,6 +808,7 @@ pub async fn knowledge(
     user: axum::extract::Extension<UserInfo>,
     Json(req): Json<KGRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
@@ -818,6 +837,7 @@ pub async fn graph_analysis(
     State(st): State<CloudState>,
     user: axum::extract::Extension<UserInfo>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
@@ -1012,6 +1032,7 @@ pub async fn knowledge_cards(
     State(st): State<CloudState>,
     user: axum::extract::Extension<UserInfo>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => {
@@ -1046,6 +1067,7 @@ pub async fn export_personality(
     State(st): State<CloudState>,
     user: axum::extract::Extension<UserInfo>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => {
@@ -1090,6 +1112,7 @@ pub async fn graph_export(
     user: axum::extract::Extension<UserInfo>,
     axum::extract::RawQuery(q): axum::extract::RawQuery,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     // 图谱裁剪: ?limit=N(默认800, 0=全量) — 曾5499节点13万边12MB/74s致客户端499
     let node_limit: usize = q
         .as_deref()
@@ -1146,6 +1169,7 @@ pub async fn user_stats(
     State(st): State<CloudState>,
     user: axum::extract::Extension<UserInfo>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => {
@@ -1273,6 +1297,7 @@ pub async fn timeline(
     user: axum::extract::Extension<UserInfo>,
     Query(params): Query<HashMap<String, String>>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
@@ -1716,6 +1741,7 @@ pub async fn list_docs(
     State(st): State<CloudState>,
     user: axum::extract::Extension<UserInfo>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
@@ -1760,8 +1786,10 @@ pub async fn list_docs(
 /// Agents (the "hands") call this to check if the personality wants them to do something.
 /// Signals are marked as "delivered" when polled.
 pub async fn drive_inbox(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let polled = engine.scheduler().current_drive_inbox(50);
     let stats = engine.scheduler().drive_queue().stats();
     let e2e_public_key = engine.scheduler().e2e_pubkey();
@@ -1831,8 +1859,10 @@ pub async fn drive_ingested(
 }
 
 pub async fn drive_policy(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let q = engine.scheduler.drive_queue();
     let stats = q.stats();
     let (bins, suppressed) = q.policy_stats();
@@ -1868,9 +1898,16 @@ pub struct BulkQuarantineRequest {
 /// 不删除记忆，只隔离使其在正常搜索中不可见
 pub async fn bulk_quarantine(
     State(_st): State<CloudState>,
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(body): Json<BulkQuarantineRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryDelete,
+    ) {
+        return r;
+    }
     // P0 门禁 (Tester-Q验收): bulk 写路径必须带 confirm_token
     let token = match &body.confirm_token {
         Some(t) => t.clone(),
@@ -1887,48 +1924,32 @@ pub async fn bulk_quarantine(
         }
     };
 
-    // 验证 token 有效且未过期
-    let pending = pending_ops().lock().remove(&token);
-    let pending = match pending {
-        Some(p) => {
-            let now = chrono::Utc::now().timestamp();
-            if now - p.created_at > 300 {
-                return (
-                    StatusCode::FORBIDDEN,
-                    Json(epicode::engine::smrp::envelope_err(
-                        &engine,
-                        "bulk_quarantine",
-                        403,
-                        "token expired",
-                    )),
-                );
-            }
-            // 检查 risk_level
-            if p.risk_level == "critical" {
-                return (
-                    StatusCode::FORBIDDEN,
-                    Json(epicode::engine::smrp::envelope_err(
-                        &engine,
-                        "bulk_quarantine",
-                        403,
-                        "operation on protected memories forbidden",
-                    )),
-                );
-            }
-            p
-        }
-        None => {
+    let pending = match take_pending_op(&token, &user.user_id, Some("quarantine"), Some(&body.ids))
+    {
+        Ok(p) => p,
+        Err(message) => {
             return (
                 StatusCode::FORBIDDEN,
                 Json(epicode::engine::smrp::envelope_err(
                     &engine,
                     "bulk_quarantine",
                     403,
-                    "invalid token",
+                    message,
                 )),
-            )
+            );
         }
     };
+    if pending.risk_level == "critical" || has_protected_targets(&engine, &body.ids) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "bulk_quarantine",
+                403,
+                "operation on protected memories forbidden",
+            )),
+        );
+    }
 
     let engine_inner = engine.clone();
     let ids = body.ids;
@@ -2050,46 +2071,31 @@ pub async fn bulk_restore(
             )
         }
     };
-    let pending_r = pending_ops().lock().remove(&token);
-    let pending_r = match pending_r {
-        Some(p) => {
-            let now = chrono::Utc::now().timestamp();
-            if now - p.created_at > 300 {
-                return (
-                    StatusCode::FORBIDDEN,
-                    Json(epicode::engine::smrp::envelope_err(
-                        &engine,
-                        "bulk_restore",
-                        403,
-                        "token expired",
-                    )),
-                );
-            }
-            if p.risk_level == "critical" {
-                return (
-                    StatusCode::FORBIDDEN,
-                    Json(epicode::engine::smrp::envelope_err(
-                        &engine,
-                        "bulk_restore",
-                        403,
-                        "operation on protected memories forbidden",
-                    )),
-                );
-            }
-            p
-        }
-        None => {
+    let pending_r = match take_pending_op(&token, &user.user_id, Some("restore"), Some(&body.ids)) {
+        Ok(p) => p,
+        Err(message) => {
             return (
                 StatusCode::FORBIDDEN,
                 Json(epicode::engine::smrp::envelope_err(
                     &engine,
                     "bulk_restore",
                     403,
-                    "invalid token",
+                    message,
                 )),
-            )
+            );
         }
     };
+    if pending_r.risk_level == "critical" || has_protected_targets(&engine, &body.ids) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(epicode::engine::smrp::envelope_err(
+                &engine,
+                "bulk_restore",
+                403,
+                "operation on protected memories forbidden",
+            )),
+        );
+    }
 
     let engine_inner = engine.clone();
     let ids = body.ids;
@@ -2184,8 +2190,10 @@ pub async fn bulk_restore(
 /// GET /v1/drive/evolution — δ1: 回执→策略演化可观测 (环4数据面)
 /// 返回四驱权重 + reward 历史 + drive 队列执行统计 — δ验收(N ack后参数变化)的数据源
 pub async fn drive_evolution(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let weights = {
         let de = engine.scheduler.drive_engine_lock();
         de.evolution_snapshot()
@@ -2224,9 +2232,11 @@ pub async fn drive_evolution(
 
 /// GET /v1/memories/:id — D5/D7 REST get single memory
 pub async fn get_memory(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Path(id): Path<u64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine_inner = engine.clone();
     let result = tokio::task::spawn_blocking(move || {
         engine_inner.space().get_tetrahedron(id).map(|t| serde_json::json!({
@@ -2304,8 +2314,10 @@ pub async fn forget_memory(
 /// GET /v1/memories/noise-stats
 /// 统计噪声记忆数量：quarantined / junk / superseded / low_importance
 pub async fn noise_stats(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine_inner = engine.clone();
     let result = tokio::task::spawn_blocking(move || {
         let space = engine_inner.space();
@@ -2408,9 +2420,11 @@ fn default_exclude_protected() -> bool {
 ///
 /// This API exists so tenants can self-govern WITHOUT platform intervention.
 pub async fn noise_candidates(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Query(req): Query<NoiseCandidatesRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine_inner = engine.clone();
     let limit = req.limit.min(500);
     let offset = req.offset;
@@ -2535,9 +2549,11 @@ fn default_contradiction_limit() -> usize {
 /// POST /v1/memories/contradictions
 /// 列出所有 "contradicts" 关系。每条关系返回 source/target 记忆元信息。
 pub async fn list_contradictions(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<ContradictionListRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine_inner = engine.clone();
     let limit = req.limit.min(500);
     let include_resolved = req.include_resolved;
@@ -2646,9 +2662,16 @@ pub struct ContradictionResolveRequest {
 /// POST /v1/memories/contradictions/resolve
 /// 标记一对矛盾为已解决：双方都加 "resolved" 标签（如果已存在则幂等）。
 pub async fn resolve_contradiction(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<ContradictionResolveRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
+        return r;
+    }
     let engine_inner = engine.clone();
     let (sid, tid) = (req.source_id, req.target_id);
     let result = tokio::task::spawn_blocking(move || {
@@ -2720,9 +2743,16 @@ pub async fn resolve_contradiction(
 /// POST /v1/memories/contradictions/archive
 /// 归档一对矛盾：双方都加 "archived" 标签（通常配合 resolved 一起用）。
 pub async fn archive_contradiction(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<ContradictionResolveRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
+        return r;
+    }
     let engine_inner = engine.clone();
     let (sid, tid) = (req.source_id, req.target_id);
     let result = tokio::task::spawn_blocking(move || {
@@ -2801,8 +2831,10 @@ pub async fn archive_contradiction(
 /// GET /v1/projects
 /// 列出所有 distinct project tags（扫描所有记忆的 labels，挑出 "project:*" 前缀）。
 pub async fn list_projects(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine_inner = engine.clone();
     let result = tokio::task::spawn_blocking(move || {
         let space = engine_inner.space();
@@ -2877,9 +2909,16 @@ pub struct ProjectSwitchRequest {
 /// - 传 project: "myapp"  → 写入 engine.current_project = Some("myapp")，后续查询可过滤 project:myapp
 /// - 传 project: null 或 ""  → 清空，恢复全局视图
 pub async fn switch_project(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<ProjectSwitchRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
+        return r;
+    }
     let normalized: Option<String> = match req.project {
         Some(p) => {
             let trimmed = p.trim().to_string();
@@ -2920,8 +2959,10 @@ pub async fn switch_project(
 /// GET /v1/projects/current
 /// 读取当前激活项目（None 表示全局，未过滤）。
 pub async fn current_project(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let cur = engine.current_project.read().clone();
     (
         StatusCode::OK,
@@ -3105,8 +3146,10 @@ pub async fn learn_rule(
 /// GET /v1/rules/list
 /// 列出所有 enforced_rule 记忆（排除已 revoked 的）。
 pub async fn list_rules(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine_inner = engine.clone();
     let result = tokio::task::spawn_blocking(move || {
         let all = engine_inner
@@ -3238,8 +3281,10 @@ pub async fn revoke_rule(
 /// GET /v1/rules/audit
 /// 审计日志：列出所有带 "rule_audit" 标签的记忆（最近优先）。
 pub async fn audit_rules(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine_inner = engine.clone();
     let result = tokio::task::spawn_blocking(move || {
         let mut entries = engine_inner
@@ -3310,6 +3355,12 @@ pub async fn drive_ack(
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<DriveAckRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryWrite,
+    ) {
+        return r;
+    }
     // D §14.1: drive_ack requires primary_executor binding (non-optional)
     let binding = check_primary_executor(&st, &user.user_id);
     if binding.is_none() {
@@ -3464,8 +3515,10 @@ pub async fn drive_ack(
 /// pair appearing more than once, or self-loops), and density
 /// (actual_edges / max_possible_edges).
 pub async fn kg_quality(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine_inner = engine.clone();
     let result = tokio::task::spawn_blocking(move || {
         let space = engine_inner.space();
@@ -3582,6 +3635,7 @@ const OP_TOKEN_TTL_SECS: i64 = 300;
 
 #[derive(Clone, Serialize)]
 struct PendingOp {
+    user_id: String,
     operation: String,
     target_ids: Vec<u64>,
     target_titles: Vec<String>,
@@ -3601,6 +3655,44 @@ fn gc_pending_ops(now: i64) {
     store.retain(|_, v| now - v.created_at < OP_TOKEN_TTL_SECS);
 }
 
+/// A token is scoped to its creator, operation and exact target list. Failed
+/// matches leave it available to the rightful user; successful matches consume it.
+fn take_pending_op(
+    token: &str,
+    user_id: &str,
+    operation: Option<&str>,
+    target_ids: Option<&[u64]>,
+) -> Result<PendingOp, &'static str> {
+    let mut store = pending_ops().lock();
+    let pending = store.get(token).ok_or("invalid token")?.clone();
+    if pending.user_id != user_id {
+        return Err("invalid token");
+    }
+    if chrono::Utc::now().timestamp() - pending.created_at >= OP_TOKEN_TTL_SECS {
+        store.remove(token);
+        return Err("token expired");
+    }
+    if operation.is_some_and(|op| pending.operation != op)
+        || target_ids.is_some_and(|ids| pending.target_ids.as_slice() != ids)
+    {
+        return Err("token does not match requested operation or targets");
+    }
+    store.remove(token).ok_or("invalid token")
+}
+
+fn has_protected_targets(engine: &epicode::engine::Engine, ids: &[u64]) -> bool {
+    ids.iter().any(|&id| {
+        engine.space().get_tetrahedron(id).is_some_and(|tetra| {
+            tetra.data.enforced
+                || tetra
+                    .data
+                    .labels
+                    .iter()
+                    .any(|label| label == "enforced" || label == "identity")
+        })
+    })
+}
+
 #[derive(Deserialize)]
 pub struct DryRunRequest {
     /// Operation kind: "delete" | "quarantine" | "merge". ("restore" also accepted.)
@@ -3616,9 +3708,16 @@ pub struct DryRunRequest {
 /// happen (count, preview of affected memory titles, risk level) plus a
 /// confirmation token that can be used with /v1/operations/confirm.
 pub async fn operations_dry_run(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
     Json(req): Json<DryRunRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if let Some(r) = super::helpers::require_perm(
+        &user,
+        epicode::engine::user_manager::Permission::MemoryDelete,
+    ) {
+        return r;
+    }
     // Validate operation name up-front.
     let op = req.operation.trim().to_lowercase();
     if !matches!(op.as_str(), "delete" | "quarantine" | "merge" | "restore") {
@@ -3655,11 +3754,12 @@ pub async fn operations_dry_run(
                     if tetra.data.importance > 0.7 {
                         high_risk += 1;
                     }
-                    if tetra
-                        .data
-                        .labels
-                        .iter()
-                        .any(|l| l == "enforced" || l == "identity")
+                    if tetra.data.enforced
+                        || tetra
+                            .data
+                            .labels
+                            .iter()
+                            .any(|l| l == "enforced" || l == "identity")
                     {
                         protected += 1;
                     }
@@ -3711,11 +3811,18 @@ pub async fn operations_dry_run(
     // Generate confirmation token.
     let now = chrono::Utc::now().timestamp();
     gc_pending_ops(now);
-    let token = format!("tok_{}_{}_{}", now, op, requested_count);
+    let mut store = pending_ops().lock();
+    let token = loop {
+        let candidate = format!("tok_{}", uuid::Uuid::new_v4());
+        if !store.contains_key(&candidate) {
+            break candidate;
+        }
+    };
 
-    pending_ops().lock().insert(
+    store.insert(
         token.clone(),
         PendingOp {
+            user_id: user.user_id.clone(),
             operation: op.clone(),
             target_ids: ids_for_store,
             target_titles: titles.clone(),
@@ -3723,6 +3830,7 @@ pub async fn operations_dry_run(
             created_at: now,
         },
     );
+    drop(store);
 
     let not_found = (requested_count as u64).saturating_sub(found);
 
@@ -3755,9 +3863,11 @@ pub struct ConfirmRequest {
 
 /// POST /v1/operations/confirm
 ///
-/// Execute a previously dry-runned operation. The token must be valid and
-/// not expired. Operations on protected (enforced/identity) memories are
-/// refused. Each successful execution is recorded as an "op_audit" memory.
+/// Execute the operation and target ids captured by a dry-run token. This is
+/// the canonical confirm endpoint for delete, quarantine and restore; bulk
+/// routes can also consume a matching token. The token must belong to this
+/// user, be unexpired and single-use. Protected memories are refused.
+/// Each successful execution is recorded as an "op_audit" memory.
 pub async fn operations_confirm(
     State(st): State<CloudState>,
     user: axum::extract::Extension<UserInfo>,
@@ -3770,41 +3880,19 @@ pub async fn operations_confirm(
     ) {
         return r;
     }
-    // Pop the pending op (single-use token).
-    let now = chrono::Utc::now().timestamp();
-    let pending = {
-        let mut store = pending_ops().lock();
-        store.remove(&req.token)
-    };
-
-    let pending = match pending {
-        Some(p) => p,
-        None => {
+    // Consume only a token created by this authenticated user.
+    let pending = match take_pending_op(&req.token, &user.user_id, None, None) {
+        Ok(p) => p,
+        Err(message) => {
             return (
-                StatusCode::BAD_REQUEST,
+                StatusCode::FORBIDDEN,
                 Json(epicode::engine::smrp::envelope_err(
-                    &engine,
-                    "confirm",
-                    400,
-                    "invalid or unknown token",
+                    &engine, "confirm", 403, message,
                 )),
-            )
+            );
         }
     };
-
-    if now - pending.created_at > OP_TOKEN_TTL_SECS {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(epicode::engine::smrp::envelope_err(
-                &engine,
-                "confirm",
-                400,
-                "token expired; please re-run dry-run",
-            )),
-        );
-    }
-
-    if pending.risk_level == "critical" {
+    if pending.risk_level == "critical" || has_protected_targets(&engine, &pending.target_ids) {
         return (
             StatusCode::FORBIDDEN,
             Json(epicode::engine::smrp::envelope_err(
@@ -3948,8 +4036,10 @@ pub async fn operations_confirm(
 ///
 /// List recent dangerous operations (memories labelled "op_audit"), newest first.
 pub async fn operations_audit_log(
+    user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
     let engine_inner = engine.clone();
     let result = tokio::task::spawn_blocking(move || {
         let mut entries = engine_inner
@@ -4110,5 +4200,129 @@ mod quota_rollback_tests {
             "failed writes must not consume quota"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod operation_token_tests {
+    use super::{pending_ops, take_pending_op, PendingOp, OP_TOKEN_TTL_SECS};
+    use epicode::engine::user_manager::{UserInfo, UserPlan, UserRole};
+
+    fn insert_token(token: &str, user_id: &str, operation: &str, ids: Vec<u64>, created_at: i64) {
+        pending_ops().lock().insert(
+            token.to_string(),
+            PendingOp {
+                user_id: user_id.to_string(),
+                operation: operation.to_string(),
+                target_ids: ids,
+                target_titles: Vec::new(),
+                risk_level: "low".to_string(),
+                created_at,
+            },
+        );
+    }
+
+    #[test]
+    fn token_requires_same_user_operation_and_exact_targets_without_consuming_on_mismatch() {
+        let token = format!("test_{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().timestamp();
+        insert_token(&token, "owner", "quarantine", vec![11, 22], now);
+
+        assert_eq!(
+            take_pending_op(&token, "other", Some("quarantine"), Some(&[11, 22])).err(),
+            Some("invalid token")
+        );
+        assert_eq!(
+            take_pending_op(&token, "owner", Some("restore"), Some(&[11, 22])).err(),
+            Some("token does not match requested operation or targets")
+        );
+        assert_eq!(
+            take_pending_op(&token, "owner", Some("quarantine"), Some(&[22, 11])).err(),
+            Some("token does not match requested operation or targets")
+        );
+        assert!(pending_ops().lock().contains_key(&token));
+
+        let accepted = take_pending_op(&token, "owner", Some("quarantine"), Some(&[11, 22]));
+        assert!(accepted.is_ok());
+        assert_eq!(
+            take_pending_op(&token, "owner", None, None).err(),
+            Some("invalid token")
+        );
+    }
+
+    #[test]
+    fn expired_token_is_rejected_and_removed() {
+        let token = format!("test_{}", uuid::Uuid::new_v4());
+        let expired = chrono::Utc::now().timestamp() - OP_TOKEN_TTL_SECS - 1;
+        insert_token(&token, "owner", "delete", vec![7], expired);
+
+        assert_eq!(
+            take_pending_op(&token, "owner", None, None).err(),
+            Some("token expired")
+        );
+        assert!(!pending_ops().lock().contains_key(&token));
+    }
+
+    #[tokio::test]
+    async fn denied_handlers_do_not_issue_tokens_or_read_memory() {
+        let viewer = UserInfo {
+            user_id: "viewer".to_string(),
+            api_key: String::new(),
+            password_hash: String::new(),
+            plan: UserPlan::Free,
+            max_memories: 1000,
+            memories_used: 0,
+            created_at: 0,
+            parent: Some("owner".to_string()),
+            sub_accounts: Vec::new(),
+            role: UserRole::Viewer,
+            email: String::new(),
+            custom_permissions: None,
+            settings: None,
+        };
+        let dir =
+            std::env::temp_dir().join(format!("epicode-operation-auth-{}", uuid::Uuid::new_v4()));
+        let engine = std::sync::Arc::new(epicode::engine::Engine::with_data_dir(dir.clone()));
+        let response = super::operations_dry_run(
+            axum::extract::Extension(viewer.clone()),
+            super::AuthedEngine(engine.clone()),
+            axum::Json(super::DryRunRequest {
+                operation: "quarantine".into(),
+                target_ids: vec![1],
+            }),
+        )
+        .await;
+        assert_eq!(response.0, axum::http::StatusCode::FORBIDDEN);
+        assert_eq!(response.1 .0["code"], "FORBIDDEN_ROLE");
+        assert!(response.1 .0.get("confirm_token").is_none());
+
+        let response = super::switch_project(
+            axum::extract::Extension(viewer.clone()),
+            super::AuthedEngine(engine.clone()),
+            axum::Json(super::ProjectSwitchRequest {
+                project: Some("forbidden".into()),
+            }),
+        )
+        .await;
+        assert_eq!(response.0, axum::http::StatusCode::FORBIDDEN);
+        assert!(engine.current_project.read().is_none());
+
+        let no_read = UserInfo {
+            custom_permissions: Some(Vec::new()),
+            ..viewer
+        };
+        let response = super::recall(
+            axum::extract::Extension(no_read),
+            super::AuthedEngine(engine.clone()),
+            axum::Json(super::RecallRequest {
+                query: "private memory".into(),
+                depth: None,
+            }),
+        )
+        .await;
+        assert_eq!(response.0, axum::http::StatusCode::FORBIDDEN);
+        assert_eq!(response.1 .0["code"], "FORBIDDEN_ROLE");
+        drop(engine);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
