@@ -415,6 +415,27 @@ impl Space {
         Ok(())
     }
 
+    /// 在单次写锁内原子应用一组字段级操作,返回是否有任一操作改变了状态。
+    /// 只触碰操作声明的字段,不会覆盖并发写入的其他字段(见 domain::ops)。
+    pub fn apply_ops(&self, id: TetraId, ops: &[super::ops::MemoryOp]) -> Result<bool, String> {
+        let mut inner = self.inner.write();
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let labels_before = tetra.data.labels.len();
+        let mut changed = false;
+        for op in ops {
+            changed |= super::ops::apply_op(&mut tetra.data, &mut tetra.mass, op);
+        }
+        // 标签变化与 with_tetra_mut 保持一致:失效聚类/检索缓存
+        if tetra.data.labels.len() != labels_before {
+            inner.structure_version += 1;
+            inner.search_revision += 1;
+        }
+        Ok(changed)
+    }
+
     /// H5修复: 闭包式原子更新——单次写锁内完成 read+modify+write，消除 TOCTOU 竞态。
     /// 用于 Mem0 调和/A-MEM 进化等需要 read-modify-write 的场景。
     pub fn with_tetra_mut<F>(&self, id: TetraId, f: F) -> Result<(), String>
