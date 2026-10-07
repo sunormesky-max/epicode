@@ -189,7 +189,7 @@ async fn main() {
 
     // 内存治理：每 10 分钟调用 malloc_trim 把 glibc 释放但滞留在堆 bins 的内存归还 OS。
     // AutoDream 大整理（如 830 簇聚类）后 RSS 常驻高位不回落，是内存谷底逐周期加深的机制。
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
     {
         extern "C" {
             fn malloc_trim(pad: usize) -> i32;
@@ -536,6 +536,7 @@ async fn main() {
     // 零停机: systemd socket 激活 — LISTEN_FDS=1 时继承 fd3, 端口由 systemd 持有
     // 重启期间连接在 socket backlog 排队而非被拒(曾每次部署必 502)
     let listener = {
+        #[cfg(unix)]
         let activated = std::env::var("LISTEN_FDS").ok().as_deref() == Some("1")
             && std::env::var("LISTEN_PID")
                 .ok()
@@ -604,6 +605,7 @@ async fn main() {
         let sf = shutdown_flag.clone();
         tokio::spawn(async move {
             // glibc arena 滞留: 引擎驱逐后堆已释放但内存不还OS(RSS不降), 须主动trim (2026-09-23实测: 驱逐后3min RSS 5.3G纹丝不动)
+            #[cfg(all(target_os = "linux", target_env = "gnu"))]
             extern "C" {
                 fn malloc_trim(pad: usize) -> std::os::raw::c_int;
             }
@@ -635,6 +637,7 @@ async fn main() {
                 } else {
                     mgr.evict_idle();
                 }
+                #[cfg(all(target_os = "linux", target_env = "gnu"))]
                 unsafe {
                     malloc_trim(0);
                 } // 每轮清扫后归还自由堆给OS
