@@ -24,7 +24,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rand = "0.8"
 chrono = "0.4"
-ureq = { version = "2", features = ["json"] }
+ureq = { version = "3", features = ["json"] }
 rusqlite = { version = "0.40", features = ["bundled", "blob"] }
 futures = "0.3"
 tokio-stream = "0.1"
