@@ -655,9 +655,6 @@ pub async fn create_node(
     if let Err(e) = validate_content(&req.content) {
         return error_response(StatusCode::BAD_REQUEST, &e);
     }
-    if let Err(e) = st.user_mgr.check_and_increment_memory(&engine.user_id) {
-        return error_response(StatusCode::FORBIDDEN, &e);
-    }
     let labels = req.labels.unwrap_or_default();
     for label in &labels {
         if label.len() > 64 || label.trim().is_empty() {
@@ -687,6 +684,10 @@ pub async fn create_node(
             )),
         );
     }
+    // 配额在全部 400 校验之后再预占,避免无效请求白白消耗配额
+    if let Err(e) = st.user_mgr.check_and_increment_memory(&engine.user_id) {
+        return error_response(StatusCode::FORBIDDEN, &e);
+    }
     let clean_content = strip_html(&req.content); // 去 HTML 标签（非 XSS 转义，React 前端默认转义文本）
     let scheduler = engine.scheduler.clone();
     let result = tokio::task::spawn_blocking(move || {
@@ -709,6 +710,7 @@ pub async fn create_node(
         }
         Ok(Err(e)) => {
             tracing::error!("internal error: {}", e);
+            st.user_mgr.decrement_memory_count(&engine.user_id, 1); // 失败回滚预占配额
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(epicode::engine::smrp::envelope_err(
@@ -721,6 +723,7 @@ pub async fn create_node(
         }
         Err(e) => {
             tracing::error!("node_create spawn_blocking error: {}", e);
+            st.user_mgr.decrement_memory_count(&engine.user_id, 1); // 失败回滚预占配额
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(epicode::engine::smrp::envelope_err(
@@ -1682,6 +1685,7 @@ pub async fn import_doc(
         }
         Ok(Err(e)) => {
             tracing::error!("doc_import error: {}", e);
+            st.user_mgr.decrement_memory_count(&engine.user_id, 1); // 失败回滚预占配额
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(epicode::engine::smrp::envelope_err(
@@ -1694,6 +1698,7 @@ pub async fn import_doc(
         }
         Err(e) => {
             tracing::error!("doc_import spawn_blocking error: {}", e);
+            st.user_mgr.decrement_memory_count(&engine.user_id, 1); // 失败回滚预占配额
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(epicode::engine::smrp::envelope_err(
@@ -3990,5 +3995,120 @@ pub async fn operations_audit_log(
                 )),
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod quota_rollback_tests {
+    use super::*;
+    use axum::extract::Extension;
+    use epicode::engine::{skills::SkillEngine, storage::StorageManager, user_manager::UserPlan};
+    use std::sync::Arc;
+
+    fn state(dir: &std::path::Path) -> CloudState {
+        CloudState {
+            user_mgr: Arc::new(epicode::engine::user_manager::UserManager::new(dir)),
+            admin_key: String::new(),
+            rate_limits: Default::default(),
+            active_tasks: Default::default(),
+            pub_skills: Arc::new(SkillEngine::new(Arc::new(
+                StorageManager::new(&dir.join("pub_skills")).unwrap(),
+            ))),
+            api_call_counts: Default::default(),
+            api_calls_daily: Default::default(),
+            insight_tx: Arc::new(tokio::sync::broadcast::channel(4).0),
+            startup_phase: Default::default(),
+            primary_executors: Default::default(),
+            stream_tickets: Default::default(),
+            library: Arc::new(
+                epicode::engine::library::LibraryStore::open_in_data_dir(dir, None).unwrap(),
+            ),
+        }
+    }
+
+    fn used(st: &CloudState, uid: &str) -> usize {
+        st.user_mgr
+            .list_users()
+            .into_iter()
+            .find(|u| u.user_id == uid)
+            .unwrap()
+            .memories_used
+    }
+
+    #[tokio::test]
+    async fn failed_create_and_import_do_not_leak_quota() {
+        let dir = std::env::temp_dir().join(format!("epicode-quota-{}", uuid::Uuid::new_v4()));
+        let st = state(&dir);
+        let info = st
+            .user_mgr
+            .register(
+                "quotauser",
+                "qk-fixture-only",
+                UserPlan::Free,
+                "password",
+                None,
+            )
+            .unwrap();
+        let engine = st.user_mgr.get_engine("quotauser").unwrap();
+        let before = used(&st, "quotauser");
+
+        // 1) 400: 空标签
+        let (code, _) = create_node(
+            State(st.clone()),
+            Extension(info.clone()),
+            AuthedEngine(engine.clone()),
+            Json(CreateNodeRequest {
+                content: "quota probe one".into(),
+                labels: Some(vec![" ".into()]),
+                timestamp: None,
+            }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::BAD_REQUEST);
+        // 2) 400: 时间戳越界
+        let (code, _) = create_node(
+            State(st.clone()),
+            Extension(info.clone()),
+            AuthedEngine(engine.clone()),
+            Json(CreateNodeRequest {
+                content: "quota probe two".into(),
+                labels: None,
+                timestamp: Some(chrono::Utc::now().timestamp() + 10 * 31_536_000),
+            }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::BAD_REQUEST);
+        // 3) 500: 下游 validate_labels 拒绝括号
+        let (code, _) = create_node(
+            State(st.clone()),
+            Extension(info.clone()),
+            AuthedEngine(engine.clone()),
+            Json(CreateNodeRequest {
+                content: "quota probe three".into(),
+                labels: Some(vec!["bad(label)".into()]),
+                timestamp: None,
+            }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::INTERNAL_SERVER_ERROR);
+        // 4) 500: 文件名带括号的文档导入
+        let (code, _) = import_doc(
+            State(st.clone()),
+            Extension(info.clone()),
+            AuthedEngine(engine.clone()),
+            Json(ImportDocRequest {
+                name: "report (1).pdf".into(),
+                content: "quota probe four".into(),
+            }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::INTERNAL_SERVER_ERROR);
+
+        assert_eq!(
+            used(&st, "quotauser"),
+            before,
+            "failed writes must not consume quota"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
