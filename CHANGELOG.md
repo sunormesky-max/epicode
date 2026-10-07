@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1](https://github.com/sunormesky-max/epicode/compare/v1.6.0...v1.6.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **dream:** skip already-quarantined / superseded memories so dream phases are idempotent ([#196](https://github.com/sunormesky-max/epicode/issues/196)) ([337a0be](https://github.com/sunormesky-max/epicode/commit/337a0be474c835767e9ef0292f9759c75ce09325))
+* **quota:** don't consume memory quota on rejected node_create / doc_import ([#194](https://github.com/sunormesky-max/epicode/issues/194)) ([1d4683e](https://github.com/sunormesky-max/epicode/commit/1d4683e61fcdf4f5c900708c2ccab115f2f5d36f))
+* **scheduler:** single-flight all dream entry points and count manual dreams toward the interval ([#197](https://github.com/sunormesky-max/epicode/issues/197)) ([c0a72b7](https://github.com/sunormesky-max/epicode/commit/c0a72b7a6fa02a53cd2179c96e71496aad746db9))
+* **security:** close MCP and cloud authorization bypasses ([#199](https://github.com/sunormesky-max/epicode/issues/199)) ([8926ab0](https://github.com/sunormesky-max/epicode/commit/8926ab02882514aacb36774068b9de6d879f953e))
+* **timeline:** sort globally before paginating /v1/timeline ([#195](https://github.com/sunormesky-max/epicode/issues/195)) ([4f647dd](https://github.com/sunormesky-max/epicode/commit/4f647dd9823034ecd0e698176f4f9d13e90bff6d))
+
 ## [1.6.0](https://github.com/sunormesky-max/epicode/compare/v1.5.0...v1.6.0) (2026-10-06)
 
 
