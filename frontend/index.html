@@ -2,18 +2,36 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <script>
-      (function () {
-        try {
-          var id = localStorage.getItem('epicode-theme') || 'synapse';
-          document.documentElement.dataset.theme = id;
-        } catch (e) {}
-      })();
-    </script>
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Epicode — AI Memory Operating System. Give AI an unforgettable memory." />
     <meta name="theme-color" content="#07070a" />
+    <!-- 无闪烁主题启动:与 src/lib/themes.ts 的 resolveTheme/applyTheme/applyBackgroundPrefs 同语义
+         (跟随系统、非法值回落、color-scheme、theme-color、背景偏好);映射表由 themes.test.ts 校验同步 -->
+    <script>
+      (function () {
+        var M = {"synapse":["dark","#07070a"],"paper":["light","#f4efe6"],"meridian":["dark","#07090d"],"daylight":["light","#f6f7f9"],"amber":["dark","#100c08"],"archive":["dark","#0c090b"],"x-dark":["dark","#000000"],"x-light":["light","#ffffff"],"x-dim":["dark","#15202b"]};
+        var d = document.documentElement, id = 'synapse', p = {};
+        try {
+          var s = localStorage.getItem('epicode-theme');
+          if (s && M.hasOwnProperty(s)) id = s;
+          p = JSON.parse(localStorage.getItem('epicode-theme-prefs') || '{}') || {};
+          if (p.followSystem === true) {
+            var dark = !window.matchMedia || window.matchMedia('(prefers-color-scheme: dark)').matches;
+            var mode = dark ? 'dark' : 'light', want = dark ? p.dark : p.light;
+            id = typeof want === 'string' && M.hasOwnProperty(want) && M[want][0] === mode ? want : (dark ? 'x-dark' : 'x-light');
+          }
+        } catch (e) { p = p || {}; }
+        d.dataset.theme = id;
+        d.style.colorScheme = M[id][0];
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', M[id][1]);
+        d.dataset.nnBg = p.bgEnabled === false ? 'off' : 'on';
+        if (typeof p.bgIntensity === 'number' && isFinite(p.bgIntensity)) {
+          d.style.setProperty('--nn-intensity', String(Math.round(Math.min(100, Math.max(0, p.bgIntensity))) / 100));
+        }
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/favicon.svg" />
     <meta property="og:title" content="Epicode — AI Memory Operating System" />

@@ -111,7 +111,7 @@ export default function DashboardSubAccounts() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
           <div style={{ textAlign: 'center', maxWidth: 400 }}>
             <div style={{ width: 56, height: 56, borderRadius: 16, background: 'rgba(139,126,200,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-              <Lock size={28} style={{ color: '#8b7ec8' }} />
+              <Lock size={28} style={{ color: 'var(--accent-purple)' }} />
             </div>
             <h2 style={{ color: 'var(--text-primary)', fontSize: 18, fontWeight: 600, marginBottom: 8 }}>{t('dash.sub.managementUnavailable')}</h2>
             <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.6 }}>
@@ -145,9 +145,9 @@ export default function DashboardSubAccounts() {
       )}
 
       {notice && (
-        <div style={{ background: 'rgba(62,207,174,0.08)', color: '#3ecfae', border: '1px solid rgba(62,207,174,0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ background: 'rgba(62,207,174,0.08)', color: 'var(--accent-cyan)', border: '1px solid rgba(62,207,174,0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {notice}
-          <button onClick={() => setNotice('')} style={{ color: '#3ecfae', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
+          <button onClick={() => setNotice('')} style={{ color: 'var(--accent-cyan)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
         </div>
       )}
 
@@ -158,7 +158,7 @@ export default function DashboardSubAccounts() {
           <div style={{ color: 'var(--text-primary)', fontSize: 14, fontWeight: 600, marginBottom: 2 }}>{t('dash.sub.mainAccountLabel')} {myStats?.user_id || '-'}</div>
           <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
             {t('dash.sub.mainAccountOwnership')}
-            <span style={{ color: '#8b7ec8', marginLeft: 6 }}>{t('dash.sub.planLabel')} {myStats?.plan || '-'} · {myStats?.memories_used || 0}/{myStats?.max_memories?.toLocaleString() || '-'} memories</span>
+            <span style={{ color: 'var(--accent-purple)', marginLeft: 6 }}>{t('dash.sub.planLabel')} {myStats?.plan || '-'} · {myStats?.memories_used || 0}/{myStats?.max_memories?.toLocaleString() || '-'} memories</span>
           </div>
         </div>
       </div>
@@ -206,7 +206,7 @@ export default function DashboardSubAccounts() {
                 {(['owner', 'admin', 'developer', 'tester', 'viewer'] as const).map(r => (
                   <td key={r} style={{ textAlign: 'center', padding: '5px 10px', borderBottom: '1px solid var(--border-light)' }}>
                     {ROLE_MATRIX[r][idx]
-                      ? <Check size={12} style={{ color: '#3ecfae', display: 'inline-block' }} />
+                      ? <Check size={12} style={{ color: 'var(--accent-cyan)', display: 'inline-block' }} />
                       : <Minus size={12} style={{ color: 'var(--text-tertiary)', opacity: 0.5, display: 'inline-block' }} />}
                   </td>
                 ))}
@@ -255,7 +255,7 @@ export default function DashboardSubAccounts() {
               ))}
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, color: '#8b7ec8', fontSize: 11 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, color: 'var(--accent-purple)', fontSize: 11 }}>
             <AlertTriangle size={12} /> {t('dash.sub.inheritNotice')}
           </div>
         </div>
@@ -278,7 +278,7 @@ export default function DashboardSubAccounts() {
             <div key={acc.user_id} style={{ display: 'grid', gridTemplateColumns: '2fr 100px 110px 160px 100px 60px', padding: '13px 4px', borderBottom: '1px solid var(--border-light)', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(139,126,200,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <UserCheck size={14} style={{ color: '#8b7ec8' }} />
+                  <UserCheck size={14} style={{ color: 'var(--accent-purple)' }} />
                 </div>
                 <div>
                   <div style={{ color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-mono)' }}>{acc.user_id}</div>

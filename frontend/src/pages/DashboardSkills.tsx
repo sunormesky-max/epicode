@@ -33,7 +33,7 @@ function SkillCard({ skill, color, onEdit, onDelete, onPublish }: {
               <span style={{ background: 'rgba(96,165,250,0.1)', color: '#60a5fa', fontSize: 9, padding: '2px 5px', borderRadius: 4 }}>SYS</span>
             )}
             {'is_public' in skill && !skill.is_public && (
-              <span style={{ background: 'rgba(245,159,11,0.1)', color: '#8b7ec8', fontSize: 9, padding: '2px 5px', borderRadius: 4 }}>{t('dash.skills.private')}</span>
+              <span style={{ background: 'rgba(245,159,11,0.1)', color: 'var(--accent-purple)', fontSize: 9, padding: '2px 5px', borderRadius: 4 }}>{t('dash.skills.private')}</span>
             )}
             {'review_status' in skill && skill.review_status && (
               <span style={{ color: skill.review_status === 'Approved' ? '#3ecfae' : skill.review_status === 'PendingReview' ? '#8b7ec8' : 'var(--text-tertiary)', fontSize: 9 }}>
@@ -69,7 +69,7 @@ function SkillCard({ skill, color, onEdit, onDelete, onPublish }: {
             </button>
           )}
           {onPublish && (
-            <button onClick={onPublish} title={t('dash.skills.publishToCommunity')} style={{ flex: 1, padding: '5px 0', background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.15)', borderRadius: 6, cursor: 'pointer', color: '#3ecfae', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
+            <button onClick={onPublish} title={t('dash.skills.publishToCommunity')} style={{ flex: 1, padding: '5px 0', background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.15)', borderRadius: 6, cursor: 'pointer', color: 'var(--accent-cyan)', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
               <Upload size={11} /> {t('dash.skills.publish')}
             </button>
           )}
@@ -270,16 +270,16 @@ export default function DashboardSkills() {
         </div>
       )}
       {notice && (
-        <div style={{ background: 'rgba(52,211,153,0.08)', color: '#3ecfae', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ background: 'rgba(52,211,153,0.08)', color: 'var(--accent-cyan)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {notice}
-          <button onClick={() => setNotice('')} style={{ color: '#3ecfae', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
+          <button onClick={() => setNotice('')} style={{ color: 'var(--accent-cyan)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
         </div>
       )}
 
       {/* S2 触发模拟器 — 预演自动触发行为 */}
       <div style={{ border: '1px solid rgba(62,207,174,0.18)', borderRadius: 12, padding: 14, marginBottom: 16, background: 'rgba(62,207,174,0.03)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-          <Zap size={13} style={{ color: '#3ecfae' }} />
+          <Zap size={13} style={{ color: 'var(--accent-cyan)' }} />
           <span style={{ color: 'var(--text-primary)', fontSize: 12.5, fontWeight: 600 }}>触发模拟器 · Trigger Simulator</span>
           <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>— 输入任务描述, 预演 agent 开工时将自动注入的技能</span>
         </div>
@@ -289,7 +289,7 @@ export default function DashboardSkills() {
             placeholder="e.g. 对整个项目做一次代码质量审查并给出自评"
             style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
           <button onClick={handleSimulate} disabled={simulating}
-            style={{ background: 'rgba(62,207,174,0.15)', border: '1px solid rgba(62,207,174,0.3)', color: '#3ecfae', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' }}>
+            style={{ background: 'rgba(62,207,174,0.15)', border: '1px solid rgba(62,207,174,0.3)', color: 'var(--accent-cyan)', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' }}>
             {simulating ? '...' : '模拟触发'}
           </button>
         </div>
@@ -303,7 +303,7 @@ export default function DashboardSkills() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {simResults.map((s, i) => (
                     <div key={s.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
-                      <span style={{ color: '#3ecfae', fontSize: 11, fontFamily: 'var(--font-mono)' }}>#{i + 1}</span>
+                      <span style={{ color: 'var(--accent-cyan)', fontSize: 11, fontFamily: 'var(--font-mono)' }}>#{i + 1}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 600 }}>{s.name}</span>
                         <span style={{ color: 'var(--text-tertiary)', fontSize: 11, marginLeft: 6 }}>v{s.version}</span>
@@ -325,7 +325,7 @@ export default function DashboardSkills() {
           <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder={tab === 'my' ? '语义搜索技能...' : 'Search skills...'}
             style={{ width: '100%', background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '7px 10px 7px 34px', fontSize: 13, boxSizing: 'border-box' }} />
           {tab === 'my' && searchQ && semResults && (
-            <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: '#3ecfae', fontSize: 10 }}>SEM</span>
+            <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--accent-cyan)', fontSize: 10 }}>SEM</span>
           )}
         </div>
         <button onClick={() => setShowFilters(!showFilters)}

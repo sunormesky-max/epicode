@@ -121,7 +121,7 @@ export default function DashboardLibrary() {
       {/* 检索 */}
       <div style={{ border: '1px solid rgba(62,207,174,0.18)', borderRadius: 12, padding: 14, marginBottom: 16, background: 'rgba(62,207,174,0.03)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-          <Search size={13} style={{ color: '#3ecfae' }} />
+          <Search size={13} style={{ color: 'var(--accent-cyan)' }} />
           <span style={{ color: 'var(--text-primary)', fontSize: 12.5, fontWeight: 600 }}>图书馆检索</span>
           <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>— 语义搜索全库(含来源溯源)</span>
         </div>
@@ -131,7 +131,7 @@ export default function DashboardLibrary() {
             placeholder="e.g. transformer attention mechanism"
             style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
           <button onClick={handleSearch} disabled={searching}
-            style={{ background: 'rgba(62,207,174,0.15)', border: '1px solid rgba(62,207,174,0.3)', color: '#3ecfae', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' }}>
+            style={{ background: 'rgba(62,207,174,0.15)', border: '1px solid rgba(62,207,174,0.3)', color: 'var(--accent-cyan)', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' }}>
             {searching ? '...' : '检索'}
           </button>
         </div>
@@ -141,7 +141,7 @@ export default function DashboardLibrary() {
               <div key={r.chunk_id} style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                   <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 600 }}>
-                    <FileText size={11} style={{ verticalAlign: -1, marginRight: 4, color: '#3ecfae' }} />
+                    <FileText size={11} style={{ verticalAlign: -1, marginRight: 4, color: 'var(--accent-cyan)' }} />
                     {r.title}
                   </span>
                   <span style={{ color: 'var(--text-tertiary)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
@@ -165,7 +165,7 @@ export default function DashboardLibrary() {
         {/* 提交 */}
         <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 14, background: 'var(--bg-card)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-            <Send size={13} style={{ color: '#8b7ec8' }} />
+            <Send size={13} style={{ color: 'var(--accent-purple)' }} />
             <span style={{ color: 'var(--text-primary)', fontSize: 12.5, fontWeight: 600 }}>提起收集请求</span>
           </div>
           <input type="text" value={reqTitle} onChange={e => setReqTitle(e.target.value)}
@@ -186,7 +186,7 @@ export default function DashboardLibrary() {
         {/* 列表 */}
         <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 14, background: 'var(--bg-card)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-            <Inbox size={13} style={{ color: '#3ecfae' }} />
+            <Inbox size={13} style={{ color: 'var(--accent-cyan)' }} />
             <span style={{ color: 'var(--text-primary)', fontSize: 12.5, fontWeight: 600 }}>
               {role === 'owner' ? `全部请求(待处理 ${pendingTotal})` : '我的请求'}
             </span>
@@ -220,7 +220,7 @@ export default function DashboardLibrary() {
                         {role === 'owner' && r.status === 'pending' && (
                           <div style={{ display: 'flex', gap: 4 }}>
                             <button onClick={() => handleRequest(r.id, 'accepted')} disabled={handling === r.id}
-                              style={{ background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', color: '#3ecfae', padding: '2px 8px', borderRadius: 5, cursor: 'pointer', fontSize: 10 }}>
+                              style={{ background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', color: 'var(--accent-cyan)', padding: '2px 8px', borderRadius: 5, cursor: 'pointer', fontSize: 10 }}>
                               接受
                             </button>
                             <button onClick={() => handleRequest(r.id, 'rejected')} disabled={handling === r.id}

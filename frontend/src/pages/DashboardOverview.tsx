@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useI18nContext } from '@/i18n/useI18n';
+import { useChartTheme } from '@/lib/chartTheme';
 import { useIsMobile } from '@/hooks/useIsMobile';
 
 /**
@@ -18,11 +19,13 @@ import { useIsMobile } from '@/hooks/useIsMobile';
  * 上半屏: 中心记忆体量大字 + HUD 四角(vitals/graph/identity/health); 下半屏: 趋势与地层(发丝行,无卡片)。
  */
 
-const PIE_COLORS = ['#8b7ec8', '#8b7ec8', '#3ecfae', '#ec4899', '#3ecfae', '#8b7ec8', '#60a5fa', '#f87171'];
 const HUD_LABEL: React.CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.16em' };
 const HUD_VAL: React.CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-secondary)' };
 
 export default function DashboardOverview() {
+  // 主题感知图表色(8 个互不相同的系列色;原 PIE_COLORS 有 3 处重复,相邻扇区同色)
+  const chart = useChartTheme();
+  const PIE_COLORS = chart.series;
   const { t } = useI18nContext();
   const [copied, setCopied] = useState(false);
   const isMobile = useIsMobile();
@@ -335,15 +338,15 @@ export default function DashboardOverview() {
             <AreaChart data={chartData}>
               <defs>
                 <linearGradient id="mg" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#8b7ec8" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#8b7ec8" stopOpacity={0} />
+                  <stop offset="0%" stopColor={chart.series[1]} stopOpacity={0.3} />
+                  <stop offset="100%" stopColor={chart.series[1]} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
               <XAxis dataKey="name" tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ background: 'rgba(10,10,15,0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, fontSize: 12, color: 'var(--text-primary)' }} />
-              <Area type="monotone" dataKey="count" stroke="#8b7ec8" strokeWidth={2} fill="url(#mg)" />
+              <Tooltip contentStyle={chart.tooltip} cursor={{ stroke: chart.grid }} />
+              <Area type="monotone" dataKey="count" stroke={chart.series[1]} strokeWidth={2} fill="url(#mg)" />
             </AreaChart>
           </ResponsiveContainer>
         </section>
@@ -356,15 +359,15 @@ export default function DashboardOverview() {
             <AreaChart data={(stats?.api_calls_daily || []).map(d => ({ name: d.date, count: d.count }))}>
               <defs>
                 <linearGradient id="apiGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#3ecfae" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#3ecfae" stopOpacity={0} />
+                  <stop offset="0%" stopColor={chart.series[0]} stopOpacity={0.3} />
+                  <stop offset="100%" stopColor={chart.series[0]} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
               <XAxis dataKey="name" tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ background: 'rgba(10,10,15,0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, fontSize: 12, color: 'var(--text-primary)' }} />
-              <Area type="monotone" dataKey="count" stroke="#3ecfae" strokeWidth={2} fill="url(#apiGrad)" />
+              <Tooltip contentStyle={chart.tooltip} cursor={{ stroke: chart.grid }} />
+              <Area type="monotone" dataKey="count" stroke={chart.series[0]} strokeWidth={2} fill="url(#apiGrad)" />
             </AreaChart>
           </ResponsiveContainer>
         </section>

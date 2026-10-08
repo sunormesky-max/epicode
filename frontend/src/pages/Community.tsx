@@ -251,7 +251,7 @@ export default function Community() {
                 <>
                   <p className="text-sm" style={{ color: 'var(--accent-warning, #f87171)', marginBottom: 12 }}>{loadError}</p>
                   <button onClick={loadSkills}
-                    className="text-xs px-4 py-2 rounded-lg" style={{ background: 'rgba(139,126,200,0.15)', color: '#8b7ec8', border: '1px solid rgba(139,126,200,0.3)', cursor: 'pointer' }}>
+                    className="text-xs px-4 py-2 rounded-lg" style={{ background: 'rgba(139,126,200,0.15)', color: 'var(--accent-purple)', border: '1px solid rgba(139,126,200,0.3)', cursor: 'pointer' }}>
                     {t('community.retry')}
                   </button>
                 </>

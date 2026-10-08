@@ -1,0 +1,238 @@
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
+import { describe, expect, it } from "vitest";
+import {
+  DEFAULT_THEME_PREFS,
+  THEMES,
+  parseThemePrefs,
+  resolveTheme,
+  type ThemeId,
+} from "../themes";
+import { FALLBACK_SERIES, readChartTheme } from "../chartTheme";
+
+const css = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
+const html = readFileSync(
+  new URL("../../../index.html", import.meta.url),
+  "utf8"
+);
+
+/* ---------- 解析 index.css 的主题变量(:root = synapse) ---------- */
+function themeVars(): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  const re = /(:root|html\[data-theme="([a-z-]+)"\])\s*\{([^}]*)\}/g;
+  for (const m of css.matchAll(re)) {
+    const id = m[2] ?? "synapse";
+    out[id] = {
+      ...(out[id] ?? {}),
+      ...Object.fromEntries(
+        [...m[3].matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map(x => [
+          x[1],
+          x[2].trim(),
+        ])
+      ),
+    };
+  }
+  return out;
+}
+const vars = themeVars();
+const get = (id: string, name: string): string => {
+  let v = vars[id]?.[name] ?? vars.synapse[name];
+  for (let i = 0; i < 5 && v?.startsWith("var("); i++) {
+    const k = v.slice(4, -1).split(",")[0].trim();
+    v = vars[id]?.[k] ?? vars.synapse[k];
+  }
+  return v;
+};
+const rgb = (h: string) => {
+  const x = h.replace("#", "");
+  return [0, 2, 4].map(i => parseInt(x.slice(i, i + 2), 16));
+};
+const lum = (h: string) => {
+  const [r, g, b] = rgb(h).map(c => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const contrast = (a: string, b: string) => {
+  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+};
+
+describe("theme tokens: contrast", () => {
+  for (const theme of THEMES) {
+    it(`${theme.id}: tertiary text meets WCAG AA (4.5:1) on page and card surfaces`, () => {
+      for (const bg of ["--bg-primary", "--bg-card-solid"]) {
+        expect(
+          contrast(get(theme.id, "--text-tertiary"), get(theme.id, bg))
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+    it(`${theme.id}: accent text tokens (cyan / purple) meet WCAG AA`, () => {
+      for (const fg of ["--accent-cyan", "--accent-purple"]) {
+        for (const bg of ["--bg-primary", "--bg-card-solid"]) {
+          expect(
+            contrast(get(theme.id, fg), get(theme.id, bg))
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    });
+    it(`${theme.id}: 8 distinct chart series, each ≥3:1 against the card surface (WCAG 1.4.11)`, () => {
+      const series = [1, 2, 3, 4, 5, 6, 7, 8].map(i =>
+        get(theme.id, `--chart-${i}`)
+      );
+      expect(series.every(c => /^#[0-9a-fA-F]{6}$/.test(c))).toBe(true);
+      expect(new Set(series.map(c => c.toLowerCase())).size).toBe(8);
+      for (const c of series)
+        expect(
+          contrast(c, get(theme.id, "--bg-card-solid"))
+        ).toBeGreaterThanOrEqual(3);
+    });
+  }
+  it("derives chart chrome (grid / tooltip) from surface tokens so every theme adapts", () => {
+    expect(vars.synapse["--chart-grid"]).toBe("var(--border-light)");
+    expect(vars.synapse["--chart-tooltip-bg"]).toBe("var(--bg-card-solid)");
+    expect(vars.synapse["--chart-tooltip-text"]).toBe("var(--text-primary)");
+  });
+  it("falls back to the Synapse palette outside the browser", () => {
+    expect(readChartTheme().series).toEqual(FALLBACK_SERIES);
+    expect(FALLBACK_SERIES).toEqual(
+      [1, 2, 3, 4, 5, 6, 7, 8].map(i => get("synapse", `--chart-${i}`))
+    );
+  });
+});
+
+/* ---------- index.html 无闪烁启动脚本 ---------- */
+const bootSrc = (() => {
+  const start = html.indexOf("<script>\n      (function () {");
+  return html.slice(
+    start + "<script>".length,
+    html.indexOf("</script>", start)
+  );
+})();
+
+function runBoot(ls: Record<string, string>, systemDark: boolean | null) {
+  const meta = {
+    content: "#07070a",
+    setAttribute(_: string, v: string) {
+      this.content = v;
+    },
+  };
+  const props: Record<string, string> = {};
+  const root = {
+    dataset: {} as Record<string, string>,
+    style: {
+      colorScheme: "",
+      setProperty: (k: string, v: string) => {
+        props[k] = v;
+      },
+    },
+  };
+  const ctx = {
+    localStorage: { getItem: (k: string) => (k in ls ? ls[k] : null) },
+    window:
+      systemDark === null
+        ? {}
+        : { matchMedia: () => ({ matches: systemDark }) },
+    document: { documentElement: root, querySelector: () => meta },
+    JSON,
+    Math,
+    String,
+    isFinite,
+  };
+  vm.runInNewContext(bootSrc, ctx);
+  return {
+    theme: root.dataset.theme,
+    scheme: root.style.colorScheme,
+    meta: meta.content,
+    nnBg: root.dataset.nnBg,
+    props,
+  };
+}
+
+describe("no-flash boot script (index.html)", () => {
+  it("keeps its theme map in sync with the registry", () => {
+    const map = JSON.parse(bootSrc.match(/var M = (\{.*?\});/)![1]) as Record<
+      string,
+      [string, string]
+    >;
+    expect(Object.keys(map)).toEqual(THEMES.map(t => t.id));
+    for (const t of THEMES) expect(map[t.id]).toEqual([t.mode, t.swatches[0]]);
+    expect(bootSrc).toContain(`'${DEFAULT_THEME_PREFS.dark}'`);
+    expect(bootSrc).toContain(`'${DEFAULT_THEME_PREFS.light}'`);
+  });
+
+  const cases: Array<[string, Record<string, string>, boolean | null]> = [
+    ["nothing stored", {}, true],
+    ["manual paper", { "epicode-theme": "paper" }, true],
+    ["invalid stored id", { "epicode-theme": "nope" }, false],
+    [
+      "follow system, light",
+      { "epicode-theme-prefs": JSON.stringify({ followSystem: true }) },
+      false,
+    ],
+    [
+      "follow system, dark, custom slots",
+      {
+        "epicode-theme": "paper",
+        "epicode-theme-prefs": JSON.stringify({
+          followSystem: true,
+          light: "daylight",
+          dark: "amber",
+        }),
+      },
+      true,
+    ],
+    [
+      "follow system, wrong-mode slot",
+      {
+        "epicode-theme-prefs": JSON.stringify({
+          followSystem: true,
+          light: "x-dark",
+        }),
+      },
+      false,
+    ],
+    [
+      "follow system, no matchMedia",
+      { "epicode-theme-prefs": JSON.stringify({ followSystem: true }) },
+      null,
+    ],
+    [
+      "malformed prefs",
+      { "epicode-theme": "amber", "epicode-theme-prefs": "{oops" },
+      false,
+    ],
+  ];
+  for (const [name, ls, systemDark] of cases) {
+    it(`matches runtime resolveTheme: ${name}`, () => {
+      const prefs = parseThemePrefs(ls["epicode-theme-prefs"] ?? null);
+      const stored = (
+        THEMES.some(t => t.id === ls["epicode-theme"])
+          ? ls["epicode-theme"]
+          : "synapse"
+      ) as ThemeId;
+      const expected = resolveTheme(prefs, stored, systemDark ?? true);
+      const spec = THEMES.find(t => t.id === expected)!;
+      const out = runBoot(ls, systemDark);
+      expect(out.theme).toBe(expected);
+      expect(out.scheme).toBe(spec.mode);
+      expect(out.meta).toBe(spec.swatches[0]);
+      expect(out.nnBg).toBe(prefs.bgEnabled ? "on" : "off");
+    });
+  }
+
+  it("applies background prefs before first paint", () => {
+    const out = runBoot(
+      {
+        "epicode-theme-prefs": JSON.stringify({
+          bgEnabled: false,
+          bgIntensity: 40,
+        }),
+      },
+      true
+    );
+    expect(out.nnBg).toBe("off");
+    expect(out.props["--nn-intensity"]).toBe("0.4");
+  });
+});
