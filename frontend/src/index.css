@@ -122,6 +122,31 @@
     --chart-tooltip-border: var(--border-medium);
     --chart-tooltip-text: var(--text-primary);
     --chart-cursor: var(--border-light);
+    /* RGB 三元组:供 rgba(var(--<token>-rgb), α) 半透明着色;与同名 hex token 同步(theme-tokens 测试校验) */
+    --accent-cyan-rgb: 62, 207, 174;
+    --accent-purple-rgb: 139, 126, 200;
+    --danger-red-rgb: 248, 113, 113;
+    --text-primary-rgb: 245, 244, 240;
+    --accent-gold-rgb: 230, 200, 120;
+    --bg-card-solid-rgb: 16, 16, 24;
+    --overlay-rgb: 255, 255, 255;   /* 深色主题的提亮叠加(原 rgba(255,255,255,α)) */
+    /* 知识图谱 canvas(DashboardGraph 绘制时读取,主题切换时重读) */
+    --graph-accent-1: #7ba3ff;
+    --graph-accent-2: #ec4899;
+    --graph-accent-3: #22d3ee;
+    --graph-accent-4: #818cf8;
+    --graph-accent-5: #e879f9;
+    --graph-accent-6: #facc15;
+    --graph-muted: #6b7280;          /* 未聚类节点 / 次要标注 */
+    --graph-path: #ffd700;           /* 路径模式高亮 */
+    --graph-label-bg-rgb: 8, 10, 18; /* 节点标签底 pill */
+    --graph-label-text: #f0f0f5;
+    /* 背景神经网络(NeuralNetworkBackground 读取);X 主题此前已单独定义 */
+    --nn-primary: #3ecfae;
+    --nn-hi: #97ebd6;
+    --nn-secondary: #8b7ec8;
+    --nn-fade: #000000;
+    --nn-gold: #e6c878;
   }
 }
 
@@ -660,6 +685,25 @@ html[data-theme="paper"] {
   --chart-6: #9a6a1f;
   --chart-7: #a33f5f;
   --chart-8: #6b6358;
+  /* RGB 三元组(说明见 :root) */
+  --accent-cyan-rgb: 89, 103, 63;
+  --accent-purple-rgb: 111, 96, 78;
+  --danger-red-rgb: 164, 66, 66;
+  --text-primary-rgb: 28, 25, 21;
+  --accent-gold-rgb: 118, 94, 49;
+  --bg-card-solid-rgb: 255, 250, 243;
+  --overlay-rgb: 28, 25, 21; /* 浅色主题:提亮叠加改为墨色叠加 */
+  /* 背景神经网络随主题取色(与 X 主题同一机制);浅色主题降低不透明度,保持正文对比度 */
+  --nn-primary: #6b7c4a;
+  --nn-hi: #4f5d36;
+  --nn-secondary: #7d6b58;
+  --nn-fade: #f4efe6;
+  --nn-gold: #a68445;
+  --nn-opacity: 0.42;
+  /* 知识图谱:浅色底上标签用浅底深字,路径色取 AA 金 */
+  --graph-path: var(--accent-gold);
+  --graph-label-bg-rgb: 255, 255, 255;
+  --graph-label-text: var(--text-primary);
 }
 html[data-theme="meridian"] {
   color-scheme: dark;
@@ -705,6 +749,19 @@ html[data-theme="meridian"] {
   --chart-6: #e8908a;
   --chart-7: #d4d48f;
   --chart-8: #8d9aab;
+  /* RGB 三元组(说明见 :root) */
+  --accent-cyan-rgb: 183, 196, 212;
+  --accent-purple-rgb: 142, 160, 184;
+  --danger-red-rgb: 224, 139, 139;
+  --text-primary-rgb: 231, 237, 244;
+  --accent-gold-rgb: 213, 222, 234;
+  --bg-card-solid-rgb: 18, 24, 32;
+  /* 背景神经网络随主题取色(与 X 主题同一机制) */
+  --nn-primary: #b7c4d4;
+  --nn-hi: #e7edf4;
+  --nn-secondary: #8ea0b8;
+  --nn-fade: #000000;
+  --nn-gold: #d5deea;
 }
 html[data-theme="daylight"] {
   color-scheme: light;
@@ -757,6 +814,25 @@ html[data-theme="daylight"] {
   --chart-6: #b3366b;
   --chart-7: #2a7aa0;
   --chart-8: #5f6673;
+  /* RGB 三元组(说明见 :root) */
+  --accent-cyan-rgb: 31, 111, 98;
+  --accent-purple-rgb: 90, 103, 129;
+  --danger-red-rgb: 180, 35, 44;
+  --text-primary-rgb: 22, 24, 29;
+  --accent-gold-rgb: 128, 98, 46;
+  --bg-card-solid-rgb: 255, 255, 255;
+  --overlay-rgb: 22, 24, 29; /* 浅色主题:提亮叠加改为墨色叠加 */
+  /* 背景神经网络随主题取色(与 X 主题同一机制);浅色主题降低不透明度,保持正文对比度 */
+  --nn-primary: #1f6f62;
+  --nn-hi: #164f47;
+  --nn-secondary: #5d6b86;
+  --nn-fade: #f6f7f9;
+  --nn-gold: #8a6a32;
+  --nn-opacity: 0.42;
+  /* 知识图谱:浅色底上标签用浅底深字,路径色取 AA 金 */
+  --graph-path: var(--accent-gold);
+  --graph-label-bg-rgb: 255, 255, 255;
+  --graph-label-text: var(--text-primary);
 }
 html[data-theme="amber"] {
   color-scheme: dark;
@@ -802,6 +878,19 @@ html[data-theme="amber"] {
   --chart-6: #e8d27a;
   --chart-7: #8fa8e8;
   --chart-8: #b0a090;
+  /* RGB 三元组(说明见 :root) */
+  --accent-cyan-rgb: 224, 164, 90;
+  --accent-purple-rgb: 196, 139, 98;
+  --danger-red-rgb: 224, 138, 120;
+  --text-primary-rgb: 246, 239, 228;
+  --accent-gold-rgb: 224, 164, 90;
+  --bg-card-solid-rgb: 29, 23, 18;
+  /* 背景神经网络随主题取色(与 X 主题同一机制) */
+  --nn-primary: #e0a45a;
+  --nn-hi: #f0c48a;
+  --nn-secondary: #c48b62;
+  --nn-fade: #000000;
+  --nn-gold: #f0c48a;
 }
 html[data-theme="archive"] {
   color-scheme: dark;
@@ -848,8 +937,30 @@ html[data-theme="archive"] {
   --chart-6: #8fa0e8;
   --chart-7: #e8d07a;
   --chart-8: #b3a7ac;
+  /* RGB 三元组(说明见 :root) */
+  --accent-cyan-rgb: 213, 86, 97;
+  --accent-purple-rgb: 185, 137, 146;
+  --danger-red-rgb: 240, 160, 166;
+  --text-primary-rgb: 246, 239, 232;
+  --accent-gold-rgb: 224, 194, 162;
+  --bg-card-solid-rgb: 26, 20, 23;
+  /* 背景神经网络随主题取色(与 X 主题同一机制) */
+  --nn-primary: #d4535e;
+  --nn-hi: #f0a0a6;
+  --nn-secondary: #b98992;
+  --nn-fade: #000000;
+  --nn-gold: #e0c2a2;
 }
 html[data-theme="synapse"] { color-scheme: dark; --chrome: rgba(10, 10, 15, 0.9); }
+/* 知识图谱辅助聚类色:synapse 保持原值(:root),其余主题取各自图表色板 */
+html[data-theme]:not([data-theme="synapse"]) {
+  --graph-accent-1: var(--chart-5);
+  --graph-accent-2: var(--chart-7);
+  --graph-accent-3: var(--chart-6);
+  --graph-accent-4: var(--chart-2);
+  --graph-accent-5: var(--chart-4);
+  --graph-accent-6: var(--chart-3);
+}
 :root { --chrome: rgba(10, 10, 15, 0.9); }
 
 /* ═══ X(原 Twitter)家族主题:x-dark / x-light / x-dim ═══ */
@@ -976,6 +1087,13 @@ html[data-theme="x-dark"] {
   --chart-6: #FF7A00;
   --chart-7: #17BFD6;
   --chart-8: #8B98A5;
+  /* RGB 三元组(说明见 :root) */
+  --accent-cyan-rgb: 29, 155, 240;
+  --accent-purple-rgb: 144, 120, 255;
+  --danger-red-rgb: 255, 90, 102;
+  --text-primary-rgb: 231, 233, 234;
+  --accent-gold-rgb: 255, 212, 0;
+  --bg-card-solid-rgb: 22, 24, 28;
 }
 /* X 浅色:白底,#0F1419 文字;强调蓝按 WCAG AA 加深 */
 html[data-theme="x-light"] {
@@ -1050,6 +1168,18 @@ html[data-theme="x-light"] {
   --chart-6: #E06800;
   --chart-7: #0D97AC;
   --chart-8: #71767B;
+  /* RGB 三元组(说明见 :root) */
+  --accent-cyan-rgb: 12, 113, 181;
+  --accent-purple-rgb: 110, 73, 255;
+  --danger-red-rgb: 218, 11, 24;
+  --text-primary-rgb: 15, 20, 25;
+  --accent-gold-rgb: 127, 106, 0;
+  --bg-card-solid-rgb: 247, 249, 249;
+  --overlay-rgb: 15, 20, 25; /* 浅色主题:提亮叠加改为墨色叠加 */
+  /* 知识图谱:浅色底上标签用浅底深字,路径色取 AA 金 */
+  --graph-path: var(--accent-gold);
+  --graph-label-bg-rgb: 255, 255, 255;
+  --graph-label-text: var(--text-primary);
 }
 /* X 暗蓝灰 (Dim):#15202B 底 */
 html[data-theme="x-dim"] {
@@ -1122,6 +1252,13 @@ html[data-theme="x-dim"] {
   --chart-6: #FF7A00;
   --chart-7: #17BFD6;
   --chart-8: #8B98A5;
+  /* RGB 三元组(说明见 :root) */
+  --accent-cyan-rgb: 29, 155, 240;
+  --accent-purple-rgb: 157, 132, 255;
+  --danger-red-rgb: 248, 106, 115;
+  --text-primary-rgb: 247, 249, 249;
+  --accent-gold-rgb: 255, 212, 0;
+  --bg-card-solid-rgb: 30, 39, 50;
 }
 
 /* ── 导航中链区: 空间不足时横向滑动(隐藏滚动条, 不换行不挤压CTA) ── */

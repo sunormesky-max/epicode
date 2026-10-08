@@ -150,7 +150,7 @@ export default function DashboardChat() {
           )}
           {messages.length > 0 && (
             <button onClick={() => { setMessages([]); localStorage.removeItem(chatStorageKey); }}
-              style={{ marginLeft: 12, background: 'none', border: '1px solid rgba(62,207,174,0.15)', borderRadius: 8, padding: '3px 10px', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 11 }}>
+              style={{ marginLeft: 12, background: 'none', border: '1px solid rgba(var(--accent-cyan-rgb), 0.15)', borderRadius: 8, padding: '3px 10px', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 11 }}>
               {t('dash.chat.clear')}
             </button>
           )}
@@ -163,7 +163,7 @@ export default function DashboardChat() {
         <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 20 }}>
           {messages.length === 0 && (
             <div style={{ textAlign: 'center', padding: '40px 20px' }}>
-              <Brain size={48} style={{ color: 'rgba(62,207,174,0.3)', marginBottom: 16 }} />
+              <Brain size={48} style={{ color: 'rgba(var(--accent-cyan-rgb), 0.3)', marginBottom: 16 }} />
               <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 20 }}>
                 {t('dash.chat.empty')}
               </p>
@@ -171,7 +171,7 @@ export default function DashboardChat() {
                 {suggestions.map(s => (
                   <button key={s} onClick={() => { setInput(s); inputRef.current?.focus(); }}
                     style={{
-                      background: 'rgba(62,207,174,0.06)', border: '1px solid rgba(62,207,174,0.15)',
+                      background: 'rgba(var(--accent-cyan-rgb), 0.06)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.15)',
                       borderRadius: 20, padding: '8px 16px', cursor: 'pointer',
                       color: 'var(--accent-cyan-bright)', fontSize: 12,
                       fontFamily: 'var(--font-heading)', transition: 'all 0.2s',
@@ -200,7 +200,7 @@ export default function DashboardChat() {
                 )}
                 {/* 记忆引用 */}
                 {msg.sources && msg.sources.length > 0 && (
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(62,207,174,0.1)' }}>
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(var(--accent-cyan-rgb), 0.1)' }}>
                     <span style={{ color: 'var(--text-tertiary)', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       <Sparkles size={10} style={{ display: 'inline', marginRight: 4 }} />
                       {t('dash.chat.memoryRefs')}
@@ -208,7 +208,7 @@ export default function DashboardChat() {
                     {msg.sources.map(src => (
                       <div key={src.id} style={{
                         marginTop: 4, padding: '4px 0 4px 10px',
-                        borderLeft: '1px solid rgba(62,207,174,0.25)',
+                        borderLeft: '1px solid rgba(var(--accent-cyan-rgb), 0.25)',
                       }}>
                         <span style={{ color: 'var(--accent-cyan-bright)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
                           #{src.id} · {(src.similarity * 100).toFixed(0)}%
@@ -219,7 +219,7 @@ export default function DashboardChat() {
                         {src.labels.length > 0 && (
                           <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 3 }}>
                             {src.labels.slice(0, 3).map(l => (
-                              <span key={l} style={{ color: 'var(--text-tertiary)', fontSize: 9, background: 'rgba(62,207,174,0.06)', padding: '1px 5px', borderRadius: 3 }}>{l}</span>
+                              <span key={l} style={{ color: 'var(--text-tertiary)', fontSize: 9, background: 'rgba(var(--accent-cyan-rgb), 0.06)', padding: '1px 5px', borderRadius: 3 }}>{l}</span>
                             ))}
                           </div>
                         )}
@@ -233,8 +233,8 @@ export default function DashboardChat() {
           {loading && (
             <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
               <div style={{
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(62,207,174,0.1)',
+                background: 'rgba(var(--overlay-rgb), 0.04)',
+                border: '1px solid rgba(var(--accent-cyan-rgb), 0.1)',
                 borderRadius: '18px 18px 18px 4px',
                 padding: '12px 16px',
                 display: 'flex', alignItems: 'center', gap: 8,
@@ -251,7 +251,7 @@ export default function DashboardChat() {
         </div>
 
         {/* 输入区 */}
-        <div style={{ padding: 16, flexShrink: 0, borderTop: '1px solid rgba(62,207,174,0.1)' }}>
+        <div style={{ padding: 16, flexShrink: 0, borderTop: '1px solid rgba(var(--accent-cyan-rgb), 0.1)' }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
               ref={inputRef}
@@ -262,8 +262,8 @@ export default function DashboardChat() {
               placeholder={t('dash.chat.placeholder')}
               disabled={loading}
               style={{
-                flex: 1, background: 'rgba(62,207,174,0.04)',
-                border: '1px solid rgba(62,207,174,0.15)',
+                flex: 1, background: 'rgba(var(--accent-cyan-rgb), 0.04)',
+                border: '1px solid rgba(var(--accent-cyan-rgb), 0.15)',
                 borderRadius: 12, padding: '10px 16px',
                 color: 'var(--text-primary)', fontSize: 14,
                 outline: 'none', fontFamily: 'var(--font-body)',
@@ -273,7 +273,7 @@ export default function DashboardChat() {
               onClick={handleSend}
               disabled={loading || !input.trim()}
               style={{
-                background: loading || !input.trim() ? 'rgba(62,207,174,0.1)' : 'linear-gradient(135deg, #3ecfae, #3ecfae)',
+                background: loading || !input.trim() ? 'rgba(var(--accent-cyan-rgb), 0.1)' : 'linear-gradient(135deg, var(--accent-cyan), var(--accent-cyan))',
                 border: 'none', borderRadius: 12,
                 padding: '0 20px', cursor: loading || !input.trim() ? 'default' : 'pointer',
                 color: '#fff', display: 'flex', alignItems: 'center',

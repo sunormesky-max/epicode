@@ -126,7 +126,7 @@ export default function DashboardOverview() {
       <DashboardLayout>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
           <div style={{ textAlign: 'center' }}>
-            <p style={{ color: '#f87171', fontSize: 14, marginBottom: 12 }}>{error}</p>
+            <p style={{ color: 'var(--danger-red)', fontSize: 14, marginBottom: 12 }}>{error}</p>
             <button onClick={reload} className="btn-secondary">{t('dash.overview.retry')}</button>
           </div>
         </div>
@@ -160,7 +160,7 @@ export default function DashboardOverview() {
               {stats?.memories_used ?? 0}
             </div>
             <div style={{ width: 260, margin: '16px auto 0' }}>
-              <div style={{ height: 2, background: 'rgba(245,244,240,0.06)', borderRadius: 1, overflow: 'hidden' }}>
+              <div style={{ height: 2, background: 'rgba(var(--text-primary-rgb), 0.06)', borderRadius: 1, overflow: 'hidden' }}>
                 <div style={{ width: `${memPct}%`, height: '100%', background: 'var(--accent-purple)' }} />
               </div>
               <p style={{ ...HUD_VAL, marginTop: 6, fontSize: 11 }}>
@@ -225,7 +225,7 @@ export default function DashboardOverview() {
               {stats?.has_sub_accounts ? ` · ${t('dash.overview.enabled')}` : ''}
               {/* 分级权限角色: owner(主账户)或被赋予的子账户角色 */}
               {keyInfo?.role && (
-                <span title={(keyInfo.permissions || []).join(' · ')} style={{ marginLeft: 8, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--accent-cyan)', border: '1px solid rgba(62,207,174,0.3)', borderRadius: 12, padding: '1px 8px' }}>
+                <span title={(keyInfo.permissions || []).join(' · ')} style={{ marginLeft: 8, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--accent-cyan)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.3)', borderRadius: 12, padding: '1px 8px' }}>
                   {keyInfo.role}
                 </span>
               )}
@@ -261,7 +261,7 @@ export default function DashboardOverview() {
                     onChange={e => { setPwdInput(e.target.value); setPwdError(''); }}
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('pwd-confirm-btn')?.click(); } }}
                     placeholder="登录密码"
-                    style={{ flex: 1, background: 'rgba(0,0,0,0.4)', color: 'var(--text-primary)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, padding: '5px 8px', fontSize: 11.5, fontFamily: 'var(--font-mono)' }}
+                    style={{ flex: 1, background: 'rgba(0,0,0,0.4)', color: 'var(--text-primary)', border: '1px solid rgba(var(--overlay-rgb), 0.15)', borderRadius: 6, padding: '5px 8px', fontSize: 11.5, fontFamily: 'var(--font-mono)' }}
                   />
                   <button
                     id="pwd-confirm-btn"
@@ -287,9 +287,9 @@ export default function DashboardOverview() {
                   >
                     {pwdBusy ? '…' : pwdPrompt === 'reset' ? '确认重置' : '显示'}
                   </button>
-                  <button onClick={() => { setPwdPrompt(null); setPwdInput(''); setPwdError(''); }} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 11, color: 'var(--text-tertiary)' }}>取消</button>
+                  <button onClick={() => { setPwdPrompt(null); setPwdInput(''); setPwdError(''); }} style={{ background: 'none', border: '1px solid rgba(var(--overlay-rgb), 0.15)', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 11, color: 'var(--text-tertiary)' }}>取消</button>
                 </div>
-                {pwdError && <p style={{ margin: '6px 0 0', color: '#f87171', fontSize: 10.5 }}>{pwdError}</p>}
+                {pwdError && <p style={{ margin: '6px 0 0', color: 'var(--danger-red)', fontSize: 10.5 }}>{pwdError}</p>}
               </div>
             )}
             {newKey && (
@@ -312,7 +312,7 @@ export default function DashboardOverview() {
               {stats?.invite_code && (
                 <button
                   onClick={() => { copyText(stats.invite_code || '').then(ok => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000); } }); }}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', color: copied ? '#3ecfae' : 'var(--text-tertiary)' }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', color: copied ? 'var(--accent-cyan)' : 'var(--text-tertiary)' }}
                 >
                   {copied ? <Check size={11} /> : <Copy size={11} />}
                 </button>
@@ -402,7 +402,7 @@ export default function DashboardOverview() {
               {ageBar.map((a, i) => (
                 <div key={a.name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ color: 'var(--text-tertiary)', fontSize: 12, width: 40, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{a.name}</span>
-                  <div style={{ flex: 1, height: 3, background: 'rgba(245,244,240,0.05)', borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{ flex: 1, height: 3, background: 'rgba(var(--text-primary-rgb), 0.05)', borderRadius: 2, overflow: 'hidden' }}>
                     <div style={{ width: `${(a.value / ageBarMax) * 100}%`, height: '100%', background: PIE_COLORS[i % PIE_COLORS.length], transition: 'width 0.5s' }} />
                   </div>
                   <span style={{ color: 'var(--text-primary)', fontSize: 12, fontFamily: 'var(--font-mono)', width: 36 }}>{a.value}</span>
@@ -451,7 +451,7 @@ export default function DashboardOverview() {
                 <span style={{ color: 'var(--text-primary)', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(ev.content || '').slice(0, 120)}</span>
                 <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
                   {(ev.labels || []).slice(0, 2).map(l => (
-                    <span key={l} style={{ color: 'var(--accent-purple)', fontSize: 10, padding: '1px 6px', borderRadius: 3, border: '1px solid rgba(139,126,200,0.25)', fontFamily: 'var(--font-mono)' }}>{l}</span>
+                    <span key={l} style={{ color: 'var(--accent-purple)', fontSize: 10, padding: '1px 6px', borderRadius: 3, border: '1px solid rgba(var(--accent-purple-rgb), 0.25)', fontFamily: 'var(--font-mono)' }}>{l}</span>
                   ))}
                 </div>
                 <span style={{ color: 'var(--text-tertiary)', fontSize: 11, flexShrink: 0, whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>

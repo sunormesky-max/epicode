@@ -36,7 +36,7 @@ function SkillCard({ skill, color, onEdit, onDelete, onPublish }: {
               <span style={{ background: 'rgba(245,159,11,0.1)', color: 'var(--accent-purple)', fontSize: 9, padding: '2px 5px', borderRadius: 4 }}>{t('dash.skills.private')}</span>
             )}
             {'review_status' in skill && skill.review_status && (
-              <span style={{ color: skill.review_status === 'Approved' ? '#3ecfae' : skill.review_status === 'PendingReview' ? '#8b7ec8' : 'var(--text-tertiary)', fontSize: 9 }}>
+              <span style={{ color: skill.review_status === 'Approved' ? 'var(--accent-cyan)' : skill.review_status === 'PendingReview' ? 'var(--accent-purple)' : 'var(--text-tertiary)', fontSize: 9 }}>
                 {skill.review_status}
               </span>
             )}
@@ -52,7 +52,7 @@ function SkillCard({ skill, color, onEdit, onDelete, onPublish }: {
           <span style={{ display: 'flex', alignItems: 'center', gap: 3 }} title="usage"><Clock size={10} /> {usage}</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 3 }} title="surface impressions (auto-trigger exposures)"><Eye size={10} /> {impressions}</span>
           {conv !== null && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: conv >= 30 ? '#3ecfae' : conv >= 10 ? '#8b7ec8' : 'var(--text-tertiary)' }} title="曝光→取用转化率 (conversion from auto-trigger exposure to fetch)">
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: conv >= 30 ? 'var(--accent-cyan)' : conv >= 10 ? 'var(--accent-purple)' : 'var(--text-tertiary)' }} title="曝光→取用转化率 (conversion from auto-trigger exposure to fetch)">
               <Zap size={10} /> {conv}%
             </span>
           )}
@@ -64,7 +64,7 @@ function SkillCard({ skill, color, onEdit, onDelete, onPublish }: {
       {canManage && (
         <div style={{ display: 'flex', gap: 4, padding: '0 14px 8px' }}>
           {onEdit && (
-            <button onClick={onEdit} title={t('dash.skills.edit')} style={{ flex: 1, padding: '5px 0', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
+            <button onClick={onEdit} title={t('dash.skills.edit')} style={{ flex: 1, padding: '5px 0', background: 'rgba(var(--overlay-rgb), 0.04)', border: '1px solid rgba(var(--overlay-rgb), 0.08)', borderRadius: 6, cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
               <Pencil size={11} /> {t('dash.skills.edit')}
             </button>
           )}
@@ -74,13 +74,13 @@ function SkillCard({ skill, color, onEdit, onDelete, onPublish }: {
             </button>
           )}
           {onDelete && (
-            <button onClick={onDelete} title={t('dash.skills.delete')} style={{ flex: 1, padding: '5px 0', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.15)', borderRadius: 6, cursor: 'pointer', color: '#f87171', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
+            <button onClick={onDelete} title={t('dash.skills.delete')} style={{ flex: 1, padding: '5px 0', background: 'rgba(var(--danger-red-rgb), 0.08)', border: '1px solid rgba(var(--danger-red-rgb), 0.15)', borderRadius: 6, cursor: 'pointer', color: 'var(--danger-red)', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
               <Trash2 size={11} /> {t('dash.skills.delete')}
             </button>
           )}
         </div>
       )}
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+      <div style={{ borderTop: '1px solid rgba(var(--overlay-rgb), 0.04)' }}>
         <button onClick={() => setExpanded(!expanded)} style={{ width: '100%', padding: '8px 0', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 12 }}>
           {expanded ? t('dash.skills.collapse') : t('dash.skills.viewContent')}
         </button>
@@ -264,9 +264,9 @@ export default function DashboardSkills() {
       </div>
 
       {error && (
-        <div style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ background: 'rgba(var(--danger-red-rgb), 0.1)', color: 'var(--danger-red)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {error}
-          <button onClick={() => setError('')} style={{ color: '#f87171', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
+          <button onClick={() => setError('')} style={{ color: 'var(--danger-red)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
         </div>
       )}
       {notice && (
@@ -277,7 +277,7 @@ export default function DashboardSkills() {
       )}
 
       {/* S2 触发模拟器 — 预演自动触发行为 */}
-      <div style={{ border: '1px solid rgba(62,207,174,0.18)', borderRadius: 12, padding: 14, marginBottom: 16, background: 'rgba(62,207,174,0.03)' }}>
+      <div style={{ border: '1px solid rgba(var(--accent-cyan-rgb), 0.18)', borderRadius: 12, padding: 14, marginBottom: 16, background: 'rgba(var(--accent-cyan-rgb), 0.03)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
           <Zap size={13} style={{ color: 'var(--accent-cyan)' }} />
           <span style={{ color: 'var(--text-primary)', fontSize: 12.5, fontWeight: 600 }}>触发模拟器 · Trigger Simulator</span>
@@ -289,7 +289,7 @@ export default function DashboardSkills() {
             placeholder="e.g. 对整个项目做一次代码质量审查并给出自评"
             style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
           <button onClick={handleSimulate} disabled={simulating}
-            style={{ background: 'rgba(62,207,174,0.15)', border: '1px solid rgba(62,207,174,0.3)', color: 'var(--accent-cyan)', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' }}>
+            style={{ background: 'rgba(var(--accent-cyan-rgb), 0.15)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.3)', color: 'var(--accent-cyan)', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' }}>
             {simulating ? '...' : '模拟触发'}
           </button>
         </div>
@@ -302,7 +302,7 @@ export default function DashboardSkills() {
                 <p style={{ color: 'var(--text-tertiary)', fontSize: 11, marginBottom: 6 }}>将自动注入 {simResults.length} 条技能卡(name+描述+fetch命令):</p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {simResults.map((s, i) => (
-                    <div key={s.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
+                    <div key={s.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 10px', background: 'rgba(var(--overlay-rgb), 0.03)', borderRadius: 8 }}>
                       <span style={{ color: 'var(--accent-cyan)', fontSize: 11, fontFamily: 'var(--font-mono)' }}>#{i + 1}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 600 }}>{s.name}</span>
@@ -323,23 +323,23 @@ export default function DashboardSkills() {
         <div style={{ position: 'relative', flex: '0 1 220px' }}>
           <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
           <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder={tab === 'my' ? '语义搜索技能...' : 'Search skills...'}
-            style={{ width: '100%', background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '7px 10px 7px 34px', fontSize: 13, boxSizing: 'border-box' }} />
+            style={{ width: '100%', background: 'rgba(var(--overlay-rgb), 0.04)', color: 'var(--text-primary)', border: '1px solid rgba(var(--overlay-rgb), 0.08)', borderRadius: 8, padding: '7px 10px 7px 34px', fontSize: 13, boxSizing: 'border-box' }} />
           {tab === 'my' && searchQ && semResults && (
             <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--accent-cyan)', fontSize: 10 }}>SEM</span>
           )}
         </div>
         <button onClick={() => setShowFilters(!showFilters)}
-          style={{ background: showFilters ? 'rgba(139,126,200,0.15)' : 'rgba(255,255,255,0.04)', border: `1px solid ${showFilters ? 'rgba(139,126,200,0.3)' : 'rgba(255,255,255,0.08)'}`, color: showFilters ? '#8b7ec8' : 'var(--text-secondary)', padding: '7px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
+          style={{ background: showFilters ? 'rgba(var(--accent-purple-rgb), 0.15)' : 'rgba(var(--overlay-rgb), 0.04)', border: `1px solid ${showFilters ? 'rgba(var(--accent-purple-rgb), 0.3)' : 'rgba(var(--overlay-rgb), 0.08)'}`, color: showFilters ? 'var(--accent-purple)' : 'var(--text-secondary)', padding: '7px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
           <Filter size={13} /> Filters
         </button>
         <button onClick={() => setShowCreate(!showCreate)} style={{ background: 'var(--accent-purple)', color: '#fff', border: 'none', padding: '7px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>
           <Plus size={14} style={{ verticalAlign: -2, marginRight: 4 }} /> {t('dash.skills.create')}
         </button>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: 3 }}>
-          <button onClick={() => { setTab('my'); setStatusFilter('all'); setOwnerFilter('all'); setSearchQ(''); }} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, background: tab === 'my' ? 'rgba(139,126,200,0.15)' : 'transparent', color: tab === 'my' ? '#8b7ec8' : 'var(--text-secondary)' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, background: 'rgba(var(--overlay-rgb), 0.03)', border: '1px solid rgba(var(--overlay-rgb), 0.06)', borderRadius: 8, padding: 3 }}>
+          <button onClick={() => { setTab('my'); setStatusFilter('all'); setOwnerFilter('all'); setSearchQ(''); }} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, background: tab === 'my' ? 'rgba(var(--accent-purple-rgb), 0.15)' : 'transparent', color: tab === 'my' ? 'var(--accent-purple)' : 'var(--text-secondary)' }}>
             <Wrench size={12} style={{ verticalAlign: -1, marginRight: 4 }} />My ({mySkills.length})
           </button>
-          <button onClick={() => { setTab('public'); setStatusFilter('all'); setOwnerFilter('all'); setSearchQ(''); }} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, background: tab === 'public' ? 'rgba(139,126,200,0.15)' : 'transparent', color: tab === 'public' ? '#8b7ec8' : 'var(--text-secondary)' }}>
+          <button onClick={() => { setTab('public'); setStatusFilter('all'); setOwnerFilter('all'); setSearchQ(''); }} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, background: tab === 'public' ? 'rgba(var(--accent-purple-rgb), 0.15)' : 'transparent', color: tab === 'public' ? 'var(--accent-purple)' : 'var(--text-secondary)' }}>
             <Users size={12} style={{ verticalAlign: -1, marginRight: 4 }} />Public ({pubSkills.length})
           </button>
         </div>
@@ -354,13 +354,13 @@ export default function DashboardSkills() {
               {tab === 'my'
                 ? ['all', 'Draft', 'PendingReview', 'Approved'].map(s => (
                     <button key={s} onClick={() => setStatusFilter(s)} style={{ padding: '4px 10px', borderRadius: 5, border: 'none', cursor: 'pointer', fontSize: 11,
-                      background: statusFilter === s ? 'rgba(139,126,200,0.15)' : 'rgba(255,255,255,0.04)', color: statusFilter === s ? '#8b7ec8' : 'var(--text-secondary)' }}>
+                      background: statusFilter === s ? 'rgba(var(--accent-purple-rgb), 0.15)' : 'rgba(var(--overlay-rgb), 0.04)', color: statusFilter === s ? 'var(--accent-purple)' : 'var(--text-secondary)' }}>
                       {s === 'all' ? t('dash.skills.all') : s}
                     </button>
                   ))
                 : ['all', 'system', 'public'].map(s => (
                     <button key={s} onClick={() => setStatusFilter(s)} style={{ padding: '4px 10px', borderRadius: 5, border: 'none', cursor: 'pointer', fontSize: 11,
-                      background: statusFilter === s ? 'rgba(139,126,200,0.15)' : 'rgba(255,255,255,0.04)', color: statusFilter === s ? '#8b7ec8' : 'var(--text-secondary)' }}>
+                      background: statusFilter === s ? 'rgba(var(--accent-purple-rgb), 0.15)' : 'rgba(var(--overlay-rgb), 0.04)', color: statusFilter === s ? 'var(--accent-purple)' : 'var(--text-secondary)' }}>
                       {s === 'all' ? t('dash.skills.all') : s.charAt(0).toUpperCase() + s.slice(1)}
                     </button>
                   ))
@@ -371,7 +371,7 @@ export default function DashboardSkills() {
             <div>
               <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{t('dash.skills.author')}</div>
               <select value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}
-                style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, padding: '4px 8px', fontSize: 12 }}>
+                style={{ background: 'rgba(var(--overlay-rgb), 0.04)', color: 'var(--text-primary)', border: '1px solid rgba(var(--overlay-rgb), 0.08)', borderRadius: 6, padding: '4px 8px', fontSize: 12 }}>
                 <option value="all">{t('dash.skills.allAuthors')}</option>
                 {allOwners.map(o => <option key={o} value={o}>{o}</option>)}
               </select>

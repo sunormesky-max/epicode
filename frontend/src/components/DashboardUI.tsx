@@ -31,12 +31,12 @@ export function SkeletonCard() {
     }}>
       <div style={{
         position: 'absolute', inset: 0,
-        background: 'linear-gradient(90deg, transparent 0%, rgba(62,207,174,0.08) 50%, transparent 100%)',
+        background: 'linear-gradient(90deg, transparent 0%, rgba(var(--accent-cyan-rgb), 0.08) 50%, transparent 100%)',
         animation: 'shimmer 1.5s infinite',
       }} />
-      <div style={{ height: 12, background: 'rgba(62,207,174,0.04)', borderRadius: 4, marginBottom: 8, width: '60%' }} />
-      <div style={{ height: 10, background: 'rgba(255,255,255,0.03)', borderRadius: 4, marginBottom: 6, width: '90%' }} />
-      <div style={{ height: 10, background: 'rgba(255,255,255,0.03)', borderRadius: 4, width: '75%' }} />
+      <div style={{ height: 12, background: 'rgba(var(--accent-cyan-rgb), 0.04)', borderRadius: 4, marginBottom: 8, width: '60%' }} />
+      <div style={{ height: 10, background: 'rgba(var(--overlay-rgb), 0.03)', borderRadius: 4, marginBottom: 6, width: '90%' }} />
+      <div style={{ height: 10, background: 'rgba(var(--overlay-rgb), 0.03)', borderRadius: 4, width: '75%' }} />
     </div>
   );
 }
@@ -90,15 +90,15 @@ export function ErrorBanner({ message, onClose, onRetry }: { message: string; on
   const { t } = useI18nContext();
   return (
     <div role="alert" style={{
-      background: 'rgba(248,113,113,0.08)', color: 'var(--danger-red)',
-      border: '1px solid rgba(248,113,113,0.15)', borderRadius: 12,
+      background: 'rgba(var(--danger-red-rgb), 0.08)', color: 'var(--danger-red)',
+      border: '1px solid rgba(var(--danger-red-rgb), 0.15)', borderRadius: 12,
       padding: 12, marginBottom: 16, fontSize: 13,
       display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
     }}>
       <span style={{ flex: 1 }}>{message}</span>
       <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
         {onRetry && (
-          <button onClick={onRetry} style={{ color: 'var(--accent-purple)', background: 'rgba(139,126,200,0.1)', border: '1px solid rgba(139,126,200,0.2)', cursor: 'pointer', padding: '3px 12px', borderRadius: 6, fontSize: 12 }}>
+          <button onClick={onRetry} style={{ color: 'var(--accent-purple)', background: 'rgba(var(--accent-purple-rgb), 0.1)', border: '1px solid rgba(var(--accent-purple-rgb), 0.2)', cursor: 'pointer', padding: '3px 12px', borderRadius: 6, fontSize: 12 }}>
             {t('common.retry')}
           </button>
         )}

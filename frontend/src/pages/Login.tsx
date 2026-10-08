@@ -105,7 +105,7 @@ export default function Login() {
           <div style={{ background: 'var(--glass-bg, rgba(16, 16, 24, 0.6))', backdropFilter: 'blur(16px)',
             border: '1px solid var(--border-light)', borderRadius: 'var(--radius-xl)', padding: 32 }}>
             {expired && (
-              <p className="mb-4 px-3 py-2 rounded-lg" style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--accent-gold)', background: 'rgba(230,200,120,0.06)', border: '1px solid rgba(230,200,120,0.2)' }}>
+              <p className="mb-4 px-3 py-2 rounded-lg" style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--accent-gold)', background: 'rgba(var(--accent-gold-rgb), 0.06)', border: '1px solid rgba(var(--accent-gold-rgb), 0.2)' }}>
                 SESSION EXPIRED — 会话已过期, 请重新登录
               </p>
             )}
@@ -136,7 +136,7 @@ export default function Login() {
 
               {error && (
                 <p className="text-sm py-2 px-3 rounded-lg"
-                  style={{ color: 'var(--danger-red)', background: 'rgba(248, 113, 113, 0.07)' }}>
+                  style={{ color: 'var(--danger-red)', background: 'rgba(var(--danger-red-rgb), 0.07)' }}>
                   {error}
                 </p>
               )}

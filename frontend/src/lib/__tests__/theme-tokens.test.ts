@@ -10,6 +10,12 @@ import {
   type ThemeId,
 } from "../themes";
 import { FALLBACK_SERIES, readChartTheme } from "../chartTheme";
+import {
+  FALLBACK_GRAPH,
+  readGraphPalette,
+  toHex,
+  withAlpha,
+} from "../graphTheme";
 
 const css = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
 const html = readFileSync(
@@ -354,5 +360,95 @@ describe("no-flash boot script (index.html)", () => {
     );
     expect(out.nnBg).toBe("off");
     expect(out.props["--nn-intensity"]).toBe("0.4");
+  });
+});
+
+/* ---------- PR B: RGB 三元组 / 图谱与神经背景 token ---------- */
+describe("theme tokens: rgb triplets mirror their hex tokens", () => {
+  const PAIRS = [
+    "--accent-cyan",
+    "--accent-purple",
+    "--danger-red",
+    "--text-primary",
+    "--accent-gold",
+    "--bg-card-solid",
+  ];
+  const triplet = (v: string) => v.split(",").map(x => Number(x.trim()));
+  for (const t of THEMES) {
+    it(`${t.id}: --*-rgb === hex token`, () => {
+      for (const name of PAIRS)
+        expect([name, triplet(get(t.id, `${name}-rgb`))]).toEqual([
+          name,
+          rgb(get(t.id, name).toLowerCase()),
+        ]);
+    });
+    it(`${t.id}: --overlay-rgb lightens dark themes and inks light themes`, () => {
+      const want =
+        t.mode === "dark"
+          ? [255, 255, 255]
+          : rgb(get(t.id, "--text-primary").toLowerCase());
+      expect(triplet(get(t.id, "--overlay-rgb"))).toEqual(want);
+    });
+  }
+});
+
+describe("theme tokens: canvas palettes (graph + neural background)", () => {
+  const HEX = /^#[0-9a-fA-F]{6}$/;
+  for (const t of THEMES) {
+    it(`${t.id}: --nn-* and --graph-* resolve to concrete colours`, () => {
+      for (const n of ["primary", "hi", "secondary", "fade", "gold"])
+        expect([n, get(t.id, `--nn-${n}`)]).toEqual([
+          n,
+          expect.stringMatching(HEX),
+        ]);
+      for (const n of ["--graph-muted", "--graph-path", "--graph-label-text"])
+        expect([n, get(t.id, n)]).toEqual([n, expect.stringMatching(HEX)]);
+      expect(get(t.id, "--graph-label-bg-rgb")).toMatch(/^\d+, \d+, \d+$/);
+    });
+    it(`${t.id}: graph node labels are AA on their pill`, () => {
+      const pill = hex(
+        over(
+          [...get(t.id, "--graph-label-bg-rgb").split(",").map(Number), 0.8],
+          parse(get(t.id, "--bg-void"))
+        )
+      );
+      expect(
+        contrast(get(t.id, "--graph-label-text"), pill)
+      ).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+  it("fallback palette equals the synapse (:root) tokens — default theme stays pixel-identical", () => {
+    const s = (n: string) => get("synapse", n).toLowerCase();
+    expect(FALLBACK_GRAPH.accent).toBe(s("--accent-cyan"));
+    expect(FALLBACK_GRAPH.purple).toBe(s("--accent-purple"));
+    expect(FALLBACK_GRAPH.crimson).toBe(s("--accent-crimson"));
+    expect(FALLBACK_GRAPH.gold).toBe(s("--accent-gold"));
+    expect(FALLBACK_GRAPH.tertiary).toBe(s("--neural-tertiary"));
+    expect(FALLBACK_GRAPH.muted).toBe(s("--graph-muted"));
+    expect(FALLBACK_GRAPH.path).toBe(s("--graph-path"));
+    expect(FALLBACK_GRAPH.labelText).toBe(s("--graph-label-text"));
+    expect(FALLBACK_GRAPH.labelBg).toBe(s("--graph-label-bg-rgb"));
+    expect(FALLBACK_GRAPH.accents).toEqual(
+      [1, 2, 3, 4, 5, 6].map(i => s(`--graph-accent-${i}`))
+    );
+  });
+  it("readGraphPalette without a DOM returns the synapse palette", () => {
+    const p = readGraphPalette();
+    expect(p.cluster).toHaveLength(15);
+    expect(p.edge.contradicts).toBe(FALLBACK_GRAPH.crimson);
+    expect(p.cluster.slice(0, 4)).toEqual([
+      FALLBACK_GRAPH.accent,
+      FALLBACK_GRAPH.accent,
+      FALLBACK_GRAPH.accent,
+      FALLBACK_GRAPH.accents[0],
+    ]);
+  });
+  it("toHex / withAlpha normalise computed-style values", () => {
+    expect(toHex("#0F1419", "#000000")).toBe("#0f1419");
+    expect(toHex("#abc", "#000000")).toBe("#aabbcc");
+    expect(toHex("rgb(29, 155, 240)", "#000000")).toBe("#1d9bf0");
+    expect(toHex("", "#123456")).toBe("#123456");
+    expect(toHex("var(--x)", "#123456")).toBe("#123456");
+    expect(withAlpha("#3ecfae", 0.18)).toBe("rgba(62,207,174,0.18)");
   });
 });

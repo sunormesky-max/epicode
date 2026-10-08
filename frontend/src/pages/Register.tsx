@@ -180,7 +180,7 @@ export default function Register() {
                     <div className="flex gap-1.5 mb-1">
                       {[1, 2, 3, 4].map((i) => (
                         <div key={i} className="flex-1 h-1 rounded-full transition-all duration-300"
-                          style={{ background: i <= pwdStrength.strength ? pwdStrength.color : 'rgba(245, 244, 240, 0.07)' }} />
+                          style={{ background: i <= pwdStrength.strength ? pwdStrength.color : 'rgba(var(--text-primary-rgb), 0.07)' }} />
                       ))}
                     </div>
                     <span className="text-xs font-medium" style={{ color: pwdStrength.color }}>
@@ -215,7 +215,7 @@ export default function Register() {
 
               {error && (
                 <p className="text-sm py-2 px-3 rounded-lg"
-                  style={{ color: 'var(--danger-red)', background: 'rgba(248, 113, 113, 0.07)' }}>
+                  style={{ color: 'var(--danger-red)', background: 'rgba(var(--danger-red-rgb), 0.07)' }}>
                   {error}
                 </p>
               )}
