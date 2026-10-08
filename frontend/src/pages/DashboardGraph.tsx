@@ -1174,7 +1174,7 @@ export default function DashboardGraph() {
                 <span style={{ color: 'var(--accent-cyan-bright)', fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '0.05em', opacity: 0.8 }}>
                   {stats.nodes} {t('dash.graph.stats.nodes')} · {stats.edges} {t('dash.graph.stats.edges')} · {stats.clusters} {t('dash.graph.stats.clusters')}{stats.highways > 0 && <> · {stats.highways} {t('dash.graph.stats.highways')}</>}
                   {graphMeta.truncated && (
-                    <span style={{ color: '#3ecfae', fontSize: 11, marginLeft: 8 }} title="top by mass">
+                    <span style={{ color: 'var(--accent-cyan)', fontSize: 11, marginLeft: 8 }} title="top by mass">
                       ⦿ 显示前 {stats.nodes} / 共 {graphMeta.total} 节点(按质量)
                     </span>
                   )}

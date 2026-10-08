@@ -255,7 +255,7 @@ export default function SmrpProtocol() {
           {/* create 安置副产物 */}
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} className="mb-20">
             <h2 className="flex items-center gap-2" style={{ fontFamily: "var(--font-display)", fontSize: "clamp(26px, 4vw, 42px)", fontWeight: 700, letterSpacing: "-0.025em", lineHeight: 1.1, color: "var(--text-primary)", marginBottom: 16 }}>
-              <GitBranch size={22} style={{ color: '#3ecfae' }} /> {t('smrp.placementTitle')}
+              <GitBranch size={22} style={{ color: 'var(--accent-cyan)' }} /> {t('smrp.placementTitle')}
             </h2>
             <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: '20px' }}>
               {t('smrp.body.placementPre')}<b style={{ color: 'var(--text-primary)' }}>{t('smrp.body.placementBold1')}</b>{t('smrp.body.placementMid')}<b style={{ color: 'var(--text-primary)' }}>{t('smrp.body.placementBold2')}</b>{t('smrp.body.placementPost')}
@@ -266,7 +266,7 @@ export default function SmrpProtocol() {
           {/* 为什么更好 */}
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }} className="mb-20">
             <h2 className="flex items-center gap-2" style={{ fontFamily: "var(--font-display)", fontSize: "clamp(26px, 4vw, 42px)", fontWeight: 700, letterSpacing: "-0.025em", lineHeight: 1.1, color: "var(--text-primary)", marginBottom: 16 }}>
-              <CheckCircle2 size={22} style={{ color: '#3ecfae' }} /> {t('smrp.betterTitle')}
+              <CheckCircle2 size={22} style={{ color: 'var(--accent-cyan)' }} /> {t('smrp.betterTitle')}
             </h2>
             <div className="space-y-4 mt-6">
               {BENEFITS.map((b) => {
