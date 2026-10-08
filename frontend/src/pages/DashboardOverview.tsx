@@ -283,7 +283,7 @@ export default function DashboardOverview() {
                       }
                       setPwdBusy(false);
                     }}
-                    style={{ background: pwdPrompt === 'reset' ? 'var(--accent-orange)' : 'var(--accent-cyan-bright, #3ecfae)', color: pwdPrompt === 'reset' ? '#1a1005' : '#04121a', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 600, opacity: pwdBusy || !pwdInput ? 0.5 : 1 }}
+                    style={{ background: pwdPrompt === 'reset' ? 'var(--accent-orange)' : 'var(--accent-solid, var(--accent-cyan-bright))', color: pwdPrompt === 'reset' ? 'var(--on-accent-orange)' : 'var(--on-accent)', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 600, opacity: pwdBusy || !pwdInput ? 0.5 : 1 }}
                   >
                     {pwdBusy ? '…' : pwdPrompt === 'reset' ? '确认重置' : '显示'}
                   </button>

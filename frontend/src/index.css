@@ -60,6 +60,13 @@
     --accent-gold-dim: #b89a58;
     --accent-crimson: #ff3860;
     --on-accent: #06231c;            /* 强调色底上的文字(btn-primary);各主题按 ≥4.5:1 覆盖 */
+    /* 补齐此前只有 X 主题定义、或从未定义却被引用的 token(测试保证每个主题都有值且文字 ≥4.5:1) */
+    --accent-orange: #f0a35e;        /* 警示操作(重置密钥等) */
+    --on-accent-orange: #1a1005;     /* 橙色底上的文字 */
+    --accent-warning: var(--warning-orange);
+    --accent-lime: #a3e635;          /* 外部评测(LongMemEval)标识色 */
+    --line: var(--border-medium);    /* 别名:分隔线/描边 */
+    --bg-deep: var(--bg-void);       /* 别名:最深底色 */
 
     /* ── 意识场主题(意识地平线:上=意识层青 / 下=潜意识场紫) ── */
     --neural-primary: #3ecfae;
@@ -128,6 +135,8 @@ html {
 
 /* 根背景跟随主题(index.html 内联的 #07070a 只用于 CSS 加载前;属性选择器提高优先级以覆盖它) */
 html[data-theme] { background: var(--bg-void); }
+/* 无 JS(启动脚本未执行、无 data-theme)且系统为浅色:<noscript> 内容用浅底,见 index.html 的 .nojs */
+@media (prefers-color-scheme: light) { html:not([data-theme]) body { background: #f6f7f9; color: #16181d; } }
 
 body {
   background:
@@ -616,16 +625,19 @@ html[data-theme="paper"] {
   --bg-darker: #efe7da;
   --text-primary: #1c1915;
   --text-secondary: #5c564c;
-  --text-tertiary: #6d665b; /* AA(原 #8a8174) */
-  --accent-blue: #5e6c42;
+  --text-tertiary: #686156; /* AA 含卡片叠加底(原 #8a8174) */
+  --accent-blue: #59673f;
   --accent-blue-bright: #4f5d36;
-  --accent-cyan: #5e6c42; /* AA 文字色(原 #6b7c4a 3.71) */
+  --accent-cyan: #59673f; /* AA 含卡片叠加底(原 #6b7c4a 3.71) */
   --accent-cyan-bright: #4f5d36;
-  --accent-purple: #7a6956; /* AA(原 #7d6b58 4.45) */
+  --accent-purple: #6f604e; /* AA(原 #7d6b58) */
   --on-accent: #fffaf3; /* 深橄榄底上用浅字(原 #06231c 仅 2.92) */
-  --accent-magenta: #7d6b58;
-  --accent-pink: #7d6b58;
-  --accent-gold: #a68445;
+  --accent-magenta: #6f604e; /* AA(原 #7d6b58) */
+  --accent-pink: #6f604e;
+  --accent-gold: #765e31; /* AA(原 #a68445 3.05) */
+  --accent-orange: #974d2b;
+  --on-accent-orange: #ffffff;
+  --accent-lime: #4d6b12;
   --accent-gold-bright: #8a6b32;
   --accent-gold-dim: #8a6b32;
   --neural-primary: #6b7c4a;
@@ -636,9 +648,9 @@ html[data-theme="paper"] {
   --border-light: rgba(28, 25, 21, 0.1);
   --border-medium: rgba(28, 25, 21, 0.18);
   --border-hologram: rgba(107, 124, 74, 0.35);
-  --success-green: #4f7a45;
-  --danger-red: #a94444;
-  --warning-orange: #a68445;
+  --success-green: #466b3c; /* AA(原 #4f7a45) */
+  --danger-red: #a44242; /* AA(原 #a94444) */
+  --warning-orange: #765e31; /* AA(原 #a68445 3.05) */
   --chrome: rgba(244, 239, 230, 0.88);
   --chart-1: #5e6c42;
   --chart-2: #a0522d;
@@ -671,6 +683,7 @@ html[data-theme="meridian"] {
   --accent-pink: #8ea0b8;
   --accent-gold: #d5deea;
   --accent-gold-bright: #f4f7fb;
+  --accent-orange: #e0a070;
   --accent-gold-dim: #8ea0b8;
   --neural-primary: #b7c4d4;
   --neural-secondary: #8ea0b8;
@@ -709,16 +722,19 @@ html[data-theme="daylight"] {
   --bg-darker: #eef1f4;
   --text-primary: #16181d;
   --text-secondary: #4d5561;
-  --text-tertiary: #656c77; /* AA(原 #7b8491) */
+  --text-tertiary: #616872; /* AA 含卡片叠加底(原 #7b8491) */
   --accent-blue: #1f6f62;
   --accent-blue-bright: #164f47;
   --accent-cyan: #1f6f62;
   --accent-cyan-bright: #164f47;
   --on-accent: #ffffff; /* 原 #06231c 仅 2.77 */
-  --accent-purple: #5d6b86;
-  --accent-magenta: #5d6b86;
-  --accent-pink: #5d6b86;
-  --accent-gold: #8a6a32;
+  --accent-orange: #a74d27;
+  --on-accent-orange: #ffffff;
+  --accent-lime: #47730e;
+  --accent-purple: #5a6781;
+  --accent-magenta: #5a6781;
+  --accent-pink: #5a6781;
+  --accent-gold: #80622e; /* AA(原 #8a6a32) */
   --accent-gold-bright: #6f5424;
   --accent-gold-dim: #8a6a32;
   --neural-primary: #1f6f62;
@@ -731,7 +747,7 @@ html[data-theme="daylight"] {
   --border-hologram: rgba(31, 111, 98, 0.32);
   --success-green: #1f6f62;
   --danger-red: #b4232c;
-  --warning-orange: #8a6a32;
+  --warning-orange: #80622e; /* AA(原 #8a6a32) */
   --chrome: rgba(246, 247, 249, 0.9);
   --chart-1: #1f6f62;
   --chart-2: #3b5bbf;
@@ -765,6 +781,7 @@ html[data-theme="amber"] {
   --accent-gold: #e0a45a;
   --accent-gold-bright: #f0c48a;
   --accent-gold-dim: #b78442;
+  --accent-orange: #f0915a;
   --neural-primary: #e0a45a;
   --neural-secondary: #c48b62;
   --neural-tertiary: #8d7c68;
@@ -803,6 +820,7 @@ html[data-theme="archive"] {
   --accent-blue-bright: #f0a0a6;
   --accent-cyan: #d55661; /* AA(原 #d4535e 4.497) */
   --on-accent: #0c090b; /* 原 #06231c 4.22 */
+  --accent-orange: #e8935a;
   --accent-cyan-bright: #f0a0a6;
   --accent-purple: #b98992;
   --accent-magenta: #b98992;
@@ -997,7 +1015,9 @@ html[data-theme="x-light"] {
   --accent-gold-dim: #7F6A00;
   --accent-crimson: #DA0B18;
   --accent-orange: #AD5300;
+  --on-accent-orange: #FFFFFF;
   --accent-warning: #7F6A00;
+  --accent-lime: #4D7C0F;
   --neural-primary: #0C71B5;
   --neural-secondary: #6E49FF;
   --neural-tertiary: #686D72;
