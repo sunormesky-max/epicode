@@ -24,9 +24,12 @@
         } catch (e) { p = p || {}; }
         d.dataset.theme = id;
         d.style.colorScheme = M[id][0];
+        d.dataset.mode = M[id][0];
         var meta = document.querySelector('meta[name="theme-color"]');
         if (meta) meta.setAttribute('content', M[id][1]);
         d.dataset.nnBg = p.bgEnabled === false ? 'off' : 'on';
+        var A = ["teal", "blue", "violet", "rose", "amber", "green"];
+        if (typeof p.accent === 'string' && A.indexOf(p.accent) >= 0) d.dataset.accent = p.accent;
         if (typeof p.bgIntensity === 'number' && isFinite(p.bgIntensity)) {
           d.style.setProperty('--nn-intensity', String(Math.round(Math.min(100, Math.max(0, p.bgIntensity))) / 100));
         }
@@ -52,22 +55,32 @@
     <title>Epicode — AI Memory Operating System</title>
     <style>
       html { background: #07070a; }
+      /* 无 JS 访客:启动脚本未执行(无 data-theme)时按系统浅/深色呈现;有 JS 时由主题 CSS 接管 */
+      .nojs { font-family: ui-monospace, monospace; max-width: 720px; margin: 48px auto; padding: 0 24px; color: #a3a3ad; line-height: 1.7; background: #07070a; }
+      .nojs h1 { color: #f5f4f0; }
+      .nojs .nojs-a, .nojs a { color: #3ecfae; }
+      @media (prefers-color-scheme: light) {
+        html:not([data-theme]) { background: #f6f7f9; color-scheme: light; }
+        .nojs { color: #4d5561; background: #f6f7f9; }
+        .nojs h1 { color: #16181d; }
+        .nojs .nojs-a, .nojs a { color: #1f6f62; }
+      }
     </style>
   </head>
   <body>
     <!-- AI 访问层: fetch 型访客(不执行JS)在此获得完整可读内容与真实可跟随链接 -->
     <noscript>
-      <main style="font-family: ui-monospace, monospace; max-width: 720px; margin: 48px auto; padding: 0 24px; color: #a3a3ad; line-height: 1.7; background: #07070a;">
-        <p style="color: #3ecfae; letter-spacing: 0.18em; font-size: 12px;">00 / FOR NON-JS VISITORS (HUMANS WITH JS OFF, AND AI AGENTS)</p>
-        <h1 style="color: #f5f4f0;">Epicode — AI Memory Operating System</h1>
+      <main class="nojs">
+        <p class="nojs-a" style="letter-spacing: 0.18em; font-size: 12px;">00 / FOR NON-JS VISITORS (HUMANS WITH JS OFF, AND AI AGENTS)</p>
+        <h1>Epicode — AI Memory Operating System</h1>
         <p>Give AI an unforgettable memory. Persistent memory, semantic search, knowledge graph, dual-loop cognition, and skill exchange for AI agents. Rust backend, React frontend, MCP endpoint.</p>
-        <h2 style="color: #3ecfae; font-size: 16px;">For AI agents</h2>
+        <h2 class="nojs-a" style="font-size: 16px;">For AI agents</h2>
         <ul>
-          <li><a href="/llms.txt" style="color: #3ecfae;">llms.txt</a> — complete machine-readable manifest (API, benchmarks, protocols, onboarding)</li>
-          <li><a href="/ai.html" style="color: #3ecfae;">ai.html</a> — dedicated zero-JS page for AI visitors</li>
-          <li><a href="/sitemap.xml" style="color: #3ecfae;">sitemap.xml</a> — site index</li>
+          <li><a href="/llms.txt">llms.txt</a> — complete machine-readable manifest (API, benchmarks, protocols, onboarding)</li>
+          <li><a href="/ai.html">ai.html</a> — dedicated zero-JS page for AI visitors</li>
+          <li><a href="/sitemap.xml">sitemap.xml</a> — site index</li>
         </ul>
-        <h2 style="color: #3ecfae; font-size: 16px;">API quick reference</h2>
+        <h2 class="nojs-a" style="font-size: 16px;">API quick reference</h2>
         <p>Base https://epicode.cn/api with X-API-Key header. POST /v1/remember, POST /v1/search, GET /v1/stats, GET /v1/stream (SSE), POST /mcp (MCP, 41 tools, identity ritual required — see llms.txt).</p>
         <p>JavaScript is required for the interactive console. This static layer carries the same facts.</p>
       </main>

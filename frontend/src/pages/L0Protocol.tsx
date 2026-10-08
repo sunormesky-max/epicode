@@ -256,9 +256,9 @@ export default function L0Protocol() {
             <div className="space-y-3 mt-6">
               {competitors.map(([name, descKey], i) => (
                 <div key={i} className="flex items-start gap-3">
-                  <CheckCircle2 size={16} style={{ color: name === 'Epicode' ? '#3ecfae' : 'var(--text-tertiary)', flexShrink: 0, marginTop: 2 }} />
+                  <CheckCircle2 size={16} style={{ color: name === 'Epicode' ? 'var(--accent-cyan)' : 'var(--text-tertiary)', flexShrink: 0, marginTop: 2 }} />
                   <span className="text-sm font-semibold" style={{ color: name === 'Epicode' ? 'var(--text-primary)' : 'var(--text-secondary)', minWidth: 96 }}>{name}</span>
-                  <span className="text-sm min-w-0" style={{ color: name === 'Epicode' ? '#3ecfae' : 'var(--text-tertiary)', wordBreak: 'break-word' }}>{t(descKey)}</span>
+                  <span className="text-sm min-w-0" style={{ color: name === 'Epicode' ? 'var(--accent-cyan)' : 'var(--text-tertiary)', wordBreak: 'break-word' }}>{t(descKey)}</span>
                 </div>
               ))}
             </div>

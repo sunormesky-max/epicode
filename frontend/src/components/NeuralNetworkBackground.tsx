@@ -22,12 +22,13 @@ interface Pulse { s: number; p: number; sp: number }
 interface RGB { r: number; g: number; b: number }
 
 // 默认调色板(突触青/潜意识紫),即原硬编码值。主题可通过 CSS 变量覆盖:
-// --nn-primary(连线/节点光晕)、--nn-hi(节点/脉冲亮点)、--nn-secondary(潜意识场)、--nn-fade(渐变透明端)。
-// 变量缺失(旧主题)时回退到这里的值,像素与改动前一致。
+// --nn-primary(连线/节点光晕)、--nn-hi(节点/脉冲亮点)、--nn-secondary(潜意识场)、--nn-fade(渐变透明端)、
+// --nn-gold(潜意识场偶发金色闪点)。所有主题均在 index.css 定义;变量缺失时回退到这里的值(= 突触青原值)。
 const TEAL_DEFAULT: RGB = { r: 62, g: 207, b: 174 };
 const TEAL_HI_DEFAULT: RGB = { r: 151, g: 235, b: 214 };
 const VIOLET_DEFAULT: RGB = { r: 139, g: 126, b: 200 };
 const FADE_DEFAULT: RGB = { r: 0, g: 0, b: 0 };
+const GOLD_DEFAULT: RGB = { r: 230, g: 200, b: 120 };
 
 function readRgbVar(name: string, fallback: RGB): RGB {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -56,12 +57,13 @@ export default function NeuralNetworkBackground() {
     if (!ctx) return;
 
     let W = 0, H = 0, horizon = 0;
-    let TEAL = TEAL_DEFAULT, TEAL_HI = TEAL_HI_DEFAULT, VIOLET = VIOLET_DEFAULT, FADE = FADE_DEFAULT;
+    let TEAL = TEAL_DEFAULT, TEAL_HI = TEAL_HI_DEFAULT, VIOLET = VIOLET_DEFAULT, FADE = FADE_DEFAULT, GOLD = GOLD_DEFAULT;
     function refreshPalette() {
       TEAL = readRgbVar('--nn-primary', TEAL_DEFAULT);
       TEAL_HI = readRgbVar('--nn-hi', TEAL_HI_DEFAULT);
       VIOLET = readRgbVar('--nn-secondary', VIOLET_DEFAULT);
       FADE = readRgbVar('--nn-fade', FADE_DEFAULT);
+      GOLD = readRgbVar('--nn-gold', GOLD_DEFAULT);
     }
     refreshPalette();
     let cn: CNode[] = [], syn: { a: number; b: number; st: number; pulses: Pulse[] }[] = [];
@@ -226,7 +228,7 @@ export default function NeuralNetworkBackground() {
           const g2 = Math.sin(s.ph * 9 + 2);
           if (g2 > 0.94) {
             ctx.beginPath(); ctx.arc(s.x, s.y, 1.6, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(230, 200, 120, ${(g2 - 0.94) * 12 * p})`;
+            ctx.fillStyle = `rgba(${GOLD.r}, ${GOLD.g}, ${GOLD.b}, ${(g2 - 0.94) * 12 * p})`;
             ctx.fill();
           }
         }
