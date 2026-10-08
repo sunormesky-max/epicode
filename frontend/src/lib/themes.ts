@@ -31,7 +31,7 @@ export const THEMES: ThemeSpec[] = [
     summary: '暖纸底、橄榄墨。官网适合长文，控制台适合白天。',
     summaryEn: 'Warm paper and olive ink. Good for long reading on the site and daytime console work.',
     mode: 'light',
-    swatches: ['#f4efe6', '#fffaf3', '#1c1915', '#5e6c42'],
+    swatches: ['#f4efe6', '#fffaf3', '#1c1915', '#59673f'],
   },
   {
     id: 'meridian',
