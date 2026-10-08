@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0](https://github.com/sunormesky-max/epicode/compare/v1.6.1...v1.7.0) (2026-10-08)
+
+
+### Features
+
+* **theme:** [#205](https://github.com/sunormesky-max/epicode/issues/205)硬编码色token化 + [#206](https://github.com/sunormesky-max/epicode/issues/206)用户可选强调色 (堆叠链尾段于main重建, rev of [#205](https://github.com/sunormesky-max/epicode/issues/205)/[#206](https://github.com/sunormesky-max/epicode/issues/206)/[#211](https://github.com/sunormesky-max/epicode/issues/211)) ([#212](https://github.com/sunormesky-max/epicode/issues/212)) ([b4879b5](https://github.com/sunormesky-max/epicode/commit/b4879b5be6ed2e66fc5876f6c0810d849ecdd92b))
+* **theme:** 主题感知图表色板 + 无闪烁启动 + WCAG AA 对比度 / theme-aware charts, no-flash boot, AA contrast tokens ([#203](https://github.com/sunormesky-max/epicode/issues/203)) ([b38494f](https://github.com/sunormesky-max/epicode/commit/b38494fae3ed3b33b95aa84f9130dc33ff860ba5))
+
+
+### Bug Fixes
+
+* **drive:** keep proposals pending until execution feedback ([#208](https://github.com/sunormesky-max/epicode/issues/208)) ([00171c5](https://github.com/sunormesky-max/epicode/commit/00171c5e381e43a57df3268ce4b83ee96bdc44b9))
+* **pulse:** persist mass updates through auto-save retries ([#201](https://github.com/sunormesky-max/epicode/issues/201)) ([71a2da9](https://github.com/sunormesky-max/epicode/commit/71a2da91cc4f2c238bf0900a23ee9918b2bd3625))
+* **space:** keep ordinary vertex IDs distinct from Ports ([#209](https://github.com/sunormesky-max/epicode/issues/209)) ([e6e2787](https://github.com/sunormesky-max/epicode/commit/e6e2787e48a2fc891a99bda4d22c32397d45d07b))
+* **space:** preserve Port vertices and anchors on removal ([#200](https://github.com/sunormesky-max/epicode/issues/200)) ([31b257a](https://github.com/sunormesky-max/epicode/commit/31b257a7344e3fd7bd86a1b6c3ef0a10042ee10b))
+* **theme:** 补齐未定义 token + 浅色可读性 + 无 JS 浅色回退 ([#204](https://github.com/sunormesky-max/epicode/issues/204) 原diff于main重建, rev of [#210](https://github.com/sunormesky-max/epicode/issues/210)) ([#210](https://github.com/sunormesky-max/epicode/issues/210)) ([6bae477](https://github.com/sunormesky-max/epicode/commit/6bae477fef44e2199805d3e3b89dd47f906c198c))
+
 ## [1.6.1](https://github.com/sunormesky-max/epicode/compare/v1.6.0...v1.6.1) (2026-10-07)
 
 
