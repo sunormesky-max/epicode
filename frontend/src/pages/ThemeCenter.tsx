@@ -3,7 +3,9 @@ import { useLocation } from 'react-router';
 import Layout from '@/components/Layout';
 import DashboardLayout from '@/components/DashboardLayout';
 import {
+  ACCENTS,
   THEMES,
+  accentName,
   activeTheme,
   readThemePrefs,
   resetThemePrefs,
@@ -12,6 +14,7 @@ import {
   themeName,
   themeSummary,
   updateThemePrefs,
+  type AccentId,
   type ThemeFamily,
   type ThemeId,
   type ThemePrefs,
@@ -71,6 +74,30 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (nex
         }}
       />
     </button>
+  );
+}
+
+function AccentPicker({ value, mode, lang, onChange }: { value: AccentId; mode: 'dark' | 'light'; lang: 'zh' | 'en'; onChange: (next: AccentId) => void }) {
+  const zh = lang === 'zh';
+  const chip = (active: boolean): CSSProperties => ({
+    display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 12px 6px 8px', borderRadius: 999, cursor: 'pointer', fontSize: 12,
+    background: active ? 'var(--bg-card)' : 'transparent', color: 'var(--text-primary)',
+    border: active ? '1px solid var(--text-secondary)' : '1px solid var(--border-light)',
+  });
+  const dot = (color: string): CSSProperties => ({ width: 16, height: 16, borderRadius: '50%', background: color, flex: '0 0 auto', boxShadow: 'inset 0 0 0 1px var(--border-medium)' });
+  return (
+    <div role="radiogroup" aria-label={zh ? '强调色' : 'Accent colour'} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+      <button type="button" role="radio" aria-checked={value === 'theme'} onClick={() => onChange('theme')} style={chip(value === 'theme')}>
+        <span aria-hidden style={{ ...dot('var(--accent-cyan)'), background: value === 'theme' ? 'var(--accent-cyan)' : 'transparent', border: '1px dashed var(--text-tertiary)' }} />
+        {zh ? '跟随主题' : 'Theme default'}
+      </button>
+      {ACCENTS.map((a) => (
+        <button key={a.id} type="button" role="radio" aria-checked={value === a.id} onClick={() => onChange(a.id)} style={chip(value === a.id)}>
+          <span aria-hidden style={dot(mode === 'light' ? a.light : a.dark)} />
+          {accentName(a, lang)}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -293,6 +320,19 @@ export default function ThemeCenter() {
                 </label>
               </div>
             )}
+          </Row>
+
+          <Row
+            title={zh ? '强调色' : 'Accent colour'}
+            hint={zh ? '按钮、链接、焦点环与图谱主色。可与任意浅色/深色主题组合，浅色主题自动换用更深的同色以保证可读（WCAG AA）。' : 'Buttons, links, focus rings and the graph’s main colour. Works with any light or dark theme; light themes automatically use a deeper shade to stay readable (WCAG AA).'}
+            control={null}
+          >
+            <AccentPicker
+              value={prefs.accent}
+              mode={THEMES.find((t) => t.id === current)?.mode ?? 'dark'}
+              lang={lang}
+              onChange={(accent) => update({ accent })}
+            />
           </Row>
 
           <Row

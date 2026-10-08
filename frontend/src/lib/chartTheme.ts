@@ -60,7 +60,7 @@ function subscribe(onChange: () => void) {
   const observer = new MutationObserver(onChange);
   observer.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["data-theme"],
+    attributeFilter: ["data-theme", "data-accent"],
   });
   window.addEventListener("epicode-theme", onChange);
   return () => {
@@ -72,7 +72,7 @@ function subscribe(onChange: () => void) {
 const themeKey = () =>
   typeof document === "undefined"
     ? ""
-    : (document.documentElement.dataset.theme ?? "");
+    : `${document.documentElement.dataset.theme ?? ""}|${document.documentElement.dataset.accent ?? ""}`;
 
 /** 订阅 `<html data-theme>`,主题切换时重新解析图表颜色。 */
 export function useChartTheme(): ChartTheme {
