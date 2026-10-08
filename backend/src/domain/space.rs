@@ -258,6 +258,18 @@ impl Space {
             .remove(&id)
             .ok_or_else(|| format!("tetrahedron {} not found", id))?;
 
+        Self::remove_tetra_indexes(&mut inner, &tetra);
+        Self::release_or_reanchor_port(&mut inner, id);
+
+        inner.structure_version += 1;
+        inner.search_revision += 1;
+        Ok(tetra)
+    }
+
+    /// Drop a tetrahedron's index entries while retaining Cylinder-owned Port vertices.
+    /// Both delete and relocation must remove ordinary orphan vertices from the spatial grid.
+    fn remove_tetra_indexes(inner: &mut SpaceInner, tetra: &Tetrahedron) {
+        let id = tetra.id;
         let tgk = grid_key(&tetra.core);
         if let Some(ids) = inner.tetra_grid.get_mut(&tgk) {
             ids.retain(|&t| t != id);
@@ -271,7 +283,17 @@ impl Space {
                 ids.retain(|&t| t != id);
                 if ids.is_empty() {
                     inner.vertex_to_tetras.remove(&vid);
-                    inner.vertices.remove(&vid);
+                    if !inner.cylinder.all_ports().iter().any(|p| p.id == vid) {
+                        if let Some(vertex) = inner.vertices.remove(&vid) {
+                            let vgk = grid_key(&vertex.position);
+                            if let Some(grid_ids) = inner.vertex_grid.get_mut(&vgk) {
+                                grid_ids.retain(|&v| v != vid);
+                                if grid_ids.is_empty() {
+                                    inner.vertex_grid.remove(&vgk);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -300,12 +322,22 @@ impl Space {
                 }
             }
         }
+    }
 
-        inner.cylinder.release_port(id);
-
-        inner.structure_version += 1;
-        inner.search_revision += 1;
-        Ok(tetra)
+    /// Preserve a Port's logical anchor when another tetrahedron still touches it.
+    fn release_or_reanchor_port(inner: &mut SpaceInner, tetra_id: TetraId) {
+        let Some(port_vid) = inner.cylinder.find_port_for_tetra(tetra_id).map(|p| p.id) else {
+            return;
+        };
+        inner.cylinder.release_port(tetra_id);
+        let replacement = inner.vertex_to_tetras.get(&port_vid).and_then(|ids| {
+            ids.iter()
+                .copied()
+                .find(|&id| inner.cylinder.find_port_for_tetra(id).is_none())
+        });
+        if let Some(id) = replacement {
+            let _ = inner.cylinder.assign_specific_port(port_vid, id);
+        }
     }
 
     /// 结构版本号（tetra 增删/relocate 递增）——用于 cluster 缓存失效。
@@ -963,62 +995,62 @@ impl Space {
     /// All under one write lock — no TOCTOU window.
     pub fn relocate_tetrahedron(&self, id: TetraId, new_core: Point3) -> Result<TetraId, String> {
         let mut inner = self.inner.write();
+        if !inner.tetrahedrons.contains_key(&id) {
+            return Err(format!("tetrahedron {} not found", id));
+        }
+        let positions = Tetrahedron::compute_vertices(new_core);
+        if !new_core.x.is_finite()
+            || !new_core.y.is_finite()
+            || !new_core.z.is_finite()
+            || !Tetrahedron::validate_shape(&positions)
+        {
+            return Err("relocated tetrahedron is not regular".into());
+        }
+
+        let old_port = inner.cylinder.find_port_for_tetra(id).map(|port| port.id);
+        let old_port_was_geometric = old_port.is_some_and(|port_vid| {
+            inner
+                .tetrahedrons
+                .get(&id)
+                .is_some_and(|tetra| tetra.vertex_ids.contains(&port_vid))
+        });
         let removed = inner
             .tetrahedrons
             .remove(&id)
-            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
-
-        for &vid in &removed.vertex_ids {
-            if let Some(ids) = inner.vertex_to_tetras.get_mut(&vid) {
-                ids.retain(|&t| t != id);
-                if ids.is_empty() {
-                    inner.vertex_to_tetras.remove(&vid);
-                    inner.vertices.remove(&vid);
-                }
-            }
-        }
-        for &(i, j) in Tetrahedron::edges() {
-            let key = ordered_pair(removed.vertex_ids[i], removed.vertex_ids[j]);
-            if let Some(entry) = inner.edge_table.get_mut(&key) {
-                entry.shared_by.retain(|&t| t != id);
-                if entry.shared_by.is_empty() {
-                    inner.edge_table.remove(&key);
-                }
-            }
-        }
-        for &face_indices in Tetrahedron::faces() {
-            let mut key = [
-                removed.vertex_ids[face_indices[0]],
-                removed.vertex_ids[face_indices[1]],
-                removed.vertex_ids[face_indices[2]],
-            ];
-            key.sort();
-            if let Some(entry) = inner.face_table.get_mut(&key) {
-                entry.shared_by.retain(|&t| t != id);
-                if entry.shared_by.is_empty() {
-                    inner.face_table.remove(&key);
-                }
-            }
-        }
-
-        let old_tgk = grid_key(&removed.core);
-        if let Some(ids) = inner.tetra_grid.get_mut(&old_tgk) {
-            ids.retain(|&t| t != id);
-            if ids.is_empty() {
-                inner.tetra_grid.remove(&old_tgk);
-            }
-        }
-
-        let positions = Tetrahedron::compute_vertices(new_core);
-        if !Tetrahedron::validate_shape(&positions) {
-            inner.tetrahedrons.insert(id, removed);
-            return Err("relocated tetrahedron is not regular".into());
-        }
+            .expect("tetrahedron exists under the write lock");
+        Self::remove_tetra_indexes(&mut inner, &removed);
 
         let mut moved = removed;
         moved.core = new_core;
         moved.vertex_ids = [0; 4];
         Self::insert_tetra(&mut inner, &moved, id, &positions)?;
+
+        // A moved anchor must not keep reserving a Port it no longer touches.
+        let new_ports: Vec<VertexId> = inner
+            .tetrahedrons
+            .get(&id)
+            .expect("relocated tetrahedron was inserted")
+            .vertex_ids
+            .iter()
+            .copied()
+            .filter(|&vid| inner.cylinder.all_ports().iter().any(|p| p.id == vid))
+            .collect();
+        // Reseeding can make a logical-only Port connection. Keep that assignment when
+        // the tetrahedron moves without touching any Port; only a geometric departure
+        // or arrival at another Port changes the anchor.
+        if old_port.is_some_and(|vid| {
+            !new_ports.contains(&vid) && (old_port_was_geometric || !new_ports.is_empty())
+        }) {
+            Self::release_or_reanchor_port(&mut inner, id);
+        }
+        if inner.cylinder.find_port_for_tetra(id).is_none() {
+            for port_vid in new_ports {
+                if inner.cylinder.assign_specific_port(port_vid, id).is_ok() {
+                    break;
+                }
+            }
+        }
+
         inner.structure_version += 1;
         Ok(id)
     }
@@ -1183,6 +1215,39 @@ mod tests {
             mass: 1.0,
         };
         (tetra, positions)
+    }
+
+    fn center_with_vertex_at(position: Point3) -> Point3 {
+        let offset = Tetrahedron::compute_vertices(Point3::zero())[0];
+        Point3::new(
+            position.x - offset.x,
+            position.y - offset.y,
+            position.z - offset.z,
+        )
+    }
+
+    fn assert_vertex_grid_consistent(space: &Space) {
+        let inner = space.inner.read();
+        for (cell, ids) in &inner.vertex_grid {
+            assert!(!ids.is_empty(), "empty vertex grid cell: {:?}", cell);
+            for id in ids {
+                let vertex = inner
+                    .vertices
+                    .get(id)
+                    .expect("grid references missing vertex");
+                assert_eq!(*cell, grid_key(&vertex.position));
+            }
+        }
+        for (id, vertex) in &inner.vertices {
+            assert!(
+                inner
+                    .vertex_grid
+                    .get(&grid_key(&vertex.position))
+                    .is_some_and(|ids| ids.contains(id)),
+                "vertex {} is absent from its spatial grid cell",
+                id
+            );
+        }
     }
 
     #[test]
@@ -1515,6 +1580,155 @@ mod tests {
             tet.vertex_ids,
             port_vid
         );
+    }
+
+    #[test]
+    fn removing_port_anchor_preserves_port_and_reanchors_remaining_tetra() {
+        let space = Space::new();
+        let port_count = space.cylinder_port_count();
+        let (port_vid, port_pos) = space.cylinder_ports()[0];
+        let core = center_with_vertex_at(port_pos);
+        let (tetra, positions) = make_tetra(0, core);
+        let anchor = space.add_tetrahedron(&tetra, &positions).unwrap();
+        let sibling = space.add_tetrahedron(&tetra, &positions).unwrap();
+        assert!(space.assign_specific_port(port_vid, anchor));
+
+        space.remove_tetrahedron(anchor).unwrap();
+        assert_eq!(space.tetras_connected_to_port(port_vid), vec![sibling]);
+        assert_eq!(
+            space
+                .inner
+                .read()
+                .cylinder
+                .find_port_for_tetra(sibling)
+                .map(|p| p.id),
+            Some(port_vid)
+        );
+        assert_vertex_grid_consistent(&space);
+
+        space.remove_tetrahedron(sibling).unwrap();
+        assert_eq!(space.vertex_count(), port_count);
+        assert!(space.inner.read().vertices.contains_key(&port_vid));
+        assert_vertex_grid_consistent(&space);
+
+        let replacement = space.add_tetrahedron(&tetra, &positions).unwrap();
+        assert!(
+            space
+                .get_tetrahedron(replacement)
+                .unwrap()
+                .vertex_ids
+                .contains(&port_vid),
+            "the Cylinder Port must still be available for geometric merging"
+        );
+    }
+
+    #[test]
+    fn relocating_port_anchor_reconciles_old_and_new_port_occupancy() {
+        let space = Space::new();
+        let ports = space.cylinder_ports();
+        let (old_port, old_position) = ports[0];
+        let (new_port, new_position) = ports[1];
+        let old_core = center_with_vertex_at(old_position);
+        let (tetra, positions) = make_tetra(0, old_core);
+        let anchor = space.add_tetrahedron(&tetra, &positions).unwrap();
+        let sibling = space.add_tetrahedron(&tetra, &positions).unwrap();
+        assert!(space.assign_specific_port(old_port, anchor));
+
+        space
+            .relocate_tetrahedron(anchor, center_with_vertex_at(new_position))
+            .unwrap();
+        let inner = space.inner.read();
+        assert_eq!(
+            inner.cylinder.find_port_for_tetra(sibling).map(|p| p.id),
+            Some(old_port)
+        );
+        assert_eq!(
+            inner.cylinder.find_port_for_tetra(anchor).map(|p| p.id),
+            Some(new_port)
+        );
+        assert!(inner.vertices.contains_key(&old_port));
+        assert!(inner.vertices.contains_key(&new_port));
+        drop(inner);
+        assert_vertex_grid_consistent(&space);
+
+        space
+            .relocate_tetrahedron(anchor, Point3::new(20.0, 20.0, 20.0))
+            .unwrap();
+        assert!(space
+            .inner
+            .read()
+            .cylinder
+            .find_port_for_tetra(anchor)
+            .is_none());
+        assert!(space.inner.read().vertices.contains_key(&new_port));
+        assert_vertex_grid_consistent(&space);
+    }
+
+    #[test]
+    fn invalid_relocation_keeps_existing_topology_and_port_occupancy() {
+        let space = Space::new();
+        let (port_vid, port_pos) = space.cylinder_ports()[0];
+        let (tetra, positions) = make_tetra(0, center_with_vertex_at(port_pos));
+        let id = space.add_tetrahedron(&tetra, &positions).unwrap();
+        assert!(space.assign_specific_port(port_vid, id));
+        let before = space.get_tetrahedron(id).unwrap();
+        let version = space.structure_version();
+        let vertex_count = space.vertex_count();
+
+        assert!(space
+            .relocate_tetrahedron(id, Point3::new(f64::NAN, 0.0, 0.0))
+            .is_err());
+        let after = space.get_tetrahedron(id).unwrap();
+        assert_eq!(after.core, before.core);
+        assert_eq!(after.vertex_ids, before.vertex_ids);
+        assert_eq!(space.structure_version(), version);
+        assert_eq!(space.vertex_count(), vertex_count);
+        assert_eq!(space.tetras_connected_to_port(port_vid), vec![id]);
+        assert_eq!(
+            space
+                .inner
+                .read()
+                .cylinder
+                .find_port_for_tetra(id)
+                .map(|p| p.id),
+            Some(port_vid)
+        );
+        assert_vertex_grid_consistent(&space);
+    }
+
+    #[test]
+    fn relocating_reseeded_cluster_keeps_its_logical_port() {
+        let space = Space::new();
+        let (tetra, positions) = make_tetra(0, Point3::new(20.0, 20.0, 0.5));
+        let id = space.add_tetrahedron(&tetra, &positions).unwrap();
+        assert_eq!(space.reseed_ports(), 1);
+        let port_vid = space
+            .inner
+            .read()
+            .cylinder
+            .find_port_for_tetra(id)
+            .expect("isolated cluster was reseeded")
+            .id;
+        assert!(!space
+            .get_tetrahedron(id)
+            .unwrap()
+            .vertex_ids
+            .contains(&port_vid));
+
+        space
+            .relocate_tetrahedron(id, Point3::new(21.0, 20.0, 0.5))
+            .unwrap();
+        assert_eq!(
+            space
+                .inner
+                .read()
+                .cylinder
+                .find_port_for_tetra(id)
+                .map(|p| p.id),
+            Some(port_vid)
+        );
+        assert_eq!(space.port_vertex_of_tetra(id), Some(port_vid));
+        assert_vertex_grid_consistent(&space);
     }
 
     #[test]
