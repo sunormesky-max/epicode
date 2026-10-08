@@ -138,7 +138,7 @@ export default function Community() {
               ]).map(opt => (
                 <button key={opt.key} onClick={() => { setSortBy(opt.key); setPage(0); }}
                   className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg transition-colors font-medium"
-                  style={{ background: sortBy === opt.key ? 'rgba(139,126,200,0.15)' : 'var(--bg-card)', color: sortBy === opt.key ? '#8b7ec8' : 'var(--text-tertiary)', border: '1px solid var(--border-light)', whiteSpace: 'nowrap' }}>
+                  style={{ background: sortBy === opt.key ? 'rgba(var(--accent-purple-rgb), 0.15)' : 'var(--bg-card)', color: sortBy === opt.key ? 'var(--accent-purple)' : 'var(--text-tertiary)', border: '1px solid var(--border-light)', whiteSpace: 'nowrap' }}>
                   {opt.icon} {opt.label}
                 </button>
               ))}
@@ -147,7 +147,7 @@ export default function Community() {
 
           {/* Category filters */}
           <div className="flex flex-wrap gap-2 mb-8">
-            <button onClick={() => { setSelectedCat(null); setPage(0); }} className="text-xs px-3 py-1.5 rounded-lg transition-colors font-medium" style={{ background: !selectedCat ? 'rgba(139,126,200,0.15)' : 'var(--bg-card)', color: !selectedCat ? '#8b7ec8' : 'var(--text-tertiary)', border: '1px solid var(--border-light)' }}>
+            <button onClick={() => { setSelectedCat(null); setPage(0); }} className="text-xs px-3 py-1.5 rounded-lg transition-colors font-medium" style={{ background: !selectedCat ? 'rgba(var(--accent-purple-rgb), 0.15)' : 'var(--bg-card)', color: !selectedCat ? 'var(--accent-purple)' : 'var(--text-tertiary)', border: '1px solid var(--border-light)' }}>
               {t('community.categoryAll')} ({skills.length})
             </button>
             {categories.map(cat => {
@@ -211,7 +211,7 @@ export default function Community() {
                           aria-valuemin={0}
                           aria-valuemax={100}
                           aria-label={`${t('community.metricSuccess')} ${Math.round(skill.success_rate * 100)}%`}
-                          style={{ background: 'rgba(255,255,255,0.05)' }}>
+                          style={{ background: 'rgba(var(--overlay-rgb), 0.05)' }}>
                           <div style={{ width: `${skill.success_rate * 100}%`, height: '100%', background: successColor(skill.success_rate), borderRadius: 999 }} />
                         </div>
                       )}
@@ -222,7 +222,7 @@ export default function Community() {
                       <div className="flex">
                         <button onClick={() => handlePull(skill.id, skill.name)} disabled={isPulled || isPulling}
                           className="flex-1 flex items-center justify-center gap-1.5 py-3 text-xs transition-colors"
-                          style={{ color: isPulled ? '#3ecfae' : isPulling ? 'var(--text-tertiary)' : color, borderRight: '1px solid var(--border-light)' }}>
+                          style={{ color: isPulled ? 'var(--accent-cyan)' : isPulling ? 'var(--text-tertiary)' : color, borderRight: '1px solid var(--border-light)' }}>
                           {isPulled ? <><CheckCircle size={13} /> {t('community.pulled')}</> : isPulling ? t('community.pulling') : <><Download size={13} /> {t('community.pull')}</>}
                         </button>
                         <button onClick={() => setExpandedId(isExpanded ? null : skill.id)} className="flex items-center justify-center gap-1.5 py-3 px-4 text-xs transition-colors" style={{ color: 'var(--text-tertiary)' }}>
@@ -251,7 +251,7 @@ export default function Community() {
                 <>
                   <p className="text-sm" style={{ color: 'var(--danger-red)', marginBottom: 12 }}>{loadError}</p>
                   <button onClick={loadSkills}
-                    className="text-xs px-4 py-2 rounded-lg" style={{ background: 'rgba(139,126,200,0.15)', color: 'var(--accent-purple)', border: '1px solid rgba(139,126,200,0.3)', cursor: 'pointer' }}>
+                    className="text-xs px-4 py-2 rounded-lg" style={{ background: 'rgba(var(--accent-purple-rgb), 0.15)', color: 'var(--accent-purple)', border: '1px solid rgba(var(--accent-purple-rgb), 0.3)', cursor: 'pointer' }}>
                     {t('community.retry')}
                   </button>
                 </>
@@ -280,7 +280,7 @@ export default function Community() {
 
       {/* Toast */}
       {toast && (
-        <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: 'rgba(15,15,25,0.97)', border: '1px solid rgba(139,126,200,0.25)', borderRadius: 10, padding: '10px 20px', fontSize: 13, color: '#d1d5db', zIndex: 100, boxShadow: '0 4px 24px rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: 'rgba(15,15,25,0.97)', border: '1px solid rgba(var(--accent-purple-rgb), 0.25)', borderRadius: 10, padding: '10px 20px', fontSize: 13, color: '#d1d5db', zIndex: 100, boxShadow: '0 4px 24px rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', gap: 8 }}>
           {toast}
           <button onClick={() => setToast(null)} style={{ color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
         </div>

@@ -101,8 +101,8 @@ export default function DashboardPermissions() {
         </p>
       </div>
 
-      {error && <div onClick={() => setError('')} style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13 }}>{error}</div>}
-      {notice && <div onClick={() => setNotice('')} style={{ background: 'rgba(62,207,174,0.08)', color: 'var(--accent-cyan)', border: '1px solid rgba(62,207,174,0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13 }}>{notice}</div>}
+      {error && <div onClick={() => setError('')} style={{ background: 'rgba(var(--danger-red-rgb), 0.1)', color: 'var(--danger-red)', border: '1px solid rgba(var(--danger-red-rgb), 0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13 }}>{error}</div>}
+      {notice && <div onClick={() => setNotice('')} style={{ background: 'rgba(var(--accent-cyan-rgb), 0.08)', color: 'var(--accent-cyan)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13 }}>{notice}</div>}
 
       {/* 计划分级与门控 */}
       <div style={panel}>
@@ -149,8 +149,8 @@ export default function DashboardPermissions() {
           {OUTPUT_MODES.map(m => (
             <button key={m.id} disabled={!canEdit} onClick={() => saveOutputMode(m.id)} style={{
               textAlign: 'left', padding: '10px 12px', borderRadius: 10, cursor: canEdit ? 'pointer' : 'not-allowed',
-              background: outputMode === m.id ? 'rgba(62,207,174,0.1)' : 'rgba(0,0,0,0.2)',
-              border: `1px solid ${outputMode === m.id ? 'var(--accent-cyan)' : 'rgba(255,255,255,0.08)'}`,
+              background: outputMode === m.id ? 'rgba(var(--accent-cyan-rgb), 0.1)' : 'rgba(0,0,0,0.2)',
+              border: `1px solid ${outputMode === m.id ? 'var(--accent-cyan)' : 'rgba(var(--overlay-rgb), 0.08)'}`,
             }}>
               <div style={{ color: 'var(--text-primary)', fontSize: 12.5, fontWeight: 600 }}>{zh ? m.zh : m.en}</div>
               <div style={{ color: 'var(--text-tertiary)', fontSize: 10.5 }}>{zh ? m.zh_d : m.en_d}</div>
@@ -187,8 +187,8 @@ export default function DashboardPermissions() {
                   return (
                     <button key={perm} disabled={!canEdit || isOwnerOnly} onClick={() => togglePerm(acc.user_id, perm)} title={isOwnerOnly ? (zh ? '仅主账户' : 'Owner only') : ''} style={{
                       display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 16, fontSize: 11, fontFamily: 'var(--font-mono)',
-                      background: active ? 'rgba(62,207,174,0.12)' : 'rgba(0,0,0,0.2)',
-                      border: `1px solid ${active ? 'rgba(62,207,174,0.5)' : 'rgba(255,255,255,0.08)'}`,
+                      background: active ? 'rgba(var(--accent-cyan-rgb), 0.12)' : 'rgba(0,0,0,0.2)',
+                      border: `1px solid ${active ? 'rgba(var(--accent-cyan-rgb), 0.5)' : 'rgba(var(--overlay-rgb), 0.08)'}`,
                       color: active ? 'var(--accent-cyan)' : 'var(--text-tertiary)',
                       cursor: !canEdit || isOwnerOnly ? 'not-allowed' : 'pointer',
                       opacity: isOwnerOnly ? 0.4 : 1,

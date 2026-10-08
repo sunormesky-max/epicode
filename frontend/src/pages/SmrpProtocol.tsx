@@ -273,7 +273,7 @@ export default function SmrpProtocol() {
                 const Icon = b.icon;
                 return (
                   <div key={b.whoKey} className="flex gap-4 p-5 rounded-xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)' }}>
-                    <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(139,126,200,0.12)' }}>
+                    <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(var(--accent-purple-rgb), 0.12)' }}>
                       <Icon size={20} style={{ color: 'var(--accent-magenta)' }} />
                     </div>
                     <div>
@@ -316,11 +316,11 @@ export default function SmrpProtocol() {
             <div className="flex flex-wrap gap-3 justify-center">
               <a href="https://epicode.cn/api/v1/smrp" target="_blank" rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 text-sm font-medium no-underline px-5 py-2.5 rounded-lg"
-                style={{ background: 'linear-gradient(135deg, #8b7ec8, #8b7ec8)', color: '#fff' }}>
+                style={{ background: 'linear-gradient(135deg, var(--accent-purple), var(--accent-purple))', color: '#fff' }}>
                 {t('smrp.ctaButton')} <ArrowRight size={16} />
               </a>
               <a href="#/docs" className="inline-flex items-center gap-2 text-sm font-medium no-underline px-5 py-2.5 rounded-lg"
-                style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', border: '1px solid var(--border-light)' }}>
+                style={{ background: 'rgba(var(--overlay-rgb), 0.05)', color: 'var(--text-secondary)', border: '1px solid var(--border-light)' }}>
                 {t('smrp.ctaApiRef')}
               </a>
             </div>

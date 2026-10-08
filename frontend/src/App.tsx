@@ -32,7 +32,7 @@ function Loading() {
   return (
     <div className="min-h-screen relative" style={{ background: 'var(--bg-void)' }}>
       <div className="relative z-10 flex flex-col items-center justify-center min-h-screen gap-4">
-        <div style={{ width: 28, height: 28, border: '2px solid rgba(62,207,174,0.25)', borderTopColor: 'var(--accent-cyan)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+        <div style={{ width: 28, height: 28, border: '2px solid rgba(var(--accent-cyan-rgb), 0.25)', borderTopColor: 'var(--accent-cyan)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)', letterSpacing: '0.2em' }}>ENTERING FIELD</span>
       </div>
     </div>
@@ -52,11 +52,11 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
       return (
         <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-void)' }}>
           <div className="text-center max-w-md px-6">
-            <h1 className="text-3xl font-bold mb-3" style={{ color: '#f87171' }}>出错了</h1>
+            <h1 className="text-3xl font-bold mb-3" style={{ color: 'var(--danger-red)' }}>出错了</h1>
             <p className="mb-2" style={{ color: '#9ca3af', fontSize: 14 }}>{this.state.message}</p>
             <div className="flex gap-3 justify-center mt-4">
               <button onClick={() => window.location.reload()} className="btn-primary">重试</button>
-              <button onClick={() => { this.setState({ hasError: false, message: '' }); window.location.hash = '#/'; }} className="btn-secondary" style={{ background: 'rgba(255,255,255,0.06)', color: '#9ca3af', border: '1px solid rgba(255,255,255,0.1)', padding: '8px 20px', borderRadius: 10, cursor: 'pointer' }}>返回首页</button>
+              <button onClick={() => { this.setState({ hasError: false, message: '' }); window.location.hash = '#/'; }} className="btn-secondary" style={{ background: 'rgba(var(--overlay-rgb), 0.06)', color: '#9ca3af', border: '1px solid rgba(var(--overlay-rgb), 0.1)', padding: '8px 20px', borderRadius: 10, cursor: 'pointer' }}>返回首页</button>
             </div>
           </div>
         </div>

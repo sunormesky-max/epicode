@@ -119,7 +119,7 @@ function StratumHeading({ overline, title, sub }: { overline?: string; title: st
         <span aria-hidden="true" style={{
           position: 'absolute', left: '-0.06em', top: '-0.45em', zIndex: -1,
           fontFamily: 'var(--font-display)', fontSize: 'clamp(180px, 22vw, 420px)', fontWeight: 700,
-          color: 'transparent', WebkitTextStroke: '1px rgba(245,244,240,0.05)', letterSpacing: '-0.05em',
+          color: 'transparent', WebkitTextStroke: '1px rgba(var(--text-primary-rgb), 0.05)', letterSpacing: '-0.05em',
           lineHeight: 1, pointerEvents: 'none', userSelect: 'none',
         }}>{num}</span>
       )}
@@ -249,7 +249,7 @@ function HeroSection() {
         className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2"
       >
         <DepthMeter />
-        <div style={{ width: 1, height: 28, background: 'linear-gradient(180deg, transparent, rgba(62,207,174,0.5), transparent)' }} />
+        <div style={{ width: 1, height: 28, background: 'linear-gradient(180deg, transparent, rgba(var(--accent-cyan-rgb), 0.5), transparent)' }} />
       </motion.div>
     </section>
   );
@@ -456,7 +456,7 @@ function SystemSkillsSection() {
                 <div style={{
                   position: 'absolute', left: -62, top: 12,
                   width: 60, height: 1,
-                  background: 'linear-gradient(90deg, transparent, rgba(62, 207, 174, 0.3))',
+                  background: 'linear-gradient(90deg, transparent, rgba(var(--accent-cyan-rgb), 0.3))',
                   transform: `rotate(${s.ang}deg)`, transformOrigin: 'right center',
                 }} />
                 <div className="flex items-center gap-2.5" style={{ padding: '6px 0' }}>
@@ -527,7 +527,7 @@ function L0CapabilitiesSection() {
           return (
             <ScrollReveal key={i} delay={i * 0.06}>
               <div className="grid grid-cols-1 md:grid-cols-[110px_1fr_1.2fr] gap-4 md:gap-10 py-10 border-t items-baseline" style={{ borderColor: 'var(--border-light)' }}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'clamp(30px, 4vw, 44px)', fontWeight: 600, color: 'rgba(139, 126, 200, 0.4)', lineHeight: 1 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'clamp(30px, 4vw, 44px)', fontWeight: 600, color: 'rgba(var(--accent-purple-rgb), 0.4)', lineHeight: 1 }}>
                   W{i + 1}
                 </span>
                 <div className="flex items-center gap-3">
@@ -593,9 +593,9 @@ function CrossDeviceSection() {
               <div key={i} className="relative">
                 {/* 节点 + 链线 */}
                 <div className="flex items-center gap-3 mb-4">
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-cyan)', boxShadow: '0 0 10px rgba(62,207,174,0.5)' }} />
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-cyan)', boxShadow: '0 0 10px rgba(var(--accent-cyan-rgb), 0.5)' }} />
                   {i < steps.length - 1 && (
-                    <div className="hidden md:block flex-1" style={{ height: 1, background: 'linear-gradient(90deg, rgba(62,207,174,0.25), transparent)' }} />
+                    <div className="hidden md:block flex-1" style={{ height: 1, background: 'linear-gradient(90deg, rgba(var(--accent-cyan-rgb), 0.25), transparent)' }} />
                   )}
                 </div>
                 <step.Icon size={22} style={{ color: 'var(--text-secondary)', marginBottom: 10 }} />
