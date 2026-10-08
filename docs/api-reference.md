@@ -75,11 +75,15 @@ Register, heartbeat, unregister and drive acknowledgement require `memory_write`
 
 The MCP `drive_inbox` tool returns the same inbox data and defaults to a limit of 50. MCP `drive_ack` takes the same acknowledgement argument names. Both acknowledgement transports require an active primary executor; High/Critical signals additionally require E2E-enabled registration.
 
+For both inbox transports, `empty_reason` is `has_signals` when proposals are returned, `no_signals` when the current queue is empty, and `no_pending` when the queue retains only terminal signals. It does not infer whether an internal or external executor acknowledged historical signals.
+
 Memory-backed signals may include an additive `grounding` object with the rule reason, source memory IDs and revisions, recorded/reviewed timestamps, and explicit uncertainty flags. It is provenance, not a confidence score. The inbox rechecks those source revisions and freshness windows before returning a signal; changed or stale evidence is expired. With E2E enabled, `description` and `grounding` are null and their ciphertexts are returned as `description_e2e` and `grounding_e2e`; the legacy `evidence` ID array remains available.
 
 The existing detector windows remain 10 minutes for high-importance rule memories, 30 minutes for follow-up memories, and 60 minutes for knowledge-gap memories. Queue stats include the existing 2,000-signal capacity and `capacity_rejected`/`stale_evidence_expired` counters; `capacity_rejected` is process-local and resets on restart, while signal state remains persisted. `ENABLE_COGNITIVE=1` enables full cognitive ticks; otherwise the operator-wide loop stays quiet. `POST /v1/runtime/unregister` revokes the primary executor but does not disable proposal generation. There is no per-account proposal pause in the current API.
 
 Drive signals are proposals, not authorization to execute. Acknowledgement requires the registered primary executor; High/Critical signals still require E2E registration. The executor must separately obtain explicit user confirmation before any external, destructive, or high-impact operation. These changes add no action execution privilege and do not change signal TTLs or scheduler cadence.
+
+Periodic saves do not acknowledge pending or delivered signals. The internal `explore` path acknowledges only after it has attempted its local-memory action; other proposals remain available to the inbox until an executor reports an outcome or the existing expiry rules apply.
 
 ## MCP Tools
 
