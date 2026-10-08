@@ -24,9 +24,12 @@
         } catch (e) { p = p || {}; }
         d.dataset.theme = id;
         d.style.colorScheme = M[id][0];
+        d.dataset.mode = M[id][0];
         var meta = document.querySelector('meta[name="theme-color"]');
         if (meta) meta.setAttribute('content', M[id][1]);
         d.dataset.nnBg = p.bgEnabled === false ? 'off' : 'on';
+        var A = ["teal", "blue", "violet", "rose", "amber", "green"];
+        if (typeof p.accent === 'string' && A.indexOf(p.accent) >= 0) d.dataset.accent = p.accent;
         if (typeof p.bgIntensity === 'number' && isFinite(p.bgIntensity)) {
           d.style.setProperty('--nn-intensity', String(Math.round(Math.min(100, Math.max(0, p.bgIntensity))) / 100));
         }

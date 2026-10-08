@@ -27,7 +27,7 @@ export default function Footer() {
             <div className="flex items-center gap-2 mb-4">
               <div 
                 className="w-8 h-8 rounded-lg flex items-center justify-center"
-                style={{ background: 'linear-gradient(135deg, #8b7ec8, #8b7ec8)' }}
+                style={{ background: 'linear-gradient(135deg, var(--accent-purple), var(--accent-purple))' }}
               >
                 <span className="text-white text-sm font-semibold">E</span>
               </div>
