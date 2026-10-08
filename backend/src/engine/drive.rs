@@ -556,6 +556,18 @@ pub fn default_status() -> DriveStatus {
     DriveStatus::Pending
 }
 
+/// The queue totals cannot reveal who executed a signal. Report only facts
+/// visible from the current inbox and retained queue entries.
+pub fn inbox_empty_reason(signal_count: usize, stats: &serde_json::Value) -> &'static str {
+    if signal_count > 0 {
+        "has_signals"
+    } else if stats.get("total").and_then(|value| value.as_u64()) == Some(0) {
+        "no_signals"
+    } else {
+        "no_pending"
+    }
+}
+
 /// Phase 2: 根据 urgency 计算默认 TTL(unix 秒), 信号创建时自动赋期
 /// Critical: 24h, High: 3天, Medium: 7天, Low: 14天
 pub fn default_expires_at(urgency: &DriveUrgency) -> Option<i64> {
@@ -1435,6 +1447,33 @@ mod will_valve_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inbox_empty_reason_does_not_claim_external_feedback_was_self_consumed() {
+        let queue = DriveQueue::new();
+        assert_eq!(inbox_empty_reason(0, &queue.stats()), "no_signals");
+
+        let executed = queue.enqueue(pending_signal(DriveIntent::Suggest, "External action"));
+        let rejected = queue.enqueue(pending_signal(DriveIntent::Warn, "External rejection"));
+        let feedback = |executed| DriveFeedback {
+            responded_at: 0,
+            executed,
+            outcome: "reported by the primary executor".into(),
+            reflection: None,
+        };
+        assert_eq!(queue.acknowledge(executed, feedback(true)), (true, true));
+        for _ in 0..=DriveQueue::max_retries() {
+            assert_eq!(queue.acknowledge(rejected, feedback(false)), (true, true));
+        }
+
+        assert!(queue.peek_unacked(10).is_empty());
+        let stats = queue.stats();
+        assert_eq!(stats["executed"], 1);
+        assert_eq!(stats["rejected"], 1);
+        assert_eq!(stats["total"], 2);
+        assert_eq!(inbox_empty_reason(0, &stats), "no_pending");
+        assert_eq!(inbox_empty_reason(1, &stats), "has_signals");
+    }
 
     fn pending_signal(intent_type: DriveIntent, description: &str) -> DriveSignal {
         DriveSignal {

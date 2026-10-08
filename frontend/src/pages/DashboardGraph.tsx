@@ -5,18 +5,10 @@ import { errMsg, getGraphExport, getGraphAnalysis, getNodeRelations, getKgQualit
 import type { KgQuality } from '@/lib/api';
 import { Search, ZoomIn, ZoomOut, RotateCcw, X, GitBranch, Tag, Activity, ChevronDown, ChevronUp, Route, Navigation, HeartPulse, Target, Orbit, Eye, ChevronsDownUp } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
+import { readGraphPalette, useGraphPalette, withAlpha, type GraphPalette } from '@/lib/graphTheme';
 import type { TranslationKey } from '@/i18n/translations';
 
-const CLUSTER_COLORS = [
-  // 青蓝能量谱（主）→ 紫罗兰 → 金红（辅），吞噬星空双能量配色
-  '#3ecfae', '#3ecfae', '#3ecfae', '#7ba3ff', '#3ecfae',
-  '#8b7ec8', '#8b7ec8', '#ec4899', '#8b7ec8', '#3ecfae',
-  '#3ecfae', '#22d3ee', '#818cf8', '#e879f9', '#facc15',
-];
-const EDGE_COLORS: Record<string, string> = {
-  similar: '#3ecfae', related: '#3ecfae', contradicts: '#ff3860',
-  precedes: '#3ecfae', contains: '#3ecfae',
-};
+// 聚类 / 关系颜色来自主题 token(src/lib/graphTheme.ts),主题切换时重新解析;默认主题与原硬编码值一致。
 const EDGE_LABEL_KEYS: Record<string, string> = {
   similar: 'dash.graph.edge.similar',
   related: 'dash.graph.edge.related',
@@ -50,6 +42,11 @@ interface SuperEdge { a: number; b: number; count: number; strength: number; }
 
 export default function DashboardGraph() {
   const { t } = useI18nContext();
+  // 主题调色板:JSX 直接用 palette;canvas 绘制循环每帧读 paletteRef(主题切换后下一帧即生效)
+  const palette = useGraphPalette();
+  const CLUSTER_COLORS = palette.cluster;
+  const EDGE_COLORS = palette.edge;
+  const paletteRef = useRef<GraphPalette>(readGraphPalette());
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -111,6 +108,7 @@ export default function DashboardGraph() {
   const hoverRef = useRef<HoverInfo | null>(null);
   const selectedNodeRef = useRef<SNode | null>(null);
   const drawRef = useRef<(() => void) | null>(null);
+  useEffect(() => { paletteRef.current = palette; drawRef.current?.(); }, [palette]);
   const frameRef = useRef(0);
   const rafRef = useRef(0);
   const dimsRef = useRef({ w: 1200, h: 720 }); // 自适应容器尺寸
@@ -391,13 +389,16 @@ export default function DashboardGraph() {
     }
 
     function draw() {
+      const P = paletteRef.current;
+      const CLUSTER_COLORS = P.cluster;
+      const EDGE_COLORS = P.edge;
       const { w: W, h: H } = dimsRef.current;
       // 完全透明 clearRect — 让底层 SacredBackground（神经网络+星尘+扫描线）直接透出
       ctx.clearRect(0, 0, W, H);
 
       // 六层圆柱体分层线(语义层级可视化) — 极低透明度，不遮挡活体背景
       const layerNames = ['Identity', 'Cycle', 'Service', 'Cognitive', 'Relation', 'Instinct'];
-      const layerColors = ["rgba(62,207,174,0.02)", "rgba(62,207,174,0.017)", "rgba(90,154,140,0.016)", "rgba(139,126,200,0.015)", "rgba(139,126,200,0.013)", "rgba(230,200,120,0.012)"];
+      const layerColors = [withAlpha(P.accent, 0.02), withAlpha(P.accent, 0.017), withAlpha(P.tertiary, 0.016), withAlpha(P.purple, 0.015), withAlpha(P.purple, 0.013), withAlpha(P.gold, 0.012)];
       const H0 = 600;
       const lh = (H0 - 80) / 6;
       ctx.font = "500 10px JetBrains Mono, monospace";
@@ -409,7 +410,7 @@ export default function DashboardGraph() {
         const screenY = ly * z + oy;
         ctx.fillStyle = layerColors[li];
         ctx.fillRect(0, screenY - lh * z / 2, W, lh * z);
-        ctx.fillStyle = 'rgba(62,207,174,0.18)';
+        ctx.fillStyle = withAlpha(P.accent, 0.18);
         ctx.fillText(layerNames[li], 8, screenY);
       }
 
@@ -492,7 +493,7 @@ export default function DashboardGraph() {
         if (vis && !vis.has(e.s) && !vis.has(e.t)) continue;
         // 焦点模式下，跨簇边非高亮的全暗
         if (hasFocus && !highlightSet!.has(e.s) && !highlightSet!.has(e.t)) continue;
-        const ec = EDGE_COLORS[e.type] || '#3ecfae';
+        const ec = EDGE_COLORS[e.type] || P.accent;
         // 渐变边
         const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
         grad.addColorStop(0, ec + '15');
@@ -517,7 +518,7 @@ export default function DashboardGraph() {
         const isHv = hvNode && (hvNode.idx === e.s || hvNode.idx === e.t);
         const isSelEdge = sel && (sel.idx === e.s || sel.idx === e.t);
         const isHwy = e.hits > 0;
-        const ec = EDGE_COLORS[e.type] || '#3ecfae';
+        const ec = EDGE_COLORS[e.type] || P.accent;
         // 焦点模式 dim 逻辑
         const edgeKey = `${Math.min(e.s, e.t)}-${Math.max(e.s, e.t)}`;
         const isPathEdge = pathEdges && pathEdges.has(edgeKey);
@@ -528,9 +529,9 @@ export default function DashboardGraph() {
           // 路径边：金色高亮
           ctx.globalAlpha = 0.9;
           ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-          ctx.strokeStyle = "#e6c878";
+          ctx.strokeStyle = P.gold;
           ctx.lineWidth = 2.5;
-          ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 8;
+          ctx.shadowColor = P.path; ctx.shadowBlur = 8;
           ctx.stroke();
           ctx.shadowBlur = 0;
           // 路径流动粒子
@@ -598,7 +599,7 @@ export default function DashboardGraph() {
         const a = ns[e.s], b = ns[e.t]; if (!a || !b) continue;
         if (ov && eff && (!eff.has(a.cluster) || !eff.has(b.cluster))) continue;
         if (vis && !vis.has(e.s) && !vis.has(e.t)) continue;
-        const ec = EDGE_COLORS[e.type] || '#3ecfae';
+        const ec = EDGE_COLORS[e.type] || P.accent;
         const seed = ((e.s * 73856093) ^ (e.t * 19349663)) >>> 0;
         const phase = (seed % 1000) / 1000;
         // 跨簇边 ~3% 时间放电（长程连接，偶尔脉冲）
@@ -624,7 +625,7 @@ export default function DashboardGraph() {
           if (!sp || !eff.has(n.cluster) || !sp.visible.has(n.idx)) continue;
         }
         const dim = (vis && !vis.has(n.idx)) || (sc !== null && n.cluster !== sc);
-        const color = n.cluster >= 0 ? CLUSTER_COLORS[n.cluster % CLUSTER_COLORS.length] : '#6b7280';
+        const color = n.cluster >= 0 ? CLUSTER_COLORS[n.cluster % CLUSTER_COLORS.length] : P.muted;
         const isHv = hvNode?.idx === n.idx; const isSel = sel?.idx === n.idx;
         // 路径起点/终点标记
         const isPathEndpoint = curPathStart === n.idx || (curPath && curPath[curPath.length - 1] === n.idx);
@@ -705,9 +706,9 @@ export default function DashboardGraph() {
             const ty = n.y + 3;
             ctx.globalAlpha = isHv ? 0.85 : 0.62;
             ctx.beginPath(); ctx.roundRect(n.x + r + 2, ty - 9, tw + 8, 13, 4);
-            ctx.fillStyle = 'rgba(8,10,18,0.8)'; ctx.fill();
+            ctx.fillStyle = `rgba(${P.labelBg},0.8)`; ctx.fill();
             ctx.globalAlpha = isHv ? 1 : 0.88;
-            ctx.fillStyle = isHv ? '#f0f0f5' : color;
+            ctx.fillStyle = isHv ? P.labelText : color;
             ctx.shadowColor = color;
             ctx.shadowBlur = isHv ? 8 : 4;
             ctx.fillText(labelText, n.x + r + 6, ty);
@@ -724,7 +725,7 @@ export default function DashboardGraph() {
         for (const sp of superNodesRef.current) {
           if (sp.memberCount === 0) continue;
           const c = cents.get(sp.ci); if (!c) continue;
-          const color = sp.ci >= 0 ? CLUSTER_COLORS[sp.ci % CLUSTER_COLORS.length] : '#6b7280';
+          const color = sp.ci >= 0 ? CLUSTER_COLORS[sp.ci % CLUSTER_COLORS.length] : P.muted;
           const isExp = eff.has(sp.ci);
           const isHov = superHoverRef.current === sp.ci;
           if (!isExp) {
@@ -761,9 +762,9 @@ export default function DashboardGraph() {
             const ltw = ctx.measureText(labelText).width;
             ctx.globalAlpha = 0.85;
             ctx.beginPath(); ctx.roundRect(c.x - ltw / 2 - 7, c.y - rr - 12 - 10, ltw + 14, 15, 5);
-            ctx.fillStyle = 'rgba(8,10,18,0.82)'; ctx.fill();
+            ctx.fillStyle = `rgba(${P.labelBg},0.82)`; ctx.fill();
             ctx.globalAlpha = 1;
-            ctx.fillStyle = '#f0f0f5';
+            ctx.fillStyle = P.labelText;
             ctx.shadowColor = color; ctx.shadowBlur = isHov ? 12 : 6;
             ctx.fillText(labelText, c.x, c.y - rr - 12);
             ctx.shadowBlur = 0;
@@ -772,7 +773,7 @@ export default function DashboardGraph() {
             const btw = ctx.measureText(badge).width;
             ctx.globalAlpha = 0.72;
             ctx.beginPath(); ctx.roundRect(c.x - btw / 2 - 6, c.y + rr + 16 - 9, btw + 12, 13, 4);
-            ctx.fillStyle = 'rgba(8,10,18,0.82)'; ctx.fill();
+            ctx.fillStyle = `rgba(${P.labelBg},0.82)`; ctx.fill();
             ctx.globalAlpha = 0.95;
             ctx.fillStyle = color;
             ctx.fillText(badge, c.x, c.y + rr + 16);
@@ -815,16 +816,16 @@ export default function DashboardGraph() {
           const cxp = (pa.x + pb.x) / 2 - (dy / d) * bow, cyp = (pa.y + pb.y) / 2 + (dx / d) * bow;
           const hov = superHoverRef.current === se.a || superHoverRef.current === se.b;
           const strengthN = se.count / maxCnt;
-          const ca = se.a >= 0 ? CLUSTER_COLORS[se.a % CLUSTER_COLORS.length] : '#6b7280';
-          const cb2 = se.b >= 0 ? CLUSTER_COLORS[se.b % CLUSTER_COLORS.length] : '#6b7280';
+          const ca = se.a >= 0 ? CLUSTER_COLORS[se.a % CLUSTER_COLORS.length] : P.muted;
+          const cb2 = se.b >= 0 ? CLUSTER_COLORS[se.b % CLUSTER_COLORS.length] : P.muted;
           const grad = ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
-          grad.addColorStop(0, ca + '80'); grad.addColorStop(0.5, '#3ecfaeaa'); grad.addColorStop(1, cb2 + '80');
+          grad.addColorStop(0, ca + '80'); grad.addColorStop(0.5, P.accent + 'aa'); grad.addColorStop(1, cb2 + '80');
           const lw = hov ? 3.4 : 2 + strengthN * 3.5;
           // 底层彩色宽线(光缆皮)
           ctx.globalAlpha = Math.min((0.2 + 0.5 * strengthN) * (hov ? 2 : 1), 0.92);
           ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.quadraticCurveTo(cxp, cyp, pb.x, pb.y);
           ctx.strokeStyle = grad; ctx.lineWidth = lw;
-          ctx.shadowColor = '#3ecfae'; ctx.shadowBlur = hov ? 14 : 6 + strengthN * 6;
+          ctx.shadowColor = P.accent; ctx.shadowBlur = hov ? 14 : 6 + strengthN * 6;
           ctx.stroke();
           // 上层白色芯线(光缆芯) — 在任何辉光背景上仍可读
           ctx.globalAlpha = Math.min((0.3 + 0.35 * strengthN) * (hov ? 1.6 : 1), 0.85);
@@ -841,7 +842,7 @@ export default function DashboardGraph() {
             const qpx = (1 - p) * (1 - p) * pa.x + 2 * (1 - p) * p * cxp + p * p * pb.x;
             const qpy = (1 - p) * (1 - p) * pa.y + 2 * (1 - p) * p * cyp + p * p * pb.y;
             ctx.globalAlpha = 0.5;
-            ctx.beginPath(); ctx.arc(qpx, qpy, 6.5, 0, Math.PI * 2); ctx.fillStyle = '#3ecfae'; ctx.fill();
+            ctx.beginPath(); ctx.arc(qpx, qpy, 6.5, 0, Math.PI * 2); ctx.fillStyle = P.accent; ctx.fill();
             ctx.globalAlpha = 0.95;
             ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 8;
             ctx.beginPath(); ctx.arc(qpx, qpy, 2.6, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill();
@@ -1143,10 +1144,10 @@ export default function DashboardGraph() {
       }}>
         {error ? (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ ...glassPanel, textAlign: 'center', padding: 40, color: '#f87171', maxWidth: 400 }}>
+            <div style={{ ...glassPanel, textAlign: 'center', padding: 40, color: 'var(--danger-red)', maxWidth: 400 }}>
               <p style={{ marginBottom: 12 }}>{error}</p>
               <button onClick={() => { setError(''); setLoading(true); refresh(); }}
-                style={{ background: 'rgba(62,207,174,0.12)', color: 'var(--accent-cyan-bright)', border: '1px solid rgba(62,207,174,0.3)', padding: '8px 20px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-heading)' }}>
+                style={{ background: 'rgba(var(--accent-cyan-rgb), 0.12)', color: 'var(--accent-cyan-bright)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.3)', padding: '8px 20px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-heading)' }}>
                 {t('dash.graph.retry')}
               </button>
             </div>
@@ -1183,17 +1184,17 @@ export default function DashboardGraph() {
               {/* 第二行：模式切换 + 搜索 + 缩放 + 重置 */}
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                 {/* 总览/观测 双模式(渐进披露 vs 全量仪器观) */}
-                <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(62,207,174,0.15)' }} title={t('dash.graph.mode.hint')}>
+                <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(var(--accent-cyan-rgb), 0.15)' }} title={t('dash.graph.mode.hint')}>
                   <button onClick={() => switchMode('overview')} style={{
                     display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', cursor: 'pointer',
-                    background: viewMode === 'overview' ? 'rgba(62,207,174,0.16)' : 'rgba(62,207,174,0.03)',
+                    background: viewMode === 'overview' ? 'rgba(var(--accent-cyan-rgb), 0.16)' : 'rgba(var(--accent-cyan-rgb), 0.03)',
                     border: 'none', color: viewMode === 'overview' ? 'var(--accent-cyan-bright)' : 'var(--text-tertiary)',
                     fontSize: 11, fontFamily: 'var(--font-heading)', fontWeight: 600, letterSpacing: '0.05em',
                   }}><Orbit size={12} />{t('dash.graph.mode.overview')}</button>
                   <button onClick={() => switchMode('observe')} style={{
                     display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', cursor: 'pointer',
-                    background: viewMode === 'observe' ? 'rgba(62,207,174,0.16)' : 'rgba(62,207,174,0.03)',
-                    border: 'none', borderLeft: '1px solid rgba(62,207,174,0.12)',
+                    background: viewMode === 'observe' ? 'rgba(var(--accent-cyan-rgb), 0.16)' : 'rgba(var(--accent-cyan-rgb), 0.03)',
+                    border: 'none', borderLeft: '1px solid rgba(var(--accent-cyan-rgb), 0.12)',
                     color: viewMode === 'observe' ? 'var(--accent-cyan-bright)' : 'var(--text-tertiary)',
                     fontSize: 11, fontFamily: 'var(--font-heading)', fontWeight: 600, letterSpacing: '0.05em',
                   }}><Eye size={12} />{t('dash.graph.mode.observe')}</button>
@@ -1201,7 +1202,7 @@ export default function DashboardGraph() {
                 <div style={{ position: 'relative', flex: '0 1 160px' }}>
                   <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
                   <input type="text" value={searchQ} onChange={e => { searchQRef.current = e.target.value; setSearchQ(e.target.value); refresh(); }} placeholder={t('dash.graph.filter.placeholder')}
-                    style={{ width: '100%', background: 'rgba(62,207,174,0.04)', color: 'var(--text-primary)', border: '1px solid rgba(62,207,174,0.12)', borderRadius: 8, padding: '5px 8px 5px 28px', fontSize: 12, boxSizing: 'border-box', outline: 'none' }} />
+                    style={{ width: '100%', background: 'rgba(var(--accent-cyan-rgb), 0.04)', color: 'var(--text-primary)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.12)', borderRadius: 8, padding: '5px 8px 5px 28px', fontSize: 12, boxSizing: 'border-box', outline: 'none' }} />
                 </div>
                 <button onClick={() => { zoomRef.current = Math.min(8, zoomRef.current * 1.25); setZoom(zoomRef.current); refresh(); }} style={tb}><ZoomIn size={14} /></button>
                 <button onClick={() => { zoomRef.current = Math.max(0.2, zoomRef.current * 0.8); setZoom(zoomRef.current); refresh(); }} style={tb}><ZoomOut size={14} /></button>
@@ -1220,7 +1221,7 @@ export default function DashboardGraph() {
                     try { const q = await getKgQuality(100); setKgQuality(q); } catch { /* 静默 */ }
                     setKgLoading(false);
                   }}
-                  style={{ ...tb, color: kgQuality ? '#3ecfae' : 'var(--accent-cyan-bright)', borderColor: kgQuality ? 'rgba(52,211,153,0.3)' : 'rgba(62,207,174,0.12)' }}
+                  style={{ ...tb, color: kgQuality ? 'var(--accent-cyan)' : 'var(--accent-cyan-bright)', borderColor: kgQuality ? 'rgba(52,211,153,0.3)' : 'rgba(var(--accent-cyan-rgb), 0.12)' }}
                   title="图谱健康评估"
                 >
                   {kgLoading ? <Activity size={14} className="animate-spin" /> : <HeartPulse size={14} />}
@@ -1253,8 +1254,8 @@ export default function DashboardGraph() {
                   <button onClick={() => { setSelectedNode(null); selectedNodeRef.current = null; }} style={{ color: 'var(--text-tertiary)', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={15} /></button>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 12 }}>
-                  <Metric label={t('dash.graph.node.relations')} value={String(nodeRelationsDetail?.degree ?? nodeRelations)} color="#3ecfae" />
-                  <Metric label={t('dash.graph.node.mass')} value={selectedNode.mass.toFixed(2)} color="#8b7ec8" />
+                  <Metric label={t('dash.graph.node.relations')} value={String(nodeRelationsDetail?.degree ?? nodeRelations)} color={palette.accent} />
+                  <Metric label={t('dash.graph.node.mass')} value={selectedNode.mass.toFixed(2)} color={palette.purple} />
                 </div>
 
                 {/* 关系类型分布（能力1：调 getNodeRelations 的真实数据）*/}
@@ -1264,7 +1265,7 @@ export default function DashboardGraph() {
                     {Object.entries(nodeRelationsDetail.typeDist).sort((a, b) => b[1] - a[1]).map(([type, count]) => {
                       const total = nodeRelationsDetail.degree || 1;
                       const pct = (count / total) * 100;
-                      const color = EDGE_COLORS[type] || '#3ecfae';
+                      const color = EDGE_COLORS[type] || palette.accent;
                       const label = EDGE_LABEL_KEYS[type] ? t(EDGE_LABEL_KEYS[type] as TranslationKey) : type;
                       return (
                         <div key={type} style={{ marginBottom: 4 }}>
@@ -1272,7 +1273,7 @@ export default function DashboardGraph() {
                             <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{label}</span>
                             <span style={{ color, fontSize: 10, fontFamily: 'var(--font-mono)' }}>{count}</span>
                           </div>
-                          <div style={{ height: 4, background: 'rgba(62,207,174,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                          <div style={{ height: 4, background: 'rgba(var(--accent-cyan-rgb), 0.06)', borderRadius: 2, overflow: 'hidden' }}>
                             <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 2, boxShadow: `0 0 6px ${color}` }} />
                           </div>
                         </div>
@@ -1286,7 +1287,7 @@ export default function DashboardGraph() {
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textTransform: 'uppercase', marginBottom: 6, fontFamily: 'var(--font-heading)', letterSpacing: '0.05em' }}><Target size={11} /> 最强关联</div>
                     {nodeRelationsDetail.strongest.slice(0, 3).map((s, i) => {
-                      const color = EDGE_COLORS[s.type] || '#3ecfae';
+                      const color = EDGE_COLORS[s.type] || palette.accent;
                       return (
                         <button key={i} onClick={() => {
                           // 点击最强关联 → 定位到目标节点(总览下先展开其所在簇)
@@ -1295,7 +1296,7 @@ export default function DashboardGraph() {
                             if (viewModeRef.current === 'overview' && !expandedRef.current.has(targetNode.cluster)) toggleExpand(targetNode.cluster);
                             focusNode(targetNode.idx);
                           }
-                        }} style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', marginBottom: 3, padding: '4px 6px', background: 'rgba(62,207,174,0.03)', border: '1px solid rgba(62,207,174,0.08)', borderRadius: 6, cursor: 'pointer', textAlign: 'left' }}>
+                        }} style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', marginBottom: 3, padding: '4px 6px', background: 'rgba(var(--accent-cyan-rgb), 0.03)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.08)', borderRadius: 6, cursor: 'pointer', textAlign: 'left' }}>
                           <span style={{ color, fontSize: 9, padding: '1px 4px', borderRadius: 3, background: `${color}15` }}>{EDGE_LABEL_KEYS[s.type] ? t(EDGE_LABEL_KEYS[s.type] as TranslationKey) : s.type}</span>
                           <span style={{ color: 'var(--text-secondary)', fontSize: 10, fontFamily: 'var(--font-mono)', flex: 1 }}>#{s.target}</span>
                           <span style={{ color: 'var(--accent-cyan-bright)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>{s.strength.toFixed(2)}</span>
@@ -1322,10 +1323,10 @@ export default function DashboardGraph() {
                   }}
                   style={{
                     width: '100%', marginBottom: 12, padding: '8px 12px',
-                    background: pathMode ? 'rgba(255,215,0,0.12)' : 'rgba(62,207,174,0.06)',
-                    border: `1px solid ${pathMode ? 'rgba(255,215,0,0.4)' : 'rgba(62,207,174,0.2)'}`,
+                    background: pathMode ? 'rgba(255,215,0,0.12)' : 'rgba(var(--accent-cyan-rgb), 0.06)',
+                    border: `1px solid ${pathMode ? 'rgba(255,215,0,0.4)' : 'rgba(var(--accent-cyan-rgb), 0.2)'}`,
                     borderRadius: 8, cursor: 'pointer',
-                    color: pathMode ? '#FFD700' : 'var(--accent-cyan-bright)',
+                    color: pathMode ? 'var(--graph-path)' : 'var(--accent-cyan-bright)',
                     fontSize: 11, fontFamily: 'var(--font-heading)', fontWeight: 600,
                     letterSpacing: '0.05em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                   }}
@@ -1337,12 +1338,12 @@ export default function DashboardGraph() {
                 {selectedNode.labels.length > 0 && (
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textTransform: 'uppercase', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-heading)', letterSpacing: '0.05em' }}><Tag size={11} /> {t('dash.graph.node.labels')}</div>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>{selectedNode.labels.map(l => <span key={l} style={{ background: 'rgba(62,207,174,0.08)', color: 'var(--accent-cyan-bright)', fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(62,207,174,0.15)' }}>{l}</span>)}</div>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>{selectedNode.labels.map(l => <span key={l} style={{ background: 'rgba(var(--accent-cyan-rgb), 0.08)', color: 'var(--accent-cyan-bright)', fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(var(--accent-cyan-rgb), 0.15)' }}>{l}</span>)}</div>
                   </div>
                 )}
                 <div>
                   <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textTransform: 'uppercase', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-heading)', letterSpacing: '0.05em' }}><Activity size={11} /> {t('dash.graph.node.content')}</div>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto', background: 'rgba(0,0,0,0.25)', padding: 10, borderRadius: 8, margin: 0, border: '1px solid rgba(62,207,174,0.06)' }}>{selectedNode.content.slice(0, 500)}{selectedNode.content.length > 500 ? '...' : ''}</p>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto', background: 'rgba(0,0,0,0.25)', padding: 10, borderRadius: 8, margin: 0, border: '1px solid rgba(var(--accent-cyan-rgb), 0.06)' }}>{selectedNode.content.slice(0, 500)}{selectedNode.content.length > 500 ? '...' : ''}</p>
                 </div>
               </div>
             )}
@@ -1357,21 +1358,21 @@ export default function DashboardGraph() {
                 {pathMode ? (
                   <>
                     <Navigation size={14} color="#FFD700" />
-                    <span style={{ color: '#FFD700', fontSize: 11, fontFamily: 'var(--font-heading)', letterSpacing: '0.05em' }}>路径模式：点击目标节点</span>
+                    <span style={{ color: 'var(--graph-path)', fontSize: 11, fontFamily: 'var(--font-heading)', letterSpacing: '0.05em' }}>路径模式：点击目标节点</span>
                     <button onClick={() => { setPathMode(false); pathModeRef.current = false; pathStartRef.current = null; setPathStart(null); refresh(); }} style={{ color: 'var(--text-tertiary)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={13} /></button>
                   </>
                 ) : pathResult ? (
                   <>
                     <Route size={14} color="#FFD700" />
                     <span style={{ color: 'var(--text-primary)', fontSize: 11, fontFamily: 'var(--font-heading)' }}>
-                      路径长度：<span style={{ color: '#FFD700', fontFamily: 'var(--font-mono)' }}>{pathResult.length - 1}</span> 跳 · 经 <span style={{ color: '#FFD700', fontFamily: 'var(--font-mono)' }}>{pathResult.length}</span> 节点
+                      路径长度：<span style={{ color: 'var(--graph-path)', fontFamily: 'var(--font-mono)' }}>{pathResult.length - 1}</span> 跳 · 经 <span style={{ color: 'var(--graph-path)', fontFamily: 'var(--font-mono)' }}>{pathResult.length}</span> 节点
                     </span>
                     <button onClick={() => { pathResultRef.current = null; setPathResult(null); pathStartRef.current = null; setPathStart(null); refresh(); }} style={{ color: 'var(--text-tertiary)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={13} /></button>
                   </>
                 ) : pathNotFound ? (
                   <>
                     <Route size={14} color="#f87171" />
-                    <span style={{ color: '#f87171', fontSize: 11, fontFamily: 'var(--font-heading)' }}>无关联路径（超过 6 跳或不连通）</span>
+                    <span style={{ color: 'var(--danger-red)', fontSize: 11, fontFamily: 'var(--font-heading)' }}>无关联路径（超过 6 跳或不连通）</span>
                   </>
                 ) : null}
               </div>
@@ -1397,10 +1398,10 @@ export default function DashboardGraph() {
                     <button key={m.id} onClick={() => {
                       const node = nodesRef.current.find(n => n.id === m.id);
                       if (node) focusNode(node.idx);
-                    }} style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '6px 8px', background: 'rgba(62,207,174,0.03)', border: '1px solid rgba(62,207,174,0.08)', borderRadius: 6, cursor: 'pointer', textAlign: 'left' }}>
+                    }} style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '6px 8px', background: 'rgba(var(--accent-cyan-rgb), 0.03)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.08)', borderRadius: 6, cursor: 'pointer', textAlign: 'left' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ color: 'var(--accent-cyan-bright)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>#{m.id}</span>
-                        {m.labels.slice(0, 2).map(l => <span key={l} style={{ color: 'var(--text-tertiary)', fontSize: 9, padding: '0 4px', borderRadius: 3, background: 'rgba(62,207,174,0.06)' }}>{l}</span>)}
+                        {m.labels.slice(0, 2).map(l => <span key={l} style={{ color: 'var(--text-tertiary)', fontSize: 9, padding: '0 4px', borderRadius: 3, background: 'rgba(var(--accent-cyan-rgb), 0.06)' }}>{l}</span>)}
                       </div>
                       <span style={{ color: 'var(--text-secondary)', fontSize: 10, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.content.slice(0, 60)}</span>
                     </button>
@@ -1427,7 +1428,7 @@ export default function DashboardGraph() {
                 </div>
                 {/* 综合评分 */}
                 <div style={{ textAlign: 'center', marginBottom: 12 }}>
-                  <div style={{ fontSize: 36, fontWeight: 800, fontFamily: 'var(--font-display)', color: kgQuality.density_score >= 50 ? '#3ecfae' : (kgQuality.density_score >= 25 ? '#3ecfae' : '#f87171') }}>
+                  <div style={{ fontSize: 36, fontWeight: 800, fontFamily: 'var(--font-display)', color: kgQuality.density_score >= 50 ? 'var(--accent-cyan)' : (kgQuality.density_score >= 25 ? 'var(--accent-cyan)' : 'var(--danger-red)') }}>
                     {kgQuality.density_score}
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--text-tertiary)', fontFamily: 'var(--font-heading)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
@@ -1436,19 +1437,19 @@ export default function DashboardGraph() {
                 </div>
                 {/* 指标网格 */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
-                  <div style={{ background: 'rgba(62,207,174,0.04)', borderRadius: 6, padding: '5px 7px' }}>
+                  <div style={{ background: 'rgba(var(--accent-cyan-rgb), 0.04)', borderRadius: 6, padding: '5px 7px' }}>
                     <div style={{ color: 'var(--text-tertiary)', fontSize: 9 }}>孤立率</div>
-                    <div style={{ color: kgQuality.orphan_rate_pct > 30 ? '#f87171' : 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-mono)' }}>{kgQuality.orphan_rate_pct.toFixed(1)}%</div>
+                    <div style={{ color: kgQuality.orphan_rate_pct > 30 ? 'var(--danger-red)' : 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-mono)' }}>{kgQuality.orphan_rate_pct.toFixed(1)}%</div>
                   </div>
-                  <div style={{ background: 'rgba(62,207,174,0.04)', borderRadius: 6, padding: '5px 7px' }}>
+                  <div style={{ background: 'rgba(var(--accent-cyan-rgb), 0.04)', borderRadius: 6, padding: '5px 7px' }}>
                     <div style={{ color: 'var(--text-tertiary)', fontSize: 9 }}>平均关系</div>
                     <div style={{ color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-mono)' }}>{kgQuality.relation_density.avg_per_memory.toFixed(1)}</div>
                   </div>
-                  <div style={{ background: 'rgba(62,207,174,0.04)', borderRadius: 6, padding: '5px 7px' }}>
+                  <div style={{ background: 'rgba(var(--accent-cyan-rgb), 0.04)', borderRadius: 6, padding: '5px 7px' }}>
                     <div style={{ color: 'var(--text-tertiary)', fontSize: 9 }}>聚类数</div>
                     <div style={{ color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-mono)' }}>{kgQuality.total_clusters}</div>
                   </div>
-                  <div style={{ background: 'rgba(62,207,174,0.04)', borderRadius: 6, padding: '5px 7px' }}>
+                  <div style={{ background: 'rgba(var(--accent-cyan-rgb), 0.04)', borderRadius: 6, padding: '5px 7px' }}>
                     <div style={{ color: 'var(--text-tertiary)', fontSize: 9 }}>平均强度</div>
                     <div style={{ color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-mono)' }}>{kgQuality.strength_distribution.avg_strength.toFixed(2)}</div>
                   </div>
@@ -1457,9 +1458,9 @@ export default function DashboardGraph() {
                 <div>
                   <div style={{ color: 'var(--text-tertiary)', fontSize: 9, marginBottom: 4 }}>关系强度分布</div>
                   <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ width: `${kgQuality.strength_distribution.strong_ge_0_5}%`, background: '#3ecfae' }} title={`强 ${kgQuality.strength_distribution.strong_ge_0_5}%`} />
-                    <div style={{ width: `${kgQuality.strength_distribution.medium}%`, background: '#3ecfae' }} title={`中 ${kgQuality.strength_distribution.medium}%`} />
-                    <div style={{ width: `${kgQuality.strength_distribution.weak_lt_0_2}%`, background: '#f87171' }} title={`弱 ${kgQuality.strength_distribution.weak_lt_0_2}%`} />
+                    <div style={{ width: `${kgQuality.strength_distribution.strong_ge_0_5}%`, background: 'var(--accent-cyan)' }} title={`强 ${kgQuality.strength_distribution.strong_ge_0_5}%`} />
+                    <div style={{ width: `${kgQuality.strength_distribution.medium}%`, background: 'var(--accent-cyan)' }} title={`中 ${kgQuality.strength_distribution.medium}%`} />
+                    <div style={{ width: `${kgQuality.strength_distribution.weak_lt_0_2}%`, background: 'var(--danger-red)' }} title={`弱 ${kgQuality.strength_distribution.weak_lt_0_2}%`} />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3, fontSize: 8, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>
                     <span>强 {kgQuality.strength_distribution.strong_ge_0_5}%</span>
@@ -1527,7 +1528,7 @@ export default function DashboardGraph() {
                 {stats.highways > 0 && <Kpi label={t('dash.graph.stats.highways')} value={String(stats.highways)} />}
                 <Kpi label={t('dash.graph.kpi.expanded')} value={`${expandedClusters.size}/${stats.clusters}`} />
                 <button onClick={() => { expandedRef.current = new Set(); setExpandedClusters(new Set()); refresh(); }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(62,207,174,0.06)', border: '1px solid rgba(62,207,174,0.18)', color: 'var(--accent-cyan-bright)', padding: '4px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 10, fontFamily: 'var(--font-heading)', letterSpacing: '0.05em' }}>
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(var(--accent-cyan-rgb), 0.06)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.18)', color: 'var(--accent-cyan-bright)', padding: '4px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 10, fontFamily: 'var(--font-heading)', letterSpacing: '0.05em' }}>
                   <ChevronsDownUp size={12} />{t('dash.graph.kpi.collapseAll')}
                 </button>
               </div>
@@ -1569,7 +1570,7 @@ export default function DashboardGraph() {
                             return (
                               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
                                 <span style={{ color: 'var(--text-secondary)', fontSize: 11, minWidth: 80, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.label}</span>
-                                <div style={{ flex: 1, height: 5, background: 'rgba(62,207,174,0.06)', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${(c.member_count / mx) * 100}%`, height: '100%', background: CLUSTER_COLORS[i % CLUSTER_COLORS.length], borderRadius: 3, boxShadow: `0 0 8px ${CLUSTER_COLORS[i % CLUSTER_COLORS.length]}` }} /></div>
+                                <div style={{ flex: 1, height: 5, background: 'rgba(var(--accent-cyan-rgb), 0.06)', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${(c.member_count / mx) * 100}%`, height: '100%', background: CLUSTER_COLORS[i % CLUSTER_COLORS.length], borderRadius: 3, boxShadow: `0 0 8px ${CLUSTER_COLORS[i % CLUSTER_COLORS.length]}` }} /></div>
                                 <span style={{ color: 'var(--text-tertiary)', fontSize: 10, minWidth: 40, fontFamily: 'var(--font-mono)' }}>{c.member_count}</span>
                               </div>
                             );
@@ -1583,7 +1584,7 @@ export default function DashboardGraph() {
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                           {clusterInfo.slice(0, 10).map((c, i) => (
                             <button key={i} onClick={() => { const v = selectedCluster === i ? null : i; selectedClusterRef.current = v; setSelectedCluster(v); setSelectedNode(null); refresh(); setStatsPanelOpen(false); }}
-                              style={{ background: selectedCluster === i ? `${CLUSTER_COLORS[i % CLUSTER_COLORS.length]}12` : 'rgba(62,207,174,0.02)', border: `1px solid ${selectedCluster === i ? `${CLUSTER_COLORS[i % CLUSTER_COLORS.length]}40` : 'rgba(62,207,174,0.08)'}`, borderRadius: 8, padding: 7, cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
+                              style={{ background: selectedCluster === i ? `${CLUSTER_COLORS[i % CLUSTER_COLORS.length]}12` : 'rgba(var(--accent-cyan-rgb), 0.02)', border: `1px solid ${selectedCluster === i ? `${CLUSTER_COLORS[i % CLUSTER_COLORS.length]}40` : 'rgba(var(--accent-cyan-rgb), 0.08)'}`, borderRadius: 8, padding: 7, cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
                                 <div style={{ width: 8, height: 8, borderRadius: 2, background: CLUSTER_COLORS[i % CLUSTER_COLORS.length] }} />
                                 <span style={{ color: 'var(--text-primary)', fontSize: 11, fontFamily: 'var(--font-mono)' }}>C{i + 1}</span>
@@ -1603,7 +1604,7 @@ export default function DashboardGraph() {
             {/* ── 总览: 超节点hover tooltip(标签+成员数+操作提示) ── */}
             {superHover && !dragging && (() => {
               const sp = superHover.sp;
-              const color = sp.ci >= 0 ? CLUSTER_COLORS[sp.ci % CLUSTER_COLORS.length] : '#6b7280';
+              const color = sp.ci >= 0 ? CLUSTER_COLORS[sp.ci % CLUSTER_COLORS.length] : palette.muted;
               const isExp = expandedClusters.has(sp.ci);
               return (
                 <div style={{ position: 'fixed', left: Math.min(superHover.x + 12, window.innerWidth - 280), top: superHover.y - 8, ...glassPanel, padding: '8px 12px', maxWidth: 260, pointerEvents: 'none', zIndex: 100 }}>
@@ -1634,7 +1635,7 @@ export default function DashboardGraph() {
                 <p style={{ color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.5, margin: 0, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{hover.node.content.slice(0, 200)}</p>
                 {hover.node.labels.length > 0 && (
                   <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 4 }}>
-                    {hover.node.labels.slice(0, 4).map(l => <span key={l} style={{ color: 'var(--accent-cyan-bright)', fontSize: 9, background: 'rgba(62,207,174,0.08)', padding: '1px 4px', borderRadius: 3 }}>{l}</span>)}
+                    {hover.node.labels.slice(0, 4).map(l => <span key={l} style={{ color: 'var(--accent-cyan-bright)', fontSize: 9, background: 'rgba(var(--accent-cyan-rgb), 0.08)', padding: '1px 4px', borderRadius: 3 }}>{l}</span>)}
                   </div>
                 )}
               </div>
@@ -1648,7 +1649,7 @@ export default function DashboardGraph() {
 
 const tb: React.CSSProperties = { background: 'rgba(62,207,174,0.05)', border: '1px solid rgba(62,207,174,0.12)', color: 'var(--accent-cyan-bright)', padding: 5, borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 function Metric({ label, value, color }: { label: string; value: string; color: string }) {
-  return <div style={{ background: `${color}0d`, border: `1px solid ${color}22`, borderRadius: 8, padding: '6px 8px', textAlign: 'center' }}><div style={{ color: '#6b7280', fontSize: 10, marginBottom: 2 }}>{label}</div><div style={{ color: '#f0f0f5', fontSize: 14, fontWeight: 600 }}>{value}</div></div>;
+  return <div style={{ background: `${color}0d`, border: `1px solid ${color}22`, borderRadius: 8, padding: '6px 8px', textAlign: 'center' }}><div style={{ color: 'var(--graph-muted)', fontSize: 10, marginBottom: 2 }}>{label}</div><div style={{ color: 'var(--graph-label-text)', fontSize: 14, fontWeight: 600 }}>{value}</div></div>;
 }
 // 总览KPI缎带项(数字徽章 — "数字代替渲染")
 function Kpi({ label, value }: { label: string; value: string }) {

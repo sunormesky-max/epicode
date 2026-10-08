@@ -31,7 +31,7 @@ export const THEMES: ThemeSpec[] = [
     summary: '暖纸底、橄榄墨。官网适合长文，控制台适合白天。',
     summaryEn: 'Warm paper and olive ink. Good for long reading on the site and daytime console work.',
     mode: 'light',
-    swatches: ['#f4efe6', '#fffaf3', '#1c1915', '#5e6c42'],
+    swatches: ['#f4efe6', '#fffaf3', '#1c1915', '#59673f'],
   },
   {
     id: 'meridian',
@@ -125,6 +125,8 @@ export function applyTheme(id: ThemeId) {
   const theme = THEMES.find((item) => item.id === id) ?? THEMES[0];
   document.documentElement.dataset.theme = theme.id;
   document.documentElement.style.colorScheme = theme.mode;
+  // 供强调色层区分浅/深取值(html[data-accent][data-mode="light"])
+  document.documentElement.dataset.mode = theme.mode;
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', theme.swatches[0]);
 }
@@ -140,6 +142,43 @@ export function setTheme(id: ThemeId) {
   const prefs = readThemePrefs();
   if (prefs.followSystem) writeThemePrefs({ ...prefs, followSystem: false });
   window.dispatchEvent(new CustomEvent('epicode-theme', { detail: id }));
+}
+
+/* ---------------- 强调色(语义层):可与任意浅/深主题组合 ---------------- */
+export type AccentId = 'theme' | 'teal' | 'blue' | 'violet' | 'rose' | 'amber' | 'green';
+
+export interface AccentSpec {
+  id: Exclude<AccentId, 'theme'>;
+  name: string;
+  nameEn: string;
+  /** 深色主题下的强调色(与 index.css 的 html[data-accent] 块一致,测试校验) */
+  dark: string;
+  /** 浅色主题下的强调色 */
+  light: string;
+}
+
+export const ACCENTS: AccentSpec[] = [
+  { id: 'teal', name: '青', nameEn: 'Teal', dark: '#2bb79b', light: '#186858' },
+  { id: 'blue', name: '蓝', nameEn: 'Blue', dark: '#68a7ee', light: '#135cae' },
+  { id: 'violet', name: '紫', nameEn: 'Violet', dark: '#af95ec', light: '#6837dc' },
+  { id: 'rose', name: '玫红', nameEn: 'Rose', dark: '#eb84a6', light: '#b11d4e' },
+  { id: 'amber', name: '琥珀', nameEn: 'Amber', dark: '#eb8d13', light: '#86500b' },
+  { id: 'green', name: '绿', nameEn: 'Green', dark: '#36ba62', light: '#1f6a38' },
+];
+
+export function isAccentId(value: unknown): value is AccentId {
+  return value === 'theme' || ACCENTS.some((a) => a.id === value);
+}
+
+export function accentName(accent: AccentSpec, lang: 'zh' | 'en'): string {
+  return lang === 'en' ? accent.nameEn : accent.name;
+}
+
+/** 把强调色写到 <html data-accent>;'theme' = 用主题自带强调色(移除属性)。 */
+export function applyAccent(accent: AccentId) {
+  const root = document.documentElement;
+  if (accent === 'theme') delete root.dataset.accent;
+  else root.dataset.accent = accent;
 }
 
 /* ---------------- 主题管理中心:偏好(跟随系统 / 背景动画) ---------------- */
@@ -163,6 +202,8 @@ export interface ThemePrefs {
   bgEnabled: boolean;
   /** 背景强度 0–100,乘在主题自带的 --nn-opacity 上 */
   bgIntensity: number;
+  /** 强调色;'theme' = 跟随主题。新增字段:旧版本解析时忽略,缺省时回落 'theme',存储格式向后兼容 */
+  accent: AccentId;
 }
 
 export const DEFAULT_THEME_PREFS: ThemePrefs = {
@@ -171,6 +212,7 @@ export const DEFAULT_THEME_PREFS: ThemePrefs = {
   dark: 'x-dark',
   bgEnabled: true,
   bgIntensity: 100,
+  accent: 'theme',
 };
 
 function modeOf(id: ThemeId): 'dark' | 'light' {
@@ -199,6 +241,7 @@ export function parseThemePrefs(raw: string | null): ThemePrefs {
     dark: pick(data.dark, 'dark', DEFAULT_THEME_PREFS.dark),
     bgEnabled: data.bgEnabled !== false,
     bgIntensity: intensity,
+    accent: isAccentId(data.accent) ? data.accent : DEFAULT_THEME_PREFS.accent,
   };
 }
 
@@ -247,6 +290,7 @@ export function applyThemePrefs(prefs: ThemePrefs = readThemePrefs()) {
   const id = resolveTheme(prefs, readStoredTheme(), darkQuery()?.matches ?? true);
   applyTheme(id);
   applyBackgroundPrefs(prefs);
+  applyAccent(prefs.accent);
   window.dispatchEvent(new CustomEvent('epicode-theme', { detail: id }));
   return id;
 }
@@ -273,6 +317,7 @@ export function initTheme() {
   const prefs = readThemePrefs();
   applyTheme(resolveTheme(prefs, readStoredTheme(), darkQuery()?.matches ?? true));
   applyBackgroundPrefs(prefs);
+  applyAccent(prefs.accent);
   darkQuery()?.addEventListener('change', () => {
     if (readThemePrefs().followSystem) applyThemePrefs();
   });

@@ -62,7 +62,7 @@ function EmotionPad({ emotion, t }: { emotion: EmotionState | null; t: (k: Trans
       {bars.map(b => (
         <div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', width: 12 }}>{b.label}</span>
-          <div style={{ flex: 1, height: 3, background: 'rgba(245,244,240,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ flex: 1, height: 3, background: 'rgba(var(--text-primary-rgb), 0.06)', borderRadius: 2, overflow: 'hidden' }}>
             <div style={{ width: `${Math.max(2, b.value * 100)}%`, height: '100%', background: b.color, transition: 'width 0.5s ease' }} />
           </div>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: b.color, width: 34, textAlign: 'right' }}>{b.value.toFixed(2)}</span>
@@ -269,7 +269,7 @@ export default function DashboardCognitive() {
           <div style={isMobile ? { borderLeft: '2px solid var(--accent-cyan)', paddingLeft: 12 } : { position: 'absolute', top: 40, left: 12, width: 190 }}>
             <p style={HUD_LABEL}><Activity size={10} style={{ verticalAlign: -1, marginRight: 6 }} />VITALS</p>
             <p style={{ ...HUD_VAL, marginTop: 8 }}>e=<span style={{ color: statusColor }}>{vitalsPending ? '—' : cog.energy.toLocaleString()}</span> / 10000</p>
-            <div style={{ height: 3, background: 'rgba(245,244,240,0.06)', borderRadius: 2, marginTop: 6, overflow: 'hidden' }}>
+            <div style={{ height: 3, background: 'rgba(var(--text-primary-rgb), 0.06)', borderRadius: 2, marginTop: 6, overflow: 'hidden' }}>
               <div style={{ width: `${vitalsPending ? 0 : Math.min(100, cog.energy / 10000 * 100)}%`, height: '100%', background: statusColor, transition: 'width 1s ease' }} />
             </div>
             <p style={{ ...HUD_VAL, marginTop: 10 }}>
@@ -352,11 +352,11 @@ export default function DashboardCognitive() {
           </p>
 
           {ackError && (
-            <p style={{ color: '#ff3860', fontSize: 11, marginBottom: 8, fontFamily: 'var(--font-mono)' }}>ack failed — {ackError}</p>
+            <p style={{ color: 'var(--accent-crimson)', fontSize: 11, marginBottom: 8, fontFamily: 'var(--font-mono)' }}>ack failed — {ackError}</p>
           )}
 
           {driveError ? (
-            <p style={{ color: '#ff3860', fontSize: 12, padding: '14px 0', background: 'rgba(255,56,96,0.05)', borderRadius: 8, border: '1px solid rgba(255,56,96,0.15)', textAlign: 'center' }}>
+            <p style={{ color: 'var(--accent-crimson)', fontSize: 12, padding: '14px 0', background: 'rgba(255,56,96,0.05)', borderRadius: 8, border: '1px solid rgba(255,56,96,0.15)', textAlign: 'center' }}>
               ⚠ Drive channel error (not an empty state): {driveError}
             </p>
           ) : driveSignals.length === 0 ? (
@@ -394,16 +394,16 @@ export default function DashboardCognitive() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
                         <span style={{ color, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: 'var(--font-mono)' }}>{sig.intent_type}</span>
-                        <span style={{ color: 'var(--text-tertiary)', fontSize: 9, padding: '1px 5px', borderRadius: 3, background: 'rgba(62,207,174,0.06)' }}>{urgencyLabel(sig.urgency)}</span>
+                        <span style={{ color: 'var(--text-tertiary)', fontSize: 9, padding: '1px 5px', borderRadius: 3, background: 'rgba(var(--accent-cyan-rgb), 0.06)' }}>{urgencyLabel(sig.urgency)}</span>
                         <span style={{ color: 'var(--text-tertiary)', fontSize: 9, fontFamily: 'var(--font-mono)' }}>#{sig.id}</span>
                         {sig.status !== 'pending' && (
-                          <span style={{ color: sig.status === 'executed' ? '#3ecfae' : sig.status === 'delivered' ? '#3ecfae' : 'var(--text-tertiary)', fontSize: 9 }}>{sig.status}</span>
+                          <span style={{ color: sig.status === 'executed' ? 'var(--accent-cyan)' : sig.status === 'delivered' ? 'var(--accent-cyan)' : 'var(--text-tertiary)', fontSize: 9 }}>{sig.status}</span>
                         )}
                         {typeof sig.retry_count === 'number' && sig.retry_count > 0 && (
                           <span style={{ color: 'var(--accent-cyan)', fontSize: 9 }} title="retry">↻{sig.retry_count}</span>
                         )}
                         {ttl !== null && ttl <= 10 && (sig.status === 'pending' || sig.status === 'delivered') && (
-                          <span style={{ color: ttl <= 0 ? '#ff3860' : '#3ecfae', fontSize: 9, fontFamily: 'var(--font-mono)' }} title="expires_at">
+                          <span style={{ color: ttl <= 0 ? 'var(--accent-crimson)' : 'var(--accent-cyan)', fontSize: 9, fontFamily: 'var(--font-mono)' }} title="expires_at">
                             {ttl <= 0 ? 'expired' : `TTL ${ttl}m`}
                           </span>
                         )}
@@ -412,7 +412,7 @@ export default function DashboardCognitive() {
                       {sig.evidence && sig.evidence.length > 0 && (
                         <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
                           {sig.evidence.slice(0, 3).map((eid) => (
-                            <span key={eid} style={{ color: 'var(--text-tertiary)', fontSize: 9, background: 'rgba(62,207,174,0.04)', padding: '1px 5px', borderRadius: 3, fontFamily: 'var(--font-mono)' }}>#{eid}</span>
+                            <span key={eid} style={{ color: 'var(--text-tertiary)', fontSize: 9, background: 'rgba(var(--accent-cyan-rgb), 0.04)', padding: '1px 5px', borderRadius: 3, fontFamily: 'var(--font-mono)' }}>#{eid}</span>
                           ))}
                         </div>
                       )}
@@ -450,7 +450,7 @@ export default function DashboardCognitive() {
                             style={{
                               background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)',
                               borderRadius: 6, padding: '3px 8px', cursor: ackDisabled ? 'not-allowed' : 'pointer',
-                              color: '#3ecfae', fontSize: 10, display: 'flex', alignItems: 'center', gap: 3,
+                              color: 'var(--accent-cyan)', fontSize: 10, display: 'flex', alignItems: 'center', gap: 3,
                             }}>
                             <CheckCircle2 size={11} /> {t('dash.cog.execute')}
                           </button>
@@ -460,7 +460,7 @@ export default function DashboardCognitive() {
                             style={{
                               background: 'rgba(255,56,96,0.08)', border: '1px solid rgba(255,56,96,0.15)',
                               borderRadius: 6, padding: '3px 8px', cursor: ackDisabled ? 'not-allowed' : 'pointer',
-                              color: '#ff3860', fontSize: 10, display: 'flex', alignItems: 'center', gap: 3,
+                              color: 'var(--accent-crimson)', fontSize: 10, display: 'flex', alignItems: 'center', gap: 3,
                             }}>
                             <XCircle size={11} /> {t('dash.cog.dismiss')}
                           </button>

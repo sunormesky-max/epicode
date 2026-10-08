@@ -271,10 +271,10 @@ export default function Benchmarks() {
           <LiveLatencyProbe t={t as never} />
 
           {/* ── 2026-08-19 新增实测基准 ── */}
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }} className="rounded-2xl p-6 mb-8" style={{ background: 'var(--bg-card)', border: '1px solid rgba(62,207,174,0.2)' }}>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }} className="rounded-2xl p-6 mb-8" style={{ background: 'var(--bg-card)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.2)' }}>
             <div className="flex items-center gap-3 mb-1 flex-wrap">
               <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>检索模式对比</h3>
-              <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(62,207,174,0.12)', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>2026-08-19 实测</span>
+              <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(var(--accent-cyan-rgb), 0.12)', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>2026-08-19 实测</span>
             </div>
             <p className="text-xs mb-4" style={{ color: 'var(--text-tertiary)' }}>生产引擎本机回环 · 5 查询 × 4 模式 × 3 次 · semantic(纯向量)最快, hybrid(BM25+向量双路)最慢 — 模式选择即性能选择</p>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -291,7 +291,7 @@ export default function Benchmarks() {
               </ResponsiveContainer>
               <div className="space-y-2">
                 {MODE_BENCH_0819.map(m => (
-                  <div key={m.mode} className="flex items-center gap-3 p-2.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                  <div key={m.mode} className="flex items-center gap-3 p-2.5 rounded-lg" style={{ background: 'rgba(var(--overlay-rgb), 0.02)' }}>
                     <span className="text-xs font-mono w-20" style={{ color: 'var(--accent-cyan-bright)' }}>{m.mode}</span>
                     <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{m.p50}ms</span>
                     <span className="text-xs ml-auto" style={{ color: 'var(--text-tertiary)' }}>均值 {m.avg_results} 结果/查询</span>
@@ -342,7 +342,7 @@ export default function Benchmarks() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="rounded-2xl p-6 mb-8" style={{ background: 'var(--bg-card)', border: '1px solid rgba(163,230,53,0.25)' }}>
             <div className="flex items-center gap-3 mb-1 flex-wrap">
               <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>外部评测 · LongMemEval-S oracle</h3>
-              <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(163,230,53,0.12)', color: '#a3e635', fontFamily: 'var(--font-mono)' }}>500 题 · 2026-08-20 · 可复现</span>
+              <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(163,230,53,0.12)', color: 'var(--accent-lime)', fontFamily: 'var(--font-mono)' }}>500 题 · 2026-08-20 · 可复现</span>
             </div>
             <p className="text-xs mb-5" style={{ color: 'var(--text-tertiary)' }}>
               指标 = 检索证据命中率 hit@10 loose(答案文本含于 top-10)。这是检索层度量, 与 Mem0/Zep 公开的 LLM 判分准确率<b>不可直接对比</b>。沙盒空间 9754 记忆, harness 与原始数据归档于服务端 docs/ 可复现。
@@ -364,7 +364,7 @@ export default function Benchmarks() {
                 <div className="text-xs mt-3 space-y-1.5">
                   {LME_JOURNEY.map(j => (
                     <div key={j.stage} className="flex items-center gap-2">
-                      <span className="font-mono w-12 text-right" style={{ color: '#a3e635' }}>{j.score}%</span>
+                      <span className="font-mono w-12 text-right" style={{ color: 'var(--accent-lime)' }}>{j.score}%</span>
                       <span style={{ color: 'var(--text-secondary)' }}>{j.stage}</span>
                       <span className="ml-auto text-right" style={{ color: 'var(--text-tertiary)' }}>{j.note}</span>
                     </div>
@@ -390,7 +390,7 @@ export default function Benchmarks() {
                 </p>
                 <div className="mt-2 p-2.5 rounded-lg" style={{ background: 'rgba(163,230,53,0.05)' }}>
                   <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>single-session-preference 类:</span>{' '}
-                  <span className="text-xs font-semibold" style={{ color: '#a3e635' }}>生成式评估 73.3%</span>{' '}
+                  <span className="text-xs font-semibold" style={{ color: 'var(--accent-lime)' }}>生成式评估 73.3%</span>{' '}
                   <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>— 该类答案是推断的行为偏好(非逐字事实, 检索命中恒为零), 换生成+判分尺子后检索信号被证明充足</span>
                 </div>
               </div>
@@ -537,7 +537,7 @@ export default function Benchmarks() {
                     ['relations_formed', String(SMRP_CREATE.relations_formed)],
                     ['has_port', String(SMRP_CREATE.has_port)],
                   ].map(([k, v]) => (
-                    <div key={k} className="p-2.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <div key={k} className="p-2.5 rounded-lg" style={{ background: 'rgba(var(--overlay-rgb), 0.02)' }}>
                       <div className="text-xs" style={{ color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>{k}</div>
                       <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{v}</div>
                     </div>
@@ -602,10 +602,10 @@ export default function Benchmarks() {
                     { label: 'Precision@5', value: '0.415', descKey: 'bench.beir.metric.precision' },
                     { label: t('bench.beir.metric.avgLatencyLabel'), value: '155ms', descKey: 'bench.beir.metric.avgLatency' },
                   ].map(m => (
-                    <div key={m.label} className="flex items-center gap-3 p-2.5 rounded-lg" style={{ background: m.highlight ? 'rgba(52,199,89,0.06)' : 'rgba(255,255,255,0.02)' }}>
+                    <div key={m.label} className="flex items-center gap-3 p-2.5 rounded-lg" style={{ background: m.highlight ? 'rgba(52,199,89,0.06)' : 'rgba(var(--overlay-rgb), 0.02)' }}>
                       <div>
                         <span className="text-xs" style={{ color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>{m.label}</span>
-                        <span className="text-sm font-bold ml-2" style={{ color: m.highlight ? '#3ecfae' : 'var(--text-primary)' }}>{m.value}</span>
+                        <span className="text-sm font-bold ml-2" style={{ color: m.highlight ? 'var(--accent-cyan)' : 'var(--text-primary)' }}>{m.value}</span>
                       </div>
                       <span className="text-xs ml-auto" style={{ color: 'var(--text-tertiary)' }}>{t(m.descKey as never)}</span>
                     </div>
@@ -639,7 +639,7 @@ export default function Benchmarks() {
                   color: (['#8b7ec8', '#3ecfae', '#3ecfae', '#8b7ec8'])[i],
                 };
                 return m;}).map(m => (
-                <div key={m.label} className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                <div key={m.label} className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'rgba(var(--overlay-rgb), 0.02)' }}>
                   <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: m.color }} />
                   <div>
                     <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{m.label}</div>

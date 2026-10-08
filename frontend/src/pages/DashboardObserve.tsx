@@ -194,7 +194,7 @@ export default function DashboardObserve() {
         <div className="observe-panel">
           <p style={HUD_LABEL}>{zh ? '能量与记忆簇' : 'VITALS'}</p>
           <p style={{ ...HUD_VAL, marginTop: 6 }}>e=<span style={{ color: statusColor }}>{cog?.timestamp ? cog.energy : '—'}</span> / 10000</p>
-          <div style={{ width: 150, height: 3, background: 'rgba(245,244,240,0.06)', borderRadius: 2, marginTop: 6, overflow: 'hidden' }}>
+          <div style={{ width: 150, height: 3, background: 'rgba(var(--text-primary-rgb), 0.06)', borderRadius: 2, marginTop: 6, overflow: 'hidden' }}>
             <div style={{ width: `${energyPct}%`, height: '100%', background: statusColor, transition: 'width 1s ease' }} />
           </div>
           <p style={{ ...HUD_VAL, marginTop: 8 }}>clusters <span style={{ color: 'var(--text-primary)' }}>{cog?.timestamp ? cog.clusters : '—'}</span></p>

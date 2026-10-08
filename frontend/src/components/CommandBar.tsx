@@ -222,7 +222,7 @@ export default function CommandBar({ isMain = false }: { isMain?: boolean }) {
                   onClick={() => c.run()}
                   onMouseEnter={() => setSel(i)}
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors"
-                  style={{ background: on ? 'rgba(62,207,174,0.07)' : 'transparent', borderLeft: on ? '2px solid var(--accent-cyan)' : '2px solid transparent', cursor: 'pointer' }}
+                  style={{ background: on ? 'rgba(var(--accent-cyan-rgb), 0.07)' : 'transparent', borderLeft: on ? '2px solid var(--accent-cyan)' : '2px solid transparent', cursor: 'pointer' }}
                 >
                   <c.icon size={15} style={{ color: on ? 'var(--accent-cyan)' : 'var(--text-tertiary)', flexShrink: 0 }} />
                   <span style={{ color: 'var(--text-primary)', fontSize: 14.5, flex: 1 }}>{c.label}</span>

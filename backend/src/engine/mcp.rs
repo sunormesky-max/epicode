@@ -1191,7 +1191,7 @@ impl McpHandler {
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "limit": { "type": "integer", "description": "Max unacknowledged signals to retrieve (default 50)", "default": 50 }
+                            "limit": { "type": "integer", "description": "Max unacknowledged signals to retrieve (default 50, minimum 1)", "default": 50, "minimum": 1 }
                         }
                     }
                 },
@@ -6372,7 +6372,11 @@ impl McpHandler {
     }
 
     fn tool_drive_inbox(&self, args: &serde_json::Value) -> serde_json::Value {
-        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50)
+            .max(1) as usize;
         let e2e_public_key = self.engine.scheduler().e2e_pubkey();
         let signals: Vec<serde_json::Value> = self
             .engine
@@ -6382,20 +6386,7 @@ impl McpHandler {
             .map(|signal| signal.inbox_value_with_e2e(e2e_public_key.as_deref()))
             .collect();
         let stats = self.engine.scheduler().drive_queue().stats();
-        // P1-6 残余修复: MCP drive_inbox 加 empty_reason (和REST对齐)
-        let empty_reason = if signals.is_empty() {
-            let executed = stats.get("executed").and_then(|v| v.as_u64()).unwrap_or(0);
-            let total = stats.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
-            if executed > 0 && total > executed {
-                "self_consumed"
-            } else if total == 0 {
-                "no_signals"
-            } else {
-                "no_pending"
-            }
-        } else {
-            "has_signals"
-        };
+        let empty_reason = super::drive::inbox_empty_reason(signals.len(), &stats);
         self.smrp_ok(
             "drive_inbox",
             serde_json::json!({
@@ -6823,6 +6814,42 @@ mod tests {
         );
         assert_eq!(response["protocol"]["error"], serde_json::Value::Null);
         assert_eq!(response["data"]["empty_reason"], "has_signals");
+        let zero_limit = handler.tool_drive_inbox(&serde_json::json!({"limit": 0}));
+        assert_eq!(zero_limit["data"]["signals"].as_array().unwrap().len(), 1);
+        assert_eq!(zero_limit["data"]["empty_reason"], "has_signals");
+    }
+
+    #[test]
+    fn mcp_drive_inbox_reports_no_pending_after_external_feedback() {
+        let engine = isolated_engine();
+        let queue = engine.scheduler().drive_queue();
+        let signal: crate::engine::drive::DriveSignal = serde_json::from_value(serde_json::json!({
+            "id": 0,
+            "timestamp": chrono::Utc::now().timestamp(),
+            "intent_type": "suggest",
+            "description": "Externally handled proposal",
+            "urgency": "medium",
+            "origin_tick": 0
+        }))
+        .unwrap();
+        let executed = queue.enqueue(signal.clone());
+        let rejected = queue.enqueue(signal);
+        let feedback = |executed| crate::engine::drive::DriveFeedback {
+            responded_at: 0,
+            executed,
+            outcome: "primary executor response".into(),
+            reflection: None,
+        };
+        queue.acknowledge(executed, feedback(true));
+        for _ in 0..=crate::engine::drive::DriveQueue::max_retries() {
+            queue.acknowledge(rejected, feedback(false));
+        }
+
+        let response = McpHandler::new(Arc::new(engine)).tool_drive_inbox(&serde_json::json!({}));
+        assert!(response["data"]["signals"].as_array().unwrap().is_empty());
+        assert_eq!(response["data"]["stats"]["executed"], 1);
+        assert_eq!(response["data"]["stats"]["rejected"], 1);
+        assert_eq!(response["data"]["empty_reason"], "no_pending");
     }
 
     #[tokio::test]
