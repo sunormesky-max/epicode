@@ -154,7 +154,7 @@ const API_SECTIONS: { titleKey: string; descKey: string; endpoints: Endpoint[] }
       {
         method: 'GET', path: '/v1/drive/inbox', descKey: 'docs.section.drive.ep1.desc',
         auth: true,
-        response: 'SMRP envelope: data = { "signals": [DriveSignal + "retryable" + optional "grounding"], "stats": {...}, "empty_reason": "has_signals" | "no_signals" | "no_pending" | "self_consumed" }',
+        response: 'SMRP envelope: data = { "signals": [DriveSignal + "retryable" + optional "grounding"], "stats": {...}, "empty_reason": "has_signals" | "no_signals" | "no_pending" }',
       },
       {
         method: 'POST', path: '/v1/drive/ack', descKey: 'docs.section.drive.ep2.desc',

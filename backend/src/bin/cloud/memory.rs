@@ -1797,20 +1797,7 @@ pub async fn drive_inbox(
         .iter()
         .map(|signal| signal.inbox_value_with_e2e(e2e_public_key.as_deref()))
         .collect();
-    // Phase 3 收尾: empty_reason 区分自消费 vs 真无信号
-    let empty_reason = if signals.is_empty() {
-        let executed = stats.get("executed").and_then(|v| v.as_u64()).unwrap_or(0);
-        let total = stats.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
-        if executed > 0 && total > executed {
-            "self_consumed" // 认知引擎已自消费了 pending 信号
-        } else if total == 0 {
-            "no_signals" // 从未产生过信号
-        } else {
-            "no_pending" // 有历史信号但当前无 pending
-        }
-    } else {
-        "has_signals"
-    };
+    let empty_reason = epicode::engine::drive::inbox_empty_reason(signals.len(), &stats);
     let result = serde_json::json!({
         "signals": signals,
         "stats": stats,
@@ -4085,6 +4072,63 @@ pub async fn operations_audit_log(
                 )),
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod drive_inbox_empty_reason_tests {
+    use super::*;
+    use epicode::engine::drive::{DriveFeedback, DriveQueue, DriveSignal};
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn rest_inbox_does_not_call_external_feedback_self_consumed() {
+        let dir = std::env::temp_dir().join(format!(
+            "epicode-inbox-empty-reason-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let engine = Arc::new(epicode::engine::Engine::with_data_dir(dir.clone()));
+        let queue = engine.scheduler().drive_queue();
+        let signal: DriveSignal = serde_json::from_value(serde_json::json!({
+            "id": 0,
+            "timestamp": chrono::Utc::now().timestamp(),
+            "intent_type": "suggest",
+            "description": "Externally handled proposal",
+            "urgency": "medium",
+            "origin_tick": 0
+        }))
+        .unwrap();
+        let executed = queue.enqueue(signal.clone());
+        let rejected = queue.enqueue(signal);
+        let feedback = |executed| DriveFeedback {
+            responded_at: 0,
+            executed,
+            outcome: "primary executor response".into(),
+            reflection: None,
+        };
+        queue.acknowledge(executed, feedback(true));
+        for _ in 0..=DriveQueue::max_retries() {
+            queue.acknowledge(rejected, feedback(false));
+        }
+        let user: UserInfo = serde_json::from_value(serde_json::json!({
+            "user_id": "inbox-fixture",
+            "api_key": "",
+            "plan": "Free",
+            "max_memories": 1000,
+            "memories_used": 0,
+            "created_at": 0
+        }))
+        .unwrap();
+
+        let (status, Json(response)) =
+            drive_inbox(axum::extract::Extension(user), AuthedEngine(engine.clone())).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(response["data"]["signals"].as_array().unwrap().is_empty());
+        assert_eq!(response["data"]["stats"]["executed"], 1);
+        assert_eq!(response["data"]["stats"]["rejected"], 1);
+        assert_eq!(response["data"]["empty_reason"], "no_pending");
+        drop(engine);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
 

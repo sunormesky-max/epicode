@@ -3513,102 +3513,6 @@ impl SchedulerCenter {
         serde_json::to_value(v).unwrap_or(serde_json::json!(null))
     }
 
-    /// D6.1: 服务端自消费点火 — 无执行端用户的常规信号由意识自消费
-    /// 租户零代码闭环: 无daemon→服务端在tick中检查→常规信号→内部think→ack
-    fn auto_consume_routine_signals(&self) -> usize {
-        // 只处理当前引擎(每个用户引擎独立调用)
-        let unacked = self.drive_queue.peek_unacked(10);
-        let mut consumed = 0;
-        for sig in &unacked {
-            // 只自消费常规信号(Low/Medium); High/Critical留给强执行端
-            let routine = matches!(
-                sig.urgency,
-                super::drive::DriveUrgency::Low | super::drive::DriveUrgency::Medium
-            );
-            if !routine {
-                continue;
-            }
-            // 检查是否有绑定的执行端(有daemon的不抢)
-            // (简化: 通过runtime binding检查 — 有primary_executor的跳过)
-            // TODO: 接入runtime binding检查
-
-            // 内部调用consciousness think(不经HTTP, 直接方法调用)
-            match self.api_consciousness_think(sig.id) {
-                Ok(report) => {
-                    // 用意识的判定ack(保持人格一致性)
-                    let executed = report
-                        .get("action")
-                        .and_then(|a| a.as_str())
-                        .map(|a| a != "none")
-                        .unwrap_or(false);
-                    let outcome = report
-                        .get("pending_ack")
-                        .and_then(|p| p.get("outcome"))
-                        .and_then(|o| o.as_str())
-                        .unwrap_or("auto-consumed by server consciousness")
-                        .to_string();
-                    let _ = self.drive_queue.acknowledge(
-                        sig.id,
-                        super::drive::DriveFeedback {
-                            responded_at: chrono::Utc::now().timestamp(),
-                            executed,
-                            outcome,
-                            reflection: None,
-                        },
-                    );
-                    consumed += 1;
-                    tracing::info!(
-                        "[D6.1] auto-consumed signal #{} (executed={})",
-                        sig.id,
-                        executed
-                    );
-                }
-                Err(e) => {
-                    tracing::debug!("[D6.1] auto-consume #{} failed: {}", sig.id, e);
-                }
-            }
-        }
-        consumed
-    }
-
-    /// D6.1: 内部意识思考(不经过HTTP层, scheduler直接调)
-    fn api_consciousness_think(&self, signal_id: u64) -> Result<serde_json::Value, String> {
-        // 简化版: 用cognitive engine思考信号描述+检索上下文
-        let sig = self
-            .drive_queue
-            .peek_unacked(50)
-            .into_iter()
-            .find(|s| s.id == signal_id)
-            .ok_or_else(|| format!("signal #{} not found", signal_id))?;
-        let results = self
-            .api_search_scored(&sig.description, 5, None)
-            .map(|(r, _)| r)?;
-        let context: Vec<String> = results
-            .iter()
-            .take(5)
-            .map(|(_, _, _, p)| p.content.chars().take(300).collect::<String>())
-            .collect();
-        let prompt = format!(
-            "Signal: {}
-
-Context from memory:
-{}
-
-Should this signal be executed? Answer with just 'execute' or 'ignore' and one sentence why.",
-            sig.description,
-            context.join(
-                "
-"
-            )
-        );
-        let response = self.cognitive.generate_free_text(&prompt, 200)?;
-        let executed = response.to_lowercase().contains("execute");
-        Ok(serde_json::json!({
-            "action": if executed { "execute" } else { "none" },
-            "pending_ack": { "executed": executed, "outcome": format!("D6.1 auto: {}", response.chars().take(100).collect::<String>()) }
-        }))
-    }
-
     /// D7.2: 知识卡片生成 — 从大簇蒸馏域级压缩知识(参数记忆层)
     pub fn generate_knowledge_cards(&self) -> usize {
         let cards = self.storage.load_knowledge_cards();
@@ -5124,8 +5028,6 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
     }
 
     fn auto_save(&self) {
-        // D6.1: 无执行端用户的常规信号自消费
-        let _ = self.auto_consume_routine_signals();
         // P2/P5/P6: 空间维护(dream不做, tick做轻量版)
         let _ = self.review_cold_memories();
         let _ = self.synaptic_pruning();
@@ -6366,7 +6268,104 @@ mod tests {
     use crate::engine::EmbeddingService;
     use crate::engine::GatewayCenter;
     use crate::engine::StorageManager;
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
     use std::sync::Arc;
+
+    #[test]
+    fn periodic_save_never_acks_unexecuted_signals() {
+        // An enabled cognitive engine used to turn the text "do not execute" into
+        // an executed acknowledgement. Keep the model available so this test
+        // exercises the production configuration without making an external call.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_server = Arc::clone(&stop);
+        let model_requests = Arc::new(AtomicUsize::new(0));
+        let request_counter = Arc::clone(&model_requests);
+        let server = std::thread::spawn(move || {
+            while !stop_server.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        request_counter.fetch_add(1, Ordering::Relaxed);
+                        stream
+                            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                            .unwrap();
+                        let mut request = [0u8; 4096];
+                        let _ = stream.read(&mut request);
+                        let body = r#"{"choices":[{"message":{"content":"do not execute"}}]}"#;
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            body.len(),
+                            body
+                        );
+                        let _ = stream.write_all(response.as_bytes());
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("local model fixture failed: {error}"),
+                }
+            }
+        });
+
+        let cognitive = Arc::new(CognitiveEngine::with_base(
+            "test-key",
+            "test-model",
+            &base_url,
+        ));
+        let (scheduler, _, _) = build_scheduler_with_cognitive(cognitive);
+        let queue = scheduler.drive_queue();
+        let make_signal = |description: &str| super::super::drive::DriveSignal {
+            id: 0,
+            timestamp: chrono::Utc::now().timestamp(),
+            intent_type: super::super::drive::DriveIntent::Suggest,
+            description: description.into(),
+            evidence: vec![],
+            urgency: super::super::drive::DriveUrgency::Medium,
+            target_capability: Some("conversation".into()),
+            emotion: None,
+            origin_tick: 0,
+            status: super::super::drive::DriveStatus::Pending,
+            feedback: None,
+            retry_count: 0,
+            expires_at: None,
+            enqueued_at_ms: 0,
+            time_budget_ms: None,
+            grounding: None,
+            terminal_reason: None,
+        };
+        let delivered = queue.enqueue(make_signal("Review this decision with the agent"));
+        let pending = queue.enqueue(make_signal("Present this suggestion to the user"));
+        assert_eq!(queue.poll(1)[0].id, delivered);
+
+        scheduler.auto_save();
+        scheduler.set_runtime_primary(true);
+        scheduler.auto_save();
+
+        stop.store(true, Ordering::Relaxed);
+        server.join().unwrap();
+        assert_eq!(model_requests.load(Ordering::Relaxed), 0);
+
+        let delivered_signal = queue.get_signal(delivered).unwrap();
+        assert!(matches!(
+            delivered_signal.status,
+            super::super::drive::DriveStatus::Delivered
+        ));
+        let pending_signal = queue.get_signal(pending).unwrap();
+        assert!(matches!(
+            pending_signal.status,
+            super::super::drive::DriveStatus::Pending
+        ));
+        for signal in [&delivered_signal, &pending_signal] {
+            assert!(signal.feedback.is_none());
+            assert_eq!(signal.retry_count, 0);
+        }
+        assert_eq!(queue.stats()["executed"], 0);
+        assert_eq!(queue.stats()["rejected"], 0);
+        assert_eq!(queue.peek_unacked(10).len(), 2);
+    }
 
     #[test]
     fn grounded_signal_expires_when_its_persistent_source_changes() {
@@ -6713,13 +6712,18 @@ mod tests {
 
     /// Build a scheduler with all real subsystems, cognitive disabled (no API key).
     fn build_scheduler() -> (Arc<SchedulerCenter>, Arc<Space>, Arc<KnowledgeGraph>) {
+        build_scheduler_with_cognitive(Arc::new(CognitiveEngine::new("", "")))
+    }
+
+    fn build_scheduler_with_cognitive(
+        cognitive: Arc<CognitiveEngine>,
+    ) -> (Arc<SchedulerCenter>, Arc<Space>, Arc<KnowledgeGraph>) {
         let space = Arc::new(Space::new());
         let bus = super::super::bus::EventBus::new(64);
         let tx = bus.sender();
         let rx = bus.subscribe();
         let energy = Arc::new(EnergyCenter::new(10000.0, 8.0, tx.clone(), bus.subscribe()));
         let knowledge = Arc::new(KnowledgeGraph::new());
-        let cognitive = Arc::new(CognitiveEngine::new("", ""));
         let classifier = Arc::new(CategoryClassifier::new("", ""));
         let embedding = Arc::new(EmbeddingService::from_env());
         let gateway = Arc::new(GatewayCenter::new(
