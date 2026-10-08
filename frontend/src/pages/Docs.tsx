@@ -304,8 +304,8 @@ function EndpointCard({ ep }: { ep: Endpoint }) {
           {t(ep.descKey as TranslationKey)}
         </span>
         <span className="text-xs px-2 py-0.5 rounded-md flex-shrink-0" style={{
-          background: ep.auth ? 'rgba(var(--accent-purple-rgb), 0.1)' : 'rgba(52,199,89,0.1)',
-          color: ep.auth ? 'var(--accent-purple)' : 'var(--accent-cyan)',
+          background: ep.auth ? 'rgba(139,126,200,0.1)' : 'rgba(52,199,89,0.1)',
+          color: ep.auth ? '#8b7ec8' : '#3ecfae',
           fontFamily: 'var(--font-mono)',
         }}>
           {ep.auth ? 'Auth' : 'Public'}
@@ -333,7 +333,7 @@ function EndpointCard({ ep }: { ep: Endpoint }) {
               </pre>
             </div>
           )}
-          <button onClick={handleCopy} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors" style={{ background: 'rgba(var(--overlay-rgb), 0.03)', color: 'var(--text-secondary)' }}>
+          <button onClick={handleCopy} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' }}>
             {copied ? <Check size={12} style={{ color: 'var(--success-green)' }} /> : <Copy size={12} />}
             {copied ? t('docs.copied') : t('docs.copyFullUrl')}
           </button>
@@ -372,7 +372,7 @@ export default function Docs() {
               {t('docs.title')}
             </h1>
             <p style={{ color: 'var(--text-secondary)', fontSize: '19px', lineHeight: 1.5, maxWidth: '640px' }}>
-              {t('docs.introPrefix')}<code className="text-xs px-1.5 py-0.5 rounded-md" style={{ background: 'rgba(var(--accent-purple-rgb), 0.1)', color: 'var(--accent-purple)', fontFamily: 'var(--font-mono)' }}>X-API-Key</code>{t('docs.introSuffix')}
+              {t('docs.introPrefix')}<code className="text-xs px-1.5 py-0.5 rounded-md" style={{ background: 'rgba(139,126,200,0.1)', color: 'var(--accent-purple)', fontFamily: 'var(--font-mono)' }}>X-API-Key</code>{t('docs.introSuffix')}
             </p>
                       <p style={{ marginTop: 14, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-tertiary)' }}>
               <a href="#/smrp" style={{ color: 'var(--accent-purple)', textDecoration: 'none' }}>SMRP 协议 →</a>
@@ -396,7 +396,7 @@ export default function Docs() {
                     className="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
                     style={{
                       color: activeSection === i ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      background: activeSection === i ? 'rgba(var(--accent-purple-rgb), 0.1)' : 'transparent',
+                      background: activeSection === i ? 'rgba(139,126,200,0.1)' : 'transparent',
                     }}
                     onMouseEnter={(e) => { if (activeSection !== i) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
                     onMouseLeave={(e) => { if (activeSection !== i) e.currentTarget.style.background = 'transparent'; }}

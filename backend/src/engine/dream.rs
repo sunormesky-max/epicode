@@ -1,3 +1,4 @@
+use crate::domain::ops::MemoryOp;
 use crate::domain::space::Space;
 use crate::engine::knowledge::KnowledgeGraph;
 use crate::engine::vector::VectorLayer;
@@ -63,9 +64,11 @@ impl DreamEngine {
             // Constitutional live floor (was 0.1 — conflicted with governor IMPORTANCE_FLOOR=0.3)
             new_importance = super::governor::clamp_live_importance(new_importance);
             if (new_importance - t.data.importance).abs() > 0.01 {
-                if let Some(mut tetra) = space.get_tetrahedron(t.id) {
-                    tetra.data.importance = new_importance;
-                    let _ = space.update_payload(t.id, tetra.data);
+                // op-log: 只写 importance 字段,不再整份 payload 写回(避免覆盖并发编辑)
+                if space
+                    .apply_ops(t.id, &[MemoryOp::SetImportance(new_importance)])
+                    .unwrap_or(false)
+                {
                     updated += 1;
                 }
             }
@@ -135,9 +138,8 @@ impl DreamEngine {
             .unwrap_or_default()
             .as_secs() as f64;
         for t in &tetras {
-            // 已隔离的记忆跳过:否则每轮都重复处理同一批(占满 10 条名额、使新垃圾饥饿,
-            // 且 update_mass 是增量,会让隔离记忆的 mass 每轮 +0.05)
-            if t.data.labels.iter().any(|l| l == "quarantine") {
+            // 快速路径:非 Active(已隔离/已取代)直接跳过;权威判定在 apply_ops 锁内对当前状态进行
+            if crate::domain::ops::Lifecycle::of(&t.data) != crate::domain::ops::Lifecycle::Active {
                 continue;
             }
             let is_junk = t.data.labels.iter().any(|l| l == "junk");
@@ -145,14 +147,21 @@ impl DreamEngine {
             let age_days = (now_ts - t.data.timestamp as f64) / 86400.0;
             let is_old_low_importance = age_days > 30.0 && t.data.importance < 0.3;
             if (is_junk || is_low_mass || is_old_low_importance) && !t.data.enforced {
-                if !dry_run {
-                    let mut updated = t.data.clone();
-                    if !updated.labels.iter().any(|l| l == "quarantine") {
-                        updated.labels.push("quarantine".to_string());
-                    }
-                    updated.importance = updated.importance.min(super::governor::IMPORTANCE_FLOOR); // O-A: 隔离是降籍不是除名(0.1曾致66%塌缩)
-                    let _ = space.update_payload(t.id, updated);
-                    let _ = space.update_mass(t.id, 0.05);
+                // op-log: 字段级原子操作,守卫在锁内对当前状态求值;已隔离/enforced 为 no-op 不计数
+                let op = MemoryOp::Quarantine {
+                    importance_cap: super::governor::IMPORTANCE_FLOOR, // O-A: 隔离是降籍不是除名
+                    mass_cap: crate::domain::ops::MASS_MIN,
+                };
+                let changed = if dry_run {
+                    let (mut d, mut m) = (t.data.clone(), t.mass);
+                    crate::domain::ops::apply_op(&mut d, &mut m, &op)
+                } else {
+                    space
+                        .apply_ops(t.id, std::slice::from_ref(&op))
+                        .unwrap_or(false)
+                };
+                if !changed {
+                    continue;
                 }
                 evicted_ids.push(t.id);
                 junk_evicted += 1;
@@ -176,15 +185,13 @@ impl DreamEngine {
             tetras
         };
 
-        // 已被 supersede 的记忆不再参与去重:否则同一对重复记忆每轮都被"再合并",
-        // 重复压低 importance、给保留方反复 +0.5 mass,并虚报 consolidated 数。
+        // 已 Superseded 的记忆不参与去重候选(否则无效对占满早退名额)
         let non_meta: Vec<usize> = (0..tetras.len())
             .filter(|i| {
                 let d = &tetras[*i].data;
-                !d.labels
-                    .iter()
-                    .any(|l| l.starts_with("meta-") || l == "superseded")
-                    && d.valid_to.is_none()
+                !d.labels.iter().any(|l| l.starts_with("meta-"))
+                    && crate::domain::ops::Lifecycle::of(d)
+                        != crate::domain::ops::Lifecycle::Superseded
             })
             .collect();
 
@@ -245,7 +252,10 @@ impl DreamEngine {
 
         merge_pairs.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
-        for (i, j, sim) in merge_pairs.iter().take(consolidate_depth) {
+        for (i, j, sim) in merge_pairs.iter() {
+            if duplicates_merged >= consolidate_depth {
+                break;
+            }
             let ta = &tetras[*i];
             let tb = &tetras[*j];
             if merged_ids.contains(&ta.id) || merged_ids.contains(&tb.id) {
@@ -261,22 +271,28 @@ impl DreamEngine {
                 (tb.id, ta.id, tb.mass)
             };
 
+            // SUPERSEDE (constitution §4.5 — memories are sacred, NEVER delete).
+            // op-log: 已 superseded / enforced 为 no-op → 不重复合并、不重复给保留方加质量
+            let op = MemoryOp::Supersede {
+                at: now_ts as i64,
+                importance_factor: 0.15,
+                importance_floor: super::governor::IMPORTANCE_FLOOR, // O-A
+                mass_cap: crate::domain::ops::MASS_MIN,
+            };
+            let changed = if dry_run {
+                let src = if remove_id == ta.id { ta } else { tb };
+                let (mut d, mut m) = (src.data.clone(), src.mass);
+                crate::domain::ops::apply_op(&mut d, &mut m, &op)
+            } else {
+                space
+                    .apply_ops(remove_id, std::slice::from_ref(&op))
+                    .unwrap_or(false)
+            };
+            if !changed {
+                continue;
+            }
             if !dry_run {
-                // SUPERSEDE (constitution §4.5 — memories are sacred, NEVER delete):
-                // mark the absorbed duplicate as historical context; it stays in space.
-                if let Some(t) = space.get_tetrahedron(remove_id) {
-                    let mut data = t.data.clone();
-                    if !data.labels.iter().any(|l| l == "superseded") {
-                        data.labels.push("superseded".to_string());
-                    }
-                    data.valid_to = Some(now_ts as i64);
-                    data.importance =
-                        (data.importance * 0.15).max(super::governor::IMPORTANCE_FLOOR); // O-A
-                    let _ = space.update_payload(remove_id, data);
-                    let _ = space.update_mass(remove_id, 0.05);
-                    let _ = space.update_validity(remove_id, Some(now_ts as i64));
-                }
-                if let Err(e) = space.update_mass(keep_id, 0.5) {
+                if let Err(e) = space.apply_ops(keep_id, &[MemoryOp::AdjustMass(0.5)]) {
                     tracing::debug!("[Dream] merge mass update {} failed: {}", keep_id, e);
                 }
             }

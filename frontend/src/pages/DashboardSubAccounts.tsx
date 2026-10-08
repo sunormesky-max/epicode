@@ -110,7 +110,7 @@ export default function DashboardSubAccounts() {
       <DashboardLayout>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
           <div style={{ textAlign: 'center', maxWidth: 400 }}>
-            <div style={{ width: 56, height: 56, borderRadius: 16, background: 'rgba(var(--accent-purple-rgb), 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+            <div style={{ width: 56, height: 56, borderRadius: 16, background: 'rgba(139,126,200,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
               <Lock size={28} style={{ color: 'var(--accent-purple)' }} />
             </div>
             <h2 style={{ color: 'var(--text-primary)', fontSize: 18, fontWeight: 600, marginBottom: 8 }}>{t('dash.sub.managementUnavailable')}</h2>
@@ -138,14 +138,14 @@ export default function DashboardSubAccounts() {
       </div>
 
       {error && (
-        <div style={{ background: 'rgba(var(--danger-red-rgb), 0.1)', color: 'var(--danger-red)', border: '1px solid rgba(var(--danger-red-rgb), 0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {error}
-          <button onClick={() => setError('')} style={{ color: 'var(--danger-red)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
+          <button onClick={() => setError('')} style={{ color: '#f87171', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
         </div>
       )}
 
       {notice && (
-        <div style={{ background: 'rgba(var(--accent-cyan-rgb), 0.08)', color: 'var(--accent-cyan)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ background: 'rgba(62,207,174,0.08)', color: 'var(--accent-cyan)', border: '1px solid rgba(62,207,174,0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {notice}
           <button onClick={() => setNotice('')} style={{ color: 'var(--accent-cyan)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
         </div>
@@ -186,7 +186,7 @@ export default function DashboardSubAccounts() {
       </div>
 
       {/* 权限矩阵 — 分级权限一览(真闸在后端) */}
-      <div style={{ background: 'rgba(var(--overlay-rgb), 0.02)', border: '1px solid var(--border-light)', borderRadius: 14, padding: 16, marginBottom: 20, overflowX: 'auto' }}>
+      <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-light)', borderRadius: 14, padding: 16, marginBottom: 20, overflowX: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <Shield size={14} style={{ color: 'var(--accent-cyan)' }} />
           <span style={{ color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{t('dash.sub.matrixTitle')}</span>
@@ -217,21 +217,21 @@ export default function DashboardSubAccounts() {
       </div>
 
       {/* 创建 */}
-      <button onClick={() => setShowCreate(!showCreate)} style={{ background: 'transparent', color: 'var(--accent-purple)', border: '1px solid rgba(var(--accent-purple-rgb), 0.4)', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-mono)', marginBottom: 16 }}>
+      <button onClick={() => setShowCreate(!showCreate)} style={{ background: 'transparent', color: 'var(--accent-purple)', border: '1px solid rgba(139,126,200,0.4)', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-mono)', marginBottom: 16 }}>
         <Plus size={15} style={{ verticalAlign: -3, marginRight: 4 }} /> {t('dash.sub.createAction')}
       </button>
 
       {showCreate && (
-        <div style={{ background: 'rgba(var(--overlay-rgb), 0.03)', border: '1px solid rgba(var(--overlay-rgb), 0.06)', borderRadius: 14, padding: 16, marginBottom: 16 }}>
+        <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 14, padding: 16, marginBottom: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <span style={{ color: 'var(--text-primary)', fontSize: 13, fontWeight: 600 }}>{t('dash.sub.createTitle')}</span>
             <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t('dash.sub.belongTo')} {myStats?.user_id}</span>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <input type="text" value={newId} onChange={e => setNewId(e.target.value)} placeholder={t('dash.sub.placeholderUserId')}
-              style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)', border: '1px solid rgba(var(--overlay-rgb), 0.1)', borderRadius: 8, padding: '8px 12px', fontSize: 13, flex: '1 1 160px' }} />
+              style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 12px', fontSize: 13, flex: '1 1 160px' }} />
             <input type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} placeholder={t('dash.sub.placeholderPassword')}
-              style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)', border: '1px solid rgba(var(--overlay-rgb), 0.1)', borderRadius: 8, padding: '8px 12px', fontSize: 13, flex: '1 1 160px' }} />
+              style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 12px', fontSize: 13, flex: '1 1 160px' }} />
             <button onClick={handleCreate} disabled={creating} style={{ background: 'var(--accent-purple)', color: '#fff', border: 'none', padding: '8px 20px', borderRadius: 8, cursor: 'pointer', opacity: creating ? 0.7 : 1 }}>
               {creating ? t('dash.sub.creating') : t('dash.sub.create')}
             </button>
@@ -242,8 +242,8 @@ export default function DashboardSubAccounts() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 8 }}>
               {SUB_ROLES.map(r => (
                 <button key={r} onClick={() => setNewRole(r)} style={{
-                  textAlign: 'left', background: newRole === r ? 'rgba(var(--accent-purple-rgb), 0.12)' : 'rgba(0,0,0,0.2)',
-                  border: `1px solid ${newRole === r ? ROLE_COLORS[r] : 'rgba(var(--overlay-rgb), 0.08)'}`,
+                  textAlign: 'left', background: newRole === r ? 'rgba(139,126,200,0.12)' : 'rgba(0,0,0,0.2)',
+                  border: `1px solid ${newRole === r ? ROLE_COLORS[r] : 'rgba(255,255,255,0.08)'}`,
                   borderRadius: 10, padding: '9px 12px', cursor: 'pointer',
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
@@ -277,7 +277,7 @@ export default function DashboardSubAccounts() {
           {accounts.map(acc => (
             <div key={acc.user_id} style={{ display: 'grid', gridTemplateColumns: '2fr 100px 110px 160px 100px 60px', padding: '13px 4px', borderBottom: '1px solid var(--border-light)', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(var(--accent-purple-rgb), 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(139,126,200,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <UserCheck size={14} style={{ color: 'var(--accent-purple)' }} />
                 </div>
                 <div>
@@ -288,12 +288,12 @@ export default function DashboardSubAccounts() {
               <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{acc.plan || 'Free'}</span>
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Brain size={10} style={{ color: acc.memories_used ? 'var(--accent-cyan)' : 'var(--text-tertiary)' }} />
+                  <Brain size={10} style={{ color: acc.memories_used ? '#3ecfae' : 'var(--text-tertiary)' }} />
                   <span style={{ color: acc.memories_used ? 'var(--text-primary)' : 'var(--text-tertiary)', fontSize: 12 }}>{acc.memories_used || 0}</span>
                 </div>
                 {acc.memories_used > 0 && (
-                  <div style={{ width: '100%', height: 3, background: 'rgba(var(--overlay-rgb), 0.04)', borderRadius: 2, marginTop: 4 }}>
-                    <div style={{ width: `${Math.min((acc.memories_used / (myStats?.max_memories || 1)) * 100, 100)}%`, height: '100%', background: 'var(--accent-cyan)', borderRadius: 2 }} />
+                  <div style={{ width: '100%', height: 3, background: 'rgba(255,255,255,0.04)', borderRadius: 2, marginTop: 4 }}>
+                    <div style={{ width: `${Math.min((acc.memories_used / (myStats?.max_memories || 1)) * 100, 100)}%`, height: '100%', background: '#3ecfae', borderRadius: 2 }} />
                   </div>
                 )}
               </div>
@@ -310,7 +310,7 @@ export default function DashboardSubAccounts() {
                   value={acc.role || 'developer'}
                   onChange={e => handleRoleChange(acc.user_id, e.target.value as SubRole)}
                   aria-label={`role-${acc.user_id}`}
-                  style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--text-secondary)', border: '1px solid rgba(var(--overlay-rgb), 0.1)', borderRadius: 6, padding: '3px 6px', fontSize: 11, cursor: 'pointer' }}
+                  style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--text-secondary)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, padding: '3px 6px', fontSize: 11, cursor: 'pointer' }}
                 >
                   {SUB_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
@@ -345,7 +345,7 @@ export default function DashboardSubAccounts() {
               <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{new Date(acc.created_at * 1000).toLocaleDateString()}</span>
               <div style={{ textAlign: 'right' }}>
                 <button onClick={() => handleRevoke(acc.user_id)}
-                  style={{ color: 'var(--danger-red)', background: 'none', border: 'none', cursor: 'pointer', padding: 6, borderRadius: 6 }}
+                  style={{ color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', padding: 6, borderRadius: 6 }}
                   onMouseEnter={e => e.currentTarget.style.background = 'rgba(248,113,113,0.08)'}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                   <Trash2 size={14} />

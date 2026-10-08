@@ -55,7 +55,6 @@ export function readChartTheme(root?: HTMLElement): ChartTheme {
   };
 }
 
-/** 订阅主题切换(`<html data-theme>` 属性变化 + `epicode-theme` 事件)。供需要重读 CSS 变量的组件复用。 */
 export function subscribeTheme(onChange: () => void) {
   if (typeof document === "undefined") return () => {};
   const observer = new MutationObserver(onChange);
@@ -70,7 +69,6 @@ export function subscribeTheme(onChange: () => void) {
   };
 }
 
-/** 当前主题的快照键;键变化即需重新解析 CSS 变量。 */
 export const themeKey = () =>
   typeof document === "undefined"
     ? ""
@@ -78,7 +76,7 @@ export const themeKey = () =>
 
 /** 订阅 `<html data-theme>`,主题切换时重新解析图表颜色。 */
 export function useChartTheme(): ChartTheme {
-  const key = useSyncExternalStore(subscribeTheme, themeKey, () => "");
+  const key = useSyncExternalStore(subscribe, themeKey, () => "");
   // key 变化即主题变化:重新从 CSS 变量解析
   // eslint-disable-next-line react-hooks/exhaustive-deps -- key 变化即主题变化,需要重新解析
   return useMemo(() => readChartTheme(), [key]);
