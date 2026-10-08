@@ -8,8 +8,16 @@ import {
   parseThemePrefs,
   resolveTheme,
   type ThemeId,
+  ACCENTS,
+  isAccentId,
 } from "../themes";
 import { FALLBACK_SERIES, readChartTheme } from "../chartTheme";
+import {
+  FALLBACK_GRAPH,
+  readGraphPalette,
+  toHex,
+  withAlpha,
+} from "../graphTheme";
 
 const css = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
 const html = readFileSync(
@@ -36,6 +44,17 @@ function themeVars(): Record<string, Record<string, string>> {
   return out;
 }
 const vars = themeVars();
+/* html[data-theme]:not([data-theme="synapse"]) 的特异性 (0,2,1) 高于单主题块 (0,1,1):覆盖所有非默认主题 */
+{
+  const shared = css.match(
+    /html\[data-theme\]:not\(\[data-theme="synapse"\]\)\s*\{([^}]*)\}/
+  );
+  if (shared)
+    for (const id of Object.keys(vars))
+      if (id !== "synapse")
+        for (const x of shared[1].matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g))
+          vars[id][x[1]] = x[2].trim();
+}
 const get = (id: string, name: string): string => {
   let v = vars[id]?.[name] ?? vars.synapse[name];
   for (let i = 0; i < 5 && v?.startsWith("var("); i++) {
@@ -266,6 +285,8 @@ function runBoot(ls: Record<string, string>, systemDark: boolean | null) {
     scheme: root.style.colorScheme,
     meta: meta.content,
     nnBg: root.dataset.nnBg,
+    accent: root.dataset.accent,
+    mode: root.dataset.mode,
     props,
   };
 }
@@ -354,5 +375,225 @@ describe("no-flash boot script (index.html)", () => {
     );
     expect(out.nnBg).toBe("off");
     expect(out.props["--nn-intensity"]).toBe("0.4");
+  });
+});
+
+/* ---------- PR B: RGB 三元组 / 图谱与神经背景 token ---------- */
+describe("theme tokens: rgb triplets mirror their hex tokens", () => {
+  const PAIRS = [
+    "--accent-cyan",
+    "--accent-purple",
+    "--danger-red",
+    "--text-primary",
+    "--accent-gold",
+    "--bg-card-solid",
+  ];
+  const triplet = (v: string) => v.split(",").map(x => Number(x.trim()));
+  for (const t of THEMES) {
+    it(`${t.id}: --*-rgb === hex token`, () => {
+      for (const name of PAIRS)
+        expect([name, triplet(get(t.id, `${name}-rgb`))]).toEqual([
+          name,
+          rgb(get(t.id, name).toLowerCase()),
+        ]);
+    });
+    it(`${t.id}: --overlay-rgb lightens dark themes and inks light themes`, () => {
+      const want =
+        t.mode === "dark"
+          ? [255, 255, 255]
+          : rgb(get(t.id, "--text-primary").toLowerCase());
+      expect(triplet(get(t.id, "--overlay-rgb"))).toEqual(want);
+    });
+  }
+});
+
+describe("theme tokens: canvas palettes (graph + neural background)", () => {
+  const HEX = /^#[0-9a-fA-F]{6}$/;
+  for (const t of THEMES) {
+    it(`${t.id}: --nn-* and --graph-* resolve to concrete colours`, () => {
+      for (const n of ["primary", "hi", "secondary", "fade", "gold"])
+        expect([n, get(t.id, `--nn-${n}`)]).toEqual([
+          n,
+          expect.stringMatching(HEX),
+        ]);
+      for (const n of ["--graph-muted", "--graph-path", "--graph-label-text"])
+        expect([n, get(t.id, n)]).toEqual([n, expect.stringMatching(HEX)]);
+      expect(get(t.id, "--graph-label-bg-rgb")).toMatch(/^\d+, \d+, \d+$/);
+    });
+    it(`${t.id}: graph muted text is AA on the canvas background (synapse: pre-existing 4.16, kept for pixel parity)`, () => {
+      const c = contrast(get(t.id, "--graph-muted"), get(t.id, "--bg-void"));
+      if (t.id === "synapse") expect(c).toBeGreaterThan(4);
+      else expect(c).toBeGreaterThanOrEqual(4.5);
+    });
+    it(`${t.id}: graph node labels are AA on their pill`, () => {
+      const pill = hex(
+        over(
+          [...get(t.id, "--graph-label-bg-rgb").split(",").map(Number), 0.8],
+          parse(get(t.id, "--bg-void"))
+        )
+      );
+      expect(
+        contrast(get(t.id, "--graph-label-text"), pill)
+      ).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+  it("fallback palette equals the synapse (:root) tokens — default theme stays pixel-identical", () => {
+    const s = (n: string) => get("synapse", n).toLowerCase();
+    expect(FALLBACK_GRAPH.accent).toBe(s("--accent-cyan"));
+    expect(FALLBACK_GRAPH.purple).toBe(s("--accent-purple"));
+    expect(FALLBACK_GRAPH.crimson).toBe(s("--accent-crimson"));
+    expect(FALLBACK_GRAPH.gold).toBe(s("--accent-gold"));
+    expect(FALLBACK_GRAPH.tertiary).toBe(s("--neural-tertiary"));
+    expect(FALLBACK_GRAPH.muted).toBe(s("--graph-muted"));
+    expect(FALLBACK_GRAPH.path).toBe(s("--graph-path"));
+    expect(FALLBACK_GRAPH.labelText).toBe(s("--graph-label-text"));
+    expect(FALLBACK_GRAPH.labelBg).toBe(s("--graph-label-bg-rgb"));
+    expect(FALLBACK_GRAPH.accents).toEqual(
+      [1, 2, 3, 4, 5, 6].map(i => s(`--graph-accent-${i}`))
+    );
+  });
+  it("readGraphPalette without a DOM returns the synapse palette", () => {
+    const p = readGraphPalette();
+    expect(p.cluster).toHaveLength(15);
+    expect(p.edge.contradicts).toBe(FALLBACK_GRAPH.crimson);
+    expect(p.cluster.slice(0, 4)).toEqual([
+      FALLBACK_GRAPH.accent,
+      FALLBACK_GRAPH.accent,
+      FALLBACK_GRAPH.accent,
+      FALLBACK_GRAPH.accents[0],
+    ]);
+  });
+  it("toHex / withAlpha normalise computed-style values", () => {
+    expect(toHex("#0F1419", "#000000")).toBe("#0f1419");
+    expect(toHex("#abc", "#000000")).toBe("#aabbcc");
+    expect(toHex("rgb(29, 155, 240)", "#000000")).toBe("#1d9bf0");
+    expect(toHex("", "#123456")).toBe("#123456");
+    expect(toHex("var(--x)", "#123456")).toBe("#123456");
+    expect(withAlpha("#3ecfae", 0.18)).toBe("rgba(62,207,174,0.18)");
+  });
+});
+
+/* ---------- PR C: 强调色层 × 每个主题 ---------- */
+const accentBlocks = (() => {
+  const out: Record<
+    string,
+    { dark: Record<string, string>; light: Record<string, string> }
+  > = {};
+  const re =
+    /html\[data-accent="([a-z]+)"\](\[data-mode="light"\])?\s*\{([^}]*)\}/g;
+  for (const m of css.matchAll(re)) {
+    out[m[1]] ??= { dark: {}, light: {} };
+    const decl = Object.fromEntries(
+      [...m[3].matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map(x => [
+        x[1],
+        x[2].trim(),
+      ])
+    );
+    Object.assign(out[m[1]][m[2] ? "light" : "dark"], decl);
+  }
+  return out;
+})();
+/** 主题 × 强调色 下某 token 的生效值(浅色主题:light 块覆盖通用块,与 CSS 特异性一致) */
+const getA = (themeId: string, accent: string, name: string): string => {
+  if (accent === "theme") return get(themeId, name);
+  const mode = THEMES.find(t => t.id === themeId)!.mode;
+  const b = accentBlocks[accent];
+  const v = (mode === "light" ? b.light[name] : undefined) ?? b.dark[name];
+  if (!v) return get(themeId, name);
+  return v.startsWith("var(")
+    ? get(themeId, v.slice(4, -1).split(",")[0].trim())
+    : v;
+};
+
+describe("accent layer: every theme x accent combination", () => {
+  const ids = ["theme", ...ACCENTS.map(a => a.id)];
+  it("CSS defines a dark and a light block for every registered accent, and nothing else", () => {
+    expect(Object.keys(accentBlocks).sort()).toEqual(
+      ACCENTS.map(a => a.id).sort()
+    );
+    for (const a of ACCENTS) {
+      expect(accentBlocks[a.id].dark["--accent-cyan"]).toBe(a.dark);
+      expect(accentBlocks[a.id].light["--accent-cyan"]).toBe(a.light);
+    }
+  });
+  for (const t of THEMES)
+    for (const a of ids) {
+      it(`${t.id} x ${a}: accent text, button label and rgb triplet meet WCAG AA`, () => {
+        for (const fg of ["--accent-cyan", "--accent-cyan-bright"])
+          if (a !== "theme" || fg === "--accent-cyan")
+            for (const bg of surfaces(t.id))
+              expect([fg, bg, contrast(getA(t.id, a, fg), bg)]).toEqual([
+                fg,
+                bg,
+                expect.toSatisfy((c: number) => c >= 4.5),
+              ]);
+        const fills = t.id.startsWith("x-")
+          ? ["--accent-solid", "--accent-solid-hover"]
+          : ["--accent-cyan", "--accent-cyan-bright"];
+        for (const fill of fills)
+          expect(
+            contrast(getA(t.id, a, "--on-accent"), getA(t.id, a, fill))
+          ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          getA(t.id, a, "--accent-cyan-rgb")
+            .split(",")
+            .map(x => Number(x.trim()))
+        ).toEqual(rgb(getA(t.id, a, "--accent-cyan").toLowerCase()));
+      });
+    }
+});
+
+describe("accent prefs: stored format stays backward compatible", () => {
+  it("old prefs without `accent` parse unchanged and default to the theme accent", () => {
+    const old = JSON.stringify({
+      followSystem: true,
+      light: "paper",
+      dark: "amber",
+      bgEnabled: false,
+      bgIntensity: 40,
+    });
+    expect(parseThemePrefs(old)).toEqual({
+      followSystem: true,
+      light: "paper",
+      dark: "amber",
+      bgEnabled: false,
+      bgIntensity: 40,
+      accent: "theme",
+    });
+  });
+  it("valid accent round-trips; unknown values fall back to 'theme'", () => {
+    expect(parseThemePrefs(JSON.stringify({ accent: "rose" })).accent).toBe(
+      "rose"
+    );
+    expect(parseThemePrefs(JSON.stringify({ accent: "neon" })).accent).toBe(
+      "theme"
+    );
+    expect(parseThemePrefs(JSON.stringify({ accent: 3 })).accent).toBe("theme");
+    expect(DEFAULT_THEME_PREFS.accent).toBe("theme");
+    expect(isAccentId("theme")).toBe(true);
+  });
+  it("boot script accent list mirrors the registry", () => {
+    const list = JSON.parse(
+      bootSrc.match(/var A = (\[.*?\]);/)![1]
+    ) as string[];
+    expect(list).toEqual(ACCENTS.map(a => a.id));
+  });
+  it("boot script applies a stored accent and mode before first paint, ignores invalid ones", () => {
+    const ok = runBoot(
+      {
+        "epicode-theme": "paper",
+        "epicode-theme-prefs": JSON.stringify({ accent: "violet" }),
+      },
+      true
+    );
+    expect(ok.accent).toBe("violet");
+    expect(ok.mode).toBe("light");
+    const bad = runBoot(
+      { "epicode-theme-prefs": JSON.stringify({ accent: "neon" }) },
+      true
+    );
+    expect(bad.accent).toBeUndefined();
+    expect(bad.mode).toBe("dark");
+    expect(runBoot({}, true).accent).toBeUndefined();
   });
 });
