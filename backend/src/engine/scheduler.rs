@@ -3277,15 +3277,21 @@ impl SchedulerCenter {
         if !changed {
             return Ok((false, old_labels.clone(), old_labels));
         }
-        // 用 with_tetra_mut 单写锁内完成更新；如果失败抛错
-        let new_labels_clone = new_labels.clone();
-        let id_inner = id;
+        // op-log: 在写锁内对当前标签做幂等追加,而不是写回锁外算好的整份列表
+        // (旧实现会覆盖锁外窗口内并发写入的标签)
+        let ops: Vec<crate::domain::ops::MemoryOp> = labels_to_add
+            .iter()
+            .filter(|l| !l.is_empty())
+            .map(|l| crate::domain::ops::MemoryOp::AddLabel(l.to_string()))
+            .collect();
         self.space
-            .with_tetra_mut(id, |payload| {
-                payload.labels = new_labels_clone.clone();
-                true
-            })
-            .map_err(|e| format!("update labels {} failed: {}", id_inner, e))?;
+            .apply_ops(id, &ops)
+            .map_err(|e| format!("update labels {} failed: {}", id, e))?;
+        let new_labels = self
+            .space
+            .get_tetrahedron(id)
+            .map(|t| t.data.labels)
+            .unwrap_or(new_labels);
         // 维护 gateway label_index（让后续 list_by_labels / list_projects 可见）
         self.gateway
             .update_label_index(id, &old_labels, &new_labels);
