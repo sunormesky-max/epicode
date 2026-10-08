@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
@@ -43,9 +44,33 @@ const get = (id: string, name: string): string => {
   }
   return v;
 };
-const rgb = (h: string) => {
-  const x = h.replace("#", "");
-  return [0, 2, 4].map(i => parseInt(x.slice(i, i + 2), 16));
+/** "#rrggbb" / "rgba(r, g, b, a)" → [r, g, b, a] */
+const parse = (c: string): number[] => {
+  if (c.startsWith("#")) {
+    const x = c.slice(1);
+    return [0, 2, 4].map(i => parseInt(x.slice(i, i + 2), 16)).concat(1);
+  }
+  const n = c.match(/[\d.]+/g)!.map(Number);
+  return [n[0], n[1], n[2], n[3] ?? 1];
+};
+const over = (fg: number[], bg: number[]) =>
+  [0, 1, 2].map(i => fg[i] * fg[3] + bg[i] * (1 - fg[3]));
+const hex = (c: number[]) =>
+  "#" +
+  c
+    .slice(0, 3)
+    .map(x => Math.round(x).toString(16).padStart(2, "0"))
+    .join("");
+const rgb = (h: string) => parse(h).slice(0, 3);
+/** 文字实际可能落在的底:页面底、实色卡片、最深底,以及半透明卡片叠在最深底上的合成色 */
+const surfaces = (id: string) => {
+  const voidBg = parse(get(id, "--bg-void"));
+  return [
+    get(id, "--bg-primary"),
+    get(id, "--bg-card-solid"),
+    get(id, "--bg-void"),
+    hex(over(parse(get(id, "--bg-card")), voidBg)),
+  ];
 };
 const lum = (h: string) => {
   const [r, g, b] = rgb(h).map(c => {
@@ -62,18 +87,16 @@ const contrast = (a: string, b: string) => {
 describe("theme tokens: contrast", () => {
   for (const theme of THEMES) {
     it(`${theme.id}: tertiary text meets WCAG AA (4.5:1) on page and card surfaces`, () => {
-      for (const bg of ["--bg-primary", "--bg-card-solid"]) {
+      for (const bg of surfaces(theme.id)) {
         expect(
-          contrast(get(theme.id, "--text-tertiary"), get(theme.id, bg))
+          contrast(get(theme.id, "--text-tertiary"), bg)
         ).toBeGreaterThanOrEqual(4.5);
       }
     });
     it(`${theme.id}: accent text tokens (cyan / purple) meet WCAG AA`, () => {
       for (const fg of ["--accent-cyan", "--accent-purple"]) {
-        for (const bg of ["--bg-primary", "--bg-card-solid"]) {
-          expect(
-            contrast(get(theme.id, fg), get(theme.id, bg))
-          ).toBeGreaterThanOrEqual(4.5);
+        for (const bg of surfaces(theme.id)) {
+          expect(contrast(get(theme.id, fg), bg)).toBeGreaterThanOrEqual(4.5);
         }
       }
     });
@@ -100,9 +123,8 @@ describe("theme tokens: contrast", () => {
       expect(series.every(c => /^#[0-9a-fA-F]{6}$/.test(c))).toBe(true);
       expect(new Set(series.map(c => c.toLowerCase())).size).toBe(8);
       for (const c of series)
-        expect(
-          contrast(c, get(theme.id, "--bg-card-solid"))
-        ).toBeGreaterThanOrEqual(3);
+        for (const bg of surfaces(theme.id))
+          expect(contrast(c, bg)).toBeGreaterThanOrEqual(3);
     });
   }
   it("derives chart chrome (grid / tooltip) from surface tokens so every theme adapts", () => {
@@ -116,6 +138,88 @@ describe("theme tokens: contrast", () => {
       [1, 2, 3, 4, 5, 6, 7, 8].map(i => get("synapse", `--chart-${i}`))
     );
   });
+});
+
+/* ---------- 语义 token 完整性:被引用的变量在每个主题都有值 ---------- */
+const TEXT_TOKENS = [
+  "--text-secondary",
+  "--success-green",
+  "--danger-red",
+  "--warning-orange",
+  "--accent-gold",
+  "--accent-magenta",
+  "--accent-orange",
+  "--accent-warning",
+  "--accent-lime",
+];
+describe("theme tokens: semantic text colours", () => {
+  for (const theme of THEMES) {
+    it(`${theme.id}: every semantic text token meets WCAG AA on page and card`, () => {
+      for (const fg of TEXT_TOKENS)
+        for (const bg of surfaces(theme.id)) {
+          const c = contrast(get(theme.id, fg), bg);
+          expect(c, `${fg} on ${bg} = ${c.toFixed(2)}`).toBeGreaterThanOrEqual(
+            4.5
+          );
+        }
+    });
+    it(`${theme.id}: warning button label (--on-accent-orange) meets WCAG AA`, () => {
+      expect(
+        contrast(
+          get(theme.id, "--on-accent-orange"),
+          get(theme.id, "--accent-orange")
+        )
+      ).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+});
+
+const SRC = new URL("../../", import.meta.url).pathname;
+function walk(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+    e.isDirectory()
+      ? e.name === "__tests__"
+        ? []
+        : walk(join(dir, e.name))
+      : /\.(tsx?|css)$/.test(e.name)
+        ? [join(dir, e.name)]
+        : []
+  );
+}
+/** 运行时由 JS 写入的变量(applyBackgroundPrefs 等) */
+const RUNTIME_VARS = new Set(["--nn-intensity"]);
+describe("theme tokens: no undefined CSS variables", () => {
+  // 去掉只在 X 家族作用域内生效的规则(那些规则里引用 X 专用 token 是合法的)
+  const scoped = (src: string) =>
+    src.replace(/html\[data-theme\^="x-"\][^{]*\{[^}]*\}/g, "");
+  const refs = new Map<string, string>();
+  for (const f of walk(SRC)) {
+    const text = f.endsWith(".css")
+      ? scoped(readFileSync(f, "utf8"))
+      : readFileSync(f, "utf8");
+    // 只检查无回退值的 var(--x)
+    for (const m of text.matchAll(/var\((--[\w-]+)\s*\)/g))
+      if (!RUNTIME_VARS.has(m[1])) refs.set(m[1], f.slice(SRC.length));
+  }
+  // 组件局部变量(如 .observatory-frame 的 --tick):在非主题规则里声明的,按局部作用域放行
+  const local = new Set(
+    [
+      ...css
+        .replace(/(:root|html\[data-theme[^\]]*\])[^{]*\{[^}]*\}/g, "")
+        .matchAll(/(--[\w-]+)\s*:/g),
+    ].map(m => m[1])
+  );
+  for (const theme of THEMES) {
+    it(`${theme.id}: every var() referenced without a fallback resolves`, () => {
+      const missing = [...refs].filter(
+        ([name]) =>
+          !local.has(name) &&
+          vars[theme.id]?.[name] === undefined &&
+          vars.synapse[name] === undefined
+      );
+      expect(missing).toEqual([]);
+    });
+  }
 });
 
 /* ---------- index.html 无闪烁启动脚本 ---------- */

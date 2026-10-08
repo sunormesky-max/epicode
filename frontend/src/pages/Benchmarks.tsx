@@ -342,7 +342,7 @@ export default function Benchmarks() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="rounded-2xl p-6 mb-8" style={{ background: 'var(--bg-card)', border: '1px solid rgba(163,230,53,0.25)' }}>
             <div className="flex items-center gap-3 mb-1 flex-wrap">
               <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>外部评测 · LongMemEval-S oracle</h3>
-              <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(163,230,53,0.12)', color: '#a3e635', fontFamily: 'var(--font-mono)' }}>500 题 · 2026-08-20 · 可复现</span>
+              <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(163,230,53,0.12)', color: 'var(--accent-lime)', fontFamily: 'var(--font-mono)' }}>500 题 · 2026-08-20 · 可复现</span>
             </div>
             <p className="text-xs mb-5" style={{ color: 'var(--text-tertiary)' }}>
               指标 = 检索证据命中率 hit@10 loose(答案文本含于 top-10)。这是检索层度量, 与 Mem0/Zep 公开的 LLM 判分准确率<b>不可直接对比</b>。沙盒空间 9754 记忆, harness 与原始数据归档于服务端 docs/ 可复现。
@@ -364,7 +364,7 @@ export default function Benchmarks() {
                 <div className="text-xs mt-3 space-y-1.5">
                   {LME_JOURNEY.map(j => (
                     <div key={j.stage} className="flex items-center gap-2">
-                      <span className="font-mono w-12 text-right" style={{ color: '#a3e635' }}>{j.score}%</span>
+                      <span className="font-mono w-12 text-right" style={{ color: 'var(--accent-lime)' }}>{j.score}%</span>
                       <span style={{ color: 'var(--text-secondary)' }}>{j.stage}</span>
                       <span className="ml-auto text-right" style={{ color: 'var(--text-tertiary)' }}>{j.note}</span>
                     </div>
@@ -390,7 +390,7 @@ export default function Benchmarks() {
                 </p>
                 <div className="mt-2 p-2.5 rounded-lg" style={{ background: 'rgba(163,230,53,0.05)' }}>
                   <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>single-session-preference 类:</span>{' '}
-                  <span className="text-xs font-semibold" style={{ color: '#a3e635' }}>生成式评估 73.3%</span>{' '}
+                  <span className="text-xs font-semibold" style={{ color: 'var(--accent-lime)' }}>生成式评估 73.3%</span>{' '}
                   <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>— 该类答案是推断的行为偏好(非逐字事实, 检索命中恒为零), 换生成+判分尺子后检索信号被证明充足</span>
                 </div>
               </div>
