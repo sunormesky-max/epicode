@@ -77,6 +77,22 @@ describe("theme tokens: contrast", () => {
         }
       }
     });
+    it(`${theme.id}: primary-button label (--on-accent) meets WCAG AA on its fill and hover fill`, () => {
+      const fills = theme.id.startsWith("x-")
+        ? ["--accent-solid", "--accent-solid-hover"]
+        : ["--accent-cyan", "--accent-cyan-bright"];
+      for (const bg of fills)
+        expect(
+          contrast(get(theme.id, "--on-accent"), get(theme.id, bg))
+        ).toBeGreaterThanOrEqual(4.5);
+    });
+    it(`${theme.id}: preview swatch accent matches the CSS accent token`, () => {
+      const accent = theme.id.startsWith("x-")
+        ? null
+        : get(theme.id, "--accent-cyan");
+      if (accent)
+        expect(theme.swatches[3].toLowerCase()).toBe(accent.toLowerCase());
+    });
     it(`${theme.id}: 8 distinct chart series, each ≥3:1 against the card surface (WCAG 1.4.11)`, () => {
       const series = [1, 2, 3, 4, 5, 6, 7, 8].map(i =>
         get(theme.id, `--chart-${i}`)
