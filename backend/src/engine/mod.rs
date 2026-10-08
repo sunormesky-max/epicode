@@ -264,6 +264,12 @@ impl Engine {
         });
 
         let report = storage.load_all(&space, &knowledge);
+        // Geometric Port anchors are rebuilt by load_all. Existing orphan
+        // clusters need their logical entry edges before any API call, including
+        // in quiet mode where start() is never used.
+        if report.space_ok {
+            space.reseed_ports();
+        }
         if report.tetras_loaded > 0 {
             // S1破案: 构造调用栈 (临时诊断, 定位幽灵加载触发者)
             tracing::info!(
@@ -637,6 +643,7 @@ impl Engine {
     }
 
     pub fn start_quiet(&mut self) {
+        self.space.reseed_ports();
         let energy = self.energy.clone();
         let rx_e = self.bus.subscribe();
         self.handles.lock().unwrap().push(tokio::spawn(async move {
@@ -676,6 +683,7 @@ impl Engine {
     }
 
     pub fn start_quiet_with_interval(&mut self, tick_ms: u64) {
+        self.space.reseed_ports();
         let energy = self.energy.clone();
         let rx_e = self.bus.subscribe();
         self.handles.lock().unwrap().push(tokio::spawn(async move {
@@ -698,6 +706,7 @@ impl Engine {
     /// 不需要 &mut self — 用 Mutex<Vec> 内部可变性
     /// 在 async 路径调用（AuthedEngine extractor 放行 Ready 后）
     pub fn start_quiet_arc(&self, tick_ms: u64) {
+        self.space.reseed_ports();
         let energy = self.energy.clone();
         let rx_e = self.bus.subscribe();
         self.handles.lock().unwrap().push(tokio::spawn(async move {
