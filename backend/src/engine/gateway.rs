@@ -1064,6 +1064,9 @@ impl GatewayCenter {
             origin,
             ttl,
         )?;
+        for &id in &result.dirty_ids {
+            self.mark_dirty(id);
+        }
         let _ = self.tx.send(EngineEvent::PulseSent { origin, ttl });
         Ok(result)
     }
