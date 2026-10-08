@@ -31,7 +31,7 @@ export const THEMES: ThemeSpec[] = [
     summary: '暖纸底、橄榄墨。官网适合长文，控制台适合白天。',
     summaryEn: 'Warm paper and olive ink. Good for long reading on the site and daytime console work.',
     mode: 'light',
-    swatches: ['#f4efe6', '#fffaf3', '#1c1915', '#6b7c4a'],
+    swatches: ['#f4efe6', '#fffaf3', '#1c1915', '#5e6c42'],
   },
   {
     id: 'meridian',
@@ -67,7 +67,7 @@ export const THEMES: ThemeSpec[] = [
     summary: '墨底、朱红动作色。把记忆库读成一间档案室。',
     summaryEn: 'Ink base with vermilion actions. Reads the memory store as an archive room.',
     mode: 'dark',
-    swatches: ['#0c090b', '#161014', '#f6efe8', '#d4535e'],
+    swatches: ['#0c090b', '#161014', '#f6efe8', '#d55661'],
   },
   {
     id: 'x-dark',

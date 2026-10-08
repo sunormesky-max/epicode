@@ -300,7 +300,7 @@ export default function DashboardCognitive() {
               <p style={{ ...HUD_VAL, marginTop: 8, opacity: 0.5 }}>{t('dash.cog.driveWaiting')}</p>
             )}
             {executorOwner && executorOwner !== 'self' && (
-              <p style={{ color: '#3ecfae', fontSize: 10, marginTop: 10, fontFamily: 'var(--font-mono)', opacity: 0.8 }}>
+              <p style={{ color: 'var(--accent-cyan)', fontSize: 10, marginTop: 10, fontFamily: 'var(--font-mono)', opacity: 0.8 }}>
                 ack bound to {executorOwner}
               </p>
             )}
@@ -400,7 +400,7 @@ export default function DashboardCognitive() {
                           <span style={{ color: sig.status === 'executed' ? '#3ecfae' : sig.status === 'delivered' ? '#3ecfae' : 'var(--text-tertiary)', fontSize: 9 }}>{sig.status}</span>
                         )}
                         {typeof sig.retry_count === 'number' && sig.retry_count > 0 && (
-                          <span style={{ color: '#3ecfae', fontSize: 9 }} title="retry">↻{sig.retry_count}</span>
+                          <span style={{ color: 'var(--accent-cyan)', fontSize: 9 }} title="retry">↻{sig.retry_count}</span>
                         )}
                         {ttl !== null && ttl <= 10 && (sig.status === 'pending' || sig.status === 'delivered') && (
                           <span style={{ color: ttl <= 0 ? '#ff3860' : '#3ecfae', fontSize: 9, fontFamily: 'var(--font-mono)' }} title="expires_at">
