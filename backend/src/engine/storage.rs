@@ -2486,4 +2486,67 @@ mod tests {
         assert_eq!(report.tetras_loaded, 0);
         assert_eq!(report.relations_loaded, 0);
     }
+
+    #[test]
+    fn empty_database_restart_keeps_ordinary_vertices_out_of_ports() {
+        let dir = tmp_dir("empty_restart_vertex_ids");
+        let storage = StorageManager::new(&dir).unwrap();
+        let space = Space::new();
+        let kg = KnowledgeGraph::new();
+        assert!(storage.load_all(&space, &kg).space_ok);
+
+        let first = make_tetra(0, "first", 1.0);
+        let first_positions = Tetrahedron::compute_vertices(first.core);
+        let first_id = space.add_tetrahedron(&first, &first_positions).unwrap();
+        assert_eq!(
+            space.get_tetrahedron(first_id).unwrap().vertex_ids,
+            [0, 1, 2, 3]
+        );
+        assert_eq!(space.port_vertex_of_tetra(first_id), None);
+        storage.save_space_only(&space).unwrap();
+
+        let restarted = Space::new();
+        let report = storage.load_all(&restarted, &KnowledgeGraph::new());
+        assert!(report.space_ok);
+        assert_eq!(report.tetras_loaded, 1);
+        assert_eq!(restarted.non_port_vertex_count(), 4);
+        assert_eq!(restarted.port_vertex_of_tetra(first_id), None);
+
+        let second = make_tetra(20, "second", 1.0);
+        let second_positions = Tetrahedron::compute_vertices(second.core);
+        let second_id = restarted
+            .add_tetrahedron(&second, &second_positions)
+            .unwrap();
+        assert_eq!(
+            restarted.get_tetrahedron(second_id).unwrap().vertex_ids,
+            [4, 5, 6, 7]
+        );
+        assert_eq!(restarted.non_port_vertex_count(), 8);
+        assert_eq!(restarted.port_vertex_of_tetra(second_id), None);
+    }
+
+    #[test]
+    fn legacy_high_ordinary_vertex_ids_do_not_create_false_port_connections() {
+        let dir = tmp_dir("legacy_high_ordinary_vertex_ids");
+        let storage = StorageManager::new(&dir).unwrap();
+        let mut legacy = make_tetra(42, "legacy", 1.0);
+        legacy.vertex_ids = [1_000_080, 1_000_081, 1_000_082, 1_000_083];
+        storage.upsert_tetra(&legacy).unwrap();
+
+        let space = Space::new();
+        let report = storage.load_all(&space, &KnowledgeGraph::new());
+        assert!(report.space_ok);
+        assert_eq!(report.tetras_loaded, 1);
+        assert_eq!(space.non_port_vertex_count(), 4);
+        assert_eq!(space.port_vertex_of_tetra(42), None);
+        for (port_id, _) in space.cylinder_ports() {
+            assert!(space.tetras_connected_to_port(port_id).is_empty());
+        }
+
+        let next = make_tetra(50, "next", 1.0);
+        let positions = Tetrahedron::compute_vertices(next.core);
+        let next_id = space.add_tetrahedron(&next, &positions).unwrap();
+        assert_eq!(space.non_port_vertex_count(), 8);
+        assert_eq!(space.port_vertex_of_tetra(next_id), None);
+    }
 }

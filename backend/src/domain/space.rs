@@ -136,8 +136,11 @@ impl Space {
         }
         let mut inner = self.inner.write();
         let id = inner.next_tetra_id;
-        inner.next_tetra_id += 1;
+        let next_tetra_id = id
+            .checked_add(1)
+            .ok_or_else(|| "tetrahedron ID space exhausted".to_string())?;
         Self::insert_tetra(&mut inner, tetra, id, positions)?;
+        inner.next_tetra_id = next_tetra_id;
         inner.structure_version += 1;
         inner.search_revision += 1;
         Ok(id)
@@ -155,9 +158,19 @@ impl Space {
         if inner.tetrahedrons.contains_key(&tetra.id) {
             return Err(format!("tetrahedron {} already exists", tetra.id));
         }
+        let next_tetra_id = if tetra.id >= inner.next_tetra_id {
+            Some(
+                tetra
+                    .id
+                    .checked_add(1)
+                    .ok_or_else(|| "tetrahedron ID space exhausted".to_string())?,
+            )
+        } else {
+            None
+        };
         Self::insert_tetra(&mut inner, tetra, tetra.id, positions)?;
-        if tetra.id >= inner.next_tetra_id {
-            inner.next_tetra_id = tetra.id + 1;
+        if let Some(next_tetra_id) = next_tetra_id {
+            inner.next_tetra_id = next_tetra_id;
         }
         inner.structure_version += 1;
         inner.search_revision += 1;
@@ -171,6 +184,11 @@ impl Space {
         positions: &[Point3; 4],
     ) -> Result<(), String> {
         let mut vertex_ids = [0u64; 4];
+        // Stage new vertices until all IDs have been allocated. A counter near
+        // exhaustion must not leave a partially inserted tetrahedron behind.
+        // Shape validation ensures the four positions cannot merge with each other.
+        let mut new_vertices = Vec::with_capacity(4);
+        let mut next_vertex_id = inner.next_vertex_id;
         for i in 0..4 {
             let pos = &positions[i];
             let gk = grid_key(pos);
@@ -199,14 +217,20 @@ impl Space {
                     vid
                 }
                 None => {
-                    let vid = inner.next_vertex_id;
-                    inner.next_vertex_id += 1;
-                    inner.vertices.insert(vid, Vertex::new(vid, *pos));
-                    inner.vertex_grid.entry(gk).or_default().push(vid);
+                    // Cylinder Port IDs and ordinary vertex IDs share a u64
+                    // namespace. Skip every occupied ID, including real Ports.
+                    let vid = Self::next_free_vertex_id(&inner.vertices, &mut next_vertex_id)?;
+                    new_vertices.push((vid, *pos, gk));
                     vid
                 }
             };
             vertex_ids[i] = vid;
+        }
+
+        inner.next_vertex_id = next_vertex_id;
+        for (vid, pos, gk) in new_vertices {
+            inner.vertices.insert(vid, Vertex::new(vid, pos));
+            inner.vertex_grid.entry(gk).or_default().push(vid);
         }
 
         let merged_count = vertex_ids.iter().collect::<HashSet<_>>().len();
@@ -248,6 +272,33 @@ impl Space {
             .entry(grid_key(&core_for_grid))
             .or_default()
             .push(id);
+        Ok(())
+    }
+
+    fn next_free_vertex_id(
+        vertices: &HashMap<VertexId, Vertex>,
+        next_vertex_id: &mut VertexId,
+    ) -> Result<VertexId, String> {
+        while vertices.contains_key(next_vertex_id) {
+            *next_vertex_id = next_vertex_id
+                .checked_add(1)
+                .ok_or_else(|| "vertex ID space exhausted".to_string())?;
+        }
+        let id = *next_vertex_id;
+        *next_vertex_id = id
+            .checked_add(1)
+            .ok_or_else(|| "vertex ID space exhausted".to_string())?;
+        Ok(id)
+    }
+
+    /// Relocation removes the old geometry before inserting the new one. Check
+    /// the worst case of four new vertices first so ID exhaustion cannot erase
+    /// the old tetrahedron. A removal can only make more IDs available.
+    fn ensure_vertex_id_capacity(inner: &SpaceInner, count: usize) -> Result<(), String> {
+        let mut next_vertex_id = inner.next_vertex_id;
+        for _ in 0..count {
+            Self::next_free_vertex_id(&inner.vertices, &mut next_vertex_id)?;
+        }
         Ok(())
     }
 
@@ -583,7 +634,12 @@ impl Space {
 
     pub fn non_port_vertex_count(&self) -> usize {
         let inner = self.inner.read();
-        inner.vertices.values().filter(|v| v.id < 1_000_000).count()
+        let port_ids: HashSet<VertexId> = inner.cylinder.all_ports().iter().map(|p| p.id).collect();
+        inner
+            .vertices
+            .keys()
+            .filter(|&&id| !port_ids.contains(&id))
+            .count()
     }
 
     pub fn cylinder_ports(&self) -> Vec<(VertexId, Point3)> {
@@ -642,8 +698,20 @@ impl Space {
 
     pub fn restore_counters(&self) {
         let mut inner = self.inner.write();
-        inner.next_tetra_id = inner.tetrahedrons.keys().max().copied().unwrap_or(0) + 1;
-        inner.next_vertex_id = inner.vertices.keys().max().copied().unwrap_or(0) + 1;
+        inner.next_tetra_id = inner
+            .tetrahedrons
+            .keys()
+            .max()
+            .copied()
+            .unwrap_or(0)
+            .saturating_add(1);
+        let port_ids: HashSet<VertexId> = inner.cylinder.all_ports().iter().map(|p| p.id).collect();
+        inner.next_vertex_id = inner
+            .vertices
+            .keys()
+            .filter(|&&id| !port_ids.contains(&id))
+            .max()
+            .map_or(0, |&id| id.saturating_add(1));
     }
 
     pub fn all_tetrahedrons(&self) -> Vec<Tetrahedron> {
@@ -856,8 +924,12 @@ impl Space {
     pub fn port_vertex_of_tetra(&self, tetra_id: TetraId) -> Option<VertexId> {
         let inner = self.inner.read();
         let tetra = inner.tetrahedrons.get(&tetra_id)?;
-        // 先查几何层（vertex_ids 含 Port vid）
-        if let Some(&pvid) = tetra.vertex_ids.iter().find(|&&v| v >= 1_000_000) {
+        // 先查几何层：只有 Cylinder 实际持有的 ID 才是 Port。
+        if let Some(&pvid) = tetra
+            .vertex_ids
+            .iter()
+            .find(|&&vid| inner.cylinder.all_ports().iter().any(|p| p.id == vid))
+        {
             return Some(pvid);
         }
         // 深层突破4: 再查逻辑层（cylinder 分配了 Port 但几何上未合并）
@@ -1006,6 +1078,7 @@ impl Space {
         {
             return Err("relocated tetrahedron is not regular".into());
         }
+        Self::ensure_vertex_id_capacity(&inner, 4)?;
 
         let old_port = inner.cylinder.find_port_for_tetra(id).map(|port| port.id);
         let old_port_was_geometric = old_port.is_some_and(|port_vid| {
@@ -1296,6 +1369,117 @@ mod tests {
         assert_eq!(id, 0);
         assert_eq!(space.tetra_count(), 1);
         assert_eq!(space.non_port_vertex_count(), 4);
+    }
+
+    #[test]
+    fn ordinary_ids_skip_ports_and_only_real_port_vertices_are_classified_as_ports() {
+        let space = Space::new();
+        let ports = space.cylinder_ports();
+        let first_port_id = ports[0].0;
+        let last_port_id = ports.last().unwrap().0;
+        space.inner.write().next_vertex_id = first_port_id - 1;
+
+        let (ordinary, positions) = make_tetra(0, Point3::new(20.0, 20.0, 20.0));
+        let ordinary_id = space.add_tetrahedron(&ordinary, &positions).unwrap();
+        let ordinary_ids = space.get_tetrahedron(ordinary_id).unwrap().vertex_ids;
+        assert_eq!(ordinary_ids[0], first_port_id - 1);
+        assert!(ordinary_ids[1..].iter().all(|&vid| vid > last_port_id));
+        assert_eq!(space.port_vertex_of_tetra(ordinary_id), None);
+        assert_eq!(space.non_port_vertex_count(), 4);
+
+        let (port_id, port_pos) = ports[0];
+        let (anchored, anchored_positions) = make_tetra(0, center_with_vertex_at(port_pos));
+        let anchored_id = space
+            .add_tetrahedron(&anchored, &anchored_positions)
+            .unwrap();
+        assert!(space
+            .get_tetrahedron(anchored_id)
+            .unwrap()
+            .vertex_ids
+            .contains(&port_id));
+        assert_eq!(space.port_vertex_of_tetra(anchored_id), Some(port_id));
+        assert_eq!(space.non_port_vertex_count(), 7);
+        let inner = space.inner.read();
+        for (id, position) in ports {
+            assert_eq!(inner.vertices.get(&id).unwrap().position, position);
+        }
+        drop(inner);
+        assert_vertex_grid_consistent(&space);
+    }
+
+    #[test]
+    fn restore_counter_tracks_high_ordinary_ids_without_including_ports() {
+        let space = Space::new();
+        space.restore_counters();
+        assert_eq!(space.inner.read().next_vertex_id, 0);
+
+        let last_port_id = space.cylinder_ports().last().unwrap().0;
+        space.inner.write().next_vertex_id = last_port_id + 1;
+        let (first, first_positions) = make_tetra(0, Point3::new(20.0, 20.0, 20.0));
+        let first_id = space.add_tetrahedron(&first, &first_positions).unwrap();
+        assert_eq!(space.port_vertex_of_tetra(first_id), None);
+        let last_ordinary_id = *space
+            .get_tetrahedron(first_id)
+            .unwrap()
+            .vertex_ids
+            .last()
+            .unwrap();
+
+        space.restore_counters();
+        assert_eq!(space.inner.read().next_vertex_id, last_ordinary_id + 1);
+        let (second, second_positions) = make_tetra(0, Point3::new(30.0, 20.0, 20.0));
+        let second_id = space.add_tetrahedron(&second, &second_positions).unwrap();
+        assert!(space
+            .get_tetrahedron(second_id)
+            .unwrap()
+            .vertex_ids
+            .iter()
+            .all(|&vid| vid > last_ordinary_id));
+        assert_eq!(space.port_vertex_of_tetra(second_id), None);
+        assert_eq!(space.non_port_vertex_count(), 8);
+    }
+
+    #[test]
+    fn exhausted_vertex_id_does_not_partially_insert_vertices() {
+        let space = Space::new();
+        space.inner.write().next_vertex_id = u64::MAX;
+        let port_count = space.vertex_count();
+        let next_tetra_id = space.inner.read().next_tetra_id;
+        let (tetra, positions) = make_tetra(0, Point3::new(20.0, 20.0, 20.0));
+        assert_eq!(
+            space.add_tetrahedron(&tetra, &positions).unwrap_err(),
+            "vertex ID space exhausted"
+        );
+        assert_eq!(space.vertex_count(), port_count);
+        assert_eq!(space.tetra_count(), 0);
+        assert_eq!(space.inner.read().next_tetra_id, next_tetra_id);
+        assert_vertex_grid_consistent(&space);
+    }
+
+    #[test]
+    fn exhausted_vertex_id_does_not_remove_tetra_during_relocation() {
+        let space = Space::new();
+        let (tetra, positions) = make_tetra(0, Point3::new(20.0, 20.0, 20.0));
+        let id = space.add_tetrahedron(&tetra, &positions).unwrap();
+        let before = space.get_tetrahedron(id).unwrap();
+        let vertex_count = space.vertex_count();
+        let structure_version = space.structure_version();
+        space.inner.write().next_vertex_id = u64::MAX;
+
+        assert_eq!(
+            space
+                .relocate_tetrahedron(id, Point3::new(30.0, 30.0, 30.0))
+                .unwrap_err(),
+            "vertex ID space exhausted"
+        );
+        assert_eq!(
+            space.get_tetrahedron(id).unwrap().vertex_ids,
+            before.vertex_ids
+        );
+        assert_eq!(space.get_tetrahedron(id).unwrap().core, before.core);
+        assert_eq!(space.vertex_count(), vertex_count);
+        assert_eq!(space.structure_version(), structure_version);
+        assert_vertex_grid_consistent(&space);
     }
 
     #[test]
