@@ -244,7 +244,7 @@ main h2, main h3, .heading-text, nav, .nav-link {
 .btn-primary:hover {
   background: var(--accent-cyan-bright);
   transform: translateY(-1px);
-  box-shadow: 0 4px 24px rgba(62, 207, 174, 0.25);
+  box-shadow: 0 4px 24px rgba(var(--accent-cyan-rgb), 0.25);
 }
 .btn-primary::before { content: none; }
 
@@ -1123,6 +1123,78 @@ html[data-theme="x-dim"] {
   --chart-7: #17BFD6;
   --chart-8: #8B98A5;
 }
+
+/* ── 强调色层(主题中心「强调色」):与任意浅/深主题组合 ──
+   data-accent 由 themes.ts / index.html 启动脚本写入;未选择(跟随主题)时不设该属性,本段完全不生效。
+   深色值对所有深色主题的页面底/卡片底 ≥ 6:1,浅色值对所有浅色主题 ≥ 5:1;--on-accent ≥ 6.5:1。
+   数值由脚本按对比度求解,theme-tokens 测试逐一校验 主题 × 强调色 组合(低于 AA 即失败)。 */
+html[data-accent="teal"] {
+  --accent-cyan: #2bb79b; --accent-blue: #2bb79b; --accent-solid: #2bb79b; --focus-ring: #2bb79b; --neural-primary: #2bb79b;
+  --accent-cyan-bright: #54d7bd; --accent-blue-bright: #54d7bd; --accent-solid-hover: #54d7bd;
+  --accent-cyan-rgb: 43, 183, 155; --on-accent: #0b0d12;
+}
+html[data-accent="teal"][data-mode="light"] {
+  --accent-cyan: #186858; --accent-blue: #186858; --accent-solid: #186858; --focus-ring: #186858; --neural-primary: #186858;
+  --accent-cyan-bright: #135246; --accent-blue-bright: #135246; --accent-solid-hover: #135246;
+  --accent-cyan-rgb: 24, 104, 88; --on-accent: #ffffff;
+}
+html[data-accent="blue"] {
+  --accent-cyan: #68a7ee; --accent-blue: #68a7ee; --accent-solid: #68a7ee; --focus-ring: #68a7ee; --neural-primary: #68a7ee;
+  --accent-cyan-bright: #9ec6f4; --accent-blue-bright: #9ec6f4; --accent-solid-hover: #9ec6f4;
+  --accent-cyan-rgb: 104, 167, 238; --on-accent: #0b0d12;
+}
+html[data-accent="blue"][data-mode="light"] {
+  --accent-cyan: #135cae; --accent-blue: #135cae; --accent-solid: #135cae; --focus-ring: #135cae; --neural-primary: #135cae;
+  --accent-cyan-bright: #0f488a; --accent-blue-bright: #0f488a; --accent-solid-hover: #0f488a;
+  --accent-cyan-rgb: 19, 92, 174; --on-accent: #ffffff;
+}
+html[data-accent="violet"] {
+  --accent-cyan: #af95ec; --accent-blue: #af95ec; --accent-solid: #af95ec; --focus-ring: #af95ec; --neural-primary: #af95ec;
+  --accent-cyan-bright: #cbbaf3; --accent-blue-bright: #cbbaf3; --accent-solid-hover: #cbbaf3;
+  --accent-cyan-rgb: 175, 149, 236; --on-accent: #0b0d12;
+}
+html[data-accent="violet"][data-mode="light"] {
+  --accent-cyan: #6837dc; --accent-blue: #6837dc; --accent-solid: #6837dc; --focus-ring: #6837dc; --neural-primary: #6837dc;
+  --accent-cyan-bright: #5122bf; --accent-blue-bright: #5122bf; --accent-solid-hover: #5122bf;
+  --accent-cyan-rgb: 104, 55, 220; --on-accent: #ffffff;
+}
+html[data-accent="rose"] {
+  --accent-cyan: #eb84a6; --accent-blue: #eb84a6; --accent-solid: #eb84a6; --focus-ring: #eb84a6; --neural-primary: #eb84a6;
+  --accent-cyan-bright: #f2b0c6; --accent-blue-bright: #f2b0c6; --accent-solid-hover: #f2b0c6;
+  --accent-cyan-rgb: 235, 132, 166; --on-accent: #0b0d12;
+}
+html[data-accent="rose"][data-mode="light"] {
+  --accent-cyan: #b11d4e; --accent-blue: #b11d4e; --accent-solid: #b11d4e; --focus-ring: #b11d4e; --neural-primary: #b11d4e;
+  --accent-cyan-bright: #8d173e; --accent-blue-bright: #8d173e; --accent-solid-hover: #8d173e;
+  --accent-cyan-rgb: 177, 29, 78; --on-accent: #ffffff;
+}
+html[data-accent="amber"] {
+  --accent-cyan: #eb8d13; --accent-blue: #eb8d13; --accent-solid: #eb8d13; --focus-ring: #eb8d13; --neural-primary: #eb8d13;
+  --accent-cyan-bright: #f3b86a; --accent-blue-bright: #f3b86a; --accent-solid-hover: #f3b86a;
+  --accent-cyan-rgb: 235, 141, 19; --on-accent: #0b0d12;
+}
+html[data-accent="amber"][data-mode="light"] {
+  --accent-cyan: #86500b; --accent-blue: #86500b; --accent-solid: #86500b; --focus-ring: #86500b; --neural-primary: #86500b;
+  --accent-cyan-bright: #693f09; --accent-blue-bright: #693f09; --accent-solid-hover: #693f09;
+  --accent-cyan-rgb: 134, 80, 11; --on-accent: #ffffff;
+}
+html[data-accent="green"] {
+  --accent-cyan: #36ba62; --accent-blue: #36ba62; --accent-solid: #36ba62; --focus-ring: #36ba62; --neural-primary: #36ba62;
+  --accent-cyan-bright: #73d694; --accent-blue-bright: #73d694; --accent-solid-hover: #73d694;
+  --accent-cyan-rgb: 54, 186, 98; --on-accent: #0b0d12;
+}
+html[data-accent="green"][data-mode="light"] {
+  --accent-cyan: #1f6a38; --accent-blue: #1f6a38; --accent-solid: #1f6a38; --focus-ring: #1f6a38; --neural-primary: #1f6a38;
+  --accent-cyan-bright: #18532c; --accent-blue-bright: #18532c; --accent-solid-hover: #18532c;
+  --accent-cyan-rgb: 31, 106, 56; --on-accent: #ffffff;
+}
+html[data-accent] {
+  --accent-soft: rgba(var(--accent-cyan-rgb), 0.14);
+  --neural-glow: rgba(var(--accent-cyan-rgb), 0.25);
+  --border-hologram: rgba(var(--accent-cyan-rgb), 0.22);
+}
+html[data-accent][data-mode="light"] { --accent-soft: rgba(var(--accent-cyan-rgb), 0.1); --neural-glow: rgba(var(--accent-cyan-rgb), 0.2); }
+html[data-accent][data-theme^="x-"] { --border-hologram: rgba(var(--accent-cyan-rgb), 0.45); }
 
 /* ── 导航中链区: 空间不足时横向滑动(隐藏滚动条, 不换行不挤压CTA) ── */
 .nav-scroll { scrollbar-width: none; -ms-overflow-style: none; }
