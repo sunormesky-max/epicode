@@ -960,6 +960,8 @@ html[data-theme]:not([data-theme="synapse"]) {
   --graph-accent-4: var(--chart-2);
   --graph-accent-5: var(--chart-4);
   --graph-accent-6: var(--chart-3);
+  /* 图谱未聚类节点 / 指标小字:用各主题已达 AA 的三级文字色(突触青保留原 #6b7280,见 PR 说明) */
+  --graph-muted: var(--text-tertiary);
 }
 :root { --chrome: rgba(10, 10, 15, 0.9); }
 
