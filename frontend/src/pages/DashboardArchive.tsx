@@ -314,8 +314,8 @@ export default function DashboardArchive() {
             paddingLeft,
             borderRadius: 8,
             cursor: 'pointer',
-            background: isSelected ? 'rgba(139,126,200,0.12)' : 'transparent',
-            borderLeft: isSelected ? '2px solid #8b7ec8' : '2px solid transparent',
+            background: isSelected ? 'rgba(var(--accent-purple-rgb), 0.12)' : 'transparent',
+            borderLeft: isSelected ? '2px solid var(--accent-purple)' : '2px solid transparent',
             transition: 'background 0.15s',
           }}
           onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
@@ -371,7 +371,7 @@ export default function DashboardArchive() {
       </div>
 
       {error && (
-        <div style={{ background: 'rgba(248,113,113,0.08)', color: 'var(--danger-red)', border: '1px solid rgba(248,113,113,0.15)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ background: 'rgba(var(--danger-red-rgb), 0.08)', color: 'var(--danger-red)', border: '1px solid rgba(var(--danger-red-rgb), 0.15)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {error}
           <button onClick={() => setError('')} style={{ color: 'var(--danger-red)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
         </div>
@@ -392,13 +392,13 @@ export default function DashboardArchive() {
             value={searchQ}
             onChange={(e) => setSearchQ(e.target.value)}
             placeholder={t('dash.arc.searchPlaceholder')}
-            style={{ width: '100%', background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary)', border: '1px solid var(--border-light)', borderRadius: 8, padding: '8px 12px 8px 34px', fontSize: 13, boxSizing: 'border-box' }}
+            style={{ width: '100%', background: 'rgba(var(--overlay-rgb), 0.04)', color: 'var(--text-primary)', border: '1px solid var(--border-light)', borderRadius: 8, padding: '8px 12px 8px 34px', fontSize: 13, boxSizing: 'border-box' }}
           />
         </div>
         <button onClick={() => openCreate(null)} style={{ background: 'var(--accent-purple)', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
           <Plus size={14} /> {t('dash.arc.newBtn')}
         </button>
-        <button onClick={() => setShowImport(true)} style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)', border: '1px solid var(--border-light)', padding: '8px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+        <button onClick={() => setShowImport(true)} style={{ background: 'rgba(var(--overlay-rgb), 0.04)', color: 'var(--text-secondary)', border: '1px solid var(--border-light)', padding: '8px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
           <Upload size={14} /> {t('dash.arc.importBtn')}
         </button>
       </div>
@@ -456,7 +456,7 @@ export default function DashboardArchive() {
                     style={{
                       flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                      background: active ? `${m.color}1a` : 'rgba(255,255,255,0.03)',
+                      background: active ? `${m.color}1a` : 'rgba(var(--overlay-rgb), 0.03)',
                       border: `1px solid ${active ? `${m.color}55` : 'var(--border-light)'}`,
                       color: active ? m.color : 'var(--text-secondary)',
                     }}
@@ -616,10 +616,10 @@ function NodeDetail({ node, content, loadingContent, t, onEdit, onDelete, onAddC
               <Plus size={13} style={{ verticalAlign: -1, marginRight: 3 }} /> {t('dash.arc.addBtn')}
             </button>
           )}
-          <button onClick={onEdit} title={t('dash.arc.editBtn')} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}>
+          <button onClick={onEdit} title={t('dash.arc.editBtn')} style={{ background: 'rgba(var(--overlay-rgb), 0.04)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}>
             <Pencil size={13} />
           </button>
-          <button onClick={onDelete} title={t('dash.arc.deleteBtn')} style={{ background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.12)', color: 'var(--danger-red)', padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}>
+          <button onClick={onDelete} title={t('dash.arc.deleteBtn')} style={{ background: 'rgba(var(--danger-red-rgb), 0.06)', border: '1px solid rgba(var(--danger-red-rgb), 0.12)', color: 'var(--danger-red)', padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}>
             <Trash2 size={13} />
           </button>
         </div>
@@ -629,7 +629,7 @@ function NodeDetail({ node, content, loadingContent, t, onEdit, onDelete, onAddC
       {isProjectLike ? (
         // 项目/根：展示子文档列表
         kids.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-tertiary)', fontSize: 13, background: 'rgba(255,255,255,0.02)', borderRadius: 12, border: '1px dashed var(--border-light)' }}>
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-tertiary)', fontSize: 13, background: 'rgba(var(--overlay-rgb), 0.02)', borderRadius: 12, border: '1px dashed var(--border-light)' }}>
             {t('dash.arc.noChildrenHint')}
           </div>
         ) : (
@@ -643,7 +643,7 @@ function NodeDetail({ node, content, loadingContent, t, onEdit, onDelete, onAddC
                   onClick={() => onSelectChild(c.id)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
-                    background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-light)',
+                    background: 'rgba(var(--overlay-rgb), 0.02)', border: '1px solid var(--border-light)',
                     borderRadius: 10, cursor: 'pointer', transition: 'all 0.15s',
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(139,126,200,0.06)'; e.currentTarget.style.borderColor = 'rgba(139,126,200,0.2)'; }}
@@ -682,7 +682,7 @@ function NodeDetail({ node, content, loadingContent, t, onEdit, onDelete, onAddC
             {content}
           </pre>
         ) : (
-          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-tertiary)', fontSize: 13, background: 'rgba(255,255,255,0.02)', borderRadius: 12, border: '1px dashed var(--border-light)' }}>
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-tertiary)', fontSize: 13, background: 'rgba(var(--overlay-rgb), 0.02)', borderRadius: 12, border: '1px dashed var(--border-light)' }}>
             {t('dash.arc.noContentHint')}
           </div>
         )

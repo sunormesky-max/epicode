@@ -38,11 +38,11 @@ export default function Navbar() {
         background: 'var(--chrome)',
         backdropFilter: 'blur(24px) saturate(180%)',
         WebkitBackdropFilter: 'blur(24px) saturate(180%)',
-        border: `1px solid ${scrolled ? "rgba(62,207,174,0.25)" : "var(--border-light)"}`,
+        border: `1px solid ${scrolled ? "rgba(var(--accent-cyan-rgb), 0.25)" : "var(--border-light)"}`,
         borderRadius: "var(--radius-full)",
         maxWidth: '800px',
         width: 'calc(100% - 2rem)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(245, 244, 240, 0.04)',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(var(--text-primary-rgb), 0.04)',
       }}
     >
       {/* Left: Brand (能量核心图标) */}
@@ -68,7 +68,7 @@ export default function Navbar() {
             style={{
               fontFamily: 'var(--font-heading)',
               color: currentPath === link.path ? 'var(--accent-cyan-bright)' : 'var(--text-secondary)',
-              background: currentPath === link.path ? 'rgba(62, 207, 174, 0.1)' : 'transparent',
+              background: currentPath === link.path ? 'rgba(var(--accent-cyan-rgb), 0.1)' : 'transparent',
               fontWeight: currentPath === link.path ? 600 : 400,
               letterSpacing: 0,
               
@@ -147,7 +147,7 @@ export default function Navbar() {
               style={{
                 fontFamily: 'var(--font-heading)',
                 color: currentPath === link.path ? 'var(--accent-cyan-bright)' : 'var(--text-primary)',
-                background: currentPath === link.path ? 'rgba(62, 207, 174, 0.1)' : 'transparent',
+                background: currentPath === link.path ? 'rgba(var(--accent-cyan-rgb), 0.1)' : 'transparent',
                 fontWeight: currentPath === link.path ? 600 : 400,
                 letterSpacing: 0,
               }}

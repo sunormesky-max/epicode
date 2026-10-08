@@ -95,7 +95,7 @@ export default function DashboardLayout({ children, viewport = false }: { childr
         className="group relative flex items-center justify-center no-underline"
         style={{
           width: 44, height: 44, borderRadius: 12, flexShrink: 0,
-          background: active ? 'rgba(62,207,174,0.08)' : 'transparent',
+          background: active ? 'rgba(var(--accent-cyan-rgb), 0.08)' : 'transparent',
           borderLeft: active ? '2px solid var(--accent-cyan)' : '2px solid transparent',
           transition: 'background 0.15s ease',
         }}
@@ -108,7 +108,7 @@ export default function DashboardLayout({ children, viewport = false }: { childr
         {/* 悬停标签: 仪器轨道的读出 */}
         {interactive && (
           <span className="absolute left-full ml-3 px-2.5 py-1 rounded-md whitespace-nowrap opacity-0 pointer-events-none transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
-            style={{ background: 'rgba(16,16,24,0.95)', border: '1px solid var(--border-light)', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
+            style={{ background: 'rgba(var(--bg-card-solid-rgb), 0.95)', border: '1px solid var(--border-light)', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
             {item.label}
           </span>
         )}
@@ -196,7 +196,7 @@ export default function DashboardLayout({ children, viewport = false }: { childr
                   className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm no-underline"
                   style={{
                     color: active ? 'var(--accent-cyan-bright)' : 'var(--text-secondary)',
-                    background: active ? 'rgba(62,207,174,0.08)' : 'transparent',
+                    background: active ? 'rgba(var(--accent-cyan-rgb), 0.08)' : 'transparent',
                     borderLeft: active ? '2px solid var(--accent-cyan)' : '2px solid transparent',
                     fontWeight: active ? 600 : 400,
                   }}>

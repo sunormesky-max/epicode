@@ -32,7 +32,7 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
     } else if (token.startsWith('`')) {
       nodes.push(
         <code key={`${keyPrefix}-c-${i}`} style={{
-          background: 'rgba(62,207,174,0.08)',
+          background: 'rgba(var(--accent-cyan-rgb), 0.08)',
           padding: '1px 5px',
           borderRadius: 4,
           fontSize: '0.9em',
@@ -90,7 +90,7 @@ export function MarkdownText({ content }: { content: string }): React.ReactEleme
     // 分隔线 ---
     if (/^---+$/.test(line.trim())) {
       flushList();
-      blocks.push(<hr key={`hr-${keyCounter++}`} style={{ border: 'none', borderTop: '1px solid rgba(62,207,174,0.1)', margin: '12px 0' }} />);
+      blocks.push(<hr key={`hr-${keyCounter++}`} style={{ border: 'none', borderTop: '1px solid rgba(var(--accent-cyan-rgb), 0.1)', margin: '12px 0' }} />);
       continue;
     }
 

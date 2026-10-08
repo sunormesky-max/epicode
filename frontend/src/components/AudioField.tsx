@@ -110,7 +110,7 @@ export default function AudioField() {
       className="fixed bottom-5 left-5 z-40 flex items-center gap-2 px-3 py-2 rounded-lg"
       style={{
         background: 'var(--glass-bg, rgba(16, 16, 24, 0.85))', backdropFilter: 'blur(12px)',
-        border: `1px solid ${on ? 'rgba(62,207,174,0.35)' : 'var(--border-medium)'}`,
+        border: `1px solid ${on ? 'rgba(var(--accent-cyan-rgb), 0.35)' : 'var(--border-medium)'}`,
         color: on ? 'var(--accent-cyan)' : 'var(--text-tertiary)',
         fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.1em',
         cursor: 'pointer', transition: 'all 0.2s ease',
@@ -119,7 +119,7 @@ export default function AudioField() {
       <span style={{
         width: 5, height: 5, borderRadius: '50%',
         background: on ? 'var(--accent-cyan)' : 'var(--text-tertiary)',
-        boxShadow: on ? '0 0 8px rgba(62,207,174,0.8)' : 'none',
+        boxShadow: on ? '0 0 8px rgba(var(--accent-cyan-rgb), 0.8)' : 'none',
       }} />
       SOUND {on ? 'ON' : 'OFF'}
     </button>
