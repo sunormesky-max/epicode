@@ -102,7 +102,7 @@ export default function DashboardPermissions() {
       </div>
 
       {error && <div onClick={() => setError('')} style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13 }}>{error}</div>}
-      {notice && <div onClick={() => setNotice('')} style={{ background: 'rgba(62,207,174,0.08)', color: '#3ecfae', border: '1px solid rgba(62,207,174,0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13 }}>{notice}</div>}
+      {notice && <div onClick={() => setNotice('')} style={{ background: 'rgba(62,207,174,0.08)', color: 'var(--accent-cyan)', border: '1px solid rgba(62,207,174,0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13 }}>{notice}</div>}
 
       {/* 计划分级与门控 */}
       <div style={panel}>

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import Layout from '@/components/Layout';
 import { getPublicStats } from '@/lib/api';
 import { useI18nContext } from '@/i18n/useI18n';
+import { useChartTheme } from '@/lib/chartTheme';
 import {
   Zap, Database, Brain, GitBranch,
   Activity, Server, Cpu
@@ -124,13 +125,6 @@ const SPECS = [
   { icon: Activity, label: 'bench.spec.runtime', value: 'Rust / Tokio Async', color: '#8b7ec8' },
 ];
 
-const CUSTOM_TOOLTIP_STYLE = {
-  background: 'rgba(10,10,15,0.95)',
-  border: '1px solid var(--border-light)',
-  borderRadius: '12px',
-  fontSize: '12px',
-  padding: '10px 14px',
-};
 
 function MetricCard({ icon: Icon, label, value, unit, color, sub }: {
   icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>;
@@ -180,19 +174,19 @@ function LiveLatencyProbe({ t }: { t: (k: never) => string }) {
   return (
     <div className="rounded-2xl p-5 mb-8" style={{ background: 'var(--bg-card)', border: '1px solid rgba(52,211,153,0.25)' }}>
       <div className="flex items-center gap-2 mb-2">
-        <Activity size={14} style={{ color: '#3ecfae' }} />
+        <Activity size={14} style={{ color: 'var(--accent-cyan)' }} />
         <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('bench.live.title' as never)}</span>
-        <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(52,211,153,0.12)', color: '#3ecfae', fontFamily: 'var(--font-mono)' }}>LIVE</span>
+        <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(52,211,153,0.12)', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>LIVE</span>
       </div>
       <p className="text-xs mb-3" style={{ color: 'var(--text-tertiary)' }}>{t('bench.live.desc' as never)}</p>
       {failed ? (
-        <span className="text-sm" style={{ color: '#3ecfae' }}>{t('bench.live.failed' as never)}</span>
+        <span className="text-sm" style={{ color: 'var(--accent-cyan)' }}>{t('bench.live.failed' as never)}</span>
       ) : probe ? (
         <div className="grid grid-cols-4 gap-3">
           {[['p50', probe.p50], ['p95', probe.p95], ['min', probe.min], ['n', probe.n]].map(([k, v]) => (
             <div key={String(k)} className="p-2.5 rounded-lg" style={{ background: 'rgba(52,211,153,0.05)' }}>
               <div className="text-xs" style={{ color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>{String(k)}</div>
-              <div className="text-sm font-semibold" style={{ color: '#3ecfae', fontFamily: 'var(--font-mono)' }}>
+              <div className="text-sm font-semibold" style={{ color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>
                 {typeof v === 'number' ? (k === 'n' ? v : `${v.toFixed(0)}ms`) : v}
               </div>
             </div>
@@ -207,6 +201,15 @@ function LiveLatencyProbe({ t }: { t: (k: never) => string }) {
 
 export default function Benchmarks() {
   const { t } = useI18nContext();
+  // 主题感知图表色:按检索模式固定映射,跨图一致(hybrid / semantic / graph·PPR / exact)
+  const chart = useChartTheme();
+  const S = chart.series;
+  const MODE = { hybrid: S[0], semantic: S[1], graph: S[2], exact: S[3] };
+  const CUSTOM_TOOLTIP_STYLE = { ...chart.tooltip, padding: '10px 14px' };
+  // 悬停高亮用主题色(recharts 默认 #ccc 实心矩形在深色主题上过亮、在浅色主题上过重)
+  const TOOLTIP_CURSOR = { fill: chart.cursor, stroke: chart.grid };
+  // 用 <Cell> 逐柱着色的图没有系列色,条目文字回落为默认灰;统一用 tooltip 文字色保证可读
+  const CELL_ITEM_STYLE = { fontSize: '11px', color: chart.tooltip.color };
   const [pubStats, setPubStats] = useState<{ total_memories: number; total_skills: number; total_users: number; total_mcp_tools?: number } | null>(null);
 
   useEffect(() => {
@@ -271,18 +274,18 @@ export default function Benchmarks() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }} className="rounded-2xl p-6 mb-8" style={{ background: 'var(--bg-card)', border: '1px solid rgba(62,207,174,0.2)' }}>
             <div className="flex items-center gap-3 mb-1 flex-wrap">
               <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>检索模式对比</h3>
-              <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(62,207,174,0.12)', color: '#3ecfae', fontFamily: 'var(--font-mono)' }}>2026-08-19 实测</span>
+              <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(62,207,174,0.12)', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>2026-08-19 实测</span>
             </div>
             <p className="text-xs mb-4" style={{ color: 'var(--text-tertiary)' }}>生产引擎本机回环 · 5 查询 × 4 模式 × 3 次 · semantic(纯向量)最快, hybrid(BM25+向量双路)最慢 — 模式选择即性能选择</p>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={MODE_BENCH_0819}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                  <XAxis dataKey="mode" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} unit="ms" />
-                  <Tooltip contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                  <XAxis dataKey="mode" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit="ms" />
+                  <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={CELL_ITEM_STYLE} />
                   <Bar dataKey="p50" radius={[4,4,0,0]} name="p50 (ms)">
-                    {MODE_BENCH_0819.map((_, i) => <Cell key={i} fill={['#3ecfae', '#3ecfae', '#8b7ec8', '#3ecfae'][i]} />)}
+                    {MODE_BENCH_0819.map((_, i) => <Cell key={i} fill={[MODE.exact, MODE.semantic, MODE.graph, MODE.hybrid][i]} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -303,14 +306,14 @@ export default function Benchmarks() {
             <div className="rounded-2xl p-6" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)' }}>
               <div className="flex items-center gap-3 mb-3 flex-wrap">
                 <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>知识图谱健康</h3>
-                <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(52,211,153,0.12)', color: '#3ecfae', fontFamily: 'var(--font-mono)' }}>2026-08-19 · kg_quality</span>
+                <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(52,211,153,0.12)', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>2026-08-19 · kg_quality</span>
               </div>
               <p className="text-xs mb-4" style={{ color: 'var(--text-tertiary)' }}>评估: excellent — dense interconnection with low orphan rate · 孤儿关系清理后首次全绿</p>
               <div className="grid grid-cols-2 gap-2">
                 {KG_HEALTH_0819.map(m => (
                   <div key={m.k} className="p-2.5 rounded-lg" style={{ background: 'rgba(52,211,153,0.04)' }}>
                     <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{m.k}</div>
-                    <div className="text-sm font-semibold" style={{ color: '#3ecfae', fontFamily: 'var(--font-mono)' }}>{m.v}</div>
+                    <div className="text-sm font-semibold" style={{ color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>{m.v}</div>
                   </div>
                 ))}
               </div>
@@ -323,13 +326,13 @@ export default function Benchmarks() {
               <p className="text-xs mb-4" style={{ color: 'var(--text-tertiary)' }}>同一组工具两个月后复测 — 语境不同(本机回环 vs 公网TLS)不可直接比绝对值, 看工具间相对关系一致性与量级变化</p>
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={SMRP_FRESH_0819}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                  <XAxis dataKey="op" tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} angle={-15} textAnchor="end" height={50} />
-                  <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} unit="ms" />
-                  <Tooltip contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} />
-                  <Legend wrapperStyle={{ fontSize: '11px', color: '#6b7280' }} />
-                  <Bar dataKey="fresh" fill="#8b7ec8" radius={[4,4,0,0]} name="2026-08-19 本机回环 p50" />
-                  <Bar dataKey="old" fill="rgba(107,114,128,0.5)" radius={[4,4,0,0]} name="2026-06-19 公网 p50" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                  <XAxis dataKey="op" tick={{ fontSize: 9, fill: chart.axis }} axisLine={false} tickLine={false} angle={-15} textAnchor="end" height={50} />
+                  <YAxis tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit="ms" />
+                  <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} />
+                  <Legend wrapperStyle={{ fontSize: '11px', color: chart.axis }} />
+                  <Bar dataKey="fresh" fill={S[1]} radius={[4,4,0,0]} name="2026-08-19 本机回环 p50" />
+                  <Bar dataKey="old" fill={S[7]} fillOpacity={0.6} radius={[4,4,0,0]} name="2026-06-19 公网 p50" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -349,12 +352,12 @@ export default function Benchmarks() {
                 <div className="text-xs mb-3" style={{ color: 'var(--text-tertiary)' }}>总命中率 by 检索模式</div>
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={LME_OVERALL}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                    <XAxis dataKey="mode" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-                    <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} unit="%" />
-                    <Tooltip contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                    <XAxis dataKey="mode" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit="%" />
+                    <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={CELL_ITEM_STYLE} />
                     <Bar dataKey="score" radius={[4,4,0,0]} name="hit@10 loose">
-                      {[0,1,2].map(i => <Cell key={i} fill={['#3ecfae', '#3ecfae', '#a3e635'][i]} />)}
+                      {[0,1,2].map(i => <Cell key={i} fill={[MODE.hybrid, MODE.semantic, MODE.graph][i]} />)}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
@@ -372,14 +375,14 @@ export default function Benchmarks() {
                 <div className="text-xs mb-3" style={{ color: 'var(--text-tertiary)' }}>分类别命中率(三模式) — 没有银弹, 只有路由</div>
                 <ResponsiveContainer width="100%" height={280}>
                   <BarChart data={LME_BY_TYPE}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                    <XAxis dataKey="type" tick={{ fontSize: 8, fill: '#6b7280' }} axisLine={false} tickLine={false} angle={-25} textAnchor="end" height={80} />
-                    <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} unit="%" />
-                    <Tooltip contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} />
-                    <Legend wrapperStyle={{ fontSize: '11px', color: '#6b7280' }} />
-                    <Bar dataKey="hybrid" fill="#3ecfae" radius={[3,3,0,0]} name="hybrid" />
-                    <Bar dataKey="semantic" fill="#3ecfae" radius={[3,3,0,0]} name="semantic" />
-                    <Bar dataKey="ppr" fill="#a3e635" radius={[3,3,0,0]} name="graph+PPR" />
+                    <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                    <XAxis dataKey="type" tick={{ fontSize: 8, fill: chart.axis }} axisLine={false} tickLine={false} angle={-25} textAnchor="end" height={80} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit="%" />
+                    <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} />
+                    <Legend wrapperStyle={{ fontSize: '11px', color: chart.axis }} />
+                    <Bar dataKey="hybrid" fill={MODE.hybrid} radius={[3,3,0,0]} name="hybrid" />
+                    <Bar dataKey="semantic" fill={MODE.semantic} radius={[3,3,0,0]} name="semantic" />
+                    <Bar dataKey="ppr" fill={MODE.graph} radius={[3,3,0,0]} name="graph+PPR" />
                   </BarChart>
                 </ResponsiveContainer>
                 <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>
@@ -400,14 +403,14 @@ export default function Benchmarks() {
               <p className="text-xs mb-4" style={{ color: 'var(--text-tertiary)' }}>{t('bench.latency.subtitle')}</p>
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={BENCHMARK_DATA.latency} barGap={2}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                  <XAxis dataKey="op" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} unit="ms" />
-                  <Tooltip contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} />
-                  <Legend wrapperStyle={{ fontSize: '11px', color: '#6b7280' }} />
-                  <Bar dataKey="p50" fill="#8b7ec8" radius={[4,4,0,0]} name="p50" />
-                  <Bar dataKey="p95" fill="#3ecfae" radius={[4,4,0,0]} name="p95" />
-                  <Bar dataKey="p99" fill="#8b7ec8" radius={[4,4,0,0]} name="p99" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                  <XAxis dataKey="op" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit="ms" />
+                  <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} />
+                  <Legend wrapperStyle={{ fontSize: '11px', color: chart.axis }} />
+                  <Bar dataKey="p50" fill={S[1]} radius={[4,4,0,0]} name="p50" />
+                  <Bar dataKey="p95" fill={S[0]} radius={[4,4,0,0]} name="p95" />
+                  <Bar dataKey="p99" fill={S[3]} radius={[4,4,0,0]} name="p99" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -417,14 +420,14 @@ export default function Benchmarks() {
               <p className="text-xs mb-4" style={{ color: 'var(--text-tertiary)' }}>{t('bench.throughput.subtitle')}</p>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={BENCHMARK_DATA.throughput}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                  <XAxis dataKey="memories" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${v/1000}K` : String(v)} />
-                  <YAxis yAxisId="left" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} unit=" QPS" />
-                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} unit="ms" />
-                  <Tooltip contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} labelFormatter={(v: number) => t('bench.throughput.labelFormatter').replace('{n}', v.toLocaleString())} />
-                  <Legend wrapperStyle={{ fontSize: '11px', color: '#6b7280' }} />
-                  <Line yAxisId="left" type="monotone" dataKey="qps" stroke="#3ecfae" strokeWidth={2} dot={{ r: 3, fill: '#3ecfae' }} name="QPS" />
-                  <Line yAxisId="right" type="monotone" dataKey="latency_p50" stroke="#8b7ec8" strokeWidth={2} dot={{ r: 3, fill: '#8b7ec8' }} name={t('bench.throughput.legendLatency')} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                  <XAxis dataKey="memories" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${v/1000}K` : String(v)} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit=" QPS" />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit="ms" />
+                  <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} labelFormatter={(v: number) => t('bench.throughput.labelFormatter').replace('{n}', v.toLocaleString())} />
+                  <Legend wrapperStyle={{ fontSize: '11px', color: chart.axis }} />
+                  <Line yAxisId="left" type="monotone" dataKey="qps" stroke={S[0]} strokeWidth={2} dot={{ r: 3, fill: S[0] }} name="QPS" />
+                  <Line yAxisId="right" type="monotone" dataKey="latency_p50" stroke={S[1]} strokeWidth={2} dot={{ r: 3, fill: S[1] }} name={t('bench.throughput.legendLatency')} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -438,26 +441,26 @@ export default function Benchmarks() {
                 <AreaChart data={BENCHMARK_DATA.scalability}>
                   <defs>
                     <linearGradient id="gb" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#8b7ec8" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#8b7ec8" stopOpacity={0} />
+                      <stop offset="0%" stopColor={S[1]} stopOpacity={0.3} />
+                      <stop offset="100%" stopColor={S[1]} stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="sr" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#3ecfae" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#3ecfae" stopOpacity={0} />
+                      <stop offset="0%" stopColor={S[0]} stopOpacity={0.3} />
+                      <stop offset="100%" stopColor={S[0]} stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="rc" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#3ecfae" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#3ecfae" stopOpacity={0} />
+                      <stop offset="0%" stopColor={S[2]} stopOpacity={0.3} />
+                      <stop offset="100%" stopColor={S[2]} stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                  <XAxis dataKey="nodes" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${v/1000}K` : String(v)} />
-                  <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} unit="ms" />
-                  <Tooltip contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} labelFormatter={(v: number) => t('bench.graph.labelFormatter').replace('{n}', v.toLocaleString())} />
-                  <Legend wrapperStyle={{ fontSize: '11px', color: '#6b7280' }} />
-                  <Area type="monotone" dataKey="graphBuild" stroke="#8b7ec8" strokeWidth={2} fill="url(#gb)" name={t('bench.graph.legendBuild')} />
-                  <Area type="monotone" dataKey="search" stroke="#3ecfae" strokeWidth={2} fill="url(#sr)" name={t('bench.graph.legendSearch')} />
-                  <Area type="monotone" dataKey="recall" stroke="#3ecfae" strokeWidth={2} fill="url(#rc)" name={t('bench.graph.legendRecall')} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                  <XAxis dataKey="nodes" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${v/1000}K` : String(v)} />
+                  <YAxis tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit="ms" />
+                  <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} labelFormatter={(v: number) => t('bench.graph.labelFormatter').replace('{n}', v.toLocaleString())} />
+                  <Legend wrapperStyle={{ fontSize: '11px', color: chart.axis }} />
+                  <Area type="monotone" dataKey="graphBuild" stroke={S[1]} strokeWidth={2} fill="url(#gb)" name={t('bench.graph.legendBuild')} />
+                  <Area type="monotone" dataKey="search" stroke={S[0]} strokeWidth={2} fill="url(#sr)" name={t('bench.graph.legendSearch')} />
+                  <Area type="monotone" dataKey="recall" stroke={S[2]} strokeWidth={2} fill="url(#rc)" name={t('bench.graph.legendRecall')} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -467,14 +470,14 @@ export default function Benchmarks() {
               <p className="text-xs mb-4" style={{ color: 'var(--text-tertiary)' }}>{t('bench.embedBatch.subtitle')}</p>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={BENCHMARK_DATA.embedBatch}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                  <XAxis dataKey="batchSize" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} label={{ value: 'Batch Size', position: 'insideBottom', offset: -5, fontSize: 10, fill: '#6b7280' }} />
-                  <YAxis yAxisId="left" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} unit=" /s" />
-                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} unit="ms" />
-                  <Tooltip contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} labelFormatter={(v: number) => `Batch ${v}`} />
-                  <Legend wrapperStyle={{ fontSize: '11px', color: '#6b7280' }} />
-                  <Line yAxisId="left" type="monotone" dataKey="throughput" stroke="#8b7ec8" strokeWidth={2} dot={{ r: 3, fill: '#8b7ec8' }} name={t('bench.embedBatch.legendThroughput')} />
-                  <Line yAxisId="right" type="monotone" dataKey="latency" stroke="#8b7ec8" strokeWidth={2} dot={{ r: 3, fill: '#8b7ec8' }} name={t('bench.embedBatch.legendLatency')} strokeDasharray="5 5" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                  <XAxis dataKey="batchSize" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} label={{ value: 'Batch Size', position: 'insideBottom', offset: -5, fontSize: 10, fill: chart.axis }} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit=" /s" />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit="ms" />
+                  <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} labelFormatter={(v: number) => `Batch ${v}`} />
+                  <Legend wrapperStyle={{ fontSize: '11px', color: chart.axis }} />
+                  <Line yAxisId="left" type="monotone" dataKey="throughput" stroke={S[1]} strokeWidth={2} dot={{ r: 3, fill: S[1] }} name={t('bench.embedBatch.legendThroughput')} />
+                  <Line yAxisId="right" type="monotone" dataKey="latency" stroke={S[3]} strokeWidth={2} dot={{ r: 3, fill: S[3] }} name={t('bench.embedBatch.legendLatency')} strokeDasharray="5 5" />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -502,13 +505,13 @@ export default function Benchmarks() {
                 </p>
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={SMRP_LATENCY} barGap={2}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                    <XAxis dataKey="op" tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} angle={-15} textAnchor="end" height={50} />
-                    <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} unit="ms" />
-                    <Tooltip contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} />
-                    <Legend wrapperStyle={{ fontSize: '11px', color: '#6b7280' }} />
-                    <Bar dataKey="p50" fill="#8b7ec8" radius={[4,4,0,0]} name="p50" />
-                    <Bar dataKey="p95" fill="#3ecfae" radius={[4,4,0,0]} name="p95" />
+                    <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                    <XAxis dataKey="op" tick={{ fontSize: 9, fill: chart.axis }} axisLine={false} tickLine={false} angle={-15} textAnchor="end" height={50} />
+                    <YAxis tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit="ms" />
+                    <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} />
+                    <Legend wrapperStyle={{ fontSize: '11px', color: chart.axis }} />
+                    <Bar dataKey="p50" fill={S[1]} radius={[4,4,0,0]} name="p50" />
+                    <Bar dataKey="p95" fill={S[0]} radius={[4,4,0,0]} name="p95" />
                   </BarChart>
                 </ResponsiveContainer>
                 <div className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>
@@ -520,7 +523,7 @@ export default function Benchmarks() {
                 <div className="space-y-1.5 mb-5">
                   {SMRP_STRUCT.map((s) => (
                     <div key={s.tool} className="flex items-center gap-2 text-xs">
-                      <span style={{ color: '#3ecfae', flexShrink: 0 }}>✓</span>
+                      <span style={{ color: 'var(--accent-cyan)', flexShrink: 0 }}>✓</span>
                       <code style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{s.tool}</code>
                       <span style={{ color: 'var(--text-tertiary)' }} className="truncate">{t(s.fieldKey as never)}</span>
                     </div>
@@ -559,7 +562,7 @@ export default function Benchmarks() {
           >
             <div className="flex items-center gap-3 mb-1 flex-wrap">
               <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('bench.beir.title')}</h3>
-              <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(52,199,89,0.12)', color: '#3ecfae', fontFamily: 'var(--font-mono)' }}>BEIR SciFact · 2026-06-24</span>
+              <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(52,199,89,0.12)', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>BEIR SciFact · 2026-06-24</span>
             </div>
             <p className="text-xs mb-5" style={{ color: 'var(--text-tertiary)' }}>
               {t('bench.beir.desc')}
@@ -578,13 +581,13 @@ export default function Benchmarks() {
                     { type: 'DPR基线', score: 0.700 },
                     { type: 'bge-m3基线', score: 0.750 },
                   ]}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                    <XAxis dataKey="type" tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} angle={-20} textAnchor="end" height={60} />
-                    <YAxis domain={[0, 1]} tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                    <XAxis dataKey="type" tick={{ fontSize: 9, fill: chart.axis }} axisLine={false} tickLine={false} angle={-20} textAnchor="end" height={60} />
+                    <YAxis domain={[0, 1]} tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} />
+                    <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={CELL_ITEM_STYLE} />
                     <Bar dataKey="score" radius={[4,4,0,0]}>
-                      {[0,1,2,3,4].map(i => <Cell key={i} fill="#3ecfae" />)}
-                      {[5,6,7].map(i => <Cell key={i} fill="rgba(107,114,128,0.4)" />)}
+                      {[0,1,2,3,4].map(i => <Cell key={i} fill={S[0]} />)}
+                      {[5,6,7].map(i => <Cell key={i} fill={S[7]} fillOpacity={0.5} />)}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>

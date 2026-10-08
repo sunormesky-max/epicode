@@ -220,7 +220,7 @@ export default function L0Protocol() {
           {/* Evolution Loop */}
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="mb-24">
             <h2 className="flex items-center gap-2" style={{ fontFamily: "var(--font-display)", fontSize: "clamp(26px, 4vw, 42px)", fontWeight: 700, letterSpacing: "-0.025em", lineHeight: 1.1, color: "var(--text-primary)", marginBottom: 16 }}>
-              <RefreshCw size={22} style={{ color: '#3ecfae' }} /> {t('l0.evolutionTitle')}
+              <RefreshCw size={22} style={{ color: 'var(--accent-cyan)' }} /> {t('l0.evolutionTitle')}
             </h2>
             <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: '24px' }}>
               {t('l0.evolutionDesc')}

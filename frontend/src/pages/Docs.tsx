@@ -372,7 +372,7 @@ export default function Docs() {
               {t('docs.title')}
             </h1>
             <p style={{ color: 'var(--text-secondary)', fontSize: '19px', lineHeight: 1.5, maxWidth: '640px' }}>
-              {t('docs.introPrefix')}<code className="text-xs px-1.5 py-0.5 rounded-md" style={{ background: 'rgba(139,126,200,0.1)', color: '#8b7ec8', fontFamily: 'var(--font-mono)' }}>X-API-Key</code>{t('docs.introSuffix')}
+              {t('docs.introPrefix')}<code className="text-xs px-1.5 py-0.5 rounded-md" style={{ background: 'rgba(139,126,200,0.1)', color: 'var(--accent-purple)', fontFamily: 'var(--font-mono)' }}>X-API-Key</code>{t('docs.introSuffix')}
             </p>
                       <p style={{ marginTop: 14, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-tertiary)' }}>
               <a href="#/smrp" style={{ color: 'var(--accent-purple)', textDecoration: 'none' }}>SMRP 协议 →</a>
