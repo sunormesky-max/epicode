@@ -368,6 +368,7 @@ async fn main() {
         .route("/v1/drive/inbox", get(memory::drive_inbox))
         .route("/v1/drive/ingested", post(memory::drive_ingested))
         .route("/v1/drive/policy", get(memory::drive_policy))
+        .route("/v1/scheduler/layers", get(memory::scheduler_layers))
         .route("/v1/persona/ready", get(health::persona_ready))
         .route("/v1/drive/ack", post(memory::drive_ack))
         .route("/v1/drive/evolution", get(memory::drive_evolution))

@@ -2,6 +2,7 @@
 pub mod bus;
 pub mod grains;
 pub mod horizon;
+pub mod run_layers;
 pub mod scheduler;
 
 // Memory lifecycle
