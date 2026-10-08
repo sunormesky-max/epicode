@@ -8,6 +8,8 @@ import {
   parseThemePrefs,
   resolveTheme,
   type ThemeId,
+  ACCENTS,
+  isAccentId,
 } from "../themes";
 import { FALLBACK_SERIES, readChartTheme } from "../chartTheme";
 import {
@@ -283,6 +285,8 @@ function runBoot(ls: Record<string, string>, systemDark: boolean | null) {
     scheme: root.style.colorScheme,
     meta: meta.content,
     nnBg: root.dataset.nnBg,
+    accent: root.dataset.accent,
+    mode: root.dataset.mode,
     props,
   };
 }
@@ -466,5 +470,130 @@ describe("theme tokens: canvas palettes (graph + neural background)", () => {
     expect(toHex("", "#123456")).toBe("#123456");
     expect(toHex("var(--x)", "#123456")).toBe("#123456");
     expect(withAlpha("#3ecfae", 0.18)).toBe("rgba(62,207,174,0.18)");
+  });
+});
+
+/* ---------- PR C: 强调色层 × 每个主题 ---------- */
+const accentBlocks = (() => {
+  const out: Record<
+    string,
+    { dark: Record<string, string>; light: Record<string, string> }
+  > = {};
+  const re =
+    /html\[data-accent="([a-z]+)"\](\[data-mode="light"\])?\s*\{([^}]*)\}/g;
+  for (const m of css.matchAll(re)) {
+    out[m[1]] ??= { dark: {}, light: {} };
+    const decl = Object.fromEntries(
+      [...m[3].matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map(x => [
+        x[1],
+        x[2].trim(),
+      ])
+    );
+    Object.assign(out[m[1]][m[2] ? "light" : "dark"], decl);
+  }
+  return out;
+})();
+/** 主题 × 强调色 下某 token 的生效值(浅色主题:light 块覆盖通用块,与 CSS 特异性一致) */
+const getA = (themeId: string, accent: string, name: string): string => {
+  if (accent === "theme") return get(themeId, name);
+  const mode = THEMES.find(t => t.id === themeId)!.mode;
+  const b = accentBlocks[accent];
+  const v = (mode === "light" ? b.light[name] : undefined) ?? b.dark[name];
+  if (!v) return get(themeId, name);
+  return v.startsWith("var(")
+    ? get(themeId, v.slice(4, -1).split(",")[0].trim())
+    : v;
+};
+
+describe("accent layer: every theme x accent combination", () => {
+  const ids = ["theme", ...ACCENTS.map(a => a.id)];
+  it("CSS defines a dark and a light block for every registered accent, and nothing else", () => {
+    expect(Object.keys(accentBlocks).sort()).toEqual(
+      ACCENTS.map(a => a.id).sort()
+    );
+    for (const a of ACCENTS) {
+      expect(accentBlocks[a.id].dark["--accent-cyan"]).toBe(a.dark);
+      expect(accentBlocks[a.id].light["--accent-cyan"]).toBe(a.light);
+    }
+  });
+  for (const t of THEMES)
+    for (const a of ids) {
+      it(`${t.id} x ${a}: accent text, button label and rgb triplet meet WCAG AA`, () => {
+        for (const fg of ["--accent-cyan", "--accent-cyan-bright"])
+          if (a !== "theme" || fg === "--accent-cyan")
+            for (const bg of surfaces(t.id))
+              expect([fg, bg, contrast(getA(t.id, a, fg), bg)]).toEqual([
+                fg,
+                bg,
+                expect.toSatisfy((c: number) => c >= 4.5),
+              ]);
+        const fills = t.id.startsWith("x-")
+          ? ["--accent-solid", "--accent-solid-hover"]
+          : ["--accent-cyan", "--accent-cyan-bright"];
+        for (const fill of fills)
+          expect(
+            contrast(getA(t.id, a, "--on-accent"), getA(t.id, a, fill))
+          ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          getA(t.id, a, "--accent-cyan-rgb")
+            .split(",")
+            .map(x => Number(x.trim()))
+        ).toEqual(rgb(getA(t.id, a, "--accent-cyan").toLowerCase()));
+      });
+    }
+});
+
+describe("accent prefs: stored format stays backward compatible", () => {
+  it("old prefs without `accent` parse unchanged and default to the theme accent", () => {
+    const old = JSON.stringify({
+      followSystem: true,
+      light: "paper",
+      dark: "amber",
+      bgEnabled: false,
+      bgIntensity: 40,
+    });
+    expect(parseThemePrefs(old)).toEqual({
+      followSystem: true,
+      light: "paper",
+      dark: "amber",
+      bgEnabled: false,
+      bgIntensity: 40,
+      accent: "theme",
+    });
+  });
+  it("valid accent round-trips; unknown values fall back to 'theme'", () => {
+    expect(parseThemePrefs(JSON.stringify({ accent: "rose" })).accent).toBe(
+      "rose"
+    );
+    expect(parseThemePrefs(JSON.stringify({ accent: "neon" })).accent).toBe(
+      "theme"
+    );
+    expect(parseThemePrefs(JSON.stringify({ accent: 3 })).accent).toBe("theme");
+    expect(DEFAULT_THEME_PREFS.accent).toBe("theme");
+    expect(isAccentId("theme")).toBe(true);
+  });
+  it("boot script accent list mirrors the registry", () => {
+    const list = JSON.parse(
+      bootSrc.match(/var A = (\[.*?\]);/)![1]
+    ) as string[];
+    expect(list).toEqual(ACCENTS.map(a => a.id));
+  });
+  it("boot script applies a stored accent and mode before first paint, ignores invalid ones", () => {
+    const ok = runBoot(
+      {
+        "epicode-theme": "paper",
+        "epicode-theme-prefs": JSON.stringify({ accent: "violet" }),
+      },
+      true
+    );
+    expect(ok.accent).toBe("violet");
+    expect(ok.mode).toBe("light");
+    const bad = runBoot(
+      { "epicode-theme-prefs": JSON.stringify({ accent: "neon" }) },
+      true
+    );
+    expect(bad.accent).toBeUndefined();
+    expect(bad.mode).toBe("dark");
+    expect(runBoot({}, true).accent).toBeUndefined();
   });
 });
