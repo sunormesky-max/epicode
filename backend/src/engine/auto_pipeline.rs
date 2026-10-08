@@ -101,6 +101,9 @@ pub fn auto_pulse(
         };
 
         if let Ok(result) = PulseEngine::send(ctx.space, ctx.knowledge, ptype, origin, 12) {
+            for &id in &result.dirty_ids {
+                ctx.gateway.mark_dirty(id);
+            }
             if result.data.visited_tetras.len() > 1 {
                 tracing::info!(
                     "[AutoPulse] {} cluster({}) origin {} (mass={:.2}) → visited {} tetras",

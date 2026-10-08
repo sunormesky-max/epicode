@@ -202,7 +202,7 @@ export default function Guide() {
           >
             <div className="rounded-2xl p-8" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)' }}>
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(var(--accent-purple-rgb), 0.1)' }}>
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(139,126,200,0.1)' }}>
                   <BookOpen size={20} style={{ color: 'var(--accent-purple)' }} />
                 </div>
                 <div>

@@ -119,7 +119,7 @@ export default function DashboardLibrary() {
       {notice && <NoticeBanner message={notice} onClose={() => setNotice('')} />}
 
       {/* 检索 */}
-      <div style={{ border: '1px solid rgba(var(--accent-cyan-rgb), 0.18)', borderRadius: 12, padding: 14, marginBottom: 16, background: 'rgba(var(--accent-cyan-rgb), 0.03)' }}>
+      <div style={{ border: '1px solid rgba(62,207,174,0.18)', borderRadius: 12, padding: 14, marginBottom: 16, background: 'rgba(62,207,174,0.03)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
           <Search size={13} style={{ color: 'var(--accent-cyan)' }} />
           <span style={{ color: 'var(--text-primary)', fontSize: 12.5, fontWeight: 600 }}>图书馆检索</span>
@@ -131,14 +131,14 @@ export default function DashboardLibrary() {
             placeholder="e.g. transformer attention mechanism"
             style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
           <button onClick={handleSearch} disabled={searching}
-            style={{ background: 'rgba(var(--accent-cyan-rgb), 0.15)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.3)', color: 'var(--accent-cyan)', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' }}>
+            style={{ background: 'rgba(62,207,174,0.15)', border: '1px solid rgba(62,207,174,0.3)', color: 'var(--accent-cyan)', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' }}>
             {searching ? '...' : '检索'}
           </button>
         </div>
         {results.length > 0 && (
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {results.map((r) => (
-              <div key={r.chunk_id} style={{ padding: '8px 12px', background: 'rgba(var(--overlay-rgb), 0.03)', borderRadius: 8 }}>
+              <div key={r.chunk_id} style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                   <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 600 }}>
                     <FileText size={11} style={{ verticalAlign: -1, marginRight: 4, color: 'var(--accent-cyan)' }} />
@@ -198,7 +198,7 @@ export default function DashboardLibrary() {
               {myRequests.slice(0, 20).map(r => {
                 const stColor = r.status === 'accepted' ? '#3ecfae' : r.status === 'rejected' ? '#f87171' : '#8b7ec8';
                 return (
-                  <div key={r.id} style={{ padding: '8px 10px', background: 'rgba(var(--overlay-rgb), 0.03)', borderRadius: 8 }}>
+                  <div key={r.id} style={{ padding: '8px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <p style={{ color: 'var(--text-primary)', fontSize: 12, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -224,7 +224,7 @@ export default function DashboardLibrary() {
                               接受
                             </button>
                             <button onClick={() => handleRequest(r.id, 'rejected')} disabled={handling === r.id}
-                              style={{ background: 'rgba(var(--danger-red-rgb), 0.1)', border: '1px solid rgba(var(--danger-red-rgb), 0.2)', color: 'var(--danger-red)', padding: '2px 8px', borderRadius: 5, cursor: 'pointer', fontSize: 10 }}>
+                              style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', color: '#f87171', padding: '2px 8px', borderRadius: 5, cursor: 'pointer', fontSize: 10 }}>
                               拒绝
                             </button>
                           </div>

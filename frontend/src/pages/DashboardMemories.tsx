@@ -19,7 +19,7 @@ function highlightText(text: string, query: string): React.ReactNode {
   const parts = text.split(re);
   return parts.map((part, i) =>
     re.test(part) && i % 2 === 1
-      ? <mark key={i} style={{ background: 'rgba(var(--accent-purple-rgb), 0.25)', color: '#e9d5ff', borderRadius: 3, padding: '0 2px' }}>{part}</mark>
+      ? <mark key={i} style={{ background: 'rgba(139,126,200,0.25)', color: '#e9d5ff', borderRadius: 3, padding: '0 2px' }}>{part}</mark>
       : part
   );
 }
@@ -336,11 +336,11 @@ export default function DashboardMemories() {
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent-cyan)', letterSpacing: '0.16em', marginBottom: 10 }}>MEMORIES</p>
             <h1 style={{ color: 'var(--text-primary)', fontSize: 'clamp(26px, 3.5vw, 36px)', fontWeight: 700, fontFamily: 'var(--font-display)', letterSpacing: '-0.025em', lineHeight: 1.1 }}>{t('dash.mem.title')}</h1>
           </div>
-          <div style={{ display: 'flex', gap: 4, background: 'rgba(var(--overlay-rgb), 0.04)', borderRadius: 8, padding: 3 }}>
+          <div style={{ display: 'flex', gap: 4, background: 'rgba(255,255,255,0.04)', borderRadius: 8, padding: 3 }}>
             {([['all', t('dash.mem.tabAll'), Brain], ['memories', t('dash.mem.tabMemories'), Brain], ['docs', t('dash.mem.tabDocs'), FileText]] as const).map(([key, label, Icon]) => (
               <button key={key} onClick={() => setContentTab(key)}
                 style={{ padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, transition: 'all 0.2s',
-                  background: contentTab === key ? 'var(--accent-purple)' : 'transparent',
+                  background: contentTab === key ? '#8b7ec8' : 'transparent',
                   color: contentTab === key ? '#fff' : 'var(--text-secondary)',
                 }}>
                 <Icon size={13} /> {label}
@@ -356,7 +356,7 @@ export default function DashboardMemories() {
           <input type="range" min={0} max={1} step={0.005} value={timeScrub}
             onChange={e => { const v = Number(e.target.value); setTimeScrub(v); window.dispatchEvent(new CustomEvent('scrub-depth', { detail: { v } })); }}
             aria-label="time scrub"
-            style={{ flex: 1, accentColor: 'var(--accent-cyan)', height: 2, cursor: 'ew-resize' }} />
+            style={{ flex: 1, accentColor: '#3ecfae', height: 2, cursor: 'ew-resize' }} />
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
             {timeScrub > 0.005 ? (() => { const alive = displayItems.filter(it => (it.timestamp ?? 0) <= scrubNow).length; return `${alive}/${displayItems.length}`; })() : ''}
           </span>
@@ -365,9 +365,9 @@ export default function DashboardMemories() {
       </div>
 
       {error && (
-        <div style={{ background: 'rgba(var(--danger-red-rgb), 0.1)', color: 'var(--danger-red)', border: '1px solid rgba(var(--danger-red-rgb), 0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {error}
-          <button onClick={() => setError('')} style={{ color: 'var(--danger-red)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
+          <button onClick={() => setError('')} style={{ color: '#f87171', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
         </div>
       )}
       {notice && (
@@ -382,7 +382,7 @@ export default function DashboardMemories() {
         <button onClick={() => { setShowStore(!showStore); setShowDocImport(false); }} style={{ background: 'var(--accent-purple)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 10, cursor: 'pointer', fontSize: 13 }}>
           <Plus size={15} style={{ verticalAlign: -3, marginRight: 4 }} /> {t('dash.mem.storeMemory')}
         </button>
-        <button onClick={() => { setShowDocImport(!showDocImport); setShowStore(false); }} style={{ background: 'rgba(var(--overlay-rgb), 0.06)', color: 'var(--text-secondary)', border: '1px solid rgba(var(--overlay-rgb), 0.1)', padding: '8px 16px', borderRadius: 10, cursor: 'pointer', fontSize: 13 }}>
+        <button onClick={() => { setShowDocImport(!showDocImport); setShowStore(false); }} style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)', border: '1px solid rgba(255,255,255,0.1)', padding: '8px 16px', borderRadius: 10, cursor: 'pointer', fontSize: 13 }}>
           <FileText size={15} style={{ verticalAlign: -3, marginRight: 4 }} /> {t('dash.mem.importDoc')}
         </button>
       </div>
@@ -390,7 +390,7 @@ export default function DashboardMemories() {
       {showStore && (
         <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: 14, marginBottom: 16 }}>
           <textarea value={storeText} onChange={e => setStoreText(e.target.value)}             placeholder={t('dash.mem.storePlaceholder')}
-            style={{ width: '100%', background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)', border: '1px solid rgba(var(--overlay-rgb), 0.1)', borderRadius: 8, padding: 12, fontSize: 14, minHeight: 80, marginBottom: 8, boxSizing: 'border-box', resize: 'vertical' }} />
+            style={{ width: '100%', background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: 12, fontSize: 14, minHeight: 80, marginBottom: 8, boxSizing: 'border-box', resize: 'vertical' }} />
           <button onClick={handleStore} disabled={storing} style={{ background: 'var(--accent-purple)', color: '#fff', border: 'none', padding: '8px 20px', borderRadius: 8, cursor: 'pointer', opacity: storing ? 0.7 : 1 }}>
             {storing ? t('dash.mem.storing') : 'Store'}
           </button>
@@ -401,11 +401,11 @@ export default function DashboardMemories() {
         <div style={{ background: 'rgba(96,165,250,0.04)', border: '1px solid rgba(96,165,250,0.12)', borderRadius: 14, padding: 16, marginBottom: 16 }}>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <input type="text" value={docName} onChange={e => setDocName(e.target.value)} placeholder={t('dash.mem.docNamePlaceholder')}
-              style={{ flex: '0 1 200px', background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)', border: '1px solid rgba(var(--overlay-rgb), 0.1)', borderRadius: 8, padding: 10, fontSize: 13, boxSizing: 'border-box' }} />
+              style={{ flex: '0 1 200px', background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: 10, fontSize: 13, boxSizing: 'border-box' }} />
             <span style={{ color: 'var(--text-tertiary)', fontSize: 11, alignSelf: 'center' }}>{t('dash.mem.docSegmentHint')}</span>
           </div>
           <textarea value={docContent} onChange={e => setDocContent(e.target.value)} placeholder={t('dash.mem.docContentPlaceholder')}
-            style={{ width: '100%', background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)', border: '1px solid rgba(var(--overlay-rgb), 0.1)', borderRadius: 8, padding: 12, fontSize: 13, minHeight: 200, marginBottom: 8, boxSizing: 'border-box', resize: 'vertical', fontFamily: 'var(--font-mono)' }} />
+            style={{ width: '100%', background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: 12, fontSize: 13, minHeight: 200, marginBottom: 8, boxSizing: 'border-box', resize: 'vertical', fontFamily: 'var(--font-mono)' }} />
           <button onClick={handleDocImport} disabled={importing || !docName.trim() || !docContent.trim()}
             style={{ background: 'var(--accent-blue)', color: '#fff', border: 'none', padding: '8px 20px', borderRadius: 8, cursor: 'pointer', opacity: importing ? 0.6 : 1 }}>
             {importing ? t('dash.mem.importing') : t('dash.mem.importDoc')}
@@ -421,10 +421,10 @@ export default function DashboardMemories() {
           onClick={() => { setRecallMode(!recallMode); setRecallSections(null); }}
           title="深度回忆：关联扩展+图谱遍历，返回更丰富的分桶结果"
           style={{
-            background: recallMode ? 'rgba(var(--accent-purple-rgb), 0.12)' : 'rgba(var(--accent-cyan-rgb), 0.04)',
-            border: `1px solid ${recallMode ? 'rgba(var(--accent-purple-rgb), 0.3)' : 'rgba(var(--accent-cyan-rgb), 0.12)'}`,
+            background: recallMode ? 'rgba(139,126,200,0.12)' : 'rgba(62,207,174,0.04)',
+            border: `1px solid ${recallMode ? 'rgba(139,126,200,0.3)' : 'rgba(62,207,174,0.12)'}`,
             borderRadius: 10, padding: '0 12px', cursor: 'pointer',
-            color: recallMode ? 'var(--accent-purple)' : 'var(--accent-cyan-bright)',
+            color: recallMode ? '#8b7ec8' : 'var(--accent-cyan-bright)',
             fontSize: 11, fontFamily: 'var(--font-heading)', fontWeight: 600,
             letterSpacing: '0.03em', display: 'flex', alignItems: 'center', gap: 4,
             whiteSpace: 'nowrap', transition: 'all 0.2s',
@@ -454,7 +454,7 @@ export default function DashboardMemories() {
             }}
             onFocus={() => { if (query.trim()) setSearchMode(true); }}
             placeholder={t('dash.mem.searchPlaceholder')}
-            style={{ width: '100%', background: 'rgba(var(--overlay-rgb), 0.04)', color: 'var(--text-primary)', border: `1px solid ${searchMode ? 'rgba(var(--accent-purple-rgb), 0.3)' : 'rgba(var(--overlay-rgb), 0.08)'}`, borderRadius: 10, padding: '10px 14px 10px 40px', fontSize: 14, boxSizing: 'border-box', transition: 'border-color 0.2s' }} />
+            style={{ width: '100%', background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary)', border: `1px solid ${searchMode ? 'rgba(139,126,200,0.3)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 10, padding: '10px 14px 10px 40px', fontSize: 14, boxSizing: 'border-box', transition: 'border-color 0.2s' }} />
           {searchMode && query && (
             <button type="button" onClick={() => {
               cancelSearch();
@@ -470,7 +470,7 @@ export default function DashboardMemories() {
           )}
         </div>
         <button type="button" onClick={() => setShowFilters(!showFilters)}
-          style={{ background: showFilters ? 'rgba(var(--accent-purple-rgb), 0.15)' : 'rgba(var(--overlay-rgb), 0.04)', border: `1px solid ${showFilters ? 'rgba(var(--accent-purple-rgb), 0.3)' : 'rgba(var(--overlay-rgb), 0.08)'}`, color: showFilters ? 'var(--accent-purple)' : 'var(--text-secondary)', padding: '8px 14px', borderRadius: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+          style={{ background: showFilters ? 'rgba(139,126,200,0.15)' : 'rgba(255,255,255,0.04)', border: `1px solid ${showFilters ? 'rgba(139,126,200,0.3)' : 'rgba(255,255,255,0.08)'}`, color: showFilters ? '#8b7ec8' : 'var(--text-secondary)', padding: '8px 14px', borderRadius: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
           <Filter size={15} /> {t('dash.mem.filter')}
         </button>
         <button type="submit" disabled={loading} style={{ background: 'var(--accent-purple)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 10, cursor: 'pointer', fontSize: 13, opacity: loading ? 0.7 : 1 }}>
@@ -489,7 +489,7 @@ export default function DashboardMemories() {
             <div style={{ display: 'flex', gap: 6 }}>
               {['all', 'today', 'week', 'month'].map(r => (
                 <button key={r} onClick={() => setTimeRange(r)} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12,
-                  background: timeRange === r ? 'rgba(var(--accent-purple-rgb), 0.15)' : 'rgba(var(--overlay-rgb), 0.04)', color: timeRange === r ? 'var(--accent-purple)' : 'var(--text-secondary)' }}>
+                  background: timeRange === r ? 'rgba(139,126,200,0.15)' : 'rgba(255,255,255,0.04)', color: timeRange === r ? '#8b7ec8' : 'var(--text-secondary)' }}>
                   {r === 'all' ? t('dash.mem.rangeAll') : r === 'today' ? t('dash.mem.rangeToday') : r === 'week' ? t('dash.mem.rangeWeek') : t('dash.mem.rangeMonth')}
                 </button>
               ))}
@@ -504,7 +504,7 @@ export default function DashboardMemories() {
             <div style={{ display: 'flex', gap: 6 }}>
               {[{ key: 'newest' as const, label: t('dash.mem.sortNewest') }, { key: 'oldest' as const, label: t('dash.mem.sortOldest') }].map(s => (
                 <button key={s.key} onClick={() => setSortBy(s.key)} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12,
-                  background: sortBy === s.key ? 'rgba(var(--accent-purple-rgb), 0.15)' : 'rgba(var(--overlay-rgb), 0.04)', color: sortBy === s.key ? 'var(--accent-purple)' : 'var(--text-secondary)' }}>
+                  background: sortBy === s.key ? 'rgba(139,126,200,0.15)' : 'rgba(255,255,255,0.04)', color: sortBy === s.key ? '#8b7ec8' : 'var(--text-secondary)' }}>
                   {s.label}
                 </button>
               ))}
@@ -520,7 +520,7 @@ export default function DashboardMemories() {
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {allLabels.map(l => (
                   <button key={l} onClick={() => toggleLabel(l)} style={{ padding: '3px 8px', borderRadius: 5, border: 'none', cursor: 'pointer', fontSize: 11,
-                    background: filterLabels.includes(l) ? 'rgba(var(--accent-purple-rgb), 0.2)' : 'rgba(var(--overlay-rgb), 0.04)', color: filterLabels.includes(l) ? 'var(--accent-purple)' : 'var(--text-secondary)' }}>
+                    background: filterLabels.includes(l) ? 'rgba(139,126,200,0.2)' : 'rgba(255,255,255,0.04)', color: filterLabels.includes(l) ? '#8b7ec8' : 'var(--text-secondary)' }}>
                     {l}
                   </button>
                 ))}
@@ -538,8 +538,8 @@ export default function DashboardMemories() {
             {recallSections && (idx === 0 || (displayItems[idx - 1] as { tier?: string }).tier !== item.tier) && (
               <div style={{
                 fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
-                color: item.tier === 'primary' ? '#60a5fa' : item.tier === 'hub' ? 'var(--accent-cyan)' : item.tier === 'experiential' ? 'var(--danger-red)' : 'var(--text-secondary)',
-                padding: '10px 4px 2px', borderBottom: '1px solid rgba(var(--overlay-rgb), 0.06)',
+                color: item.tier === 'primary' ? '#60a5fa' : item.tier === 'hub' ? '#3ecfae' : item.tier === 'experiential' ? '#f87171' : 'var(--text-secondary)',
+                padding: '10px 4px 2px', borderBottom: '1px solid rgba(255,255,255,0.06)',
               }}>
                 {String(item.tier)} · {recallSections.find(g => g.tier === item.tier)?.results.length ?? ''}
               </div>
@@ -559,27 +559,27 @@ export default function DashboardMemories() {
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                   <span style={{ color: 'var(--text-tertiary)', fontSize: 11, fontFamily: 'var(--font-mono)' }}>#{item.id}</span>
                   {(item.labels || []).map(label => (
-                    <span key={label} style={{ background: 'rgba(var(--accent-purple-rgb), 0.08)', color: 'var(--accent-purple)', fontSize: 10, padding: '2px 6px', borderRadius: 4, border: '1px solid rgba(var(--accent-purple-rgb), 0.15)' }}>{label}</span>
+                    <span key={label} style={{ background: 'rgba(139,126,200,0.08)', color: 'var(--accent-purple)', fontSize: 10, padding: '2px 6px', borderRadius: 4, border: '1px solid rgba(139,126,200,0.15)' }}>{label}</span>
                   ))}
                   {item.similarity !== undefined && (
                     <span style={{ background: 'rgba(52,211,153,0.08)', color: 'var(--accent-cyan)', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>{t('dash.mem.score')} {item.similarity.toFixed(3)}</span>
                   )}
                   {/* 刀2: 检索来源诚实 — matched_by 后端早有, 前端首次展示(审计前端P0-5) */}
                   {item.matched_by && item.matched_by.length > 0 && (
-                    <span style={{ background: 'rgba(var(--accent-cyan-rgb), 0.08)', color: 'var(--accent-cyan)', fontSize: 10, padding: '2px 6px', borderRadius: 4, fontFamily: 'var(--font-mono)' }} title="matched_by">⚙ {(item.matched_by as string[]).join(',')}</span>
+                    <span style={{ background: 'rgba(62,207,174,0.08)', color: 'var(--accent-cyan)', fontSize: 10, padding: '2px 6px', borderRadius: 4, fontFamily: 'var(--font-mono)' }} title="matched_by">⚙ {(item.matched_by as string[]).join(',')}</span>
                   )}
                   {item.tier && (
                     <span style={{
                       background: item.tier === 'primary' ? 'rgba(96,165,250,0.12)' :
                                   item.tier === 'hub' ? 'rgba(251,191,36,0.12)' :
-                                  item.tier === 'experiential' ? 'rgba(var(--danger-red-rgb), 0.1)' : 'rgba(156,163,175,0.08)',
+                                  item.tier === 'experiential' ? 'rgba(248,113,113,0.1)' : 'rgba(156,163,175,0.08)',
                       color: item.tier === 'primary' ? '#60a5fa' :
-                             item.tier === 'hub' ? 'var(--accent-cyan)' :
-                             item.tier === 'experiential' ? 'var(--danger-red)' : 'var(--text-secondary)',
+                             item.tier === 'hub' ? '#3ecfae' :
+                             item.tier === 'experiential' ? '#f87171' : 'var(--text-secondary)',
                       fontSize: 10, padding: '2px 6px', borderRadius: 4, border: `1px solid ${
                         item.tier === 'primary' ? 'rgba(96,165,250,0.2)' :
                         item.tier === 'hub' ? 'rgba(251,191,36,0.2)' :
-                        item.tier === 'experiential' ? 'rgba(var(--danger-red-rgb), 0.15)' : 'rgba(156,163,175,0.15)'}`
+                        item.tier === 'experiential' ? 'rgba(248,113,113,0.15)' : 'rgba(156,163,175,0.15)'}`
                     }}>
                       {item.tier === 'primary' ? t('dash.mem.tierPrimary') : item.tier === 'hub' ? t('dash.mem.tierHub') : item.tier === 'experiential' ? t('dash.mem.tierExperiential') : t('dash.mem.tierContext')}
                     </span>
@@ -595,23 +595,23 @@ export default function DashboardMemories() {
             {expandedId === item.id && (
               <div style={{
                 padding: '0 16px 16px',
-                borderTop: '1px solid rgba(var(--overlay-rgb), 0.04)',
+                borderTop: '1px solid rgba(255,255,255,0.04)',
                 borderLeft: item.tier ? `3px solid ${
                   item.tier === 'primary' ? '#60a5fa' :
-                  item.tier === 'hub' ? 'var(--accent-cyan)' :
-                  item.tier === 'experiential' ? 'var(--danger-red)' : 'var(--text-secondary)'}` : undefined,
+                  item.tier === 'hub' ? '#3ecfae' :
+                  item.tier === 'experiential' ? '#f87171' : 'var(--text-secondary)'}` : undefined,
               }}>
                 {editingId === item.id ? (
                   <div style={{ padding: '12px 0' }}>
                     <textarea value={editText} onChange={e => setEditText(e.target.value)}
-                      style={{ width: '100%', background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)', border: '1px solid rgba(var(--accent-purple-rgb), 0.2)', borderRadius: 8, padding: 12, fontSize: 13, minHeight: 80, boxSizing: 'border-box', resize: 'vertical', lineHeight: 1.6 }} />
+                      style={{ width: '100%', background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)', border: '1px solid rgba(139,126,200,0.2)', borderRadius: 8, padding: 12, fontSize: 13, minHeight: 80, boxSizing: 'border-box', resize: 'vertical', lineHeight: 1.6 }} />
                     <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                       <button onClick={e => { e.stopPropagation(); handleSaveEdit(item.id); }} disabled={saving}
                         style={{ background: 'var(--accent-purple)', color: '#fff', border: 'none', padding: '5px 14px', borderRadius: 6, cursor: 'pointer', fontSize: 12, opacity: saving ? 0.6 : 1 }}>
                         {saving ? t('dash.mem.saving') : t('dash.mem.save')}
                       </button>
                       <button onClick={e => { e.stopPropagation(); setEditingId(null); setEditText(''); }}
-                        style={{ background: 'rgba(var(--overlay-rgb), 0.04)', color: 'var(--text-secondary)', border: 'none', padding: '5px 14px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
+                        style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)', border: 'none', padding: '5px 14px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
                         {t('dash.mem.cancel')}
                       </button>
                     </div>
@@ -627,8 +627,8 @@ export default function DashboardMemories() {
                           {item.score_notes.adjustments.map((adj: { kind: string; reason?: string; delta?: number }, i: number) => (
                             <span key={i} style={{
                               fontSize: 10, padding: '2px 6px', borderRadius: 4,
-                              background: (adj.delta ?? 0) > 0 ? 'rgba(52,211,153,0.08)' : 'rgba(var(--danger-red-rgb), 0.08)',
-                              color: (adj.delta ?? 0) > 0 ? 'var(--accent-cyan)' : 'var(--danger-red)',
+                              background: (adj.delta ?? 0) > 0 ? 'rgba(52,211,153,0.08)' : 'rgba(248,113,113,0.08)',
+                              color: (adj.delta ?? 0) > 0 ? '#3ecfae' : '#f87171',
                             }}>
                               {adj.kind.replace(/_/g, ' ')} {(adj.delta ?? 0) > 0 ? '+' : ''}{(adj.delta ?? 0).toFixed(2)}
                             </span>
@@ -638,19 +638,19 @@ export default function DashboardMemories() {
                     )}
                     {/* multi_hop KG扩展标识 */}
                     {item.source && item.source.includes('kg') && (
-                      <div style={{ display: 'inline-block', fontSize: 10, padding: '2px 8px', borderRadius: 4, background: 'rgba(var(--accent-purple-rgb), 0.08)', color: 'var(--accent-purple)', marginBottom: 8 }}>KG multi-hop</div>
+                      <div style={{ display: 'inline-block', fontSize: 10, padding: '2px 8px', borderRadius: 4, background: 'rgba(139,126,200,0.08)', color: 'var(--accent-purple)', marginBottom: 8 }}>KG multi-hop</div>
                     )}
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button onClick={e => { e.stopPropagation(); handleCopy(item.content, item.id); }}
-                        style={{ background: 'rgba(var(--overlay-rgb), 0.04)', color: copiedId === item.id ? 'var(--accent-cyan)' : 'var(--text-secondary)', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
+                        style={{ background: 'rgba(255,255,255,0.04)', color: copiedId === item.id ? '#3ecfae' : 'var(--text-secondary)', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
                         {copiedId === item.id ? t('dash.mem.copied') : 'Copy'}
                       </button>
                       <button onClick={e => { e.stopPropagation(); startEdit(item.id, item.content); }}
-                        style={{ background: 'rgba(var(--overlay-rgb), 0.04)', color: 'var(--accent-purple)', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--accent-purple)', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
                         <Pencil size={12} /> {t('dash.mem.edit')}
                       </button>
                       <button onClick={e => { e.stopPropagation(); handleDelete(item.id); }}
-                        style={{ background: 'rgba(var(--overlay-rgb), 0.04)', color: 'var(--danger-red)', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
+                        style={{ background: 'rgba(255,255,255,0.04)', color: '#f87171', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
                         {t('dash.mem.delete')}
                       </button>
                     </div>
@@ -692,9 +692,9 @@ export default function DashboardMemories() {
           <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('dash.mem.pageLabel')} {page + 1} · {totalEvents} {t('dash.mem.pageUnit')}</span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0}
-              style={{ background: 'rgba(var(--overlay-rgb), 0.04)', color: 'var(--text-secondary)', border: '1px solid rgba(var(--overlay-rgb), 0.06)', padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, opacity: page === 0 ? 0.4 : 1 }}>{t('dash.mem.prevPage')}</button>
+              style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)', border: '1px solid rgba(255,255,255,0.06)', padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, opacity: page === 0 ? 0.4 : 1 }}>{t('dash.mem.prevPage')}</button>
             <button onClick={() => setPage(page + 1)} disabled={(page + 1) * PAGE >= totalEvents}
-              style={{ background: 'rgba(var(--overlay-rgb), 0.04)', color: 'var(--text-secondary)', border: '1px solid rgba(var(--overlay-rgb), 0.06)', padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, opacity: (page + 1) * PAGE >= totalEvents ? 0.4 : 1 }}>{t('dash.mem.nextPage')}</button>
+              style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)', border: '1px solid rgba(255,255,255,0.06)', padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, opacity: (page + 1) * PAGE >= totalEvents ? 0.4 : 1 }}>{t('dash.mem.nextPage')}</button>
           </div>
         </div>
       )}
