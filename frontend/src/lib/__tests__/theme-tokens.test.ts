@@ -42,6 +42,17 @@ function themeVars(): Record<string, Record<string, string>> {
   return out;
 }
 const vars = themeVars();
+/* html[data-theme]:not([data-theme="synapse"]) 的特异性 (0,2,1) 高于单主题块 (0,1,1):覆盖所有非默认主题 */
+{
+  const shared = css.match(
+    /html\[data-theme\]:not\(\[data-theme="synapse"\]\)\s*\{([^}]*)\}/
+  );
+  if (shared)
+    for (const id of Object.keys(vars))
+      if (id !== "synapse")
+        for (const x of shared[1].matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g))
+          vars[id][x[1]] = x[2].trim();
+}
 const get = (id: string, name: string): string => {
   let v = vars[id]?.[name] ?? vars.synapse[name];
   for (let i = 0; i < 5 && v?.startsWith("var("); i++) {
@@ -404,6 +415,11 @@ describe("theme tokens: canvas palettes (graph + neural background)", () => {
       for (const n of ["--graph-muted", "--graph-path", "--graph-label-text"])
         expect([n, get(t.id, n)]).toEqual([n, expect.stringMatching(HEX)]);
       expect(get(t.id, "--graph-label-bg-rgb")).toMatch(/^\d+, \d+, \d+$/);
+    });
+    it(`${t.id}: graph muted text is AA on the canvas background (synapse: pre-existing 4.16, kept for pixel parity)`, () => {
+      const c = contrast(get(t.id, "--graph-muted"), get(t.id, "--bg-void"));
+      if (t.id === "synapse") expect(c).toBeGreaterThan(4);
+      else expect(c).toBeGreaterThanOrEqual(4.5);
     });
     it(`${t.id}: graph node labels are AA on their pill`, () => {
       const pill = hex(
