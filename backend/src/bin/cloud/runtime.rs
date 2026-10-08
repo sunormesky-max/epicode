@@ -69,6 +69,30 @@ pub struct RegisterRequest {
     pub e2e_public_key: Option<String>,
 }
 
+/// 重新注册是否构成新的绑定时间线事件;返回写入锚记忆的原因,`None` 表示无需新锚。
+///
+/// 只比较"谁、在哪台机器、哪个协议版本、什么加密状态",不比较时间与心跳:
+/// 同一 agent 心跳过期后以相同指纹重新注册,时间线上已有它的锚,再写只会无界增长。
+fn anchor_reason(
+    previous: Option<&super::state::ExecutorBinding>,
+    next: &super::state::ExecutorBinding,
+) -> Option<&'static str> {
+    let Some(prev) = previous else {
+        return Some("first-binding");
+    };
+    if prev.agent_id != next.agent_id {
+        Some("agent-changed")
+    } else if prev.machine_fingerprint != next.machine_fingerprint {
+        Some("machine-changed")
+    } else if prev.manifest_version != next.manifest_version {
+        Some("manifest-changed")
+    } else if prev.e2e_enabled != next.e2e_enabled || prev.e2e_public_key != next.e2e_public_key {
+        Some("e2e-changed")
+    } else {
+        None
+    }
+}
+
 /// POST /v1/runtime/register
 pub async fn register(
     State(st): State<CloudState>,
@@ -92,10 +116,15 @@ pub async fn register(
         last_heartbeat: now,
         e2e_enabled: req.e2e_enabled,
         e2e_public_key: req.e2e_public_key.clone(),
+        machine_fingerprint: req.machine_fingerprint.clone(),
+        manifest_version: req.manifest_version.clone(),
     };
 
+    let anchor;
     {
         let mut executors = st.primary_executors.write();
+        // 与上一次绑定(含已过期的)比较:同一 agent 以相同指纹重新注册不是新的时间线事件
+        anchor = anchor_reason(executors.get(&user.user_id), &binding);
         if let Some(existing) = executors.get(&user.user_id) {
             if !existing.is_expired() && existing.agent_id != req.agent_id {
                 return (
@@ -132,21 +161,24 @@ pub async fn register(
     }
 
     let engine = user_engine(&st, &user.user_id);
-    if let Some(ref e) = engine {
+    if let (Some(ref e), Some(reason)) = (&engine, anchor) {
         // α0.4: binding 锚记忆 — 机器指纹 + manifest 版本 + 时间, 时间线保留 (unregister 不删)
+        // 只在绑定身份变化时写入:控制台每次心跳过期(120s)后都会重新注册同一 agent,
+        // 以前每次都写一条锚记忆,记忆数随登录次数无界增长。
         let e2e_kfp = req
             .e2e_public_key
             .as_ref()
             .map(|p| epicode::engine::crypto::compute_integrity_hash(p.as_bytes(), b"e2e-kfp"))
             .unwrap_or_else(|| "none".into());
         let audit = format!(
-            "[binding-anchor] primary={} machine={} manifest={} e2e={} e2e_key={} user={} at {}",
+            "[binding-anchor] primary={} machine={} manifest={} e2e={} e2e_key={} user={} reason={} at {}",
             req.agent_id,
             req.machine_fingerprint.as_deref().unwrap_or("unreported"),
             req.manifest_version.as_deref().unwrap_or("unreported"),
             req.e2e_enabled,
             &e2e_kfp[..16.min(e2e_kfp.len())],
             user.user_id,
+            reason,
             now
         );
         let _ = e.scheduler.api_remember_with_labels(
@@ -492,6 +524,8 @@ mod permission_tests {
                 last_heartbeat: expired_at,
                 e2e_enabled: false,
                 e2e_public_key: None,
+                machine_fingerprint: None,
+                manifest_version: None,
             },
         );
         denied(unregister(State(st.clone()), Extension(viewer.clone())).await);
@@ -519,5 +553,84 @@ mod permission_tests {
             ..viewer
         };
         denied(status(State(st), Extension(revoked)).await);
+    }
+
+    fn binding(
+        agent: &str,
+        machine: Option<&str>,
+        at: i64,
+    ) -> super::super::state::ExecutorBinding {
+        super::super::state::ExecutorBinding {
+            agent_id: agent.into(),
+            user_id: "u".into(),
+            capabilities: vec!["ack".into()],
+            registered_at: at,
+            last_heartbeat: at,
+            e2e_enabled: false,
+            e2e_public_key: None,
+            machine_fingerprint: machine.map(Into::into),
+            manifest_version: Some("1".into()),
+        }
+    }
+
+    #[test]
+    fn anchor_only_when_binding_identity_changes() {
+        let first = binding("dashboard-u", Some("m1"), 0);
+        assert_eq!(anchor_reason(None, &first), Some("first-binding"));
+        // heartbeat expired, same agent/machine/manifest re-registers: no new timeline event
+        assert_eq!(
+            anchor_reason(Some(&first), &binding("dashboard-u", Some("m1"), 9_999)),
+            None
+        );
+        assert_eq!(
+            anchor_reason(Some(&first), &binding("cli-agent", Some("m1"), 1)),
+            Some("agent-changed")
+        );
+        assert_eq!(
+            anchor_reason(Some(&first), &binding("dashboard-u", Some("m2"), 1)),
+            Some("machine-changed")
+        );
+        let mut upgraded = binding("dashboard-u", Some("m1"), 1);
+        upgraded.manifest_version = Some("2".into());
+        assert_eq!(
+            anchor_reason(Some(&first), &upgraded),
+            Some("manifest-changed")
+        );
+        let mut keyed = binding("dashboard-u", Some("m1"), 1);
+        keyed.e2e_enabled = true;
+        keyed.e2e_public_key = Some("pem".into());
+        assert_eq!(anchor_reason(Some(&first), &keyed), Some("e2e-changed"));
+    }
+
+    #[test]
+    fn legacy_persisted_binding_without_fingerprint_fields_still_dedupes() {
+        let legacy: super::super::state::ExecutorBinding =
+            serde_json::from_value(serde_json::json!({
+                "agent_id": "dashboard-u", "user_id": "u", "capabilities": ["ack"],
+                "registered_at": 0, "last_heartbeat": 0, "e2e_enabled": false
+            }))
+            .unwrap();
+        assert_eq!(legacy.machine_fingerprint, None);
+        let mut again = binding("dashboard-u", None, 500);
+        again.manifest_version = None;
+        assert_eq!(anchor_reason(Some(&legacy), &again), None);
+    }
+
+    /// Reproduction: the console re-registers `dashboard-<user>` whenever its 120 s heartbeat
+    /// lapsed (every visit after a pause). Each re-registration used to write one anchor memory.
+    #[test]
+    fn dashboard_relogin_loop_writes_one_anchor_instead_of_one_per_login() {
+        let mut current: Option<super::super::state::ExecutorBinding> = None;
+        let (mut anchors_before, mut anchors_after) = (0, 0);
+        for login in 0..50i64 {
+            let next = binding("dashboard-u", None, login * 3_600);
+            anchors_before += 1; // old behaviour: unconditional
+            if anchor_reason(current.as_ref(), &next).is_some() {
+                anchors_after += 1;
+            }
+            current = Some(next);
+        }
+        assert_eq!(anchors_before, 50);
+        assert_eq!(anchors_after, 1);
     }
 }
