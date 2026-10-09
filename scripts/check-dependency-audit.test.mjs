@@ -16,22 +16,22 @@ function policy(exceptions = []) {
       {
         ecosystem: "npm",
         scope: npmScope,
-        id: "GHSA-vfj7-8cjw-p6xm",
-        package: "braces",
-        version: "3.0.3",
+        id: "GHSA-test-waiver-0001",
+        package: "sample-braces",
+        version: "1.2.3",
         owner: "security@epicode.cn",
         expiresOn: "2026-11-09",
-        reason: "Unpatched dev-only dependency.",
+        reason: "Fixture proves exact exception matching.",
       },
       {
         ecosystem: "cargo",
         scope: cargoScope,
-        id: "RUSTSEC-2023-0071",
-        package: "rsa",
-        version: "0.9.10",
+        id: "RUSTSEC-2099-0001",
+        package: "sample-rsa",
+        version: "1.2.3",
         owner: "security@epicode.cn",
         expiresOn: "2026-11-09",
-        reason: "No patched release; private decrypt is not used by HTTP/MCP handlers.",
+        reason: "Fixture proves exact exception matching.",
       },
       ...exceptions,
     ],
@@ -43,23 +43,23 @@ const npmReport = {
     vulnerabilities: { info: 0, low: 0, moderate: 0, high: 2, critical: 0, total: 2 },
   },
   vulnerabilities: {
-    braces: {
-      name: "braces",
+    "sample-braces": {
+      name: "sample-braces",
       severity: "high",
       via: [
         {
-          name: "braces",
-          url: "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm",
+          name: "sample-braces",
+          url: "https://github.com/advisories/GHSA-test-waiver-0001",
           severity: "high",
-          range: "<=3.0.3",
+          range: "<2.0.0",
         },
       ],
-      nodes: ["node_modules/braces"],
+      nodes: ["node_modules/sample-braces"],
     },
     tailwindcss: {
       name: "tailwindcss",
       severity: "high",
-      via: ["braces"],
+      via: ["sample-braces"],
       nodes: ["node_modules/tailwindcss"],
     },
   },
@@ -67,12 +67,12 @@ const npmReport = {
 
 const npmLockfile = {
   packages: {
-    "node_modules/braces": { version: "3.0.3" },
+    "node_modules/sample-braces": { version: "1.2.3" },
     "node_modules/tailwindcss": { version: "3.4.19" },
   },
 };
 
-function cargoReport(version = "0.9.10") {
+function cargoReport(version = "1.2.3") {
   return {
     database: { "advisory-count": 1 },
     lockfile: { "dependency-count": 1 },
@@ -82,8 +82,8 @@ function cargoReport(version = "0.9.10") {
       count: 1,
       list: [
         {
-          advisory: { id: "RUSTSEC-2023-0071", package: "rsa" },
-          package: { name: "rsa", version },
+          advisory: { id: "RUSTSEC-2099-0001", package: "sample-rsa" },
+          package: { name: "sample-rsa", version },
         },
       ],
     },
@@ -102,7 +102,7 @@ test("allows only the exact npm advisory/package/version exception through aggre
     today: "2026-10-09",
   });
 
-  assert.match(messages.join("\n"), /GHSA-vfj7-8cjw-p6xm braces@3\.0\.3/);
+  assert.match(messages.join("\n"), /GHSA-test-waiver-0001 sample-braces@1\.2\.3/);
 });
 
 test("fails closed on an unrelated high npm advisory", () => {
@@ -142,7 +142,7 @@ test("fails closed on an unrelated high npm advisory", () => {
   );
 });
 
-test("allows the exact current Rust exception but rejects a different locked version", () => {
+test("allows an exact Rust exception but rejects a different locked version", () => {
   const report = cargoReport();
 
   const messages = evaluateAuditReport({
@@ -153,9 +153,9 @@ test("allows the exact current Rust exception but rejects a different locked ver
     auditPolicy: policy(),
     today: "2026-10-09",
   });
-  assert.match(messages.join("\n"), /RUSTSEC-2023-0071 rsa@0\.9\.10/);
+  assert.match(messages.join("\n"), /RUSTSEC-2099-0001 sample-rsa@1\.2\.3/);
 
-  report.vulnerabilities.list[0].package.version = "0.9.11";
+  report.vulnerabilities.list[0].package.version = "1.2.4";
   assert.throws(
     () =>
       evaluateAuditReport({

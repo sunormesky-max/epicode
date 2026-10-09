@@ -6854,18 +6854,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_drive_inbox_encrypts_descriptions_for_registered_e2e_key() {
-        use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
-        use rsa::RsaPrivateKey;
-
-        let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
-        let private_pem = private_key
-            .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
-            .unwrap()
-            .to_string();
-        let public_pem = private_key
-            .to_public_key()
-            .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
-            .unwrap();
+        let (public_pem, private_pem) = crate::engine::e2e::test_keypair_pem();
         let mut engine = isolated_engine();
         engine.start();
         engine.scheduler().set_e2e_pubkey(Some(&public_pem));
