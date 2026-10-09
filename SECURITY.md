@@ -6,8 +6,8 @@ The following versions of Epicode are currently supported with security updates:
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
-| < 1.0   | :x:                |
+| 1.8.x   | :white_check_mark: |
+| < 1.8   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -30,7 +30,7 @@ Epicode implements the following security measures:
 - **Secure memory**: Sensitive data is stored in locked memory pages
 - **Constant-time operations**: Cryptographic operations use constant-time implementations
 - **Input validation**: All user inputs are validated and sanitized
-- **Dependency scanning**: Regular automated scans for vulnerable dependencies
+- **Dependency scanning**: CI audits Rust, npm, and Python dependency manifests. High/critical npm findings and unexcepted Rust/Python advisories block CI; exceptions are exact, reviewed, and time-limited.
 
 ## Security Features
 
