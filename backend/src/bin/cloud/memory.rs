@@ -1870,6 +1870,22 @@ pub async fn drive_policy(
     )
 }
 
+/// GET /v1/scheduler/layers — 中央调度器分层运行观测(每层运行/推迟/耗时 + horizon)
+pub async fn scheduler_layers(
+    user: axum::extract::Extension<UserInfo>,
+    AuthedEngine(engine): AuthedEngine,
+) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "scheduler_layers",
+            engine.scheduler.run_layers_snapshot(),
+        )),
+    )
+}
+
 // ═══ Phase 4-1: 噪声批量管理 (Tester-Q Phase 4 治理层) ═══
 
 #[derive(Deserialize)]

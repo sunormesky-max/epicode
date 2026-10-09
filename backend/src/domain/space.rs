@@ -869,10 +869,20 @@ impl Space {
             .map(|(&id, t)| (id, t.vertex_ids))
             .collect();
         let v2t = inner.vertex_to_tetras.clone();
+        let port_vids: HashSet<VertexId> = inner
+            .cylinder
+            .all_ports()
+            .iter()
+            .map(|port| port.id)
+            .collect();
 
         let mut visited: HashSet<TetraId> = HashSet::new();
         let mut clusters: Vec<Vec<TetraId>> = Vec::new();
-        for &id in tetra_verts.keys() {
+        // HashMap iteration order changes across restarts. Visit the oldest
+        // tetrahedron in each cluster first so virtual Port links are stable.
+        let mut tetra_ids: Vec<TetraId> = tetra_verts.keys().copied().collect();
+        tetra_ids.sort_unstable();
+        for id in tetra_ids {
             if visited.contains(&id) {
                 continue;
             }
@@ -905,25 +915,61 @@ impl Space {
                 continue;
             }
 
+            // Prefer a real shared vertex if direct Space insertion left its
+            // Port unclaimed. A virtual edge is only a fallback for a truly
+            // distant cluster.
+            let mut contacts: Vec<(VertexId, TetraId)> = cluster
+                .iter()
+                .flat_map(|&id| {
+                    tetra_verts
+                        .get(&id)
+                        .into_iter()
+                        .flatten()
+                        .filter(|vid| port_vids.contains(vid))
+                        .map(move |&vid| (vid, id))
+                })
+                .collect();
+            contacts.sort_unstable();
+            if contacts
+                .iter()
+                .any(|&(port_vid, id)| inner.cylinder.assign_specific_port(port_vid, id).is_ok())
+            {
+                reseeded += 1;
+                continue;
+            }
+
             // 找该簇的语义层
             let first_tetra = match inner.tetrahedrons.get(&cluster[0]) {
                 Some(t) => t,
                 None => continue,
             };
-            // 用第一个 tetra 的 core.z 判断层
-            let layer = crate::domain::cylinder::CylinderLayer::from_index(
-                (first_tetra.core.z / 2.0).round().clamp(0.0, 5.0) as usize,
-            )
-            .unwrap_or(crate::domain::cylinder::CylinderLayer::Instinct);
+            // The zone owns the layer boundary. Rounding z/2 assigned center-z
+            // memories (1, 3, 5, ...) to the next layer.
+            let Some(layer) = crate::domain::cylinder::CylinderLayer::all()
+                .iter()
+                .copied()
+                .find(|&layer| {
+                    inner
+                        .cylinder
+                        .zone_for_layer(layer)
+                        .contains_z(first_tetra.core.z)
+                })
+            else {
+                continue;
+            };
+            if !layer.has_ports() {
+                continue;
+            }
 
             // 尝试分配 Port
-            if let Some(port_vid) = inner.cylinder.assign_port(layer, cluster[0]) {
-                let _ = inner.cylinder.assign_specific_port(port_vid, cluster[0]);
+            if inner.cylinder.assign_port(layer, cluster[0]).is_some() {
                 reseeded += 1;
             }
         }
 
-        inner.structure_version += 1;
+        if reseeded > 0 {
+            inner.structure_version += 1;
+        }
         tracing::info!("[Space] port reseed: {} clusters got ports (of {} total clusters, {} already had ports)",
             reseeded, clusters.len(), clusters.len() - reseeded);
         reseeded
@@ -975,11 +1021,33 @@ impl Space {
 
     pub fn tetras_connected_to_port(&self, port_vid: VertexId) -> Vec<TetraId> {
         let inner = self.inner.read();
-        inner
+        let Some(port) = inner
+            .cylinder
+            .all_ports()
+            .iter()
+            .find(|port| port.id == port_vid)
+        else {
+            return Vec::new();
+        };
+        let mut connected = inner
             .vertex_to_tetras
             .get(&port_vid)
             .cloned()
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // Reseeding creates a deliberate logical edge when an existing cluster
+        // is too far from the Cylinder for a geometric shared vertex. Pulses
+        // must enter through that edge as well as through geometric contacts.
+        if port.status == super::cylinder::PortStatus::Occupied {
+            if let Some(owner) = port
+                .connected_tetra
+                .filter(|id| inner.tetrahedrons.contains_key(id))
+            {
+                connected.push(owner);
+            }
+        }
+        connected.sort_unstable();
+        connected.dedup();
+        connected
     }
 
     pub fn confirm_identity(
@@ -2016,7 +2084,80 @@ mod tests {
             Some(port_vid)
         );
         assert_eq!(space.port_vertex_of_tetra(id), Some(port_vid));
+        assert_eq!(space.tetras_connected_to_port(port_vid), vec![id]);
         assert_vertex_grid_consistent(&space);
+    }
+
+    #[test]
+    fn reseed_assigns_stable_logical_edges_in_the_actual_zones() {
+        let space = Space::new();
+        let cases = [
+            (
+                Point3::new(20.0, 20.0, 1.0),
+                super::super::cylinder::CylinderLayer::Instinct,
+            ),
+            (
+                Point3::new(30.0, 20.0, 1.0),
+                super::super::cylinder::CylinderLayer::Instinct,
+            ),
+            (
+                Point3::new(40.0, 20.0, 3.0),
+                super::super::cylinder::CylinderLayer::Relation,
+            ),
+        ];
+        let ids: Vec<_> = cases
+            .iter()
+            .map(|(center, _)| {
+                let (tetra, positions) = make_tetra(0, *center);
+                space.add_tetrahedron(&tetra, &positions).unwrap()
+            })
+            .collect();
+        let (identity_tetra, identity_positions) = make_tetra(0, Point3::new(50.0, 20.0, 11.0));
+        let identity_id = space
+            .add_tetrahedron(&identity_tetra, &identity_positions)
+            .unwrap();
+
+        assert_eq!(space.reseed_ports(), cases.len());
+        assert_eq!(space.port_vertex_of_tetra(identity_id), None);
+        let mut ports = Vec::new();
+        for (&id, (_, expected_layer)) in ids.iter().zip(cases.iter()) {
+            let inner = space.inner.read();
+            let port = inner.cylinder.find_port_for_tetra(id).unwrap();
+            assert_eq!(port.layer, *expected_layer);
+            let port_vid = port.id;
+            drop(inner);
+            assert!(!space
+                .get_tetrahedron(id)
+                .unwrap()
+                .vertex_ids
+                .contains(&port_vid));
+            assert_eq!(space.tetras_connected_to_port(port_vid), vec![id]);
+            ports.push(port_vid);
+        }
+        assert!(ports[0] < ports[1]);
+        let structure_version = space.structure_version();
+        assert_eq!(space.reseed_ports(), 0);
+        assert_eq!(space.structure_version(), structure_version);
+        for (&id, &port_vid) in ids.iter().zip(ports.iter()) {
+            assert_eq!(space.tetras_connected_to_port(port_vid), vec![id]);
+        }
+    }
+
+    #[test]
+    fn reseed_claims_an_existing_geometric_port_before_creating_a_virtual_link() {
+        let space = Space::new();
+        let (port_vid, port_pos) = space.cylinder_ports()[0];
+        let (tetra, positions) = make_tetra(0, center_with_vertex_at(port_pos));
+        let id = space.add_tetrahedron(&tetra, &positions).unwrap();
+        assert!(space
+            .get_tetrahedron(id)
+            .unwrap()
+            .vertex_ids
+            .contains(&port_vid));
+        assert_eq!(space.reseed_ports(), 1);
+        assert_eq!(space.tetras_connected_to_port(port_vid), vec![id]);
+        assert_eq!(space.port_stats().0, 1);
+        assert_eq!(space.reseed_ports(), 0);
     }
 
     #[test]

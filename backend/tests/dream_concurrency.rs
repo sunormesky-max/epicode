@@ -13,7 +13,7 @@ fn seed(space: &Space, n: usize) -> Vec<u64> {
     for i in 0..n {
         let core = Point3::new(i as f64 * 3.0, 0.0, 0.0);
         let pos = Tetrahedron::compute_vertices(core);
-        let mut emb = vec![0.0; 64];
+        let mut emb = vec![0.0; epicode::engine::vector::EMBEDDING_DIM];
         emb[i % 64] = 1.0; // i 与 i+64 互为重复 → 有合并对
         let junk = i % 3 == 0;
         let t = Tetrahedron {

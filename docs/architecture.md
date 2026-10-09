@@ -66,16 +66,18 @@ Tetrahedrons that share vertices naturally cluster into polyhedra. This physical
 
 ### Central Hollow Cylinder
 
-A central hollow cylinder acts as the system hub, organized into four layers:
+A central hollow cylinder acts as the system hub, organized into six layers:
 
 | Layer | Purpose |
 |-------|---------|
 | **Instinct** | Reflexive responses, hard-coded patterns, survival-level behaviors |
+| **Relation** | Connected entities and knowledge graph structure |
 | **Cognition** | Reasoning, inference, and dynamic thought processes |
 | **Service** | Operational utilities, tool execution, and external integrations |
+| **Cycle** | Proactive and recurring activity |
 | **Identity** | Self-model, persistent preferences, and long-term personality |
 
-Ports on the cylinder connect to external polyhedron clusters via a **star topology**.
+Ports on the first five layers connect to external polyhedron clusters via a **star topology**; the Identity layer currently has no Ports. A seed tetrahedron can share a Port vertex geometrically. When an existing cluster is too far away, reseeding creates an explicit logical Port-to-tetra entry edge instead of moving or distorting its geometry. Pulses traverse either kind of edge. The logical edge is rebuilt in stable cluster order when the engine loads, so a distant cluster remains reachable after restart without claiming that it physically touches the cylinder.
 
 ### Pulse Propagation
 
@@ -126,6 +128,8 @@ Long-running and periodic work is executed via `tokio::task`:
 ### Graph and Library Persistence
 
 Each user's knowledge graph is stored with that user's memory database. Incremental edge changes are coalesced by directed edge and relation type, then saved transactionally with the current concept snapshot. Bulk relation decay uses a full graph snapshot so changed strengths are not lost when no edge is removed.
+
+Concept snapshots persist the full unique tetra membership; `member_count` is derived from that set. Older databases did not persist membership IDs, so startup rebuilds their derived prototypes from stored tetra labels when those memories load successfully. This may regenerate concept labels/IDs, but does not alter memory records or relations. Older standalone graph snapshots cannot be repaired until a full tetra-label snapshot is supplied, so their unknown counts are preserved rather than silently undercounted.
 
 The Cloud L1 library database is stored as `library.db` in the configured data directory. Its shared HNSW index is rebuilt from persisted chunk embeddings during startup. Cloud startup fails if the persistent library cannot be opened; it does not accept writes into a volatile in-memory substitute.
 

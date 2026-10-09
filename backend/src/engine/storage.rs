@@ -93,6 +93,23 @@ CREATE TABLE IF NOT EXISTS drive_signals (
 );
 ";
 
+fn ensure_concept_member_ids_column(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(concepts)")
+        .map_err(|e| e.to_string())?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(stmt);
+    if !columns.iter().any(|column| column == "member_ids") {
+        conn.execute_batch("ALTER TABLE concepts ADD COLUMN member_ids TEXT")
+            .map_err(|e| format!("failed to add concepts.member_ids: {}", e))?;
+    }
+    Ok(())
+}
+
 const MIGRATION_ADD_EMBEDDING: &str = "ALTER TABLE tetrahedrons ADD COLUMN embedding BLOB";
 const MIGRATION_ADD_IMPORTANCE: &str =
     "ALTER TABLE tetrahedrons ADD COLUMN importance REAL NOT NULL DEFAULT 1.0";
@@ -207,6 +224,7 @@ impl StorageManager {
 
         conn.execute_batch(SCHEMA)
             .map_err(|e| format!("failed to initialize schema: {}", e))?;
+        ensure_concept_member_ids_column(&conn)?;
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_EMBEDDING) {
             tracing::debug!(
                 "[Storage] embedding migration skipped (likely already applied): {}",
@@ -367,7 +385,7 @@ impl StorageManager {
             }
         }
 
-        match self.load_concepts(kg) {
+        match self.load_concepts(kg, space, report.space_ok) {
             Ok(n) => {
                 report.concepts_loaded = n;
             }
@@ -1264,30 +1282,51 @@ impl StorageManager {
         if signals.is_empty() {
             return Ok(0);
         }
-        let conn = self.conn.lock();
+        let mut conn = self.conn.lock();
         conn.execute("CREATE TABLE IF NOT EXISTS drive_signals_archive AS SELECT * FROM drive_signals WHERE 1=0", []).map_err(|e| e.to_string())?;
-        let mut moved = 0;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
         for s in signals {
-            let data = serde_json::to_string(&s).unwrap_or_default();
+            let data = serde_json::to_string(s).map_err(|e| e.to_string())?;
             let updated = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
-            if conn
-                .execute(
-                    "INSERT OR REPLACE INTO drive_signals_archive (id, data, updated_at) VALUES (?1, ?2, ?3)",
-                    rusqlite::params![s.id as i64, data, updated],
-                )
-                .is_ok()
-            {
-                let _ = conn.execute("DELETE FROM drive_signals WHERE id=?1", rusqlite::params![s.id as i64]);
-                moved += 1;
-            }
+            // Legacy archive tables have no primary key. Remove only exact retries;
+            // a historical signal with a reused ID must remain intact.
+            tx.execute(
+                "DELETE FROM drive_signals_archive WHERE id=?1 AND data=?2",
+                params![s.id as i64, data],
+            )
+            .map_err(|e| e.to_string())?;
+            tx.execute(
+                "INSERT INTO drive_signals_archive (id, data, updated_at) VALUES (?1, ?2, ?3)",
+                params![s.id as i64, data, updated],
+            )
+            .map_err(|e| e.to_string())?;
+            tx.execute(
+                "DELETE FROM drive_signals WHERE id=?1",
+                params![s.id as i64],
+            )
+            .map_err(|e| e.to_string())?;
         }
-        if moved > 0 {
-            tracing::info!("[O-C] archived {} terminal drive signals", moved);
-        }
-        Ok(moved)
+        tx.commit().map_err(|e| e.to_string())?;
+        tracing::info!("[O-C] archived {} terminal drive signals", signals.len());
+        Ok(signals.len())
+    }
+
+    /// Reserve IDs above both active and archived signals on restart.
+    pub fn max_drive_signal_id(&self) -> Result<u64, String> {
+        let conn = self.conn.lock();
+        conn.execute("CREATE TABLE IF NOT EXISTS drive_signals_archive AS SELECT * FROM drive_signals WHERE 1=0", [])
+            .map_err(|e| e.to_string())?;
+        let max_id: Option<i64> = conn
+            .query_row(
+                "SELECT MAX(id) FROM (SELECT id FROM drive_signals UNION ALL SELECT id FROM drive_signals_archive)",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(max_id.unwrap_or(0).max(0) as u64)
     }
 
     pub fn archive_old_drive_signals(&self) -> Result<usize, String> {
@@ -2096,10 +2135,15 @@ impl StorageManager {
         Ok(count)
     }
 
-    fn load_concepts(&self, kg: &KnowledgeGraph) -> Result<usize, String> {
+    fn load_concepts(
+        &self,
+        kg: &KnowledgeGraph,
+        space: &Space,
+        can_rebuild: bool,
+    ) -> Result<usize, String> {
         let conn = self.conn.lock();
         let mut stmt = conn
-            .prepare("SELECT id, label, member_count, centroid FROM concepts")
+            .prepare("SELECT id, label, member_count, centroid, member_ids FROM concepts")
             .map_err(|e| e.to_string())?;
 
         let rows = stmt
@@ -2111,20 +2155,57 @@ impl StorageManager {
                 let centroid = centroid_blob
                     .as_deref()
                     .map_or(vec![], VectorLayer::blob_to_embedding);
+                let member_ids_json: Option<String> = row.get(4)?;
+                let member_ids = match member_ids_json {
+                    Some(json) => serde_json::from_str(&json).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            4,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?,
+                    None => vec![],
+                };
                 Ok(ConceptPrototype {
                     id,
                     centroid,
                     member_count,
                     label,
-                    member_ids: vec![],
+                    member_ids,
                 })
             })
             .map_err(|e| e.to_string())?;
 
-        let concepts: Vec<ConceptPrototype> = rows.filter_map(|r| r.ok()).collect();
+        let concepts = rows
+            .collect::<Result<Vec<ConceptPrototype>, _>>()
+            .map_err(|e| e.to_string())?;
         let count = concepts.len();
+        let needs_rebuild = concepts
+            .iter()
+            .any(|c| c.member_count > c.member_ids.len() as u64);
         kg.restore_concepts(concepts);
-        Ok(count)
+        if needs_rebuild && can_rebuild {
+            let tetras = space.all_tetrahedrons();
+            let label_data: Vec<(TetraId, Vec<String>)> = tetras
+                .iter()
+                .map(|t| (t.id, t.data.labels.clone()))
+                .collect();
+            kg.replace_concepts(&label_data);
+            kg.recompute_centroids(space);
+            tracing::info!(
+                "[Storage] rebuilt {} legacy concepts from {} stored memories; membership IDs were not persisted",
+                kg.concept_count(),
+                tetras.len()
+            );
+            Ok(kg.concept_count())
+        } else {
+            if needs_rebuild {
+                tracing::warn!(
+                    "[Storage] concept membership is incomplete and cannot be rebuilt until tetrahedrons load successfully"
+                );
+            }
+            Ok(count)
+        }
     }
 
     fn save_tetrahedrons_tx(
@@ -2249,10 +2330,21 @@ impl StorageManager {
 
         let mut stmt = tx
             .prepare(
-                "INSERT INTO concepts (id, label, member_count, centroid) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO concepts (id, label, member_count, centroid, member_ids) VALUES (?1, ?2, ?3, ?4, ?5)",
             )
             .map_err(|e| e.to_string())?;
         for c in &concepts {
+            let (member_count, member_ids_json) = if c.member_count <= c.member_ids.len() as u64 {
+                let mut member_ids = c.member_ids.clone();
+                member_ids.sort_unstable();
+                member_ids.dedup();
+                let member_count = member_ids.len() as u64;
+                let member_ids_json = serde_json::to_string(&member_ids)
+                    .map_err(|e| format!("serialize concept {} members: {}", c.id, e))?;
+                (member_count, Some(member_ids_json))
+            } else {
+                (c.member_count, None)
+            };
             let centroid_blob = if c.centroid.is_empty() {
                 Vec::<u8>::new()
             } else {
@@ -2261,8 +2353,9 @@ impl StorageManager {
             stmt.execute(params![
                 c.id as i64,
                 c.label,
-                c.member_count as i64,
-                centroid_blob
+                member_count as i64,
+                centroid_blob,
+                member_ids_json
             ])
             .map_err(|e| e.to_string())?;
         }
@@ -2494,6 +2587,85 @@ mod tests {
             "another secret"
         );
         drop(restored);
+    }
+
+    #[test]
+    fn legacy_concept_counts_are_rebuilt_and_membership_survives_restart() {
+        let dir = tmp_dir("legacy_concept_membership");
+        let db_path = dir.join("tetramem.db");
+        let legacy_db = Connection::open(&db_path).unwrap();
+        legacy_db
+            .execute_batch(
+                "CREATE TABLE concepts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    label TEXT NOT NULL,
+                    member_count INTEGER NOT NULL DEFAULT 1,
+                    centroid BLOB NOT NULL
+                );
+                INSERT INTO concepts (id, label, member_count, centroid)
+                VALUES (0, 'legacy', 999, X'');",
+            )
+            .unwrap();
+        drop(legacy_db);
+
+        let storage = StorageManager::new(&dir).unwrap();
+        let space = Space::new();
+        for id in [1, 2] {
+            let mut tetra = make_tetra(id, &format!("memory_{id}"), 1.0);
+            tetra.data.labels = vec!["rust".to_string()];
+            let positions = Tetrahedron::compute_vertices(tetra.core);
+            space.add_tetrahedron_with_id(&tetra, &positions).unwrap();
+        }
+        storage.save_space_only(&space).unwrap();
+
+        let restored_space = Space::new();
+        let restored_kg = KnowledgeGraph::new();
+        let report = storage.load_all(&restored_space, &restored_kg);
+        assert!(report.space_ok);
+        assert_eq!(report.concepts_loaded, 1);
+        let concepts = restored_kg.get_concepts();
+        assert_eq!(concepts[0].member_ids, vec![1, 2]);
+        assert_eq!(concepts[0].member_count, 2);
+        assert_eq!(
+            concepts[0].member_count as usize,
+            concepts[0].member_ids.len()
+        );
+        storage.save_kg_only(&restored_kg).unwrap();
+
+        drop(storage);
+        let storage = StorageManager::new(&dir).unwrap();
+        let connection = Connection::open(&db_path).unwrap();
+        let (member_count, member_ids): (i64, String) = connection
+            .query_row(
+                "SELECT member_count, member_ids FROM concepts WHERE label='rust'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(member_count, 2);
+        assert_eq!(
+            serde_json::from_str::<Vec<u64>>(&member_ids).unwrap(),
+            vec![1, 2]
+        );
+        drop(connection);
+
+        let restarted_space = Space::new();
+        let restarted_kg = KnowledgeGraph::new();
+        let report = storage.load_all(&restarted_space, &restarted_kg);
+        assert_eq!(report.concepts_loaded, 1);
+        let labels: Vec<(TetraId, Vec<String>)> = restarted_space
+            .all_tetrahedrons()
+            .iter()
+            .map(|tetra| (tetra.id, tetra.data.labels.clone()))
+            .collect();
+        restarted_kg.replace_concepts(&labels);
+        assert_eq!(restarted_kg.get_concepts()[0].member_count, 2);
+        assert_eq!(restarted_kg.get_concepts()[0].member_ids, vec![1, 2]);
+        restarted_kg.replace_concepts(&labels);
+        assert_eq!(restarted_kg.get_concepts()[0].member_count, 2);
+        assert_eq!(restarted_kg.get_concepts()[0].member_ids, vec![1, 2]);
+
+        drop(storage);
         fs::remove_dir_all(dir).unwrap();
     }
 
