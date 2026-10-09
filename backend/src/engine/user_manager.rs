@@ -708,16 +708,17 @@ impl UserManager {
             db.values()
                 .find(|u| u.email == email)
                 .cloned()
-                .ok_or("user not found")?
+                .ok_or("invalid credentials")?
         } else {
-            db.get(account).cloned().ok_or("user not found")?
+            db.get(account).cloned().ok_or("invalid credentials")?
         };
         drop(db);
         if info.password_hash.is_empty() {
-            return Err("password not set for this account, please contact admin".into());
+            // 渗透修复#4: 与"用户不存在"同文案, 不再暴露账号存在性(OAuth账户走OAuth流登录)
+            return Err("invalid credentials".into());
         }
         if !verify_password(password, &info.password_hash) {
-            return Err("invalid password".into());
+            return Err("invalid credentials".into());
         }
         tracing::info!("[UserManager] user {} logged in via password", info.user_id);
         Ok(info)
