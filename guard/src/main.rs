@@ -21,6 +21,7 @@ const CHECK_INTERVAL_SECS: u64 = 10;
 const SSH_LOG: &str = "/var/log/secure";
 const WEB_LOG: &str = "/var/log/nginx/access.log";
 const STATE_FILE: &str = "/var/lib/epicode-guard/state.json";
+const STATE_LOCK_FILE: &str = "/var/lib/epicode-guard/state.lock";
 const LOG_FILE: &str = "/var/log/epicode-guard/guard.log";
 const PID_FILE: &str = "/var/lib/epicode-guard/guard.pid";
 const EPICODE_API: &str = "http://127.0.0.1:9111";
@@ -204,25 +205,40 @@ impl Default for GuardState {
 }
 
 impl GuardState {
-    /// Load state. On corruption we now refuse to silently drop history
-    /// (which would also drop all active bans — catastrophic combined with the
-    /// old `delete table` init), and instead preserve the broken bytes as a
-    /// `.broken` sidecar for forensic recovery and start fresh *with a loud
-    /// log line*. We also restrict file permissions to 0600 at load time.
-    fn load() -> Self {
-        match fs::read_to_string(STATE_FILE) {
-            Ok(data) => match serde_json::from_str::<GuardState>(&data) {
-                Ok(s) => s,
-                Err(e) => {
-                    // Preserve the unparsable file so history is recoverable.
-                    let _ = fs::rename(STATE_FILE, format!("{STATE_FILE}.broken"));
-                    log_msg(&format!(
-                        "FATAL: state.json corrupted ({e}); moved to state.json.broken and starting empty"
-                    ));
-                    Self::default()
+    /// A missing file is only normal before the first successful save.
+    /// Corrupt or unreadable state must never be replaced by an empty state.
+    fn load() -> io::Result<Self> {
+        Self::load_from(Path::new(STATE_FILE), false)
+    }
+
+    fn load_required() -> io::Result<Self> {
+        Self::load_from(Path::new(STATE_FILE), true)
+    }
+
+    fn load_from(path: &Path, required: bool) -> io::Result<Self> {
+        match fs::read(path) {
+            Ok(data) => serde_json::from_slice(&data).map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{} is invalid: {error}", path.display()),
+                )
+            }),
+            Err(error) if error.kind() == io::ErrorKind::NotFound && !required => {
+                match fs::metadata(path.with_extension("initialized")) {
+                    Ok(_) => Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("{} disappeared after initialization", path.display()),
+                    )),
+                    Err(marker_error) if marker_error.kind() == io::ErrorKind::NotFound => {
+                        Ok(Self::default())
+                    }
+                    Err(marker_error) => Err(marker_error),
                 }
-            },
-            Err(_) => Self::default(),
+            }
+            Err(error) => Err(io::Error::new(
+                error.kind(),
+                format!("cannot read {}: {error}", path.display()),
+            )),
         }
     }
 
@@ -259,6 +275,19 @@ impl GuardState {
             file.sync_all()?;
             drop(file);
             fs::rename(&tmp, path)?;
+            let marker = path.with_extension("initialized");
+            let mut marker_options = fs::OpenOptions::new();
+            marker_options.write(true).create_new(true);
+            #[cfg(unix)]
+            marker_options.mode(0o600);
+            match marker_options.open(&marker) {
+                Ok(mut file) => {
+                    file.write_all(b"initialized\n")?;
+                    file.sync_all()?;
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
             #[cfg(unix)]
             fs::File::open(parent)?.sync_all()?;
             Ok(())
@@ -848,11 +877,18 @@ fn nft_drop_rules_healthy() -> bool {
 }
 
 fn health_check_cli() -> i32 {
-    let healthy = nft_verify_health();
+    let firewall_healthy = nft_verify_health();
+    let state = GuardState::load();
+    let healthy = firewall_healthy && state.is_ok();
     if healthy {
-        println!("healthy: nftables drop rules verified");
+        println!("healthy: nftables drop rules and guard state verified");
     } else {
-        eprintln!("degraded: nftables enforcement is unavailable");
+        if !firewall_healthy {
+            eprintln!("degraded: nftables enforcement is unavailable");
+        }
+        if let Err(error) = state {
+            eprintln!("degraded: guard state unavailable: {error}");
+        }
     }
     health_exit_code(healthy)
 }
@@ -1305,6 +1341,26 @@ fn acquire_guard_lock(path: &Path) -> io::Result<fs::File> {
     Ok(file)
 }
 
+fn acquire_state_lock() -> io::Result<fs::File> {
+    acquire_state_lock_at(Path::new(STATE_LOCK_FILE))
+}
+
+fn acquire_state_lock_at(path: &Path) -> io::Result<fs::File> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("state lock has no parent"))?;
+    fs::create_dir_all(parent)?;
+    #[cfg(unix)]
+    fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let file = options.open(path)?;
+    file.lock_exclusive()?;
+    Ok(file)
+}
+
 fn run_daemon() {
     let _pid_lock = match acquire_guard_lock(Path::new(PID_FILE)) {
         Ok(lock) => lock,
@@ -1317,9 +1373,24 @@ fn run_daemon() {
     let _ = fs::create_dir_all("/var/log/epicode-guard");
 
     log_msg(&format!("=== epicode-guard v{} starting ===", VERSION));
+    let state_lock = acquire_state_lock().unwrap_or_else(|error| {
+        eprintln!("FATAL: cannot lock guard state: {error}");
+        std::process::exit(1);
+    });
+    let mut state = GuardState::load().unwrap_or_else(|error| {
+        eprintln!("FATAL: guard state unavailable; original file preserved: {error}");
+        std::process::exit(1);
+    });
     if !nft_init() {
         std::process::exit(1);
     }
+    let now = now_ts();
+    state.reapply_bans(now);
+    if let Err(error) = state.save() {
+        eprintln!("FATAL: cannot persist guard state: {error}");
+        std::process::exit(1);
+    }
+    drop(state_lock);
     migrate_v1_rules();
     open_honeypot_ports();
 
@@ -1327,9 +1398,6 @@ fn run_daemon() {
     start_honeypot(&tx);
     let telemetry = start_telemetry_worker();
 
-    let mut state = GuardState::load();
-    let now = now_ts();
-    state.reapply_bans(now);
     log_msg(&format!(
         "State loaded: {} tracked IPs, {} historical bans",
         state.ips.len(),
@@ -1338,6 +1406,14 @@ fn run_daemon() {
 
     let mut cycle = 0u64;
     loop {
+        let state_lock = acquire_state_lock().unwrap_or_else(|error| {
+            eprintln!("FATAL: cannot lock guard state: {error}");
+            std::process::exit(1);
+        });
+        state = GuardState::load_required().unwrap_or_else(|error| {
+            eprintln!("FATAL: guard state unavailable; original file preserved: {error}");
+            std::process::exit(1);
+        });
         let now = now_ts();
 
         if cycle > 0 && cycle.is_multiple_of(FIREWALL_CHECK_INTERVAL_CYCLES) {
@@ -1463,8 +1539,10 @@ fn run_daemon() {
         state.process_bans(now, &telemetry);
 
         if let Err(error) = state.save() {
-            log_msg(&format!("DEGRADED: state save failed: {error}"));
+            eprintln!("FATAL: guard state save failed: {error}");
+            std::process::exit(1);
         }
+        drop(state_lock);
 
         if cycle.is_multiple_of(60) && cycle > 0 {
             log_msg(&format!(
@@ -1489,9 +1567,29 @@ fn run_daemon() {
 fn cmd_status() -> i32 {
     println!("=== epicode-guard v{} Status ===\n", VERSION);
     let firewall_healthy = nft_verify_health();
-    let state = GuardState::load();
     let banned = nft_banned_count();
     let firewall_healthy = firewall_healthy && banned.is_ok();
+    println!(
+        "Firewall:          {}",
+        if firewall_healthy {
+            "HEALTHY"
+        } else {
+            "DEGRADED"
+        }
+    );
+    println!(
+        "Currently Banned:  {}",
+        banned
+            .map(|count| count.to_string())
+            .unwrap_or_else(|_| "UNKNOWN".to_string())
+    );
+    let state = match GuardState::load() {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!("State: DEGRADED; original file preserved: {error}");
+            return 1;
+        }
+    };
     let now = now_ts();
 
     let uptime = if state.start_time > 0 {
@@ -1508,20 +1606,6 @@ fn cmd_status() -> i32 {
 
     println!("Uptime:            {}", uptime);
     println!("Tracked IPs:       {}", state.ips.len());
-    println!(
-        "Firewall:          {}",
-        if firewall_healthy {
-            "HEALTHY"
-        } else {
-            "DEGRADED"
-        }
-    );
-    println!(
-        "Currently Banned:  {}",
-        banned
-            .map(|count| count.to_string())
-            .unwrap_or_else(|_| "UNKNOWN".to_string())
-    );
     println!("Total Bans:        {}", state.total_bans);
     println!("Total Attacks:     {}", state.total_attacks);
     println!("Honeypot Hits:     {}", state.total_honeypot);
@@ -1578,6 +1662,20 @@ fn cmd_ban(ip: &str) -> i32 {
         eprintln!("Invalid IP: {}", ip);
         return 2;
     }
+    let _state_lock = match acquire_state_lock() {
+        Ok(lock) => lock,
+        Err(error) => {
+            eprintln!("Ban not applied: cannot lock guard state: {error}");
+            return 1;
+        }
+    };
+    let mut state = match GuardState::load() {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!("Ban not applied: guard state unavailable: {error}");
+            return 1;
+        }
+    };
     if !nft_healthy() && !nft_init() {
         eprintln!("Ban not applied: nftables enforcement could not be verified.");
         return 1;
@@ -1586,7 +1684,6 @@ fn cmd_ban(ip: &str) -> i32 {
         eprintln!("Ban not applied or recorded: nftables did not confirm enforcement.");
         return 1;
     }
-    let mut state = GuardState::load();
     let entry = state.ips.entry(ip.to_string()).or_default();
     entry.banned_until = now_ts() + BAN_TIMEOUT_SECS as i64;
     entry.score = BAN_THRESHOLD;
@@ -1605,11 +1702,24 @@ fn cmd_ban(ip: &str) -> i32 {
 }
 
 fn cmd_unban(ip: &str) -> i32 {
+    let _state_lock = match acquire_state_lock() {
+        Ok(lock) => lock,
+        Err(error) => {
+            eprintln!("Unban not applied: cannot lock guard state: {error}");
+            return 1;
+        }
+    };
+    let mut state = match GuardState::load() {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!("Unban not applied: guard state unavailable: {error}");
+            return 1;
+        }
+    };
     if !nft_unban(ip) {
         eprintln!("Unban not confirmed by nftables; state was retained.");
         return 1;
     }
-    let mut state = GuardState::load();
     state.ips.remove(ip);
     if let Err(error) = state.save() {
         eprintln!("Kernel ban removed but state was not saved: {error}");
@@ -1620,9 +1730,22 @@ fn cmd_unban(ip: &str) -> i32 {
     0
 }
 
-fn cmd_check() {
+fn cmd_check() -> i32 {
     println!("=== File Integrity Check ===\n");
-    let mut state = GuardState::load();
+    let _state_lock = match acquire_state_lock() {
+        Ok(lock) => lock,
+        Err(error) => {
+            eprintln!("File integrity check unavailable: cannot lock guard state: {error}");
+            return 1;
+        }
+    };
+    let mut state = match GuardState::load() {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!("File integrity check unavailable: guard state unavailable: {error}");
+            return 1;
+        }
+    };
     let first_run = state.file_hashes.is_empty();
     for &path in MONITORED_FILES {
         match hash_file(path) {
@@ -1646,6 +1769,7 @@ fn cmd_check() {
     }
     if let Err(error) = state.save() {
         eprintln!("State save failed: {error}");
+        return 1;
     }
     println!();
     let unexpected = check_unexpected_ports();
@@ -1667,6 +1791,7 @@ fn cmd_check() {
         }
     }
     println!();
+    0
 }
 
 fn cmd_nft() {
@@ -1688,7 +1813,7 @@ fn cmd_help() {
     println!("  epicode-guard unban <ip> Manual unban IP");
     println!("  epicode-guard check      File integrity + ports + flood");
     println!("  epicode-guard nft        Show nft table");
-    println!("  epicode-guard --health  Verify firewall integrity (exit 0 healthy, 1 degraded)");
+    println!("  epicode-guard --health  Verify firewall and state (exit 0 healthy, 1 degraded)");
     println!("  epicode-guard help       Show this help");
 }
 
@@ -1713,7 +1838,7 @@ fn main() {
                 std::process::exit(2);
             }
         }
-        Some("check") => cmd_check(),
+        Some("check") => std::process::exit(cmd_check()),
         Some("nft") => cmd_nft(),
         Some("help") | Some("--help") | Some("-h") => cmd_help(),
         None | Some("daemon") => run_daemon(),
@@ -1950,7 +2075,80 @@ mod tests {
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
         );
+        assert!(path.with_extension("initialized").exists());
+        #[cfg(unix)]
+        assert_eq!(
+            fs::metadata(path.with_extension("initialized"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 2);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn initialized_state_cannot_silently_reset_after_file_loss() {
+        let dir = temp_test_dir();
+        let path = dir.join("state.json");
+        GuardState::default().save_to(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+        let error = GuardState::load_from(&path, false).err().unwrap();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(error.to_string().contains("after initialization"));
+        assert!(path.with_extension("initialized").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn corrupt_state_is_reported_without_renaming_or_overwriting() {
+        let dir = temp_test_dir();
+        let path = dir.join("state.json");
+        assert!(GuardState::load_from(&path, false).is_ok());
+        assert_eq!(
+            GuardState::load_from(&path, true).err().unwrap().kind(),
+            io::ErrorKind::NotFound
+        );
+        let original = b"{invalid guard state";
+        fs::write(&path, original).unwrap();
+        assert_eq!(
+            GuardState::load_from(&path, false).err().unwrap().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(fs::read(&path).unwrap(), original);
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn state_lock_serializes_read_modify_write() {
+        let dir = temp_test_dir();
+        let lock_path = dir.join("state.lock");
+        let state_path = dir.join("state.json");
+        let first_lock = acquire_state_lock_at(&lock_path).unwrap();
+        let mut first = GuardState::load_from(&state_path, false).unwrap();
+        first.record("203.0.113.1", 3, "ssh", 100);
+        let worker_lock_path = lock_path.clone();
+        let worker_state_path = state_path.clone();
+        let (sender, receiver) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let _lock = acquire_state_lock_at(&worker_lock_path).unwrap();
+            let mut second = GuardState::load_from(&worker_state_path, true).unwrap();
+            second.record("203.0.113.2", 3, "ssh", 100);
+            second.save_to(&worker_state_path).unwrap();
+            sender.send(()).unwrap();
+        });
+        thread::sleep(Duration::from_millis(50));
+        assert!(receiver.try_recv().is_err());
+        first.save_to(&state_path).unwrap();
+        drop(first_lock);
+        receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        worker.join().unwrap();
+        let saved = GuardState::load_from(&state_path, true).unwrap();
+        assert!(saved.ips.contains_key("203.0.113.1"));
+        assert!(saved.ips.contains_key("203.0.113.2"));
         fs::remove_dir_all(dir).unwrap();
     }
 
