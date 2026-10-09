@@ -37,6 +37,13 @@ pub struct ExecutorBinding {
     /// γ2: 端侧 E2E 公钥 (PEM SPKI) — 有钥则 signal description 传输层加密
     #[serde(default)]
     pub e2e_public_key: Option<String>,
+    /// α0.4: 绑定时申报的机器指纹 / manifest 版本。持久化后用于判断重新注册是否
+    /// 真的改变了绑定身份(只有改变时才写 binding-anchor 记忆,见 runtime::anchor_reason)。
+    /// 旧版 runtime_bindings.json 没有这两个字段 → None,向后兼容。
+    #[serde(default)]
+    pub machine_fingerprint: Option<String>,
+    #[serde(default)]
+    pub manifest_version: Option<String>,
 }
 
 impl ExecutorBinding {

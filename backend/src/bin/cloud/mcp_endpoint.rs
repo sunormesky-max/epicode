@@ -514,6 +514,8 @@ mod tests {
             last_heartbeat: now,
             e2e_enabled: false,
             e2e_public_key: None,
+            machine_fingerprint: None,
+            manifest_version: None,
         };
         let rejection = check_mcp_request_access(&engine, Some(binding), true, &request).unwrap();
 
