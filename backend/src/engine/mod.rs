@@ -265,6 +265,12 @@ impl Engine {
         });
 
         let report = storage.load_all(&space, &knowledge);
+        // Geometric Port anchors are rebuilt by load_all. Existing orphan
+        // clusters need their logical entry edges before any API call, including
+        // in quiet mode where start() is never used.
+        if report.space_ok {
+            space.reseed_ports();
+        }
         if report.tetras_loaded > 0 {
             // S1破案: 构造调用栈 (临时诊断, 定位幽灵加载触发者)
             tracing::info!(

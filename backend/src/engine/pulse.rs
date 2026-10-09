@@ -157,8 +157,6 @@ impl PulseEngine {
         let cluster = Self::bfs_cluster_from_port(space, port_vid, max_hops as usize);
 
         let mut report = PulseReport::new(port_vid, layer);
-        report.returned = true;
-        report.tetras_visited = cluster.len() + 1;
 
         let all = space.all_tetrahedrons();
         let snapshot: HashMap<TetraId, &crate::domain::tetra::Tetrahedron> =
@@ -166,17 +164,25 @@ impl PulseEngine {
 
         for (tid, _hop) in &cluster {
             if let Some(t) = snapshot.get(tid) {
+                report.tetras_visited += 1;
                 report.data_collected.push(t.data.embedding.clone());
                 report.content_hashes.push(t.data.content_hash);
 
-                kg.add_relation(
-                    origin,
-                    *tid,
-                    crate::engine::knowledge::RelationType::Related,
-                    0.5,
-                );
+                if *tid != origin {
+                    kg.add_relation(
+                        origin,
+                        *tid,
+                        crate::engine::knowledge::RelationType::Related,
+                        0.5,
+                    );
+                }
             }
         }
+
+        if report.tetras_visited == 0 {
+            return Err(format!("no tetrahedra connected to port {}", port_vid));
+        }
+        report.returned = true;
 
         for (tid, _hop) in &cluster {
             let _ = space.update_mass(*tid, 0.02);
@@ -210,6 +216,7 @@ impl PulseEngine {
         for &seed in &seeds {
             if visited.insert(seed) {
                 queue.push_back((seed, 0));
+                results.push((seed, 0));
             }
         }
 
@@ -359,5 +366,105 @@ mod tests {
             result.is_err(),
             "should fail when no tetra connected to port"
         );
+    }
+
+    #[test]
+    fn reseeded_logical_port_reaches_and_reports_its_whole_cluster() {
+        let space = Space::new();
+        let kg = KnowledgeGraph::new();
+        let mut ids = Vec::new();
+        for (index, x) in [20.0, 21.0].into_iter().enumerate() {
+            let core = Point3::new(x, 20.0, 1.0);
+            let tetra = Tetrahedron {
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: MemoryPayload {
+                    content: format!("orphan cluster {index}"),
+                    content_hash: 101 + index as u64,
+                    labels: vec!["orphan".into()],
+                    ..Default::default()
+                },
+                mass: 1.0,
+            };
+            ids.push(
+                space
+                    .add_tetrahedron(&tetra, &Tetrahedron::compute_vertices(core))
+                    .unwrap(),
+            );
+        }
+        assert_eq!(space.reseed_ports(), 1);
+        let port_vid = space.port_vertex_of_tetra(ids[0]).unwrap();
+        assert!(!space
+            .get_tetrahedron(ids[0])
+            .unwrap()
+            .vertex_ids
+            .contains(&port_vid));
+        assert_eq!(space.tetras_connected_to_port(port_vid), vec![ids[0]]);
+
+        let report =
+            PulseEngine::send_from_port(&space, &kg, port_vid, CylinderLayer::Instinct, 3).unwrap();
+        assert!(report.returned);
+        assert_eq!(report.tetras_visited, 2);
+        assert_eq!(report.content_hashes, vec![101, 102]);
+        assert_eq!(report.data_collected.len(), 2);
+
+        let direct = PulseEngine::send(
+            &space,
+            &kg,
+            PulseType::Neural { temperature: 0.8 },
+            ids[0],
+            3,
+        )
+        .unwrap();
+        assert_eq!(direct.data.visited_tetras, ids);
+        assert_eq!(direct.data.collected_content_hashes, vec![101, 102]);
+    }
+
+    #[test]
+    fn engine_restart_rebuilds_the_same_logical_port_before_startup() {
+        let dir = std::env::temp_dir().join(format!(
+            "epicode-logical-port-restart-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let storage = crate::engine::storage::StorageManager::new(&dir).unwrap();
+        let space = Space::new();
+        let core = Point3::new(20.0, 20.0, 1.0);
+        let tetra = Tetrahedron {
+            id: 0,
+            vertex_ids: [0; 4],
+            core,
+            data: MemoryPayload {
+                content: "persisted orphan".into(),
+                content_hash: 31337,
+                ..Default::default()
+            },
+            mass: 1.0,
+        };
+        let id = space
+            .add_tetrahedron(&tetra, &Tetrahedron::compute_vertices(core))
+            .unwrap();
+        storage.save_space_only(&space).unwrap();
+        drop(storage);
+
+        let first = crate::engine::Engine::with_data_dir(dir.clone());
+        let port_vid = first.space.port_vertex_of_tetra(id).unwrap();
+        assert_eq!(first.space.tetras_connected_to_port(port_vid), vec![id]);
+        let first_report = PulseEngine::send_from_port(
+            &first.space,
+            &KnowledgeGraph::new(),
+            port_vid,
+            CylinderLayer::Instinct,
+            1,
+        )
+        .unwrap();
+        assert_eq!(first_report.content_hashes, vec![31337]);
+        drop(first);
+
+        let restarted = crate::engine::Engine::with_data_dir(dir.clone());
+        assert_eq!(restarted.space.port_vertex_of_tetra(id), Some(port_vid));
+        assert_eq!(restarted.space.tetras_connected_to_port(port_vid), vec![id]);
+        drop(restarted);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
