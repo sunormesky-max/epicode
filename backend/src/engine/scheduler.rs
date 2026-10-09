@@ -1301,9 +1301,27 @@ impl SchedulerCenter {
         if let Err(e) = self.storage.save_drive_kv("scheduler_tick", &body) {
             tracing::warn!("[Scheduler] save tick failed: {}", e);
         }
+        let adaptive = self.adaptive.lock().to_json().to_string();
+        if let Err(e) = self.storage.save_drive_kv("adaptive_params", &adaptive) {
+            tracing::warn!("[Scheduler] save adaptive params failed: {}", e);
+        }
+    }
+
+    /// 学到的自适应阈值(值 + 默认 + 边界),供稳态观测。
+    pub fn adaptive_params_snapshot(&self) -> serde_json::Value {
+        self.adaptive.lock().describe()
     }
 
     pub fn restore_tick_state(&self) {
+        if let Some(raw) = self.storage.load_drive_kv("adaptive_params") {
+            match serde_json::from_str::<serde_json::Value>(&raw) {
+                Ok(v) => {
+                    let n = self.adaptive.lock().restore_json(&v);
+                    tracing::info!("[Scheduler] restored {} adaptive params", n);
+                }
+                Err(e) => tracing::warn!("[Scheduler] adaptive params snapshot unreadable: {}", e),
+            }
+        }
         if let Some(s) = self.storage.load_drive_kv("scheduler_tick") {
             let parts: Vec<&str> = s.split(',').collect();
             if parts.len() >= 2 {
@@ -7885,5 +7903,37 @@ mod tests {
         assert_eq!(scheduler.layers.runs(RunLayer::Deliberative), 1);
         let (calls, peak) = model.finish();
         assert_eq!((calls, peak), (1, 1));
+    }
+
+    /// Reproduction: learned thresholds used to reset to defaults on every restart.
+    #[test]
+    fn learned_adaptive_params_survive_engine_restart() {
+        use crate::engine::adaptive::Param;
+        let dir = std::env::temp_dir().join(format!("epicode-adaptive-{}", uuid::Uuid::new_v4()));
+        let learned = {
+            let engine = crate::engine::Engine::with_data_dir(dir.clone());
+            {
+                let mut ad = engine.scheduler.adaptive.lock();
+                for _ in 0..30 {
+                    ad.adapt_from_outcome(ActionType::Dream, 1.0);
+                    ad.adapt_from_outcome(ActionType::Pulse, 0.0);
+                }
+            }
+            engine.scheduler.save_tick_state();
+            let ad = engine.scheduler.adaptive.lock();
+            (ad.get(Param::DreamInterval), ad.get(Param::PulseBudget))
+        };
+        assert!(learned.0 > 50.0 && learned.1 < 3.0, "{learned:?}");
+        let engine = crate::engine::Engine::with_data_dir(dir.clone());
+        let ad = engine.scheduler.adaptive.lock();
+        assert_eq!(
+            (ad.get(Param::DreamInterval), ad.get(Param::PulseBudget)),
+            learned
+        );
+        drop(ad);
+        let described = engine.scheduler.adaptive_params_snapshot();
+        assert_eq!(described["dream_interval"]["default"], 50.0);
+        drop(engine);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
