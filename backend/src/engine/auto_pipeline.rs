@@ -333,8 +333,9 @@ pub fn auto_dream(
         .iter()
         .map(|t| (t.id, t.data.labels.clone()))
         .collect();
-    ctx.knowledge.update_concepts(&label_data);
+    ctx.knowledge.replace_concepts(&label_data);
     ctx.knowledge.merge_duplicate_concepts();
+    ctx.knowledge.recompute_centroids(ctx.space);
 
     Some(DreamOutcome {
         total_removed,

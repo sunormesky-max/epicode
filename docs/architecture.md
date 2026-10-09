@@ -129,6 +129,8 @@ Long-running and periodic work is executed via `tokio::task`:
 
 Each user's knowledge graph is stored with that user's memory database. Incremental edge changes are coalesced by directed edge and relation type, then saved transactionally with the current concept snapshot. Bulk relation decay uses a full graph snapshot so changed strengths are not lost when no edge is removed.
 
+Concept snapshots persist the full unique tetra membership; `member_count` is derived from that set. Older databases did not persist membership IDs, so startup rebuilds their derived prototypes from stored tetra labels when those memories load successfully. This may regenerate concept labels/IDs, but does not alter memory records or relations. Older standalone graph snapshots cannot be repaired until a full tetra-label snapshot is supplied, so their unknown counts are preserved rather than silently undercounted.
+
 The Cloud L1 library database is stored as `library.db` in the configured data directory. Its shared HNSW index is rebuilt from persisted chunk embeddings during startup. Cloud startup fails if the persistent library cannot be opened; it does not accept writes into a volatile in-memory substitute.
 
 ## Related Documentation

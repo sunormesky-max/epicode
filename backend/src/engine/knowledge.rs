@@ -91,7 +91,19 @@ pub struct ConceptPrototype {
     pub centroid: Vec<f64>,
     pub member_count: u64,
     pub label: String,
+    /// Full unique membership after reconciliation; legacy snapshots may be incomplete.
+    #[serde(default)]
     pub member_ids: Vec<TetraId>,
+}
+
+fn deduplicate_member_ids(member_ids: &mut Vec<TetraId>) {
+    let mut seen = HashSet::with_capacity(member_ids.len());
+    member_ids.retain(|id| seen.insert(*id));
+}
+
+fn member_ids_are_complete(concept: &ConceptPrototype) -> bool {
+    // Legacy snapshots that hit the old member-ID cap have count > stored length.
+    concept.member_count <= concept.member_ids.len() as u64
 }
 
 pub struct KnowledgeGraph {
@@ -313,6 +325,38 @@ impl KnowledgeGraph {
                     self.queue_relation_delete(source, target, relation_type);
                 }
             }
+            self.mark_dirty(false);
+        }
+        drop(relations);
+        self.remove_concept_member(id);
+    }
+
+    pub fn remove_concept_member(&self, id: TetraId) {
+        let mut concepts = self.concepts.write();
+        let mut changed = false;
+        for concept in concepts.iter_mut() {
+            let membership_complete = member_ids_are_complete(concept);
+            let before = concept.member_ids.len();
+            concept.member_ids.retain(|&member_id| member_id != id);
+            if concept.member_ids.len() != before {
+                changed = true;
+                if membership_complete {
+                    concept.member_count = concept.member_ids.len() as u64;
+                }
+            }
+        }
+
+        let before = concepts.len();
+        concepts
+            .retain(|concept| !member_ids_are_complete(concept) || !concept.member_ids.is_empty());
+        changed |= concepts.len() != before;
+        if changed {
+            for (index, concept) in concepts.iter_mut().enumerate() {
+                concept.id = index as u64;
+            }
+        }
+        drop(concepts);
+        if changed {
             self.mark_dirty(false);
         }
     }
@@ -828,36 +872,37 @@ impl KnowledgeGraph {
         (n_comm, largest, q)
     }
 
+    /// Add previously unseen members. Replaying a batch does not change counts;
+    /// use `replace_concepts` for removals or changed labels.
     pub fn update_concepts(&self, tetras: &[(TetraId, Vec<String>)]) {
-        // 性能修复(2026-09-28, #100同族): 原实现每个tetra线性扫全部概念并
-        // 逐一聚合成员标签算Jaccard → O(T×C×M)。批级倒排索引:
-        //   eff_labels[ci] = 概念ci的有效标签集(批次内成员的标签并集)
-        //   postings[label] = 拥有该标签的概念idx列表
-        // 每个tetra只碰自己的标签命中过的概念 → O(C×M + T×|L|×postings)。
-        // 顺序语义与旧实现精确等价(见测试 update_concepts_inverted_matches_reference):
-        // 指派/新建会同步更新索引, 模拟旧实现"后面的tetra看到已变异的概念"。
-        let mut concepts = self.concepts.write();
+        self.update_concepts_inner(tetras, false);
+    }
+
+    /// Replace membership and reassign changed labels from the complete current snapshot.
+    pub fn replace_concepts(&self, tetras: &[(TetraId, Vec<String>)]) {
+        self.update_concepts_inner(tetras, true);
+    }
+
+    fn update_concepts_inner(&self, tetras: &[(TetraId, Vec<String>)], replace: bool) {
         let labels_map: HashMap<TetraId, &Vec<String>> =
-            tetras.iter().map(|(id, l)| (*id, l)).collect();
+            tetras.iter().map(|(id, labels)| (*id, labels)).collect();
+        let mut current = self.concepts.write();
+        let existing = current.clone();
+        let mut previous_centroids = HashMap::new();
+        for concept in &existing {
+            previous_centroids
+                .entry(concept.label.clone())
+                .or_insert_with(|| concept.centroid.clone());
+        }
+        let mut concepts = if replace { Vec::new() } else { existing };
+        let mut known_members = HashSet::new();
+        for concept in &concepts {
+            known_members.extend(concept.member_ids.iter().copied());
+        }
 
         let mut eff_labels: Vec<HashSet<&str>> = Vec::with_capacity(concepts.len());
         let mut postings: HashMap<&str, Vec<usize>> = HashMap::new();
-        for (ci, c) in concepts.iter().enumerate() {
-            let mut set: HashSet<&str> = HashSet::new();
-            for &mid in &c.member_ids {
-                if let Some(ml) = labels_map.get(&mid) {
-                    for l in ml.iter() {
-                        set.insert(l.as_str());
-                    }
-                }
-            }
-            for l in &set {
-                postings.entry(*l).or_default().push(ci);
-            }
-            eff_labels.push(set);
-        }
-        // 概念ci吸收新标签(指派后), 同步入索引
-        // (无捕获, 用内嵌fn统一生命周期参数——闭包的不变性会拒绝混装两个来源的&str)
+
         fn absorb<'a>(
             ci: usize,
             labels: &'a [String],
@@ -873,9 +918,39 @@ impl KnowledgeGraph {
             }
         }
 
-        for &(id, ref labels) in tetras {
+        for (ci, concept) in concepts.iter().enumerate() {
+            let mut set: HashSet<&str> = HashSet::new();
+            for &member_id in &concept.member_ids {
+                if let Some(member_labels) = labels_map.get(&member_id) {
+                    for label in member_labels.iter() {
+                        set.insert(label.as_str());
+                    }
+                }
+            }
+            for label in &set {
+                postings.entry(*label).or_default().push(ci);
+            }
+            eff_labels.push(set);
+        }
+
+        let ids = if replace {
+            let mut ids: Vec<TetraId> = labels_map.keys().copied().collect();
+            ids.sort_unstable();
+            ids
+        } else {
+            let mut seen = HashSet::new();
+            tetras
+                .iter()
+                .filter_map(|(id, _)| seen.insert(*id).then_some(*id))
+                .collect()
+        };
+        let mut changed = replace;
+        for id in ids {
+            if !replace && !known_members.insert(id) {
+                continue;
+            }
+            let labels = labels_map[&id];
             let label_set: HashSet<&str> = labels.iter().map(|s| s.as_str()).collect();
-            // 交集计数: 每个标签在哪些概念的有效集里
             let mut shared: HashMap<usize, usize> = HashMap::new();
             for l in &label_set {
                 if let Some(cis) = postings.get(*l) {
@@ -884,7 +959,6 @@ impl KnowledgeGraph {
                     }
                 }
             }
-            // 候选排序: sim降序, 平票取最小idx(=旧实现"先见者胜"的确定性等价)
             let mut cands: Vec<(usize, f64)> = shared
                 .into_iter()
                 .filter_map(|(ci, n)| {
@@ -905,52 +979,28 @@ impl KnowledgeGraph {
 
             match best {
                 Some((idx, sim)) if sim > 0.3 => {
-                    concepts[idx].member_count += 1;
+                    let membership_complete = member_ids_are_complete(&concepts[idx]);
                     concepts[idx].member_ids.push(id);
-                    if concepts[idx].member_ids.len() > 100 {
-                        // 驱逐最老成员后重建该概念的有效标签集(与旧实现按当前成员重算等价)
-                        let drained: Vec<TetraId> = concepts[idx].member_ids.drain(0..10).collect();
-                        for l in eff_labels[idx].iter() {
-                            if let Some(v) = postings.get_mut(*l) {
-                                v.retain(|&c| c != idx);
-                            }
-                        }
-                        let mut set: HashSet<&str> = HashSet::new();
-                        for &mid in concepts[idx].member_ids.iter().chain(drained.iter()) {
-                            // drained成员已不在member_ids, 但仍在批次内——旧实现
-                            // jaccard只看当前member_ids, 所以这里排除drained
-                            if drained.contains(&mid) {
-                                continue;
-                            }
-                            if let Some(ml) = labels_map.get(&mid) {
-                                for l in ml.iter() {
-                                    set.insert(l.as_str());
-                                }
-                            }
-                        }
-                        for l in &set {
-                            postings.entry(*l).or_default().push(idx);
-                        }
-                        eff_labels[idx] = set;
+                    if membership_complete {
+                        concepts[idx].member_count = concepts[idx].member_ids.len() as u64;
                     } else {
-                        absorb(idx, labels, &mut eff_labels, &mut postings);
+                        concepts[idx].member_count = concepts[idx].member_count.saturating_add(1);
                     }
+                    absorb(idx, labels, &mut eff_labels, &mut postings);
+                    changed = true;
                 }
                 _ => {
-                    // 修复：不为孤立 tetra 创建 member_count=1 的垃圾 concept_N。
-                    // 只有当 tetra 有有意义的 labels 时才创建概念（避免 concept_N 噪音）。
-                    // 孤立 tetra（无标签或标签太特殊）不归属任何概念，等未来有相似记忆时再聚类。
                     if !labels.is_empty() {
                         let next_id = concepts.len() as u64;
-                        // 用第一个 label 作为概念名，而不是 concept_N（更有语义意义）
+                        let label = labels
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| format!("cluster_{}", next_id));
                         concepts.push(ConceptPrototype {
                             id: next_id,
-                            centroid: vec![],
+                            centroid: previous_centroids.get(&label).cloned().unwrap_or_default(),
                             member_count: 1,
-                            label: labels
-                                .first()
-                                .cloned()
-                                .unwrap_or_else(|| format!("cluster_{}", next_id)),
+                            label,
                             member_ids: vec![id],
                         });
                         let ci = concepts.len() - 1;
@@ -962,12 +1012,16 @@ impl KnowledgeGraph {
                             postings.entry(*l).or_default().push(ci);
                         }
                         eff_labels.push(set);
+                        changed = true;
                     }
-                    // labels 为空的 tetra：不创建概念（之前会生成 concept_N 垃圾）
                 }
             }
         }
-        self.mark_dirty(false);
+        if changed {
+            *current = concepts;
+            drop(current);
+            self.mark_dirty(false);
+        }
     }
 
     pub fn get_concepts(&self) -> Vec<ConceptPrototype> {
@@ -1158,7 +1212,7 @@ impl KnowledgeGraph {
         }
         let snapshot: KgSnapshot = serde_json::from_str(&data).map_err(|e| e.to_string())?;
         *self.relations.write() = snapshot.relations;
-        *self.concepts.write() = snapshot.concepts;
+        self.restore_concepts(snapshot.concepts);
         {
             let relations = self.relations.read();
             *self.adj_index.write() = self.rebuild_adj_index(&relations);
@@ -1179,8 +1233,23 @@ impl KnowledgeGraph {
         self.relations.read().clone()
     }
 
-    pub fn restore_concepts(&self, concepts: Vec<ConceptPrototype>) {
+    pub fn restore_concepts(&self, mut concepts: Vec<ConceptPrototype>) {
+        let mut changed = false;
+        for concept in &mut concepts {
+            let membership_complete = member_ids_are_complete(concept);
+            let original_len = concept.member_ids.len();
+            deduplicate_member_ids(&mut concept.member_ids);
+            changed |= concept.member_ids.len() != original_len;
+            if membership_complete {
+                let member_count = concept.member_ids.len() as u64;
+                changed |= concept.member_count != member_count;
+                concept.member_count = member_count;
+            }
+        }
         *self.concepts.write() = concepts;
+        if changed {
+            self.mark_dirty(false);
+        }
     }
 
     pub fn merge_duplicate_concepts(&self) -> usize {
@@ -1197,7 +1266,7 @@ impl KnowledgeGraph {
 
         let mut merged_count = 0usize;
         let mut to_remove: Vec<usize> = Vec::new();
-        let mut to_update: Vec<(usize, u64, Vec<u64>)> = Vec::new();
+        let mut to_update: Vec<(usize, u64, Vec<TetraId>)> = Vec::new();
 
         for indices in groups.values() {
             if indices.len() <= 1 {
@@ -1205,19 +1274,33 @@ impl KnowledgeGraph {
             }
             let primary = indices[0];
             let mut total_count = concepts[primary].member_count;
-            let mut all_ids = concepts[primary].member_ids.clone();
+            let mut all_ids = Vec::new();
+            let mut seen_ids = HashSet::new();
+            let mut membership_complete = member_ids_are_complete(&concepts[primary]);
+            for &id in &concepts[primary].member_ids {
+                if seen_ids.insert(id) {
+                    all_ids.push(id);
+                }
+            }
 
             for &dup_idx in &indices[1..] {
-                total_count += concepts[dup_idx].member_count;
-                all_ids.extend(concepts[dup_idx].member_ids.iter().copied());
+                total_count = total_count.saturating_add(concepts[dup_idx].member_count);
+                membership_complete &= member_ids_are_complete(&concepts[dup_idx]);
+                for &id in &concepts[dup_idx].member_ids {
+                    if seen_ids.insert(id) {
+                        all_ids.push(id);
+                    }
+                }
                 to_remove.push(dup_idx);
                 merged_count += 1;
             }
 
-            if all_ids.len() > 100 {
-                all_ids = all_ids.split_off(all_ids.len() - 100);
-            }
-            to_update.push((primary, total_count, all_ids));
+            let member_count = if membership_complete {
+                all_ids.len() as u64
+            } else {
+                total_count
+            };
+            to_update.push((primary, member_count, all_ids));
         }
 
         for (idx, count, ids) in to_update {
@@ -1557,13 +1640,157 @@ mod tests {
     }
 
     #[test]
-    fn concepts_update_incrementally() {
+    fn concepts_update_is_idempotent() {
         let kg = KnowledgeGraph::new();
+
+        kg.update_concepts(&[
+            (0, vec!["rust".to_string()]),
+            (0, vec!["rust".to_string()]),
+            (1, vec!["rust".to_string()]),
+        ]);
+        let concepts = kg.get_concepts();
+        assert_eq!(concepts.len(), 1);
+        assert_eq!(concepts[0].member_count, 2);
 
         kg.update_concepts(&[(0, vec!["rust".to_string()]), (1, vec!["rust".to_string()])]);
         let concepts = kg.get_concepts();
         assert_eq!(concepts.len(), 1);
         assert_eq!(concepts[0].member_count, 2);
+        assert_eq!(concepts[0].member_ids, vec![0, 1]);
+        assert_eq!(kg.get_top_concepts(1), vec![("rust".to_string(), 2)]);
+    }
+
+    #[test]
+    fn concept_snapshot_reconciles_duplicate_ids_removals_and_reassignments() {
+        let kg = KnowledgeGraph::new();
+        kg.replace_concepts(&[(1, vec!["rust".to_string()]), (2, vec!["go".to_string()])]);
+        assert_eq!(kg.concept_count(), 2);
+
+        let updated_members = [
+            (1, vec!["rust".to_string()]),
+            (1, vec!["go".to_string()]),
+            (3, vec!["go".to_string()]),
+        ];
+        kg.replace_concepts(&updated_members);
+        let concepts = kg.get_concepts();
+        assert_eq!(concepts.len(), 1);
+        assert_eq!(concepts[0].label, "go");
+        assert_eq!(concepts[0].member_ids, vec![1, 3]);
+        assert_eq!(concepts[0].member_count, 2);
+
+        kg.replace_concepts(&updated_members);
+        assert_eq!(kg.get_concepts()[0].member_count, 2);
+        assert_eq!(kg.get_concepts()[0].member_ids, vec![1, 3]);
+
+        kg.remove_relations_for(3);
+        let concepts = kg.get_concepts();
+        assert_eq!(concepts.len(), 1);
+        assert_eq!(concepts[0].member_ids, vec![1]);
+        assert_eq!(concepts[0].member_count, 1);
+
+        kg.remove_relations_for(1);
+        assert!(kg.get_concepts().is_empty());
+        kg.replace_concepts(&[(4, vec![])]);
+        assert!(kg.get_concepts().is_empty());
+        kg.replace_concepts(&[]);
+        assert!(kg.get_concepts().is_empty());
+    }
+
+    #[test]
+    fn concept_snapshot_preserves_centroid_without_usable_embeddings() {
+        let kg = KnowledgeGraph::new();
+        kg.restore_concepts(vec![ConceptPrototype {
+            id: 0,
+            centroid: vec![0.25, 0.75],
+            member_count: 4,
+            label: "rust".to_string(),
+            member_ids: vec![1],
+        }]);
+
+        kg.replace_concepts(&[(1, vec!["rust".to_string()]), (2, vec!["rust".to_string()])]);
+        let concepts = kg.get_concepts();
+        assert_eq!(concepts[0].member_count, 2);
+        assert_eq!(concepts[0].centroid, vec![0.25, 0.75]);
+    }
+
+    #[test]
+    fn merging_duplicate_concepts_counts_unique_members() {
+        let kg = KnowledgeGraph::new();
+        kg.restore_concepts(vec![
+            ConceptPrototype {
+                id: 0,
+                centroid: vec![],
+                member_count: 3,
+                label: "shared-label".to_string(),
+                member_ids: vec![1, 2, 2],
+            },
+            ConceptPrototype {
+                id: 1,
+                centroid: vec![],
+                member_count: 2,
+                label: "shared label".to_string(),
+                member_ids: vec![2, 3],
+            },
+        ]);
+
+        assert_eq!(kg.merge_duplicate_concepts(), 1);
+        let concepts = kg.get_concepts();
+        assert_eq!(concepts.len(), 1);
+        assert_eq!(concepts[0].member_ids, vec![1, 2, 3]);
+        assert_eq!(concepts[0].member_count, 3);
+        assert!(member_ids_are_complete(&concepts[0]));
+    }
+
+    #[test]
+    fn concept_graph_snapshot_roundtrip_preserves_complete_membership() {
+        let path = std::env::temp_dir().join(format!(
+            "epicode_concept_snapshot_{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let kg = KnowledgeGraph::new();
+        let membership = vec![
+            (10, vec!["rust".to_string()]),
+            (11, vec!["rust".to_string()]),
+        ];
+        kg.update_concepts(&membership);
+        kg.save(&path).unwrap();
+
+        let recovered = KnowledgeGraph::new();
+        recovered.load(&path).unwrap();
+        let concepts = recovered.get_concepts();
+        assert_eq!(concepts.len(), 1);
+        assert_eq!(concepts[0].member_ids, vec![10, 11]);
+        assert_eq!(concepts[0].member_count, 2);
+        assert!(member_ids_are_complete(&concepts[0]));
+
+        recovered.update_concepts(&membership);
+        assert_eq!(recovered.get_concepts()[0].member_count, 2);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn legacy_graph_snapshot_count_is_preserved_until_full_rebuild() {
+        let path = std::env::temp_dir().join(format!(
+            "epicode_legacy_concept_snapshot_{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            r#"{"relations":[],"concepts":[{"id":0,"centroid":[],"member_count":9,"label":"legacy","member_ids":[1,2]}]}"#,
+        )
+        .unwrap();
+
+        let kg = KnowledgeGraph::new();
+        kg.load(&path).unwrap();
+        let legacy = kg.get_concepts();
+        assert_eq!(legacy[0].member_count, 9);
+        assert!(!member_ids_are_complete(&legacy[0]));
+
+        kg.replace_concepts(&[(1, vec!["rust".to_string()]), (2, vec!["rust".to_string()])]);
+        let rebuilt = kg.get_concepts();
+        assert_eq!(rebuilt[0].member_count, 2);
+        assert!(member_ids_are_complete(&rebuilt[0]));
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -1731,16 +1958,25 @@ mod kg_research_tests {
         assert!(q > 0.3, "双团+弱桥的模块度应显著(实测Q={q})");
     }
 
-    // ───────── 概念聚合倒排: 与旧实现精确等价 ─────────
+    // ───────── 概念聚合倒排: 与直接扫描参考实现等价 ─────────
 
-    /// 旧实现逐字拷贝(独立操作裸Vec, 作等价性参照)
+    /// Direct-scan reference implementation for the inverted index.
     fn update_concepts_reference(
         concepts: &mut Vec<ConceptPrototype>,
         tetras: &[(TetraId, Vec<String>)],
     ) {
         let labels_map: HashMap<TetraId, &Vec<String>> =
-            tetras.iter().map(|(id, l)| (*id, l)).collect();
-        for &(id, ref labels) in tetras {
+            tetras.iter().map(|(id, labels)| (*id, labels)).collect();
+        let mut known_members: HashSet<TetraId> = concepts
+            .iter()
+            .flat_map(|concept| concept.member_ids.iter().copied())
+            .collect();
+        let mut processed = HashSet::new();
+        for &(id, _) in tetras {
+            if !processed.insert(id) || !known_members.insert(id) {
+                continue;
+            }
+            let labels = labels_map[&id];
             let mut best: Option<(usize, f64)> = None;
             for (i, c) in concepts.iter().enumerate() {
                 let sim = label_jaccard(labels, &c.member_ids, &labels_map);
@@ -1752,10 +1988,12 @@ mod kg_research_tests {
             }
             match best {
                 Some((idx, sim)) if sim > 0.3 => {
-                    concepts[idx].member_count += 1;
+                    let membership_complete = member_ids_are_complete(&concepts[idx]);
                     concepts[idx].member_ids.push(id);
-                    if concepts[idx].member_ids.len() > 100 {
-                        concepts[idx].member_ids.drain(0..10);
+                    if membership_complete {
+                        concepts[idx].member_count = concepts[idx].member_ids.len() as u64;
+                    } else {
+                        concepts[idx].member_count = concepts[idx].member_count.saturating_add(1);
                     }
                 }
                 _ => {
@@ -1784,14 +2022,27 @@ mod kg_research_tests {
             assert_eq!(ca.label, cb.label, "{ctx}: label");
             assert_eq!(ca.member_count, cb.member_count, "{ctx}: member_count");
             assert_eq!(ca.member_ids, cb.member_ids, "{ctx}: member_ids");
+            if member_ids_are_complete(ca) {
+                let unique_ids: HashSet<TetraId> = ca.member_ids.iter().copied().collect();
+                assert_eq!(
+                    unique_ids.len(),
+                    ca.member_ids.len(),
+                    "{ctx}: duplicate IDs"
+                );
+                assert_eq!(
+                    ca.member_count as usize,
+                    unique_ids.len(),
+                    "{ctx}: derived count"
+                );
+            }
         }
     }
 
     #[test]
     fn update_concepts_inverted_matches_reference() {
-        // 批次覆盖: 新概念创建/聚拢/空标签/标签漂移/跨越100成员触发drain/平票
+        // Coverage: concept creation, grouping, empty labels, label drift, large membership, and ties.
         let mut batch: Vec<(TetraId, Vec<String>)> = Vec::new();
-        // 105个同标签 → 单概念膨胀跨100触发drain
+        // 105 same-label memories exercise complete membership beyond the old sample limit.
         for i in 0..105u64 {
             batch.push((1000 + i, vec!["rust".into(), "memory".into()]));
         }
@@ -1826,7 +2077,17 @@ mod kg_research_tests {
 
         assert_same_concepts(&kg.get_concepts(), &reference, "首批");
 
-        // 第二批(已有概念状态下的指派/drain再触发): 语义等价的真正考验
+        kg.update_concepts(&batch);
+        update_concepts_reference(&mut reference, &batch);
+        assert_same_concepts(&kg.get_concepts(), &reference, "重试");
+
+        let replacement = KnowledgeGraph::new();
+        replacement.replace_concepts(&batch);
+        let before_retry = replacement.get_concepts();
+        replacement.replace_concepts(&batch);
+        assert_same_concepts(&replacement.get_concepts(), &before_retry, "完整快照重试");
+
+        // A second incremental batch exercises existing prototype state and new members.
         let batch2: Vec<(TetraId, Vec<String>)> = (0..40u64)
             .map(|i| {
                 if i % 3 == 0 {
