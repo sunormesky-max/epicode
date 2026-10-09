@@ -1,10 +1,12 @@
 import { lazy, Suspense, Component, Fragment, useEffect, useState, type ReactNode } from 'react';
-import { Routes, Route, Navigate } from 'react-router';
+import { Routes, Route, Navigate, useLocation } from 'react-router';
 import { I18nProvider } from '@/i18n/I18nContext';
 import PageBackground from '@/components/PageBackground';
 import AudioField from "./components/AudioField";
 import { CognitiveProvider } from '@/components/CognitiveContext';
 import { AUTH_CHANGE_EVENT, getUserId, isAuthenticated } from '@/lib/api';
+import { useI18nContext } from '@/i18n/useI18n';
+import { applyPageMeta } from '@/lib/page-meta';
 
 const Home = lazy(() => import('@/pages/Home'));
 const Login = lazy(() => import('@/pages/Login'));
@@ -99,14 +101,22 @@ function NotFound() {
   );
 }
 
+/** 路由 / 语言变化时同步 <title>、meta description 与 og 标签(见 lib/page-meta.ts) */
+function PageMetaSync() {
+  const { pathname } = useLocation();
+  const { lang } = useI18nContext();
+  useEffect(() => { applyPageMeta(pathname, lang); }, [pathname, lang]);
+  return null;
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
       <I18nProvider>
         <CognitiveProvider>
+        <PageMetaSync />
         {/* 全局统一背景: 所有页面共享一个NeuralNetworkBackground实例(含SSE绑定) */}
         <PageBackground />
-        <AudioField />
         <div className="relative z-10">
         <Suspense fallback={<Loading />}>
           <Routes>
@@ -136,6 +146,8 @@ export default function App() {
           </Routes>
         </Suspense>
         </div>
+        {/* 固定定位的声音开关放在内容之后:Tab 顺序先到"跳到内容"再到页面,视觉位置不变 */}
+        <AudioField />
         </CognitiveProvider>
       </I18nProvider>
     </ErrorBoundary>

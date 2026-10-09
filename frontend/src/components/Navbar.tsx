@@ -6,7 +6,7 @@ import ThemeSwitcher from '@/components/ThemeSwitcher';
 import { useState, useEffect } from "react";
 
 export default function Navbar() {
-  const { t } = useI18nContext();
+  const { t, lang } = useI18nContext();
   const location = useLocation();
   const currentPath = location.pathname;
   const authed = isAuthenticated();
@@ -27,11 +27,12 @@ export default function Navbar() {
     { path: '/l0', label: 'L0' },
     { path: '/community', label: t('nav.community') },
     { path: '/benchmarks', label: t('nav.benchmarks') },
-    { path: '/themes', label: '主题' },
+    { path: '/themes', label: lang === 'zh' ? '主题' : 'Themes' },
   ];
 
   return (
     <nav
+      aria-label={lang === 'zh' ? '主导航' : 'Main navigation'}
       className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center px-2"
       style={{
         height: 'var(--navbar-height)',
@@ -64,6 +65,7 @@ export default function Navbar() {
           <a
             key={link.path}
             href={`#${link.path}`}
+            aria-current={currentPath === link.path ? 'page' : undefined}
             className="px-3 py-1.5 rounded-full text-xs no-underline transition-all duration-200 whitespace-nowrap flex-shrink-0"
             style={{
               fontFamily: 'var(--font-heading)',
@@ -143,6 +145,7 @@ export default function Navbar() {
             <a
               key={link.path}
               href={`#${link.path}`}
+              aria-current={currentPath === link.path ? 'page' : undefined}
               className="px-4 py-2.5 rounded-xl text-sm no-underline transition-colors"
               style={{
                 fontFamily: 'var(--font-heading)',
@@ -157,8 +160,14 @@ export default function Navbar() {
             </a>
           ))}
           <div className="pt-3 flex flex-col gap-2 border-t mt-2" style={{ borderColor: 'var(--border-light)' }}>
-            <a href="#/login" className="btn-secondary w-full text-sm">{t('login.title')}</a>
-            <a href="#/register" className="btn-primary w-full text-sm">{t('nav.getStarted')}</a>
+            {authed ? (
+              <a href="#/dashboard" className="btn-primary w-full text-sm" onClick={() => setMobileOpen(false)}>{t('nav.console')}</a>
+            ) : (
+              <>
+                <a href="#/login" className="btn-secondary w-full text-sm" onClick={() => setMobileOpen(false)}>{t('login.title')}</a>
+                <a href="#/register" className="btn-primary w-full text-sm" onClick={() => setMobileOpen(false)}>{t('nav.getStarted')}</a>
+              </>
+            )}
           </div>
         </div>
       )}

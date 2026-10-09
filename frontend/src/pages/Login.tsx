@@ -127,7 +127,7 @@ export default function Login() {
                     placeholder={t('login.password')} className="dark-input pr-12" autoComplete="current-password" />
                   <button type="button" onClick={() => setShowPassword(!showPassword)}
                     aria-label={showPassword ? t('common.hidePassword') : t('common.showPassword')}
-                    className="absolute right-4 top-1/2 -translate-y-1/2"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 inline-flex items-center justify-center"
                     style={{ color: 'var(--text-tertiary)' }}>
                     {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
                   </button>

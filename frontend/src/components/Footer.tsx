@@ -1,21 +1,26 @@
 import { useI18nContext } from '@/i18n/useI18n';
 import LanguageSwitcher from './LanguageSwitcher';
-import { Github, MessageCircle } from 'lucide-react';
+import { Github, FileText } from 'lucide-react';
+// 只取 version 字段(Vite 对 JSON 具名导入做 tree-shaking);由 release-please 随发版更新
+import { version as APP_VERSION } from '../../package.json';
+import { REPO_URL } from '@/lib/page-meta';
 
 export default function Footer() {
-  const { t } = useI18nContext();
+  const { t, lang } = useI18nContext();
 
   const docLinks = [
     { href: '#/guide', label: t('footer.quickStart') },
     { href: '#/docs', label: t('footer.apiDocs') },
     { href: '#/smrp', label: t('footer.mcpProtocol') },
+    { href: '#/l0', label: lang === 'zh' ? 'L0 协议' : 'L0 Protocol' },
     { href: '#/benchmarks', label: t('footer.benchmarks') },
   ];
 
   const communityLinks = [
     { href: '#/community', label: t('footer.communitySkills') },
-    { href: 'https://github.com', label: 'GitHub', external: true },
-    { href: 'https://discord.com', label: 'Discord', external: true },
+    // 原为 https://github.com / https://discord.com 占位链接(指向站点首页而非本项目)
+    { href: REPO_URL, label: 'GitHub', external: true },
+    { href: '/llms.txt', label: lang === 'zh' ? 'llms.txt(AI 可读)' : 'llms.txt (for AI)', external: false },
   ];
 
   return (
@@ -45,9 +50,9 @@ export default function Footer() {
 
           {/* Documentation */}
           <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: 'var(--text-tertiary)' }}>
+            <h2 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: 'var(--text-tertiary)' }}>
               {t('footer.docs')}
-            </h4>
+            </h2>
             <ul className="space-y-3">
               {docLinks.map((link) => (
                 <li key={link.label}>
@@ -61,15 +66,15 @@ export default function Footer() {
 
           {/* Community */}
           <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: 'var(--text-tertiary)' }}>
+            <h2 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: 'var(--text-tertiary)' }}>
               {t('footer.community')}
-            </h4>
+            </h2>
             <ul className="space-y-3">
               {communityLinks.map((link) => (
                 <li key={link.label}>
                   <a href={link.href} className="text-sm no-underline transition-colors duration-200 hover:text-[var(--accent-magenta)] inline-flex items-center gap-2" style={{ color: 'var(--text-secondary)' }} target={link.external ? '_blank' : undefined} rel={link.external ? 'noopener noreferrer' : undefined}>
                     {link.label === 'GitHub' && <Github size={14} />}
-                    {link.label === 'Discord' && <MessageCircle size={14} />}
+                    {link.href === '/llms.txt' && <FileText size={14} />}
                     {link.label}
                   </a>
                 </li>
@@ -97,7 +102,7 @@ export default function Footer() {
           </div>
           <div className="flex items-center gap-4">
             <LanguageSwitcher />
-            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('footer.version')}</span>
+            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>v{APP_VERSION}</span>
           </div>
         </div>
       </div>
