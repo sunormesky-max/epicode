@@ -264,6 +264,12 @@ impl Engine {
         });
 
         let report = storage.load_all(&space, &knowledge);
+        assert!(
+            report.space_ok,
+            "[{}] refused to start with an incomplete memory load: {}",
+            uid,
+            report.space_error.as_deref().unwrap_or("unknown error")
+        );
         if report.tetras_loaded > 0 {
             // S1破案: 构造调用栈 (临时诊断, 定位幽灵加载触发者)
             tracing::info!(
