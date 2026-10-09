@@ -35,7 +35,7 @@ Tracking issue: [#170 Memory roadmap (Mem0 / Zep / Letta / HippoRAG)](https://gi
 
 Suggested next kernel PRs (see #170 for full P0/P1/P2):
 
-- [ ] Dream: respect `enforced` on merge/link; disable Jaccard-only supersede when embeddings are missing
+- [ ] Dream: exclude `enforced` memories from Phase 2 merges and Phase 3 links; Phase 2 supersedes require healthy 1024-dim vectors and never fall back to Jaccard when vectors are absent, stale, or degraded
 - [ ] Knowledge: make concept membership / `member_count` idempotent
 - [ ] Memory: `memory_improve` preserves full content and refreshes embeddings
 

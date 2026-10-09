@@ -180,5 +180,30 @@ mod tests {
         };
         assert!(!apply_op(&mut d, &mut m, &q));
         assert_eq!(m, 1.0);
+
+        let before = (
+            d.labels.clone(),
+            d.valid_to,
+            d.invalidated_at,
+            d.importance,
+            m,
+        );
+        let s = MemoryOp::Supersede {
+            at: 5,
+            importance_factor: 0.15,
+            importance_floor: 0.3,
+            mass_cap: 0.1,
+        };
+        assert!(!apply_op(&mut d, &mut m, &s));
+        assert_eq!(
+            (
+                d.labels.clone(),
+                d.valid_to,
+                d.invalidated_at,
+                d.importance,
+                m
+            ),
+            before
+        );
     }
 }

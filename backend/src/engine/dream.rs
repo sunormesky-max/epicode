@@ -1,7 +1,7 @@
 use crate::domain::ops::MemoryOp;
 use crate::domain::space::Space;
 use crate::engine::knowledge::KnowledgeGraph;
-use crate::engine::vector::VectorLayer;
+use crate::engine::vector::{VectorLayer, EMBEDDING_DIM};
 #[derive(Debug, Clone)]
 pub struct DreamResult {
     pub memories_consolidated: usize,
@@ -14,6 +14,19 @@ pub struct DreamResult {
 }
 
 pub struct DreamEngine;
+
+fn has_healthy_embedding(embedding: &[f64]) -> bool {
+    if embedding.len() != EMBEDDING_DIM || embedding.iter().any(|value| !value.is_finite()) {
+        return false;
+    }
+
+    let norm = embedding
+        .iter()
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt();
+    norm.is_finite() && norm > 1e-10
+}
 
 impl DreamEngine {
     pub fn recompute_importance(
@@ -186,34 +199,34 @@ impl DreamEngine {
         };
 
         // 已 Superseded 的记忆不参与去重候选(否则无效对占满早退名额)
-        let non_meta: Vec<usize> = (0..tetras.len())
+        let merge_candidates: Vec<usize> = (0..tetras.len())
             .filter(|i| {
                 let d = &tetras[*i].data;
-                !d.labels.iter().any(|l| l.starts_with("meta-"))
+                !d.enforced
+                    && !d.labels.iter().any(|l| l.starts_with("meta-"))
                     && crate::domain::ops::Lifecycle::of(d)
                         != crate::domain::ops::Lifecycle::Superseded
+                    && has_healthy_embedding(&d.embedding)
             })
             .collect();
 
-        // Phase 2: Find and merge high-similarity pairs (duplicates)
+        // Phase 2: Superseding requires healthy current-model vectors; never fall back to Jaccard.
         let merge_threshold = 0.95f64;
         let mut merged_ids: std::collections::HashSet<u64> = std::collections::HashSet::new();
         let max_scan = 200usize;
         let mut merge_pairs: Vec<(usize, usize, f64)> = Vec::new();
 
-        if non_meta.len() <= 30 {
-            for wi in 0..non_meta.len() {
-                for wj in (wi + 1)..non_meta.len() {
-                    let i = non_meta[wi];
-                    let j = non_meta[wj];
+        if merge_candidates.len() <= 30 {
+            for wi in 0..merge_candidates.len() {
+                for wj in (wi + 1)..merge_candidates.len() {
+                    let i = merge_candidates[wi];
+                    let j = merge_candidates[wj];
                     if merged_ids.contains(&tetras[i].id) || merged_ids.contains(&tetras[j].id) {
                         continue;
                     }
-                    let sim = VectorLayer::best_similarity(
+                    let sim = VectorLayer::cosine_similarity(
                         &tetras[i].data.embedding,
-                        &tetras[i].data.labels,
                         &tetras[j].data.embedding,
-                        &tetras[j].data.labels,
                     );
                     if sim > merge_threshold {
                         merge_pairs.push((i, j, sim));
@@ -224,20 +237,18 @@ impl DreamEngine {
             // 深层突破2: 全量 O(N²) 扫描替代 random sampling(~5%召回率)。
             // 696记忆的O(N²)≈250K次1024维点积≈几十ms，完全可接受。
             // 全量扫描召回率~100% vs random sampling ~5%。
-            for wi in 0..non_meta.len() {
-                let i = non_meta[wi];
+            for wi in 0..merge_candidates.len() {
+                let i = merge_candidates[wi];
                 if merged_ids.contains(&tetras[i].id) {
                     continue;
                 }
-                for &j in non_meta.iter().skip(wi + 1) {
+                for &j in merge_candidates.iter().skip(wi + 1) {
                     if merged_ids.contains(&tetras[j].id) {
                         continue;
                     }
-                    let sim = VectorLayer::best_similarity(
+                    let sim = VectorLayer::cosine_similarity(
                         &tetras[i].data.embedding,
-                        &tetras[i].data.labels,
                         &tetras[j].data.embedding,
-                        &tetras[j].data.labels,
                     );
                     if sim > merge_threshold {
                         merge_pairs.push((i, j, sim));
@@ -259,6 +270,9 @@ impl DreamEngine {
             let ta = &tetras[*i];
             let tb = &tetras[*j];
             if merged_ids.contains(&ta.id) || merged_ids.contains(&tb.id) {
+                continue;
+            }
+            if ta.data.enforced || tb.data.enforced {
                 continue;
             }
             if space.get_tetrahedron(ta.id).is_none() || space.get_tetrahedron(tb.id).is_none() {
@@ -320,11 +334,8 @@ impl DreamEngine {
         };
         let non_meta: Vec<usize> = (0..tetras.len())
             .filter(|i| {
-                !tetras[*i]
-                    .data
-                    .labels
-                    .iter()
-                    .any(|l| l.starts_with("meta-"))
+                let d = &tetras[*i].data;
+                !d.enforced && !d.labels.iter().any(|l| l.starts_with("meta-"))
             })
             .collect();
 
@@ -376,6 +387,9 @@ impl DreamEngine {
         // Phase 3.5: 将发现的语义相似对写入知识图谱（之前断联：只计数不建链）
         if !dry_run && !pairs.is_empty() {
             for &(i, j, sim) in pairs.iter().take(50) {
+                if tetras[i].data.enforced || tetras[j].data.enforced {
+                    continue;
+                }
                 let id_i = tetras[i].id;
                 let id_j = tetras[j].id;
                 knowledge.add_relation(
@@ -685,7 +699,7 @@ mod idempotency_tests {
     }
 
     fn normal(i: usize) -> MemoryPayload {
-        let mut emb = vec![0.0; 128];
+        let mut emb = vec![0.0; EMBEDDING_DIM];
         emb[i % 128] = 1.0;
         MemoryPayload {
             content: format!("normal {i}"),
@@ -695,6 +709,234 @@ mod idempotency_tests {
             embedding: emb,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn enforced_junk_is_not_quarantined_in_phase1() {
+        let space = Space::new();
+        let protected = add(
+            &space,
+            0.0,
+            MemoryPayload {
+                content: "enforced junk".into(),
+                labels: vec!["junk".into()],
+                importance: 0.05,
+                enforced: true,
+                ..Default::default()
+            },
+            0.05,
+        );
+        let ordinary_junk = add(
+            &space,
+            1.0,
+            MemoryPayload {
+                content: "ordinary junk".into(),
+                labels: vec!["junk".into()],
+                importance: 0.05,
+                ..Default::default()
+            },
+            0.05,
+        );
+
+        let result = DreamEngine::cycle(&space, &KnowledgeGraph::new(), 1.1, 0, false);
+
+        assert_eq!(result.evicted_ids, vec![ordinary_junk]);
+        assert_eq!(result.junk_evicted, 1);
+        let protected_after = space.get_tetrahedron(protected).unwrap();
+        assert!(protected_after.data.enforced);
+        assert_eq!(protected_after.data.labels, ["junk"]);
+        assert_eq!(protected_after.data.importance, 0.05);
+        assert_eq!(protected_after.mass, 0.05);
+    }
+
+    #[test]
+    fn phase2_skips_enforced_memories_in_both_keeper_orders() {
+        for (protected_mass, ordinary_mass) in [(2.0, 1.0), (1.0, 2.0)] {
+            let space = Space::new();
+            let mut protected_data = normal(0);
+            protected_data.enforced = true;
+            let protected = add(&space, 0.0, protected_data, protected_mass);
+            let ordinary = add(&space, 1.0, normal(0), ordinary_mass);
+            let protected_before = space.get_tetrahedron(protected).unwrap();
+            let ordinary_before = space.get_tetrahedron(ordinary).unwrap();
+            let knowledge = KnowledgeGraph::new();
+
+            let result = DreamEngine::cycle(&space, &knowledge, 1.1, 5, false);
+
+            assert_eq!(result.duplicates_merged, 0);
+            assert!(result.merged_remove_ids.is_empty());
+            assert_eq!(knowledge.relation_count(), 0);
+            let protected_after = space.get_tetrahedron(protected).unwrap();
+            let ordinary_after = space.get_tetrahedron(ordinary).unwrap();
+            assert!(protected_after.data.enforced);
+            assert_eq!(protected_after.data.labels, protected_before.data.labels);
+            assert_eq!(
+                protected_after.data.valid_to,
+                protected_before.data.valid_to
+            );
+            assert_eq!(
+                protected_after.data.importance,
+                protected_before.data.importance
+            );
+            assert_eq!(protected_after.mass, protected_before.mass);
+            assert_eq!(ordinary_after.data.labels, ordinary_before.data.labels);
+            assert_eq!(ordinary_after.data.valid_to, ordinary_before.data.valid_to);
+            assert_eq!(
+                ordinary_after.data.importance,
+                ordinary_before.data.importance
+            );
+            assert_eq!(ordinary_after.mass, ordinary_before.mass);
+        }
+    }
+
+    #[test]
+    fn phase2_never_supersedes_without_healthy_vectors() {
+        let stale_dim = EMBEDDING_DIM - 1;
+        let cases = [
+            ("absent", vec![], vec![]),
+            (
+                "stale same-dimension pair",
+                vec![1.0; stale_dim],
+                vec![1.0; stale_dim],
+            ),
+            ("stale Jaccard fallback", vec![1.0; stale_dim], vec![]),
+            (
+                "degraded zero-vector fallback",
+                vec![0.0; EMBEDDING_DIM],
+                vec![],
+            ),
+        ];
+
+        for (name, embedding_a, embedding_b) in cases {
+            let space = Space::new();
+            let mut data_a = normal(0);
+            data_a.labels = vec!["shared".into()];
+            data_a.embedding = embedding_a;
+            let mut data_b = normal(1);
+            data_b.labels = vec!["shared".into()];
+            data_b.embedding = embedding_b;
+            let id_a = add(&space, 0.0, data_a, 2.0);
+            let id_b = add(&space, 1.0, data_b, 1.0);
+
+            let result = DreamEngine::cycle(&space, &KnowledgeGraph::new(), 2.0, 5, false);
+
+            assert_eq!(result.duplicates_merged, 0, "{name}");
+            assert!(result.merged_remove_ids.is_empty(), "{name}");
+            for id in [id_a, id_b] {
+                let after = space.get_tetrahedron(id).unwrap();
+                assert!(
+                    !after.data.labels.iter().any(|label| label == "superseded"),
+                    "{name}: memory {id} was superseded"
+                );
+                assert_eq!(after.data.valid_to, None, "{name}: memory {id}");
+                assert_eq!(after.mass, if id == id_a { 2.0 } else { 1.0 }, "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn phase3_skips_enforced_links_but_keeps_healthy_ordinary_links() {
+        let space = Space::new();
+        let mut protected_data = normal(0);
+        protected_data.enforced = true;
+        let protected = add(&space, 0.0, protected_data, 1.0);
+        let ordinary_isolated = add(&space, 1.0, normal(0), 1.0);
+        let ordinary_a = add(&space, 2.0, normal(1), 1.0);
+        let mut near_a = normal(2);
+        near_a.embedding[1] = 0.8;
+        near_a.embedding[2] = 0.6;
+        let ordinary_b = add(&space, 3.0, near_a, 1.0);
+        let knowledge = KnowledgeGraph::new();
+
+        let result = DreamEngine::cycle(&space, &knowledge, 0.7, 0, false);
+
+        assert_eq!(result.duplicates_merged, 0);
+        assert_eq!(result.connections_formed, 1);
+        let relations = knowledge.all_relations();
+        assert_eq!(relations.len(), 1);
+        let relation = &relations[0];
+        assert_eq!(
+            relation.relation_type,
+            crate::engine::knowledge::RelationType::SimilarTo
+        );
+        let endpoints = [relation.source, relation.target];
+        assert!(endpoints.contains(&ordinary_a));
+        assert!(endpoints.contains(&ordinary_b));
+        assert!(!endpoints.contains(&protected));
+        assert!(!endpoints.contains(&ordinary_isolated));
+    }
+
+    #[test]
+    fn dry_run_reports_without_changing_memory_or_graph_state() {
+        fn memory_state(space: &Space) -> Vec<(u64, serde_json::Value)> {
+            let mut state: Vec<_> = space
+                .all_tetrahedrons()
+                .into_iter()
+                .map(|tetra| {
+                    (
+                        tetra.id,
+                        serde_json::to_value((
+                            tetra.data,
+                            tetra.mass,
+                            tetra.vertex_ids,
+                            tetra.core.x,
+                            tetra.core.y,
+                            tetra.core.z,
+                        ))
+                        .unwrap(),
+                    )
+                })
+                .collect();
+            state.sort_by_key(|(id, _)| *id);
+            state
+        }
+
+        let space = Space::new();
+        add(&space, 0.0, normal(0), 2.0);
+        add(&space, 1.0, normal(0), 1.0);
+        let mut junk = normal(3);
+        junk.labels = vec!["junk".into()];
+        junk.embedding.clear();
+        junk.importance = 0.05;
+        add(&space, 2.0, junk, 0.05);
+        let knowledge = KnowledgeGraph::new();
+        knowledge.add_relation(
+            100,
+            101,
+            crate::engine::knowledge::RelationType::Related,
+            0.5,
+        );
+        let graph_state = || {
+            knowledge
+                .all_relations()
+                .into_iter()
+                .map(|relation| {
+                    (
+                        relation.source,
+                        relation.target,
+                        relation.relation_type,
+                        relation.strength,
+                        relation.created_tick,
+                        relation.hits,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let memories_before = memory_state(&space);
+        let graph_before = graph_state();
+        let graph_dirty_before = knowledge.is_dirty();
+        let graph_persistence_before = knowledge.persistence_snapshot();
+
+        let result = DreamEngine::cycle(&space, &knowledge, 0.2, 5, true);
+
+        assert_eq!(result.junk_evicted, 1);
+        assert_eq!(result.duplicates_merged, 1);
+        assert!(result.connections_formed > 0);
+        assert!(!result.insights.is_empty());
+        assert_eq!(memory_state(&space), memories_before);
+        assert_eq!(graph_state(), graph_before);
+        assert_eq!(knowledge.is_dirty(), graph_dirty_before);
+        assert_eq!(knowledge.persistence_snapshot(), graph_persistence_before);
     }
 
     #[test]
