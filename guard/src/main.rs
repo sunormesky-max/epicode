@@ -1,9 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::net::IpAddr;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -11,6 +13,7 @@ use std::thread;
 use std::time::Duration;
 
 use chrono::Local;
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
 const VERSION: &str = "3.0.0";
@@ -19,7 +22,7 @@ const SSH_LOG: &str = "/var/log/secure";
 const WEB_LOG: &str = "/var/log/nginx/access.log";
 const STATE_FILE: &str = "/var/lib/epicode-guard/state.json";
 const LOG_FILE: &str = "/var/log/epicode-guard/guard.log";
-const PID_FILE: &str = "/var/run/epicode-guard.pid";
+const PID_FILE: &str = "/var/lib/epicode-guard/guard.pid";
 const EPICODE_API: &str = "http://127.0.0.1:9111";
 const HTTP_TIMEOUT_SECS: u64 = 10;
 
@@ -41,13 +44,22 @@ const BAN_TIMEOUT_SECS: u64 = 86400;
 const DECAY_INTERVAL_SECS: u64 = 300;
 const DECAY_AMOUNT: u32 = 2;
 const FILE_CHECK_INTERVAL_SECS: u64 = 300;
+const FIREWALL_CHECK_INTERVAL_CYCLES: u64 = 6;
+const MAX_LOG_BYTES_PER_CYCLE: u64 = 1024 * 1024;
+const MAX_LOG_LINE_BYTES: usize = 16 * 1024;
+const HONEYPOT_QUEUE_CAPACITY: usize = 1024;
+const TELEMETRY_QUEUE_CAPACITY: usize = 256;
 
 fn get_honeypot_ports() -> Vec<u16> {
-    std::env::var("GUARD_HONEYPOT_PORTS")
+    let mut ports: Vec<u16> = std::env::var("GUARD_HONEYPOT_PORTS")
         .unwrap_or_default()
         .split(',')
-        .filter_map(|s| s.trim().parse().ok())
-        .collect()
+        .filter_map(|s| s.trim().parse::<u16>().ok())
+        .filter(|port| *port != 0)
+        .collect();
+    ports.sort_unstable();
+    ports.dedup();
+    ports
 }
 
 const WHITELIST: &[&str] = &["127.0.0.1", "::1", "0.0.0.0", "::"];
@@ -144,6 +156,14 @@ struct IpEntry {
 struct GuardState {
     ssh_offset: u64,
     web_offset: u64,
+    #[serde(default)]
+    ssh_log_id: Option<String>,
+    #[serde(default)]
+    web_log_id: Option<String>,
+    #[serde(default)]
+    ssh_skip_long_line: bool,
+    #[serde(default)]
+    web_skip_long_line: bool,
     ips: HashMap<String, IpEntry>,
     file_hashes: HashMap<String, String>,
     last_decay: i64,
@@ -151,6 +171,10 @@ struct GuardState {
     total_bans: u64,
     total_attacks: u64,
     total_honeypot: u64,
+    #[serde(default)]
+    honeypot_dropped: u64,
+    #[serde(default)]
+    telemetry_dropped: u64,
     start_time: i64,
     last_ports: Vec<u16>,
 }
@@ -160,6 +184,10 @@ impl Default for GuardState {
         Self {
             ssh_offset: 0,
             web_offset: 0,
+            ssh_log_id: None,
+            web_log_id: None,
+            ssh_skip_long_line: false,
+            web_skip_long_line: false,
             ips: HashMap::new(),
             file_hashes: HashMap::new(),
             last_decay: 0,
@@ -167,6 +195,8 @@ impl Default for GuardState {
             total_bans: 0,
             total_attacks: 0,
             total_honeypot: 0,
+            honeypot_dropped: 0,
+            telemetry_dropped: 0,
             start_time: now_ts(),
             last_ports: Vec::new(),
         }
@@ -202,38 +232,41 @@ impl GuardState {
     /// state that silently drops all bans on the next boot. Permissions are
     /// pinned to 0600 because state.json contains attacker IPs (personal data
     /// under GDPR) and historical ban records.
-    fn save(&self) {
-        if let Ok(data) = serde_json::to_string_pretty(self) {
-            let path = Path::new(STATE_FILE);
-            if let Some(parent) = path.parent() {
-                let _ = fs::create_dir_all(parent);
-                #[cfg(unix)]
-                let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
-            }
-            let tmp = format!("{STATE_FILE}.tmp");
-            let result = fs::File::create(&tmp)
-                .and_then(|mut f| {
-                    f.write_all(data.as_bytes())?;
-                    f.sync_all()?;
-                    drop(f);
-                    fs::rename(&tmp, STATE_FILE)
-                })
-                // Windows 无 POSIX mode 位; ACL 继承自父目录, 仅 Unix 收紧到 0600
-                .and_then(|_| {
-                    #[cfg(unix)]
-                    {
-                        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        Ok(())
-                    }
-                });
-            if let Err(e) = result {
-                log_msg(&format!("state save failed: {e}"));
-                let _ = fs::remove_file(&tmp);
-            }
+    fn save(&self) -> io::Result<()> {
+        self.save_to(Path::new(STATE_FILE))
+    }
+
+    fn save_to(&self, path: &Path) -> io::Result<()> {
+        let data = serde_json::to_vec_pretty(self)?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| io::Error::other("state has no parent"))?;
+        fs::create_dir_all(parent)?;
+        #[cfg(unix)]
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(io::Error::other)?
+            .as_nanos();
+        let tmp = path.with_extension(format!("tmp.{}.{}", std::process::id(), suffix));
+        let result = (|| {
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            options.mode(0o600);
+            let mut file = options.open(&tmp)?;
+            file.write_all(&data)?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&tmp, path)?;
+            #[cfg(unix)]
+            fs::File::open(parent)?.sync_all()?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&tmp);
         }
+        result
     }
 
     fn record(&mut self, ip: &str, score: u32, category: &str, now: i64) {
@@ -241,18 +274,18 @@ impl GuardState {
             return;
         }
         let entry = self.ips.entry(ip.to_string()).or_default();
-        entry.score += score;
+        entry.score = entry.score.saturating_add(score);
         entry.last_fail = now;
         match category {
-            "ssh" => entry.ssh_fails += 1,
-            "web_attack" => entry.web_attacks += 1,
-            "web_scan" => entry.web_scans += 1,
-            "honeypot" => entry.honeypot_hits += 1,
-            "flood" => entry.web_scans += 1,
+            "ssh" => entry.ssh_fails = entry.ssh_fails.saturating_add(1),
+            "web_attack" => entry.web_attacks = entry.web_attacks.saturating_add(1),
+            "web_scan" => entry.web_scans = entry.web_scans.saturating_add(1),
+            "honeypot" => entry.honeypot_hits = entry.honeypot_hits.saturating_add(1),
+            "flood" => entry.web_scans = entry.web_scans.saturating_add(1),
             _ => {}
         }
         if score > 0 {
-            self.total_attacks += 1;
+            self.total_attacks = self.total_attacks.saturating_add(1);
         }
     }
 
@@ -275,7 +308,7 @@ impl GuardState {
         }
     }
 
-    fn process_bans(&mut self, now: i64) {
+    fn process_bans(&mut self, now: i64, telemetry: &mpsc::SyncSender<TelemetryEvent>) {
         let mut to_ban: Vec<(String, u64)> = Vec::new();
         let mut to_clean: Vec<String> = Vec::new();
         for (ip, entry) in self.ips.iter() {
@@ -308,7 +341,14 @@ impl GuardState {
                     entry.honeypot_hits,
                     timeout / 3600
                 ));
-                epicode_remember_ban(ip, &entry, *timeout);
+                self.queue_telemetry(
+                    telemetry,
+                    TelemetryEvent::Ban {
+                        ip: ip.clone(),
+                        entry,
+                        timeout: *timeout,
+                    },
+                );
             } else {
                 log_msg(&format!(
                 "BAN FAILED for {} (score remains pending; nftables did not confirm enforcement)",
@@ -321,6 +361,16 @@ impl GuardState {
         }
     }
 
+    fn queue_telemetry(
+        &mut self,
+        sender: &mpsc::SyncSender<TelemetryEvent>,
+        event: TelemetryEvent,
+    ) {
+        if sender.try_send(event).is_err() {
+            self.telemetry_dropped = self.telemetry_dropped.saturating_add(1);
+        }
+    }
+
     fn enforce_ban<F>(&mut self, ip: &str, now: i64, timeout: u64, enforce: F) -> Option<IpEntry>
     where
         F: FnOnce(&str, u64) -> bool,
@@ -330,7 +380,7 @@ impl GuardState {
         }
         let entry = self.ips.get_mut(ip)?;
         entry.banned_until = now + timeout as i64;
-        self.total_bans += 1;
+        self.total_bans = self.total_bans.saturating_add(1);
         Some(entry.clone())
     }
 
@@ -377,6 +427,36 @@ impl GuardState {
     }
 }
 
+enum TelemetryEvent {
+    Ban {
+        ip: String,
+        entry: IpEntry,
+        timeout: u64,
+    },
+    Honeypot {
+        ip: String,
+        port: u16,
+    },
+}
+
+fn start_telemetry_worker() -> mpsc::SyncSender<TelemetryEvent> {
+    let (sender, receiver) = mpsc::sync_channel(TELEMETRY_QUEUE_CAPACITY);
+    thread::Builder::new()
+        .name("guard-telemetry".to_string())
+        .spawn(move || {
+            while let Ok(event) = receiver.recv() {
+                match event {
+                    TelemetryEvent::Ban { ip, entry, timeout } => {
+                        epicode_remember_ban(&ip, &entry, timeout)
+                    }
+                    TelemetryEvent::Honeypot { ip, port } => epicode_remember_honeypot(&ip, port),
+                }
+            }
+        })
+        .expect("failed to start guard telemetry worker");
+    sender
+}
+
 /// Forward a security memory to the Epicode backend.
 ///
 /// Previously this shelled out to `curl` with the API key and body on the
@@ -388,6 +468,9 @@ impl GuardState {
 /// correctly.
 fn epicode_remember(content: &str, labels: &[&str]) {
     let key = get_epicode_key();
+    if key.is_empty() {
+        return;
+    }
     let url = format!("{EPICODE_API}/v1/remember");
     let body = serde_json::json!({
         "content": content,
@@ -557,6 +640,7 @@ fn run_cmd_output(cmd: &str, args: &[&str]) -> Option<String> {
 // nftables 实际可用标志(审计三轮中优): 初始化失败后服务曾"看似运行"
 // 而实际未封禁任何 IP — 现在显式暴露健康状态, 日志与状态面都可见
 static NFT_AVAILABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static HONEYPOT_DROPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 pub fn nft_healthy() -> bool {
     NFT_AVAILABLE.load(std::sync::atomic::Ordering::Acquire)
@@ -728,7 +812,6 @@ fn nft_init() -> bool {
     NFT_AVAILABLE.store(false, std::sync::atomic::Ordering::Release);
     match reconcile_nft_firewall() {
         Ok(()) => {
-            migrate_v1_rules();
             NFT_AVAILABLE.store(true, std::sync::atomic::Ordering::Release);
             log_msg("nft firewall verified and enforcing (inet table with IPv4+IPv6 drop rules)");
             true
@@ -742,9 +825,30 @@ fn nft_init() -> bool {
     }
 }
 
-/// Reconcile and verify the firewall before returning a monitorable exit status.
+/// Health and status commands observe the firewall without changing it.
+fn nft_verify_health() -> bool {
+    let result = (|| {
+        let set_v4 = run_cmd_result("nft", &["list", "set", "inet", NFT_TABLE, NFT_SET_V4])?;
+        let set_v6 = run_cmd_result("nft", &["list", "set", "inet", NFT_TABLE, NFT_SET_V6])?;
+        let chain = run_cmd_result("nft", &["list", "chain", "inet", NFT_TABLE, "input"])?;
+        verify_nft_configuration(&set_v4, &set_v6, &chain)
+    })();
+    NFT_AVAILABLE.store(result.is_ok(), std::sync::atomic::Ordering::Release);
+    result.is_ok()
+}
+
+fn nft_drop_rules_healthy() -> bool {
+    run_cmd_result("nft", &["list", "chain", "inet", NFT_TABLE, "input"])
+        .map(|chain| {
+            nft_input_chain_valid(&chain)
+                && nft_chain_has_drop_rule(&chain, "ip", NFT_SET_V4)
+                && nft_chain_has_drop_rule(&chain, "ip6", NFT_SET_V6)
+        })
+        .unwrap_or(false)
+}
+
 fn health_check_cli() -> i32 {
-    let healthy = nft_init() && nft_healthy();
+    let healthy = nft_verify_health();
     if healthy {
         println!("healthy: nftables drop rules verified");
     } else {
@@ -784,18 +888,16 @@ fn nft_ban(ip: &str, timeout_secs: u64) -> bool {
         return false;
     };
     let set = nft_set_for_ip(&addr);
-    if !nft_healthy() {
+    if !nft_healthy() || !nft_drop_rules_healthy() {
+        NFT_AVAILABLE.store(false, std::sync::atomic::Ordering::Release);
         log_msg(&format!(
             "DEGRADED: ban requested for {ip} but nftables is not verified"
         ));
         return false;
     }
-    let hours = timeout_secs / 3600;
-    let timeout_str = if hours > 0 {
-        format!("{}h", hours)
-    } else {
-        format!("{}s", timeout_secs)
-    };
+    // Repairs must preserve the remaining expiry exactly; rounding to hours
+    // can shorten a restored ban by almost an hour.
+    let timeout_str = format!("{timeout_secs}s");
     let canonical_ip = addr.to_string();
     let element = format!("{{ {} timeout {} }}", canonical_ip, timeout_str);
     if nft_set_contains_ip(set, &canonical_ip) {
@@ -803,7 +905,7 @@ fn nft_ban(ip: &str, timeout_secs: u64) -> bool {
             "delete element inet {NFT_TABLE} {set} {{ {canonical_ip} }}\nadd element inet {NFT_TABLE} {set} {element}\n"
         );
         match run_cmd_with_input("nft", &["-f", "-"], &batch) {
-            Ok(_) => return true,
+            Ok(_) => return confirm_nft_ban(set, &canonical_ip),
             Err(refresh_error) => {
                 if nft_set_contains_ip(set, &canonical_ip) {
                     log_msg(&format!(
@@ -815,7 +917,7 @@ fn nft_ban(ip: &str, timeout_secs: u64) -> bool {
         }
     }
     match run_cmd_result("nft", &["add", "element", "inet", NFT_TABLE, set, &element]) {
-        Ok(_) => true,
+        Ok(_) => confirm_nft_ban(set, &canonical_ip),
         Err(add_error) => {
             log_msg(&format!(
                 "nft_ban: failed to enforce {ip} in {set}: {add_error}"
@@ -825,38 +927,56 @@ fn nft_ban(ip: &str, timeout_secs: u64) -> bool {
     }
 }
 
-fn nft_unban(ip: &str) {
+fn confirm_nft_ban(set: &str, ip: &str) -> bool {
+    let element = format!("{{ {ip} }}");
+    if run_cmd_result("nft", &["get", "element", "inet", NFT_TABLE, set, &element]).is_ok()
+        || nft_set_contains_ip(set, ip)
+    {
+        true
+    } else {
+        log_msg(&format!(
+            "nft_ban: command succeeded but {ip} is absent from {set}"
+        ));
+        false
+    }
+}
+
+fn nft_unban(ip: &str) -> bool {
     let set = match ip.parse::<IpAddr>() {
         Ok(IpAddr::V4(_)) => NFT_SET_V4,
         Ok(IpAddr::V6(_)) => NFT_SET_V6,
-        Err(_) => return,
+        Err(_) => return false,
     };
+    if !nft_verify_health() {
+        return false;
+    }
     let element = format!("{{ {} }}", ip);
     run_cmd(
         "nft",
         &["delete", "element", "inet", NFT_TABLE, set, &element],
-    );
+    ) && !nft_set_contains_ip(set, ip)
 }
 
-fn nft_list_banned() -> Vec<String> {
-    let mut ips = Vec::new();
+fn nft_banned_addresses() -> Result<HashSet<IpAddr>, String> {
+    let mut ips = HashSet::new();
     for set in [NFT_SET_V4, NFT_SET_V6] {
-        if let Some(o) = run_cmd_output("nft", &["list", "set", "inet", NFT_TABLE, set]) {
-            for token in o.split(|c: char| c.is_whitespace() || matches!(c, ',' | '{' | '}')) {
-                let t = token.trim();
-                if t.parse::<IpAddr>().is_ok() && !is_whitelisted(t) {
-                    ips.push(t.to_string());
-                }
+        let output = run_cmd_result("nft", &["list", "set", "inet", NFT_TABLE, set])?;
+        for token in output.split(|c: char| c.is_whitespace() || matches!(c, ',' | '{' | '}')) {
+            if let Ok(address) = token.trim().parse::<IpAddr>() {
+                ips.insert(address);
             }
         }
     }
-    ips.sort();
-    ips.dedup();
-    ips
+    Ok(ips)
 }
 
-fn nft_banned_count() -> usize {
-    nft_list_banned().len()
+fn nft_banned_count() -> Result<usize, String> {
+    nft_banned_addresses().map(|addresses| addresses.len())
+}
+
+fn is_legacy_epicode_rule(rule: &str) -> bool {
+    (rule.contains("source ipset=epicode-ban") || rule.contains("source ipset=\"epicode-ban\""))
+        && rule.ends_with(" drop")
 }
 
 fn migrate_v1_rules() {
@@ -864,10 +984,11 @@ fn migrate_v1_rules() {
         let mut count = 0u32;
         for line in rules.lines() {
             let trimmed = line.trim();
-            if trimmed.contains("rule family=\"ipv4\" source address=\"")
-                && trimmed.ends_with("\" drop")
+            // Only the named legacy Epicode ipset belongs to this daemon.
+            // A generic IPv4 drop rule may protect an unrelated service.
+            if is_legacy_epicode_rule(trimmed)
+                && run_cmd("firewall-cmd", &["--remove-rich-rule", trimmed])
             {
-                run_cmd("firewall-cmd", &["--remove-rich-rule", trimmed]);
                 count += 1;
             }
         }
@@ -883,12 +1004,16 @@ fn migrate_v1_rules() {
 fn open_honeypot_ports() {
     let ports = get_honeypot_ports();
     for &port in &ports {
-        run_cmd("firewall-cmd", &["--add-port", &format!("{}/tcp", port)]);
+        if !run_cmd("firewall-cmd", &["--add-port", &format!("{}/tcp", port)]) {
+            log_msg(&format!(
+                "Honeypot port {port}: firewalld could not add the port; check host firewall exposure"
+            ));
+        }
     }
-    log_msg(&format!("Honeypot ports opened: {:?}", ports));
+    log_msg(&format!("Honeypot ports configured: {:?}", ports));
 }
 
-fn start_honeypot(tx: &mpsc::Sender<String>) {
+fn start_honeypot(tx: &mpsc::SyncSender<(String, u16)>) {
     let ports = get_honeypot_ports();
     for port in ports {
         let tx = tx.clone();
@@ -903,8 +1028,10 @@ fn start_honeypot(tx: &mpsc::Sender<String>) {
                                 Ok((stream, _)) => {
                                     if let Ok(addr) = stream.peer_addr() {
                                         let ip = addr.ip().to_string();
-                                        if !is_whitelisted(&ip) {
-                                            let _ = tx.send(ip);
+                                        if !is_whitelisted(&ip) && tx.try_send((ip, port)).is_err()
+                                        {
+                                            HONEYPOT_DROPPED
+                                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                         }
                                     }
                                     drop(stream);
@@ -916,51 +1043,120 @@ fn start_honeypot(tx: &mpsc::Sender<String>) {
                         }
                     }
                     Err(e) => {
-                        if e.kind() != std::io::ErrorKind::AddrInUse {
-                            log_msg(&format!("Honeypot port {} bind failed: {}", port, e));
-                        }
+                        log_msg(&format!("Honeypot port {} bind failed: {}", port, e));
                     }
                 },
             );
     }
 }
 
-fn tail_log(path: &str, offset: &mut u64) -> Vec<String> {
+fn log_file_identity(metadata: &fs::Metadata) -> Option<String> {
+    #[cfg(unix)]
+    {
+        Some(format!("{}:{}", metadata.dev(), metadata.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        None
+    }
+}
+
+/// Rebuild kernel bans lost after an nftables/firewall reload while preserving
+/// their original expiry in durable state. Snapshot both sets once per pass.
+fn repair_missing_bans(state: &mut GuardState, now: i64) -> usize {
+    let enforced = match nft_banned_addresses() {
+        Ok(enforced) => enforced,
+        Err(error) => {
+            log_msg(&format!(
+                "BAN REPAIR SKIPPED: cannot list nft sets: {error}"
+            ));
+            return 0;
+        }
+    };
+    let missing = missing_bans(state, now, &enforced);
+    let mut repaired = 0;
+    for (ip, remaining) in missing {
+        if nft_ban(&ip, remaining) {
+            repaired += 1;
+        } else {
+            log_msg(&format!("BAN REPAIR FAILED for {ip}; retained for retry"));
+        }
+    }
+    repaired
+}
+
+fn missing_bans(state: &GuardState, now: i64, enforced: &HashSet<IpAddr>) -> Vec<(String, u64)> {
+    state
+        .ips
+        .iter()
+        .filter(|(_, entry)| entry.banned_until > now)
+        .filter_map(|(ip, entry)| {
+            let address = ip.parse::<IpAddr>().ok()?;
+            (!enforced.contains(&address))
+                .then_some((ip.clone(), (entry.banned_until - now) as u64))
+        })
+        .collect()
+}
+
+/// Read a bounded chunk of complete log lines. Persisting the file identity
+/// alongside the offset detects rename-and-create rotation even when the new
+/// file has already grown beyond the old offset.
+fn tail_log(
+    path: &str,
+    offset: &mut u64,
+    identity: &mut Option<String>,
+    skip_long_line: &mut bool,
+) -> Vec<String> {
     let mut lines = Vec::new();
     let mut file = match fs::File::open(path) {
         Ok(f) => f,
         Err(_) => return lines,
     };
-    let len = match file.metadata() {
-        Ok(m) => m.len(),
+    let metadata = match file.metadata() {
+        Ok(m) => m,
         Err(_) => return lines,
     };
-    if len < *offset {
+    let current_id = log_file_identity(&metadata);
+    if (identity.is_some() && current_id.is_some() && *identity != current_id)
+        || metadata.len() < *offset
+    {
         *offset = 0;
+        *skip_long_line = false;
     }
-    if *offset >= len {
+    *identity = current_id;
+    if *offset >= metadata.len() {
         return lines;
     }
     if file.seek(SeekFrom::Start(*offset)).is_err() {
         return lines;
     }
-    let mut reader = std::io::BufReader::new(file);
-    let mut buf = String::new();
-    loop {
-        buf.clear();
-        match reader.read_line(&mut buf) {
-            Ok(0) => break,
-            Ok(_) => {
-                let trimmed = buf.trim().to_string();
-                if !trimmed.is_empty() {
-                    lines.push(trimmed);
-                }
-            }
-            Err(_) => break,
-        }
+    let mut bytes = Vec::new();
+    if file
+        .take(MAX_LOG_BYTES_PER_CYCLE)
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
+        return lines;
     }
-    if let Ok(pos) = reader.stream_position() {
-        *offset = pos;
+    for segment in bytes.split_inclusive(|byte| *byte == b'\n') {
+        let complete = segment.last() == Some(&b'\n');
+        if !complete && !*skip_long_line && segment.len() <= MAX_LOG_LINE_BYTES {
+            // Keep a short partial line for the next pass. Parsing it now can
+            // turn a split request into a false positive or lose the suffix.
+            break;
+        }
+        *offset += segment.len() as u64;
+        if *skip_long_line || segment.len() > MAX_LOG_LINE_BYTES {
+            *skip_long_line = !complete;
+            continue;
+        }
+        if let Ok(line) = std::str::from_utf8(segment) {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                lines.push(trimmed.to_string());
+            }
+        }
     }
     lines
 }
@@ -1089,28 +1285,47 @@ fn check_connection_flood() -> Vec<(String, usize)> {
         .collect()
 }
 
+fn acquire_guard_lock(path: &Path) -> io::Result<fs::File> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("PID file has no parent"))?;
+    fs::create_dir_all(parent)?;
+    #[cfg(unix)]
+    fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    file.try_lock_exclusive()?;
+    file.set_len(0)?;
+    file.write_all(std::process::id().to_string().as_bytes())?;
+    file.sync_all()?;
+    Ok(file)
+}
+
 fn run_daemon() {
-    if let Ok(pid) = fs::read_to_string(PID_FILE) {
-        if let Ok(old_pid) = pid.trim().parse::<u32>() {
-            if run_cmd("kill", &["-0", &old_pid.to_string()]) {
-                eprintln!("epicode-guard already running (pid {})", old_pid);
-                std::process::exit(1);
-            }
+    let _pid_lock = match acquire_guard_lock(Path::new(PID_FILE)) {
+        Ok(lock) => lock,
+        Err(error) => {
+            eprintln!("epicode-guard cannot acquire process lock: {error}");
+            std::process::exit(1);
         }
-    }
+    };
     let _ = fs::create_dir_all("/var/lib/epicode-guard");
     let _ = fs::create_dir_all("/var/log/epicode-guard");
-    let _ = fs::write(PID_FILE, std::process::id().to_string());
 
     log_msg(&format!("=== epicode-guard v{} starting ===", VERSION));
     if !nft_init() {
-        let _ = fs::remove_file(PID_FILE);
         std::process::exit(1);
     }
+    migrate_v1_rules();
     open_honeypot_ports();
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(HONEYPOT_QUEUE_CAPACITY);
     start_honeypot(&tx);
+    let telemetry = start_telemetry_worker();
 
     let mut state = GuardState::load();
     let now = now_ts();
@@ -1125,14 +1340,50 @@ fn run_daemon() {
     loop {
         let now = now_ts();
 
-        while let Ok(ip) = rx.try_recv() {
-            state.record(&ip, HONEYPOT_SCORE, "honeypot", now);
-            state.total_honeypot += 1;
-            log_msg(&format!("HONEYPOT HIT: {} on decoy port", ip));
-            epicode_remember_honeypot(&ip, 0);
+        if cycle > 0 && cycle.is_multiple_of(FIREWALL_CHECK_INTERVAL_CYCLES) {
+            if nft_init() {
+                let repaired = repair_missing_bans(&mut state, now);
+                if repaired > 0 {
+                    log_msg(&format!("Repaired {repaired} missing kernel bans"));
+                }
+            } else {
+                log_msg("DEGRADED: firewall reconciliation failed; will retry next cycle");
+            }
         }
 
-        let ssh_lines = tail_log(SSH_LOG, &mut state.ssh_offset);
+        let mut honeypot_hits = 0u64;
+        let mut unique_hits = HashSet::new();
+        for _ in 0..HONEYPOT_QUEUE_CAPACITY {
+            let Ok((ip, port)) = rx.try_recv() else {
+                break;
+            };
+            honeypot_hits += 1;
+            if unique_hits.insert(ip.clone()) {
+                state.record(&ip, HONEYPOT_SCORE, "honeypot", now);
+                state.queue_telemetry(&telemetry, TelemetryEvent::Honeypot { ip, port });
+            }
+        }
+        if honeypot_hits > 0 {
+            state.total_honeypot = state.total_honeypot.saturating_add(honeypot_hits);
+            log_msg(&format!(
+                "HONEYPOT: {honeypot_hits} hits from {} unique IPs",
+                unique_hits.len()
+            ));
+        }
+        let dropped = HONEYPOT_DROPPED.swap(0, std::sync::atomic::Ordering::Relaxed);
+        if dropped > 0 {
+            state.honeypot_dropped = state.honeypot_dropped.saturating_add(dropped);
+            log_msg(&format!(
+                "HONEYPOT: dropped {dropped} hits because queue was full"
+            ));
+        }
+
+        let ssh_lines = tail_log(
+            SSH_LOG,
+            &mut state.ssh_offset,
+            &mut state.ssh_log_id,
+            &mut state.ssh_skip_long_line,
+        );
         let mut ssh_count = 0u32;
         for line in &ssh_lines {
             if let Some(ip) = analyze_ssh(line) {
@@ -1144,7 +1395,12 @@ fn run_daemon() {
             log_msg(&format!("SSH: {} new failed auth attempts", ssh_count));
         }
 
-        let web_lines = tail_log(WEB_LOG, &mut state.web_offset);
+        let web_lines = tail_log(
+            WEB_LOG,
+            &mut state.web_offset,
+            &mut state.web_log_id,
+            &mut state.web_skip_long_line,
+        );
         let mut web_attacks = 0u32;
         let mut web_scans = 0u32;
         for line in &web_lines {
@@ -1204,18 +1460,24 @@ fn run_daemon() {
             state.last_decay = now;
         }
 
-        state.process_bans(now);
+        state.process_bans(now, &telemetry);
 
-        state.save();
+        if let Err(error) = state.save() {
+            log_msg(&format!("DEGRADED: state save failed: {error}"));
+        }
 
         if cycle.is_multiple_of(60) && cycle > 0 {
             log_msg(&format!(
-                "Stats: tracked={} nft_banned={} total_bans={} attacks={} honeypot={}",
+                "Stats: tracked={} nft_banned={} total_bans={} attacks={} honeypot={} honeypot_dropped={} telemetry_dropped={}",
                 state.ips.len(),
-                nft_banned_count(),
+                nft_banned_count()
+                    .map(|count| count.to_string())
+                    .unwrap_or_else(|_| "unknown".to_string()),
                 state.total_bans,
                 state.total_attacks,
-                state.total_honeypot
+                state.total_honeypot,
+                state.honeypot_dropped,
+                state.telemetry_dropped
             ));
         }
 
@@ -1226,9 +1488,10 @@ fn run_daemon() {
 
 fn cmd_status() -> i32 {
     println!("=== epicode-guard v{} Status ===\n", VERSION);
-    let firewall_healthy = nft_init();
+    let firewall_healthy = nft_verify_health();
     let state = GuardState::load();
     let banned = nft_banned_count();
+    let firewall_healthy = firewall_healthy && banned.is_ok();
     let now = now_ts();
 
     let uptime = if state.start_time > 0 {
@@ -1253,10 +1516,17 @@ fn cmd_status() -> i32 {
             "DEGRADED"
         }
     );
-    println!("Currently Banned:  {}", banned);
+    println!(
+        "Currently Banned:  {}",
+        banned
+            .map(|count| count.to_string())
+            .unwrap_or_else(|_| "UNKNOWN".to_string())
+    );
     println!("Total Bans:        {}", state.total_bans);
     println!("Total Attacks:     {}", state.total_attacks);
     println!("Honeypot Hits:     {}", state.total_honeypot);
+    println!("Honeypot Dropped:  {}", state.honeypot_dropped);
+    println!("Telemetry Dropped: {}", state.telemetry_dropped);
     println!();
 
     let active: Vec<_> = state
@@ -1320,8 +1590,11 @@ fn cmd_ban(ip: &str) -> i32 {
     let entry = state.ips.entry(ip.to_string()).or_default();
     entry.banned_until = now_ts() + BAN_TIMEOUT_SECS as i64;
     entry.score = BAN_THRESHOLD;
-    state.total_bans += 1;
-    state.save();
+    state.total_bans = state.total_bans.saturating_add(1);
+    if let Err(error) = state.save() {
+        eprintln!("Ban enforced but state was not saved: {error}");
+        return 1;
+    }
     log_msg(&format!(
         "Manual ban: {} for {}h",
         ip,
@@ -1331,13 +1604,20 @@ fn cmd_ban(ip: &str) -> i32 {
     0
 }
 
-fn cmd_unban(ip: &str) {
-    nft_unban(ip);
+fn cmd_unban(ip: &str) -> i32 {
+    if !nft_unban(ip) {
+        eprintln!("Unban not confirmed by nftables; state was retained.");
+        return 1;
+    }
     let mut state = GuardState::load();
     state.ips.remove(ip);
-    state.save();
+    if let Err(error) = state.save() {
+        eprintln!("Kernel ban removed but state was not saved: {error}");
+        return 1;
+    }
     log_msg(&format!("Manual unban: {}", ip));
     println!("Unbanned {}", ip);
+    0
 }
 
 fn cmd_check() {
@@ -1364,7 +1644,9 @@ fn cmd_check() {
             None => println!("  {} -> NOT FOUND", path),
         }
     }
-    state.save();
+    if let Err(error) = state.save() {
+        eprintln!("State save failed: {error}");
+    }
     println!();
     let unexpected = check_unexpected_ports();
     println!(
@@ -1425,9 +1707,10 @@ fn main() {
         }
         Some("unban") => {
             if let Some(ip) = args.get(2) {
-                cmd_unban(ip);
+                std::process::exit(cmd_unban(ip));
             } else {
                 eprintln!("Usage: epicode-guard unban <ip>");
+                std::process::exit(2);
             }
         }
         Some("check") => cmd_check(),
@@ -1441,6 +1724,17 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_test_dir() -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("epicode-guard-{}-{nonce}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        dir
+    }
 
     // H1 regression: the previous string-prefix form only matched `172.16.`,
     // letting Docker (172.17.*), K8s (172.18-31.*) and link-local through. We
@@ -1619,6 +1913,204 @@ mod tests {
         let back: GuardState = serde_json::from_str(&json).unwrap();
         assert_eq!(back.ips.get("203.0.113.9").unwrap().score, 12);
         assert_eq!(back.total_bans, 5);
+    }
+
+    #[test]
+    fn old_state_without_log_identity_still_loads() {
+        let mut value = serde_json::to_value(GuardState::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        for key in [
+            "ssh_log_id",
+            "web_log_id",
+            "ssh_skip_long_line",
+            "web_skip_long_line",
+        ] {
+            object.remove(key);
+        }
+        let state: GuardState = serde_json::from_value(value).unwrap();
+        assert!(state.ssh_log_id.is_none());
+        assert!(!state.web_skip_long_line);
+    }
+
+    #[test]
+    fn state_save_is_atomic_and_private() {
+        let dir = temp_test_dir();
+        let path = dir.join("state.json");
+        let mut state = GuardState {
+            total_bans: 7,
+            ..Default::default()
+        };
+        state.save_to(&path).unwrap();
+        state.total_bans = 8;
+        state.save_to(&path).unwrap();
+        let loaded: GuardState = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(loaded.total_bans, 8);
+        #[cfg(unix)]
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn tail_waits_for_complete_line_and_skips_oversized_line() {
+        let dir = temp_test_dir();
+        let path = dir.join("access.log");
+        fs::write(&path, b"first part").unwrap();
+        let mut offset = 0;
+        let mut identity = None;
+        let mut skip = false;
+        let name = path.to_str().unwrap();
+        assert!(tail_log(name, &mut offset, &mut identity, &mut skip).is_empty());
+        assert_eq!(offset, 0);
+        let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(b" second part\n").unwrap();
+        drop(file);
+        assert_eq!(
+            tail_log(name, &mut offset, &mut identity, &mut skip),
+            vec!["first part second part"]
+        );
+        let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(&vec![b'x'; MAX_LOG_LINE_BYTES + 1]).unwrap();
+        file.write_all(b"\nvalid line\n").unwrap();
+        drop(file);
+        assert_eq!(
+            tail_log(name, &mut offset, &mut identity, &mut skip),
+            vec!["valid line"]
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn tail_caps_each_read_and_resumes_after_long_line() {
+        let dir = temp_test_dir();
+        let path = dir.join("access.log");
+        let mut content = vec![b'x'; MAX_LOG_BYTES_PER_CYCLE as usize + 10];
+        content.extend_from_slice(b"\nnext\n");
+        fs::write(&path, content).unwrap();
+        let mut offset = 0;
+        let mut identity = None;
+        let mut skip = false;
+        let name = path.to_str().unwrap();
+        assert!(tail_log(name, &mut offset, &mut identity, &mut skip).is_empty());
+        assert_eq!(offset, MAX_LOG_BYTES_PER_CYCLE);
+        assert!(skip);
+        assert_eq!(
+            tail_log(name, &mut offset, &mut identity, &mut skip),
+            vec!["next"]
+        );
+        assert!(!skip);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tail_reads_rotated_file_even_when_new_file_is_longer() {
+        let dir = temp_test_dir();
+        let path = dir.join("access.log");
+        fs::write(&path, b"old\n").unwrap();
+        let mut offset = 0;
+        let mut identity = None;
+        let mut skip = false;
+        let name = path.to_str().unwrap();
+        assert_eq!(
+            tail_log(name, &mut offset, &mut identity, &mut skip),
+            vec!["old"]
+        );
+        fs::rename(&path, dir.join("access.log.1")).unwrap();
+        fs::write(&path, b"new first line\nnew second line\n").unwrap();
+        assert_eq!(
+            tail_log(name, &mut offset, &mut identity, &mut skip),
+            vec!["new first line", "new second line"]
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn firewall_repair_only_selects_missing_unexpired_bans() {
+        let mut state = GuardState::default();
+        for (ip, expiry) in [
+            ("203.0.113.1", 120),
+            ("203.0.113.2", 130),
+            ("203.0.113.3", 90),
+        ] {
+            state.ips.insert(
+                ip.to_string(),
+                IpEntry {
+                    banned_until: expiry,
+                    ..Default::default()
+                },
+            );
+        }
+        let enforced = HashSet::from(["203.0.113.2".parse().unwrap()]);
+        assert_eq!(
+            missing_bans(&state, 100, &enforced),
+            vec![("203.0.113.1".to_string(), 20)]
+        );
+    }
+
+    #[test]
+    fn migration_only_removes_named_legacy_rules() {
+        assert!(is_legacy_epicode_rule(
+            "rule family=\"ipv4\" source ipset=epicode-ban drop"
+        ));
+        assert!(is_legacy_epicode_rule(
+            "rule family=\"ipv4\" source ipset=\"epicode-ban\" drop"
+        ));
+        assert!(!is_legacy_epicode_rule(
+            "rule family=\"ipv4\" source address=\"203.0.113.1\" drop"
+        ));
+    }
+
+    #[test]
+    fn scores_saturate_instead_of_wrapping() {
+        let mut state = GuardState::default();
+        state.ips.insert(
+            "203.0.113.1".to_string(),
+            IpEntry {
+                score: u32::MAX,
+                ssh_fails: u32::MAX,
+                ..Default::default()
+            },
+        );
+        state.record("203.0.113.1", 3, "ssh", 100);
+        let entry = state.ips.get("203.0.113.1").unwrap();
+        assert_eq!(entry.score, u32::MAX);
+        assert_eq!(entry.ssh_fails, u32::MAX);
+    }
+
+    #[test]
+    fn full_telemetry_queue_does_not_block_enforcement() {
+        let (sender, _receiver) = mpsc::sync_channel(1);
+        let mut state = GuardState::default();
+        state.queue_telemetry(
+            &sender,
+            TelemetryEvent::Honeypot {
+                ip: "203.0.113.1".into(),
+                port: 9999,
+            },
+        );
+        state.queue_telemetry(
+            &sender,
+            TelemetryEvent::Honeypot {
+                ip: "203.0.113.2".into(),
+                port: 9999,
+            },
+        );
+        assert_eq!(state.telemetry_dropped, 1);
+    }
+
+    #[test]
+    fn second_guard_cannot_take_process_lock() {
+        let dir = temp_test_dir();
+        let path = dir.join("guard.pid");
+        let first = acquire_guard_lock(&path).unwrap();
+        assert!(acquire_guard_lock(&path).is_err());
+        drop(first);
+        assert!(acquire_guard_lock(&path).is_ok());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
