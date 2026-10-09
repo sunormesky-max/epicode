@@ -59,11 +59,12 @@ jobs:
         with:
           toolchain: "stable"
           components: rustfmt, clippy
+          targets: aarch64-unknown-linux-gnu
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "20"
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev pkg-config libssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev pkg-config libssl-dev gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
       - name: Cache cargo
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
@@ -78,6 +79,12 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Check build
         run: cargo check --locked
+      - name: Check aarch64 backend build
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          TARGET_CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          TARGET_CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+        run: cargo check --locked --lib --target aarch64-unknown-linux-gnu
       - name: Run tests
         run: cargo test --locked --all-targets -- --test-threads=1
       - name: Install cargo-audit

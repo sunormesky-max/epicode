@@ -1579,18 +1579,7 @@ mod tests {
 
     #[test]
     fn drive_inbox_and_sse_encrypt_descriptions_and_grounding() {
-        use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
-        use rsa::RsaPrivateKey;
-
-        let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
-        let private_pem = private_key
-            .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
-            .unwrap()
-            .to_string();
-        let public_pem = private_key
-            .to_public_key()
-            .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
-            .unwrap();
+        let (public_pem, private_pem) = crate::engine::e2e::test_keypair_pem();
         let signal = DriveSignal {
             id: 8,
             timestamp: 1_780_000_000,
