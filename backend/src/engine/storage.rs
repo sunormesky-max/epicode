@@ -332,17 +332,23 @@ impl StorageManager {
         }
     }
 
-    fn decrypt_field(&self, content: &str) -> String {
+    fn decrypt_field(&self, content: &str) -> Result<String, String> {
         if let Some(ref crypto) = self.crypto {
-            match crypto.decrypt_content(content, &self.crypto_user) {
-                Ok(dec) => dec,
-                Err(e) => {
-                    tracing::error!("[Storage] decrypt failed for user {}: {}. Content marked as corrupted (id may be affected). raw_len={}", self.crypto_user, e, content.len());
-                    "[corrupted:decryption-failed]".to_string() // 占位而非空串（kimi #7），避免静默清空
-                }
-            }
+            crypto
+                .decrypt_content(content, &self.crypto_user)
+                .map_err(|e| {
+                    tracing::error!(
+                        "[Storage] decrypt failed for user {}: {}. Stored ciphertext was not loaded.",
+                        self.crypto_user,
+                        e
+                    );
+                    format!(
+                        "failed to decrypt stored memory for user {}: {}",
+                        self.crypto_user, e
+                    )
+                })
         } else {
-            content.to_string()
+            Ok(content.to_string())
         }
     }
 
@@ -357,6 +363,15 @@ impl StorageManager {
             }
             Err(e) => {
                 report.space_error = Some(e);
+                // A partial/failed load must never be saved back as the new
+                // authoritative space. This also protects direct callers that
+                // inspect the report but accidentally attempt a later write.
+                if let Err(guard_error) = self.conn.lock().execute_batch("PRAGMA query_only = ON") {
+                    tracing::error!(
+                        "[Storage] failed to make connection read-only after load error: {}",
+                        guard_error
+                    );
+                }
             }
         }
 
@@ -1914,15 +1929,14 @@ impl StorageManager {
                 let core_y: f64 = row.get(2)?;
                 let core_z: f64 = row.get(3)?;
                 let content: String = row.get(4)?;
-                let decrypted_content = self.decrypt_field(&content);
                 let content_hash: u64 = {
                     let h: i64 = row.get(5)?;
                     h as u64
                 };
-                let labels_json = self.decrypt_field(&row.get::<_, String>(6)?);
+                let labels_json: String = row.get(6)?;
                 let mass: f64 = row.get(7)?;
                 let timestamp: i64 = row.get(8)?;
-                let aliases_json = self.decrypt_field(&row.get::<_, String>(9)?);
+                let aliases_json: String = row.get(9)?;
                 let vertex_json: String = row
                     .get::<_, String>(10)
                     .unwrap_or_else(|_| "[0,0,0,0]".into());
@@ -1941,21 +1955,6 @@ impl StorageManager {
                 let invalidated_at: Option<i64> = row.get(23).unwrap_or(None);
                 let memory_class: Option<String> = row.get(24).unwrap_or(None);
 
-                let labels: Vec<String> = serde_json::from_str(&labels_json).unwrap_or_else(|e| {
-                    tracing::warn!(
-                        "[Storage] labels parse error (may be plaintext migration): {}",
-                        e
-                    );
-                    vec![]
-                });
-                let aliases: Vec<String> =
-                    serde_json::from_str(&aliases_json).unwrap_or_else(|e| {
-                        tracing::warn!(
-                            "[Storage] aliases parse error (may be plaintext migration): {}",
-                            e
-                        );
-                        vec![]
-                    });
                 let embedding = emb_blob
                     .as_deref()
                     .map_or(vec![], VectorLayer::blob_to_embedding);
@@ -1965,12 +1964,12 @@ impl StorageManager {
                     core_x,
                     core_y,
                     core_z,
-                    decrypted_content,
+                    content,
                     content_hash,
-                    labels,
+                    labels_json,
                     mass,
                     timestamp,
-                    aliases,
+                    aliases_json,
                     vertex_json,
                     embedding,
                     importance,
@@ -1999,10 +1998,10 @@ impl StorageManager {
                 cz,
                 content,
                 hash,
-                labels,
+                labels_json,
                 mass,
                 ts,
-                aliases,
+                aliases_json,
                 vertex_json,
                 embedding,
                 importance,
@@ -2019,6 +2018,16 @@ impl StorageManager {
                 invalidated_at,
                 memory_class,
             ) = row.map_err(|e: rusqlite::Error| e.to_string())?;
+            let content = self.decrypt_field(&content)?;
+            let labels_json = self.decrypt_field(&labels_json)?;
+            let aliases_json = self.decrypt_field(&aliases_json)?;
+            // Encrypted rows opened without a key look like invalid JSON here.
+            // Replacing those fields with [] would destroy recoverable data on
+            // the next full save, so a malformed row must fail the whole load.
+            let labels: Vec<String> = serde_json::from_str(&labels_json)
+                .map_err(|e| format!("invalid labels for tetra {}: {}", id, e))?;
+            let aliases: Vec<String> = serde_json::from_str(&aliases_json)
+                .map_err(|e| format!("invalid aliases for tetra {}: {}", id, e))?;
             let positions = Tetrahedron::compute_vertices(Point3::new(cx, cy, cz));
             let saved_vertex_ids: Vec<u64> = serde_json::from_str(&vertex_json).unwrap_or_default();
             let tetra = Tetrahedron {
@@ -2498,6 +2507,86 @@ mod tests {
 
         let rels = kg2.query_relations(0);
         assert!(rels.iter().any(|(id, _, _)| *id == 1));
+    }
+
+    #[test]
+    fn wrong_encryption_key_never_rewrites_existing_ciphertext() {
+        let dir =
+            std::env::temp_dir().join(format!("epicode-wrong-key-load-{}", uuid::Uuid::new_v4()));
+        let original = StorageManager::new(&dir).unwrap().with_encryption(
+            super::super::crypto::CryptoEngine::from_key(vec![1; 32]).unwrap(),
+            "owner",
+        );
+        original
+            .upsert_tetra(&make_tetra(7, "original secret", 1.0))
+            .unwrap();
+        drop(original);
+
+        let wrong = StorageManager::new(&dir).unwrap().with_encryption(
+            super::super::crypto::CryptoEngine::from_key(vec![2; 32]).unwrap(),
+            "owner",
+        );
+        let space = Space::new();
+        let report = wrong.load_all(&space, &KnowledgeGraph::new());
+        assert!(!report.space_ok, "wrong key must fail the load");
+        assert_eq!(space.tetra_count(), 0);
+        assert!(
+            wrong.save_space_only(&space).is_err(),
+            "failed load must disable writes"
+        );
+        assert!(wrong.save_all(&space, &KnowledgeGraph::new()).is_err());
+        drop(wrong);
+
+        let restored = StorageManager::new(&dir).unwrap().with_encryption(
+            super::super::crypto::CryptoEngine::from_key(vec![1; 32]).unwrap(),
+            "owner",
+        );
+        let loaded = Space::new();
+        assert!(restored.load_all(&loaded, &KnowledgeGraph::new()).space_ok);
+        assert_eq!(
+            loaded.get_tetrahedron(7).unwrap().data.content,
+            "original secret"
+        );
+        drop(restored);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn missing_encryption_key_never_rewrites_existing_ciphertext() {
+        let dir =
+            std::env::temp_dir().join(format!("epicode-missing-key-load-{}", uuid::Uuid::new_v4()));
+        let encrypted = StorageManager::new(&dir).unwrap().with_encryption(
+            super::super::crypto::CryptoEngine::from_key(vec![3; 32]).unwrap(),
+            "owner",
+        );
+        encrypted
+            .upsert_tetra(&make_tetra(8, "another secret", 1.0))
+            .unwrap();
+        drop(encrypted);
+
+        let missing = StorageManager::new(&dir).unwrap();
+        let space = Space::new();
+        let report = missing.load_all(&space, &KnowledgeGraph::new());
+        assert!(
+            !report.space_ok,
+            "encrypted labels must not load without the key"
+        );
+        assert_eq!(space.tetra_count(), 0);
+        assert!(missing.save_space_only(&space).is_err());
+        assert!(missing.save_all(&space, &KnowledgeGraph::new()).is_err());
+        drop(missing);
+
+        let restored = StorageManager::new(&dir).unwrap().with_encryption(
+            super::super::crypto::CryptoEngine::from_key(vec![3; 32]).unwrap(),
+            "owner",
+        );
+        let loaded = Space::new();
+        assert!(restored.load_all(&loaded, &KnowledgeGraph::new()).space_ok);
+        assert_eq!(
+            loaded.get_tetrahedron(8).unwrap().data.content,
+            "another secret"
+        );
+        drop(restored);
     }
 
     #[test]
