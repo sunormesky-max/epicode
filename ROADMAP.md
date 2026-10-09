@@ -37,7 +37,7 @@ Suggested next kernel PRs (see #170 for full P0/P1/P2):
 
 - [ ] Dream: exclude `enforced` memories from Phase 2 merges and Phase 3 links; Phase 2 supersedes require healthy 1024-dim vectors and never fall back to Jaccard when vectors are absent, stale, or degraded
 - [x] Knowledge: make concept membership / `member_count` idempotent — persist unique member IDs, reconcile full snapshots, and rebuild legacy SQLite prototypes from tetra labels ([PR #228](https://github.com/sunormesky-max/epicode/pull/228)).
-- [ ] Memory: `memory_improve` preserves full content and refreshes embeddings
+- [x] Memory: `memory_improve` preserves complete validated content and refreshes embeddings, hashes, and HNSW indexes while protecting enforced memories.
 
 ## How to influence the roadmap
 
