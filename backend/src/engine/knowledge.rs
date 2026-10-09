@@ -1657,6 +1657,7 @@ mod tests {
         assert_eq!(concepts.len(), 1);
         assert_eq!(concepts[0].member_count, 2);
         assert_eq!(concepts[0].member_ids, vec![0, 1]);
+        assert_eq!(kg.get_top_concepts(1), vec![("rust".to_string(), 2)]);
     }
 
     #[test]
