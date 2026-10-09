@@ -1279,6 +1279,8 @@ pub async fn user_stats(
         "api_calls": api_calls,
         "api_calls_daily": api_calls_daily,
         "time_context": time_ctx,
+        // 稳态观测: 自适应阈值当前值(跨重启持久化)与默认/边界
+        "adaptive_params": engine.scheduler.adaptive_params_snapshot(),
     });
     (
         StatusCode::OK,
