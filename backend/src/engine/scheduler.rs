@@ -244,6 +244,7 @@ pub struct SchedulerCenter {
     feedback_agg_cache: ParkMutex<Option<(usize, std::time::Instant, HashSet<u64>)>>,
     skill_feedback_agg_cache: ParkMutex<Option<(usize, std::time::Instant, HashSet<u64>)>>,
     drive_queue: Arc<super::drive::DriveQueue>,
+    drive_save_gate: ParkMutex<()>,
 }
 
 impl SchedulerCenter {
@@ -331,6 +332,7 @@ impl SchedulerCenter {
             feedback_agg_cache: ParkMutex::new(None),
             skill_feedback_agg_cache: ParkMutex::new(None),
             drive_queue: Arc::new(super::drive::DriveQueue::new()),
+            drive_save_gate: ParkMutex::new(()),
         }
     }
 
@@ -1354,6 +1356,10 @@ impl SchedulerCenter {
     }
 
     pub fn restore_drive_queue(&self) {
+        match self.storage.max_drive_signal_id() {
+            Ok(max_id) => self.drive_queue.reserve_next_id(max_id.saturating_add(1)),
+            Err(e) => tracing::warn!("[L0] failed to read archived drive signal IDs: {}", e),
+        }
         match self.storage.load_drive_signals() {
             Ok(signals) => {
                 if !signals.is_empty() {
@@ -5078,13 +5084,16 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
     /// pub: ack 处理器在成功后立即调用 — ack 只改内存, 依赖周期保存时
     /// 重启会回滚 ack 状态(#105187 曾复活为 Pending)
     pub fn save_drive_queue(&self) {
-        // O-C 信号墓园: 终态且入队>7天的信号 drain → archive表(不再进active)
+        // Serialize snapshots and full-table writes so an older save cannot overwrite a newer one.
+        let _save_guard = self.drive_save_gate.lock();
+        // Keep terminal signals in memory and the active snapshot if archiving fails.
+        if let Err(e) = self
+            .drive_queue
+            .archive_archivable(7 * 86400 * 1000, |signals| {
+                self.storage.save_archived_signals(signals)
+            })
         {
-            let cutoff_ms = 7 * 86400 * 1000;
-            let drained = self.drive_queue().drain_archivable(cutoff_ms);
-            if !drained.is_empty() {
-                let _ = self.storage.save_archived_signals(&drained);
-            }
+            tracing::warn!("[L0] drive signal archive failed: {}", e);
         }
         self.save_tick_state();
         let signals = self.drive_queue.snapshot();

@@ -760,7 +760,6 @@ pub fn will_text_reject(description: &str) -> Option<&'static str> {
 }
 
 pub const MAX_QUEUE_SIGNALS: usize = 2_000;
-const TERMINAL_PRUNE_BATCH: usize = 100;
 
 fn urgency_rank(urgency: &DriveUrgency) -> u8 {
     match urgency {
@@ -835,21 +834,6 @@ impl DriveQueue {
     pub fn try_enqueue(&self, mut signal: DriveSignal) -> Result<u64, DriveEnqueueError> {
         let mut signals = self.signals.lock();
         if signals.len() >= MAX_QUEUE_SIGNALS {
-            let mut removed = 0;
-            signals.retain(|s| {
-                let is_terminal = matches!(
-                    s.status,
-                    DriveStatus::Executed | DriveStatus::Rejected | DriveStatus::Expired
-                );
-                if removed < TERMINAL_PRUNE_BATCH && is_terminal {
-                    removed += 1;
-                    false
-                } else {
-                    true
-                }
-            });
-        }
-        if signals.len() >= MAX_QUEUE_SIGNALS {
             self.capacity_rejected.fetch_add(1, Ordering::Relaxed);
             return Err(DriveEnqueueError::QueueFull);
         }
@@ -900,11 +884,6 @@ impl DriveQueue {
                 ing.insert(s.id);
             }
         }
-        let now = chrono::Utc::now().timestamp();
-        signals.retain(|s| {
-            let age = now - s.timestamp;
-            age < 86400 || matches!(s.status, DriveStatus::Pending | DriveStatus::Delivered)
-        });
         to_deliver
     }
 
@@ -1098,27 +1077,40 @@ impl DriveQueue {
         (result, first_ack)
     }
 
-    /// O-C 信号墓园: 从队列取出终态(Executed/Rejected/Expired)且入队超 cutoff_ms 的信号。
-    /// 被 drain 的信号不再进入 active 持久化, 由调用方写入 archive 表。
-    /// 生产实证: 1969 条信号 archive=0 — save 全量重写刷新 updated_at, 7天窗口永不满足。
-    pub fn drain_archivable(&self, cutoff_ms: i64) -> Vec<DriveSignal> {
+    /// Persist old terminal signals before removing them from memory. Hold the queue lock
+    /// through the archive write so no concurrent queue change can invalidate the snapshot.
+    pub fn archive_archivable(
+        &self,
+        cutoff_ms: i64,
+        archive: impl FnOnce(&[DriveSignal]) -> Result<usize, String>,
+    ) -> Result<usize, String> {
         let now = Self::now_ts() * 1000;
         let mut signals = self.signals.lock();
-        let mut drained = Vec::new();
-        signals.retain(|s| {
-            let terminal = matches!(
-                s.status,
-                DriveStatus::Executed | DriveStatus::Rejected | DriveStatus::Expired
-            );
-            let old = now.saturating_sub(s.enqueued_at_ms) > cutoff_ms;
-            if terminal && old {
-                drained.push(s.clone());
-                false
-            } else {
-                true
-            }
-        });
-        drained
+        let archivable: Vec<_> = signals
+            .iter()
+            .filter(|s| {
+                let terminal = matches!(
+                    s.status,
+                    DriveStatus::Executed | DriveStatus::Rejected | DriveStatus::Expired
+                );
+                let old = now.saturating_sub(s.enqueued_at_ms) > cutoff_ms;
+                terminal && old
+            })
+            .cloned()
+            .collect();
+        if archivable.is_empty() {
+            return Ok(0);
+        }
+        let moved = archive(&archivable)?;
+        if moved != archivable.len() {
+            return Err(format!(
+                "archived {moved} of {} drive signals",
+                archivable.len()
+            ));
+        }
+        let ids: HashSet<u64> = archivable.iter().map(|s| s.id).collect();
+        signals.retain(|s| !ids.contains(&s.id));
+        Ok(moved)
     }
 
     pub fn stats(&self) -> serde_json::Value {
@@ -1341,8 +1333,7 @@ impl DriveQueue {
         let max_id = queue.iter().map(|s| s.id).max().unwrap_or(0);
         // 审计修复: next_id 只升不降 — 防止 reload 竞态下 id 回卷复用
         // (同 id 双 signal 互相覆盖: Suggest 被 Explore 顶掉的幽灵丢失)
-        let cur = self.next_id.load(Ordering::SeqCst);
-        self.next_id.store(cur.max(max_id + 1), Ordering::SeqCst);
+        self.reserve_next_id(max_id.saturating_add(1));
         drop(queue);
         // Phase 2: restore 后立即 sweep, 重启后过期信号直接转 Expired
         self.sweep_expired();
@@ -1350,6 +1341,10 @@ impl DriveQueue {
             "[Drive] restore: {} signals loaded, sweep_expired applied",
             count
         );
+    }
+
+    pub fn reserve_next_id(&self, next_id: u64) {
+        self.next_id.fetch_max(next_id, Ordering::SeqCst);
     }
 }
 
@@ -1945,14 +1940,14 @@ mod tests {
     }
 
     #[test]
-    fn queue_reclaims_terminal_records_before_rejecting_new_work() {
+    fn queue_rejects_new_work_without_discarding_unarchived_terminal_records() {
         let queue = DriveQueue::new();
         {
             let mut signals = queue.signals.lock();
             for id in 1..=MAX_QUEUE_SIGNALS as u64 {
                 let mut signal = pending_signal(DriveIntent::Warn, "signal");
                 signal.id = id;
-                if id <= TERMINAL_PRUNE_BATCH as u64 {
+                if id <= 100 {
                     signal.status = DriveStatus::Executed;
                 }
                 signals.push(signal);
@@ -1962,17 +1957,107 @@ mod tests {
             .next_id
             .store(MAX_QUEUE_SIGNALS as u64 + 1, Ordering::SeqCst);
 
-        assert!(queue
-            .try_enqueue(pending_signal(DriveIntent::Suggest, "new"))
-            .is_ok());
-        let remaining = queue.snapshot();
         assert_eq!(
-            remaining.len(),
-            MAX_QUEUE_SIGNALS - TERMINAL_PRUNE_BATCH + 1
+            queue.try_enqueue(pending_signal(DriveIntent::Suggest, "new")),
+            Err(DriveEnqueueError::QueueFull)
         );
-        assert!(remaining
-            .iter()
-            .all(|signal| signal.id > TERMINAL_PRUNE_BATCH as u64));
+        let remaining = queue.snapshot();
+        assert_eq!(remaining.len(), MAX_QUEUE_SIGNALS);
+        assert_eq!(remaining[0].id, 1);
+        assert!(matches!(remaining[0].status, DriveStatus::Executed));
+    }
+
+    #[test]
+    fn poll_keeps_old_terminal_records_until_archive_succeeds() {
+        let queue = DriveQueue::new();
+        let mut old = pending_signal(DriveIntent::Suggest, "old terminal");
+        old.id = 1;
+        old.timestamp = DriveQueue::now_ts() - 2 * 86400;
+        old.enqueued_at_ms = (DriveQueue::now_ts() - 2 * 86400) * 1000;
+        old.status = DriveStatus::Executed;
+        queue.restore(vec![old]);
+        assert!(queue.poll(10).is_empty());
+        assert_eq!(queue.snapshot().len(), 1);
+    }
+
+    #[test]
+    fn archive_failure_keeps_queue_and_active_rows_for_retry() {
+        use super::super::storage::StorageManager;
+
+        let dir =
+            std::env::temp_dir().join(format!("epicode_drive_archive_{}", uuid::Uuid::new_v4()));
+        let storage = StorageManager::new(&dir).unwrap();
+        let queue = DriveQueue::new();
+        let old_ms = (DriveQueue::now_ts() - 8 * 86400) * 1000;
+        let signals: Vec<_> = (1..=2)
+            .map(|id| {
+                let mut signal = pending_signal(DriveIntent::Suggest, "terminal");
+                signal.id = id;
+                signal.status = DriveStatus::Executed;
+                signal.enqueued_at_ms = old_ms;
+                signal
+            })
+            .collect();
+        queue.restore(signals.clone());
+        storage.save_drive_signals(&signals).unwrap();
+
+        let conn = rusqlite::Connection::open(storage.db_path()).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE drive_signals_archive AS SELECT * FROM drive_signals WHERE 1=0;
+             CREATE TRIGGER fail_second_archive BEFORE INSERT ON drive_signals_archive
+             WHEN NEW.id = 2 BEGIN SELECT RAISE(FAIL, 'injected archive failure'); END;",
+        )
+        .unwrap();
+        let archive = |signals: &[DriveSignal]| storage.save_archived_signals(signals);
+        assert!(queue.archive_archivable(7 * 86400 * 1000, archive).is_err());
+        assert_eq!(queue.snapshot().len(), 2);
+        assert_eq!(storage.load_drive_signals().unwrap().len(), 2);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM drive_signals_archive", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+
+        conn.execute("DROP TRIGGER fail_second_archive", [])
+            .unwrap();
+        assert_eq!(
+            queue
+                .archive_archivable(7 * 86400 * 1000, |signals| {
+                    storage.save_archived_signals(signals)
+                })
+                .unwrap(),
+            2
+        );
+        assert!(queue.snapshot().is_empty());
+        assert!(storage.load_drive_signals().unwrap().is_empty());
+        storage.save_archived_signals(&signals).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM drive_signals_archive", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 2);
+        let restarted = DriveQueue::new();
+        restarted.reserve_next_id(storage.max_drive_signal_id().unwrap() + 1);
+        assert_eq!(
+            restarted.enqueue(pending_signal(DriveIntent::Suggest, "after restart")),
+            3
+        );
+        let mut reused_id = signals[0].clone();
+        reused_id.description = "distinct historical signal".into();
+        storage.save_archived_signals(&[reused_id]).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM drive_signals_archive WHERE id=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
+        drop(conn);
+        drop(storage);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -1267,30 +1267,51 @@ impl StorageManager {
         if signals.is_empty() {
             return Ok(0);
         }
-        let conn = self.conn.lock();
+        let mut conn = self.conn.lock();
         conn.execute("CREATE TABLE IF NOT EXISTS drive_signals_archive AS SELECT * FROM drive_signals WHERE 1=0", []).map_err(|e| e.to_string())?;
-        let mut moved = 0;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
         for s in signals {
-            let data = serde_json::to_string(&s).unwrap_or_default();
+            let data = serde_json::to_string(s).map_err(|e| e.to_string())?;
             let updated = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
-            if conn
-                .execute(
-                    "INSERT OR REPLACE INTO drive_signals_archive (id, data, updated_at) VALUES (?1, ?2, ?3)",
-                    rusqlite::params![s.id as i64, data, updated],
-                )
-                .is_ok()
-            {
-                let _ = conn.execute("DELETE FROM drive_signals WHERE id=?1", rusqlite::params![s.id as i64]);
-                moved += 1;
-            }
+            // Legacy archive tables have no primary key. Remove only exact retries;
+            // a historical signal with a reused ID must remain intact.
+            tx.execute(
+                "DELETE FROM drive_signals_archive WHERE id=?1 AND data=?2",
+                params![s.id as i64, data],
+            )
+            .map_err(|e| e.to_string())?;
+            tx.execute(
+                "INSERT INTO drive_signals_archive (id, data, updated_at) VALUES (?1, ?2, ?3)",
+                params![s.id as i64, data, updated],
+            )
+            .map_err(|e| e.to_string())?;
+            tx.execute(
+                "DELETE FROM drive_signals WHERE id=?1",
+                params![s.id as i64],
+            )
+            .map_err(|e| e.to_string())?;
         }
-        if moved > 0 {
-            tracing::info!("[O-C] archived {} terminal drive signals", moved);
-        }
-        Ok(moved)
+        tx.commit().map_err(|e| e.to_string())?;
+        tracing::info!("[O-C] archived {} terminal drive signals", signals.len());
+        Ok(signals.len())
+    }
+
+    /// Reserve IDs above both active and archived signals on restart.
+    pub fn max_drive_signal_id(&self) -> Result<u64, String> {
+        let conn = self.conn.lock();
+        conn.execute("CREATE TABLE IF NOT EXISTS drive_signals_archive AS SELECT * FROM drive_signals WHERE 1=0", [])
+            .map_err(|e| e.to_string())?;
+        let max_id: Option<i64> = conn
+            .query_row(
+                "SELECT MAX(id) FROM (SELECT id FROM drive_signals UNION ALL SELECT id FROM drive_signals_archive)",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(max_id.unwrap_or(0).max(0) as u64)
     }
 
     pub fn archive_old_drive_signals(&self) -> Result<usize, String> {
