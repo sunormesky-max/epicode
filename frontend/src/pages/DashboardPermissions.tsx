@@ -20,9 +20,9 @@ const PERM_LABELS: Record<string, Record<string, string>> = {
 };
 
 const OUTPUT_MODES = [
-  { id: 'full', zh: '完整输出', en: 'Full output', zh_d: '检索返回完整内容', en_d: 'Full content in results' },
-  { id: 'truncated', zh: '截断输出', en: 'Truncated', zh_d: '内容截断至280字符(降token)', en_d: 'Content truncated to 280 chars' },
-  { id: 'summary', zh: '摘要输出', en: 'Summary only', zh_d: '仅返回标签与摘要', en_d: 'Labels and summary only' },
+  { id: 'full', zh: '完整输出', en: 'Full output', zh_d: '预设返回完整内容', en_d: 'Preferred full content' },
+  { id: 'truncated', zh: '截断输出', en: 'Truncated', zh_d: '预设截断至280字符', en_d: 'Preferred 280-character limit' },
+  { id: 'summary', zh: '摘要输出', en: 'Summary only', zh_d: '预设仅返回标签与摘要', en_d: 'Preferred labels and summary' },
 ];
 
 export default function DashboardPermissions() {
@@ -36,9 +36,11 @@ export default function DashboardPermissions() {
   const [notice, setNotice] = useState('');
 
   const [outputMode, setOutputMode] = useState('full');
+  const [canThemeCustom, setCanThemeCustom] = useState(false);
+  const [canOutputControl, setCanOutputControl] = useState(false);
+  const [canEditPermissions, setCanEditPermissions] = useState(false);
 
   const isFree = myStats?.plan === 'Free';
-  const canEdit = !isFree;
 
   useEffect(() => {
     let mounted = true;
@@ -55,6 +57,9 @@ export default function DashboardPermissions() {
         if (mounted) {
           setSettings(s.settings);
           setOutputMode((s.settings?.memory_output as Record<string, unknown>)?.mode as string || 'full');
+          setCanThemeCustom(s.can_theme_custom);
+          setCanOutputControl(s.can_memory_output_control);
+          setCanEditPermissions(s.can_permission_edit);
         }
       } catch (e) { if (mounted) setError(errMsg(e)); }
       if (mounted) setLoading(false);
@@ -63,16 +68,16 @@ export default function DashboardPermissions() {
   }, []);
 
   const saveOutputMode = async (mode: string) => {
-    if (!canEdit) return;
-    setOutputMode(mode);
+    if (!canOutputControl) return;
     try {
       await setUserSettings({ memory_output: { mode } });
-      setNotice(zh ? '记忆输出策略已保存 ✓' : 'Output policy saved ✓');
+      setOutputMode(mode);
+      setNotice(zh ? '记忆输出偏好已保存 ✓' : 'Output preference saved ✓');
     } catch (e) { setError(errMsg(e)); }
   };
 
   const togglePerm = async (user_id: string, perm: string) => {
-    if (!canEdit) return;
+    if (!canEditPermissions) return;
     const acc = accounts.find(a => a.user_id === user_id);
     if (!acc) return;
     const current = new Set(acc.custom_permissions ?? acc.effective_permissions ?? []);
@@ -119,14 +124,14 @@ export default function DashboardPermissions() {
           <span style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${isFree ? 'var(--accent-cyan)' : 'var(--border-light)'}`, color: isFree ? 'var(--accent-cyan)' : 'var(--text-tertiary)' }}>
             {zh ? '主题切换' : 'Theme switching'} ✓
           </span>
-          <span style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${canEdit ? 'var(--accent-cyan)' : 'var(--border-medium)'}`, color: canEdit ? 'var(--accent-cyan)' : 'var(--text-tertiary)', opacity: canEdit ? 1 : 0.6 }}>
-            {canEdit ? '✓ ' : '⛗ '}{zh ? '主题自定义' : 'Theme custom'}
+          <span style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${canThemeCustom ? 'var(--accent-cyan)' : 'var(--border-medium)'}`, color: canThemeCustom ? 'var(--accent-cyan)' : 'var(--text-tertiary)', opacity: canThemeCustom ? 1 : 0.6 }}>
+            {canThemeCustom ? '✓ ' : '⛗ '}{zh ? '主题自定义' : 'Theme custom'}
           </span>
-          <span style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${canEdit ? 'var(--accent-cyan)' : 'var(--border-medium)'}`, color: canEdit ? 'var(--accent-cyan)' : 'var(--text-tertiary)', opacity: canEdit ? 1 : 0.6 }}>
-            {canEdit ? '✓ ' : '⛗ '}{zh ? '权限编辑' : 'Permission editing'}
+          <span style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${canEditPermissions ? 'var(--accent-cyan)' : 'var(--border-medium)'}`, color: canEditPermissions ? 'var(--accent-cyan)' : 'var(--text-tertiary)', opacity: canEditPermissions ? 1 : 0.6 }}>
+            {canEditPermissions ? '✓ ' : '⛗ '}{zh ? '权限编辑' : 'Permission editing'}
           </span>
-          <span style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${canEdit ? 'var(--accent-cyan)' : 'var(--border-medium)'}`, color: canEdit ? 'var(--accent-cyan)' : 'var(--text-tertiary)', opacity: canEdit ? 1 : 0.6 }}>
-            {canEdit ? '✓ ' : '⛗ '}{zh ? '记忆输出控制' : 'Output control'}
+          <span style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${canOutputControl ? 'var(--accent-cyan)' : 'var(--border-medium)'}`, color: canOutputControl ? 'var(--accent-cyan)' : 'var(--text-tertiary)', opacity: canOutputControl ? 1 : 0.6 }}>
+            {canOutputControl ? '✓ ' : '⛗ '}{zh ? '记忆输出控制' : 'Output control'}
           </span>
         </div>
         {isFree && (
@@ -137,18 +142,18 @@ export default function DashboardPermissions() {
       </div>
 
       {/* 记忆输出内容控制 */}
-      <div style={{ ...panel, opacity: canEdit ? 1 : 0.72 }}>
+      <div style={{ ...panel, opacity: canOutputControl ? 1 : 0.72 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <span style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--text-primary)', fontSize: 14, fontWeight: 600 }}>
             <Eye size={15} style={{ color: 'var(--accent-cyan)' }} />
-            {zh ? '记忆输出内容控制' : 'Memory Output Control'}
+            {zh ? '记忆输出偏好' : 'Memory Output Preference'}
           </span>
-          {!canEdit && <Lock size={13} style={{ color: 'var(--warning-orange)' }} />}
+          {!canOutputControl && <Lock size={13} style={{ color: 'var(--warning-orange)' }} />}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 8 }}>
           {OUTPUT_MODES.map(m => (
-            <button key={m.id} disabled={!canEdit} onClick={() => saveOutputMode(m.id)} style={{
-              textAlign: 'left', padding: '10px 12px', borderRadius: 10, cursor: canEdit ? 'pointer' : 'not-allowed',
+            <button key={m.id} disabled={!canOutputControl} onClick={() => saveOutputMode(m.id)} style={{
+              textAlign: 'left', padding: '10px 12px', borderRadius: 10, cursor: canOutputControl ? 'pointer' : 'not-allowed',
               background: outputMode === m.id ? 'rgba(var(--accent-cyan-rgb), 0.1)' : 'rgba(0,0,0,0.2)',
               border: `1px solid ${outputMode === m.id ? 'var(--accent-cyan)' : 'rgba(var(--overlay-rgb), 0.08)'}`,
             }}>
@@ -158,19 +163,19 @@ export default function DashboardPermissions() {
           ))}
         </div>
         <p style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 8 }}>
-          {zh ? '输出策略跟随账户，对 MCP/REST 检索响应生效。' : 'Policy follows your account and applies to MCP/REST retrieval.'}
+          {zh ? '偏好已保存到账户；MCP/REST 检索响应尚未按此策略裁剪。' : 'Preference is saved to your account; MCP/REST retrieval is not filtered by it yet.'}
         </p>
       </div>
 
       {/* 子账户权限矩阵(仅主账户) */}
       {myStats?.is_main_account && (
-        <div style={panel}>
+        <div style={{ ...panel, opacity: canEditPermissions ? 1 : 0.72 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <span style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--text-primary)', fontSize: 14, fontWeight: 600 }}>
               <Users size={15} style={{ color: 'var(--accent-cyan)' }} />
               {zh ? '子账户权限配置' : 'Sub-account Permissions'}
             </span>
-            {!canEdit && <Lock size={13} style={{ color: 'var(--warning-orange)' }} />}
+            {!canEditPermissions && <Lock size={13} style={{ color: 'var(--warning-orange)' }} />}
           </div>
           {accounts.length === 0 ? (
             <p style={{ color: 'var(--text-tertiary)', fontSize: 13, textAlign: 'center', padding: 24 }}>{zh ? '暂无子账户' : 'No sub-accounts'}</p>
@@ -185,12 +190,12 @@ export default function DashboardPermissions() {
                   const active = (acc.custom_permissions ?? acc.effective_permissions ?? []).includes(perm);
                   const isOwnerOnly = perm === 'permission_edit' || perm === 'subaccount_manage';
                   return (
-                    <button key={perm} disabled={!canEdit || isOwnerOnly} onClick={() => togglePerm(acc.user_id, perm)} title={isOwnerOnly ? (zh ? '仅主账户' : 'Owner only') : ''} style={{
+                    <button key={perm} disabled={!canEditPermissions || isOwnerOnly} onClick={() => togglePerm(acc.user_id, perm)} title={isOwnerOnly ? (zh ? '仅主账户' : 'Owner only') : ''} style={{
                       display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 16, fontSize: 11, fontFamily: 'var(--font-mono)',
                       background: active ? 'rgba(var(--accent-cyan-rgb), 0.12)' : 'rgba(0,0,0,0.2)',
                       border: `1px solid ${active ? 'rgba(var(--accent-cyan-rgb), 0.5)' : 'rgba(var(--overlay-rgb), 0.08)'}`,
                       color: active ? 'var(--accent-cyan)' : 'var(--text-tertiary)',
-                      cursor: !canEdit || isOwnerOnly ? 'not-allowed' : 'pointer',
+                      cursor: !canEditPermissions || isOwnerOnly ? 'not-allowed' : 'pointer',
                       opacity: isOwnerOnly ? 0.4 : 1,
                     }}>
                       {active ? <Check size={10} /> : <Minus size={10} />}
