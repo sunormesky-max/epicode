@@ -181,6 +181,12 @@ readinessProbe:
 - Rate limits are per-tenant; configure via `REDIS_URL` for distributed limiting
 - The `guard` daemon is optional and only relevant for self-hosted single-tenant deployments
 
+### Guard state recovery (self-hosted)
+
+Guard keeps ban history in `/var/lib/epicode-guard/state.json` and an initialization marker in the same directory. If the state file is corrupt, unreadable, or disappears after initialization, the daemon exits with a nonzero status instead of replacing the history with an empty state. `epicode-guard --health` and `epicode-guard status` report the degraded state; the status command does not alter the file.
+
+Stop the service before recovery. Preserve the state file and marker for diagnosis, then restore a known-good state backup with root ownership and mode `0600`. Start the service and check `epicode-guard --health` and `epicode-guard status`. Existing kernel bans may expire while the daemon is stopped; review the nftables sets before making a deliberate state reset. Manual `ban`, `unban`, and `check` commands serialize state updates with the running daemon through `/var/lib/epicode-guard/state.lock`.
+
 ## API prefix reference
 
 | Access path | Base URL |
