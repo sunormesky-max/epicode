@@ -785,7 +785,12 @@ pub async fn openapi_spec(
     }
     let mut h = axum::http::HeaderMap::new();
     h.insert("content-type", "text/yaml; charset=utf-8".parse().unwrap());
-    (axum::http::StatusCode::OK, h, include_str!("../../../docs/openapi.yaml")).into_response()
+    (
+        axum::http::StatusCode::OK,
+        h,
+        include_str!("../../../docs/openapi.yaml"),
+    )
+        .into_response()
 }
 
 /// SMRP 协议规范（公开，无需认证）—— 官网发布入口，返回 RFC/W3C 风格的 HTML 规范。
