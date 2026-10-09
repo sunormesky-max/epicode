@@ -66,16 +66,18 @@ Tetrahedrons that share vertices naturally cluster into polyhedra. This physical
 
 ### Central Hollow Cylinder
 
-A central hollow cylinder acts as the system hub, organized into four layers:
+A central hollow cylinder acts as the system hub, organized into six layers:
 
 | Layer | Purpose |
 |-------|---------|
 | **Instinct** | Reflexive responses, hard-coded patterns, survival-level behaviors |
+| **Relation** | Connected entities and knowledge graph structure |
 | **Cognition** | Reasoning, inference, and dynamic thought processes |
 | **Service** | Operational utilities, tool execution, and external integrations |
+| **Cycle** | Proactive and recurring activity |
 | **Identity** | Self-model, persistent preferences, and long-term personality |
 
-Ports on the cylinder connect to external polyhedron clusters via a **star topology**.
+Ports on the first five layers connect to external polyhedron clusters via a **star topology**; the Identity layer currently has no Ports. A seed tetrahedron can share a Port vertex geometrically. When an existing cluster is too far away, reseeding creates an explicit logical Port-to-tetra entry edge instead of moving or distorting its geometry. Pulses traverse either kind of edge. The logical edge is rebuilt in stable cluster order when the engine loads, so a distant cluster remains reachable after restart without claiming that it physically touches the cylinder.
 
 ### Pulse Propagation
 
