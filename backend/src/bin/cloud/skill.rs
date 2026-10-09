@@ -421,7 +421,7 @@ pub async fn explore_public_skills(
             serde_json::json!({
                 "id": s.id,
                 "name": s.name,
-                "skill_md": s.skill_md,
+                // 渗透修复#2: 公共浏览不再下发全文(社区页只需描述; 全文走认证后的 skill_pull)
                 "version": s.version,
                 "owner": s.owner,
                 "category": s.category,
