@@ -11,6 +11,7 @@ description = "Lightweight host security guard for Epicode deployments"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+fs2 = "0.4.3"
 # Minimal blocking HTTP client used to forward security telemetry to the
 # memory backend without leaking the API key on the process argv (the old
 # `curl -H "X-API-Key: <key>" ...` invocation exposed the secret to any local
