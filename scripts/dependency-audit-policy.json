@@ -1,0 +1,30 @@
+{
+  "scopes": {
+    "backend/Cargo.lock": "cargo",
+    "guard/Cargo.lock": "cargo",
+    "frontend/package-lock.json": "npm",
+    "backend/sdk/typescript/package-lock.json": "npm"
+  },
+  "exceptions": [
+    {
+      "ecosystem": "cargo",
+      "scope": "backend/Cargo.lock",
+      "id": "RUSTSEC-2023-0071",
+      "package": "rsa",
+      "version": "0.9.10",
+      "owner": "security@epicode.cn",
+      "expiresOn": "2026-11-09",
+      "reason": "RustSec reports no patched release. The backend uses RSA for public-key encryption; the private-key decrypt helper has no HTTP or MCP call site and is exercised only by tests. Re-review when RustCrypto ships a constant-time fix."
+    },
+    {
+      "ecosystem": "npm",
+      "scope": "frontend/package-lock.json",
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "version": "3.0.3",
+      "owner": "security@epicode.cn",
+      "expiresOn": "2026-11-09",
+      "reason": "No patched braces 3.x release is available; the locked package is dev-only through Tailwind 3.4.19. npm's proposed remediation requires a Tailwind 4 major migration. Re-review when a compatible fix is available."
+    }
+  ]
+}

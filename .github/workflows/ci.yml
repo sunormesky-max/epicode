@@ -59,6 +59,9 @@ jobs:
         with:
           toolchain: "stable"
           components: rustfmt, clippy
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "20"
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev pkg-config libssl-dev
       - name: Cache cargo
@@ -78,9 +81,24 @@ jobs:
       - name: Run tests
         run: cargo test --locked --all-targets -- --test-threads=1
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-      - name: Run security audit
-        run: cargo audit --deny warnings --ignore RUSTSEC-2025-0141 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2025-0119 --ignore RUSTSEC-2026-0190
+        run: cargo install cargo-audit --locked --version 0.22.2
+      - name: Test dependency audit policy
+        working-directory: .
+        run: node --test scripts/check-dependency-audit.test.mjs
+      - name: Audit backend and Guard dependency locks
+        shell: bash
+        run: |
+          set +e
+          cargo audit --json --file Cargo.lock > "$RUNNER_TEMP/backend-cargo-audit.json"
+          backend_status=$?
+          set -e
+          node ../scripts/check-dependency-audit.mjs cargo "$RUNNER_TEMP/backend-cargo-audit.json" backend/Cargo.lock "$backend_status"
+
+          set +e
+          cargo audit --json --file ../guard/Cargo.lock > "$RUNNER_TEMP/guard-cargo-audit.json"
+          guard_status=$?
+          set -e
+          node ../scripts/check-dependency-audit.mjs cargo "$RUNNER_TEMP/guard-cargo-audit.json" guard/Cargo.lock "$guard_status"
 
   frontend:
     runs-on: ubuntu-latest
@@ -100,22 +118,15 @@ jobs:
       # 类型债(187)与lint债(52)已于 2026-09-26 全面迭代清零 — 门禁恢复严格
       - name: Type check
         run: npm run check
-      - name: Audit all frontend dependencies (high+ blocking)
-        # braces GHSA-vfj7-8cjw-p6xm: 上游无修复(latest=3.0.3), 仅构建链不进运行时bundle
-        # 豁免: 输出里非braces族的高危为零时放行, 否则阻断
+      - name: Audit frontend dependencies
+        working-directory: .
+        shell: bash
         run: |
           set +e
-          npm audit --audit-level=high > /tmp/audit.txt 2>&1
-          RC=$?
+          npm --prefix frontend audit --json --registry=https://registry.npmjs.org > "$RUNNER_TEMP/frontend-npm-audit.json"
+          audit_status=$?
           set -e
-          if [ $RC -eq 0 ]; then echo 'audit clean'; exit 0; fi
-          NON_BRACES=$(grep 'Severity: high' -B 4 /tmp/audit.txt | grep -vE 'braces|chokidar|micromatch|fast-glob|tailwindcss|postcss|source-map|Severity|--|^\$' | grep -v '^#' | head -5)
-          if grep -q 'GHSA-vfj7-8cjw-p6xm' /tmp/audit.txt && [ -z "$NON_BRACES" ]; then
-            echo "::warning::only known unfixable braces advisory (build-chain only) — passing"
-            exit 0
-          fi
-          cat /tmp/audit.txt
-          exit 1
+          node scripts/check-dependency-audit.mjs npm "$RUNNER_TEMP/frontend-npm-audit.json" frontend/package-lock.json "$audit_status" --lockfile frontend/package-lock.json
 
       - name: Lint
         run: npm run lint
@@ -172,6 +183,15 @@ jobs:
           cache-dependency-path: backend/sdk/typescript/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Audit TypeScript SDK dependencies
+        working-directory: .
+        shell: bash
+        run: |
+          set +e
+          npm --prefix backend/sdk/typescript audit --json --registry=https://registry.npmjs.org > "$RUNNER_TEMP/sdk-typescript-npm-audit.json"
+          audit_status=$?
+          set -e
+          node scripts/check-dependency-audit.mjs npm "$RUNNER_TEMP/sdk-typescript-npm-audit.json" backend/sdk/typescript/package-lock.json "$audit_status" --lockfile backend/sdk/typescript/package-lock.json
       - name: Type check
         run: npx tsc --noEmit
       - name: Build
@@ -190,8 +210,12 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: pip install -e .
+      - name: Install pip-audit
+        run: pip install pip-audit==2.10.1
+      - name: Audit Python SDK runtime dependencies
+        run: pip-audit --strict --progress-spinner=off .
       - name: Type check
-        run: pip install mypy && mypy epicode --ignore-missing-imports || true
+        run: pip install mypy && mypy epicode --ignore-missing-imports
       - name: Syntax check
         run: python -m py_compile epicode/*.py
 
@@ -216,3 +240,7 @@ jobs:
         env:
           PYTHONPATH: "${{ github.workspace }}/mcp-bridge"
         run: pytest -v
+      - name: Install pip-audit
+        run: pip install pip-audit==2.10.1
+      - name: Audit MCP bridge dependencies
+        run: pip-audit --strict --progress-spinner=off --requirement mcp-bridge/requirements.txt --index-url https://pypi.org/simple
