@@ -117,10 +117,15 @@ impl PulseEngine {
         // 收集被修改 mass 的 tetra id，供调用方增量持久化
         let dirty_ids: Vec<TetraId> = mass_updates.iter().map(|(id, _)| *id).collect();
 
-        let returned = port_vid.is_some();
+        let returned_to_port = port_vid.or_else(|| {
+            let mut reached = Vec::with_capacity(cluster_tetras.len() + 1);
+            reached.push((origin, 0));
+            reached.extend(cluster_tetras.iter().copied());
+            space.nearest_port_in_tetras(&reached)
+        });
         tracing::info!(
             "[Pulse] star-topology from tetra {} (port {:?}): visited {} tetras, returned={}, dirty={}",
-            origin, port_vid, visited.len(), returned, dirty_ids.len()
+            origin, returned_to_port, visited.len(), returned_to_port.is_some(), dirty_ids.len()
         );
 
         let pulse = Pulse { id: 0, origin, ttl };
@@ -128,6 +133,7 @@ impl PulseEngine {
             pulse_id: pulse.id,
             origin,
             reached_target: visited.len() > 1,
+            returned_to_port,
             data: crate::domain::pulse::PulseData {
                 visited_tetras: visited,
                 collected_content_hashes: collected_hashes,
@@ -292,6 +298,7 @@ mod tests {
             !r.data.visited_tetras.is_empty(),
             "pulse should visit at least origin"
         );
+        assert_eq!(r.returned_to_port, None);
     }
 
     #[test]
@@ -419,6 +426,33 @@ mod tests {
         .unwrap();
         assert_eq!(direct.data.visited_tetras, ids);
         assert_eq!(direct.data.collected_content_hashes, vec![101, 102]);
+        assert_eq!(direct.returned_to_port, Some(port_vid));
+
+        // A pulse emitted by a non-anchor member only returns once its TTL
+        // covers the hop to the cluster's logical Port owner.
+        assert!(space.neighbors_of(ids[1]).contains(&ids[0]));
+        assert_eq!(space.port_vertex_of_tetra(ids[1]), None);
+        let too_short = PulseEngine::send(
+            &space,
+            &kg,
+            PulseType::Neural { temperature: 0.8 },
+            ids[1],
+            0,
+        )
+        .unwrap();
+        assert_eq!(too_short.returned_to_port, None);
+        assert_eq!(too_short.data.visited_tetras, vec![ids[1]]);
+
+        let returned = PulseEngine::send(
+            &space,
+            &kg,
+            PulseType::Neural { temperature: 0.8 },
+            ids[1],
+            1,
+        )
+        .unwrap();
+        assert_eq!(returned.returned_to_port, Some(port_vid));
+        assert_eq!(returned.data.visited_tetras, vec![ids[1], ids[0]]);
     }
 
     #[test]

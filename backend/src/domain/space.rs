@@ -988,6 +988,35 @@ impl Space {
         None
     }
 
+    /// Find the nearest Port among tetrahedra visited by a pulse. Distance is
+    /// measured from the pulse origin; ties are resolved by Port ID.
+    pub fn nearest_port_in_tetras(&self, reached: &[(TetraId, usize)]) -> Option<VertexId> {
+        let inner = self.inner.read();
+        let distances: HashMap<TetraId, usize> = reached.iter().copied().collect();
+        let mut nearest: Option<(usize, VertexId)> = None;
+        for port in inner.cylinder.all_ports() {
+            let mut consider = |id: TetraId| {
+                if let Some(&distance) = distances.get(&id) {
+                    let candidate = (distance, port.id);
+                    if nearest.is_none_or(|current| candidate < current) {
+                        nearest = Some(candidate);
+                    }
+                }
+            };
+            if port.status == super::cylinder::PortStatus::Occupied {
+                if let Some(owner) = port.connected_tetra {
+                    consider(owner);
+                }
+            }
+            if let Some(ids) = inner.vertex_to_tetras.get(&port.id) {
+                for &id in ids {
+                    consider(id);
+                }
+            }
+        }
+        nearest.map(|(_, port_id)| port_id)
+    }
+
     pub fn tetras_connected_to_port(&self, port_vid: VertexId) -> Vec<TetraId> {
         let inner = self.inner.read();
         let Some(port) = inner

@@ -324,6 +324,8 @@ pub async fn send_pulse(
             "success": true,
             "origin": result.origin,
             "reached_target": result.reached_target,
+            "returned": result.returned_to_port.is_some(),
+            "return_port_id": result.returned_to_port,
             "path_length": result.data.path_length,
             "visited": result.data.visited_tetras,
             "collected_count": result.data.collected_content_hashes.len(),
