@@ -190,6 +190,7 @@ impl DreamEngine {
             .filter(|i| {
                 let d = &tetras[*i].data;
                 !d.labels.iter().any(|l| l.starts_with("meta-"))
+                    && !d.enforced
                     && crate::domain::ops::Lifecycle::of(d)
                         != crate::domain::ops::Lifecycle::Superseded
             })
@@ -207,6 +208,12 @@ impl DreamEngine {
                     let i = non_meta[wi];
                     let j = non_meta[wj];
                     if merged_ids.contains(&tetras[i].id) || merged_ids.contains(&tetras[j].id) {
+                        continue;
+                    }
+                    if !has_compatible_embeddings(
+                        &tetras[i].data.embedding,
+                        &tetras[j].data.embedding,
+                    ) {
                         continue;
                     }
                     let sim = VectorLayer::best_similarity(
@@ -231,6 +238,12 @@ impl DreamEngine {
                 }
                 for &j in non_meta.iter().skip(wi + 1) {
                     if merged_ids.contains(&tetras[j].id) {
+                        continue;
+                    }
+                    if !has_compatible_embeddings(
+                        &tetras[i].data.embedding,
+                        &tetras[j].data.embedding,
+                    ) {
                         continue;
                     }
                     let sim = VectorLayer::best_similarity(
@@ -325,6 +338,7 @@ impl DreamEngine {
                     .labels
                     .iter()
                     .any(|l| l.starts_with("meta-"))
+                    && !tetras[*i].data.enforced
             })
             .collect();
 
@@ -423,6 +437,10 @@ impl DreamEngine {
             merged_remove_ids,
         }
     }
+}
+
+fn has_compatible_embeddings(a: &[f64], b: &[f64]) -> bool {
+    !a.is_empty() && !b.is_empty() && a.len() == b.len()
 }
 
 #[cfg(test)]
@@ -752,5 +770,49 @@ mod idempotency_tests {
             r2.insights
         );
         assert_eq!(space.get_tetrahedron(a).unwrap().mass, mass_after_first);
+    }
+
+    #[test]
+    fn enforced_memories_are_excluded_from_dream_merge_and_links() {
+        for dry_run in [true, false] {
+            let space = Space::new();
+            let mut protected = normal(0);
+            protected.enforced = true;
+            let protected_id = add(&space, 0.0, protected, 2.0);
+            let unprotected_id = add(&space, 1.0, normal(0), 1.0);
+
+            let result = DreamEngine::cycle(&space, &KnowledgeGraph::new(), 0.2, 5, dry_run);
+
+            assert_eq!(result.duplicates_merged, 0, "dry_run={dry_run}");
+            assert_eq!(result.connections_formed, 0, "dry_run={dry_run}");
+            for id in [protected_id, unprotected_id] {
+                let memory = space.get_tetrahedron(id).unwrap();
+                assert!(!memory.data.labels.iter().any(|label| label == "superseded"));
+            }
+            assert_eq!(space.get_tetrahedron(protected_id).unwrap().mass, 2.0);
+            assert_eq!(space.get_tetrahedron(unprotected_id).unwrap().mass, 1.0);
+        }
+    }
+
+    #[test]
+    fn dream_does_not_supersede_using_labels_without_embeddings() {
+        for dry_run in [true, false] {
+            let space = Space::new();
+            let mut a = normal(0);
+            a.embedding.clear();
+            let mut b = normal(1);
+            b.embedding.clear();
+            b.labels = a.labels.clone();
+            let a_id = add(&space, 0.0, a, 2.0);
+            let b_id = add(&space, 1.0, b, 1.0);
+
+            let result = DreamEngine::cycle(&space, &KnowledgeGraph::new(), 0.99, 5, dry_run);
+
+            assert_eq!(result.duplicates_merged, 0, "dry_run={dry_run}");
+            for id in [a_id, b_id] {
+                let memory = space.get_tetrahedron(id).unwrap();
+                assert!(!memory.data.labels.iter().any(|label| label == "superseded"));
+            }
+        }
     }
 }
