@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.3](https://github.com/sunormesky-max/epicode/compare/v1.8.2...v1.8.3) (2026-10-09)
+
+
+### Bug Fixes
+
+* **guard:** parse ss output for ports and IPv6 floods ([#235](https://github.com/sunormesky-max/epicode/issues/235)) ([e4bb08a](https://github.com/sunormesky-max/epicode/commit/e4bb08a23819a94a3be3e45346bfd089efd62446))
+* **security:** 渗透测试第一轮修复 — openapi门禁/explore全文/登录枚举 ([#238](https://github.com/sunormesky-max/epicode/issues/238)) ([261eb1f](https://github.com/sunormesky-max/epicode/commit/261eb1f4c91f7f505ed301e060722cb944d90b73))
+
 ## [1.8.2](https://github.com/sunormesky-max/epicode/compare/v1.8.1...v1.8.2) (2026-10-09)
 
 
