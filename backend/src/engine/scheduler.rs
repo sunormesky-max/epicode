@@ -3870,7 +3870,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                 .iter()
                 .map(|t| (t.id, t.data.labels.clone()))
                 .collect();
-            self.knowledge.update_concepts(&label_data);
+            self.knowledge.replace_concepts(&label_data);
             // 计算 concept centroid（embedding 均值），之前断联：永远 vec![]
             self.knowledge.recompute_centroids(&self.space);
             let _ = self.tx.send(EngineEvent::DecisionTick);
