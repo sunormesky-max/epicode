@@ -1279,6 +1279,8 @@ pub async fn user_stats(
         "api_calls": api_calls,
         "api_calls_daily": api_calls_daily,
         "time_context": time_ctx,
+        // 稳态观测: 自适应阈值当前值(跨重启持久化)与默认/边界
+        "adaptive_params": engine.scheduler.adaptive_params_snapshot(),
     });
     (
         StatusCode::OK,
@@ -1864,6 +1866,22 @@ pub async fn drive_policy(
                 "suppressed": suppressed,
                 "stats": stats,
             }),
+        )),
+    )
+}
+
+/// GET /v1/scheduler/layers — 中央调度器分层运行观测(每层运行/推迟/耗时 + horizon)
+pub async fn scheduler_layers(
+    user: axum::extract::Extension<UserInfo>,
+    AuthedEngine(engine): AuthedEngine,
+) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
+    (
+        StatusCode::OK,
+        Json(epicode::engine::smrp::envelope_ok(
+            &engine,
+            "scheduler_layers",
+            engine.scheduler.run_layers_snapshot(),
         )),
     )
 }
