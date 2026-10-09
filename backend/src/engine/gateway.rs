@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering as AtomicOrdering;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-use crate::domain::space::Space;
+use crate::domain::space::{Space, PORT_RESERVATION_OWNER};
 use crate::domain::tetra::{MemoryPayload, TetraId};
 use crate::domain::vertex::Point3;
 
@@ -250,6 +250,18 @@ impl GatewayCenter {
         let placement = self.find_best_placement(&labels, layer);
         let core = Point3::new(placement.core[0], placement.core[1], placement.core[2]);
         let has_port = placement.has_port;
+        let reserved_port_vid = if has_port {
+            match placement.port_vid {
+                Some(vid) => Some(vid),
+                None => {
+                    self.index.invalidate_placement_cache();
+                    self.energy.replenish(CREATE_COST);
+                    return Err("seed placement has no reserved Port ID".into());
+                }
+            }
+        } else {
+            None
+        };
 
         let embedding = self.compute_embedding(content);
         tracing::debug!(
@@ -394,12 +406,30 @@ impl GatewayCenter {
 
         match self.space.add_tetrahedron(&tetra, &positions) {
             Ok(id) => {
-                if has_port {
-                    // 精确按 vid 连接（kimi2.7 #1：替代 sentinel 匹配，防并发泄漏）
-                    if let Some(vid) = placement.port_vid {
-                        self.space.assign_specific_port(vid, id);
-                    } else {
-                        self.space.reassign_cylinder_port(Self::PORT_SENTINEL, id);
+                if let Some(port_vid) = reserved_port_vid {
+                    if let Err(e) = self.space.transfer_cylinder_port_reservation(port_vid, id) {
+                        let rollback = self.space.remove_tetrahedron(id);
+                        let release = self.space.release_cylinder_port_reservation(port_vid);
+                        self.index.invalidate_placement_cache();
+                        self.energy.replenish(CREATE_COST);
+                        if let Err(rollback_error) = rollback {
+                            tracing::error!(
+                                "[Gateway] failed to roll back tetra {}: {}",
+                                id,
+                                rollback_error
+                            );
+                        }
+                        if let Err(release_error) = release {
+                            tracing::error!(
+                                "[Gateway] failed to release Port {}: {}",
+                                port_vid,
+                                release_error
+                            );
+                        }
+                        return Err(format!(
+                            "failed to connect seed tetrahedron {} to Port {}: {}",
+                            id, port_vid, e
+                        ));
                     }
                 }
                 {
@@ -472,6 +502,7 @@ impl GatewayCenter {
                 }
                 let _ = self.tx.send(EngineEvent::TetrahedronCreated(id));
                 self.search.invalidate_df_cache();
+                self.index.invalidate_placement_cache();
                 let relations_formed = self.knowledge.query_relations(id).len();
                 tracing::info!(
                     "memory created: tetra {} hash={} rels={}",
@@ -487,16 +518,23 @@ impl GatewayCenter {
                 })
             }
             Err(e) => {
-                if has_port {
-                    self.space.release_cylinder_port(Self::PORT_SENTINEL);
+                if let Some(port_vid) = reserved_port_vid {
+                    if let Err(release_error) =
+                        self.space.release_cylinder_port_reservation(port_vid)
+                    {
+                        tracing::error!(
+                            "[Gateway] failed to release Port {}: {}",
+                            port_vid,
+                            release_error
+                        );
+                    }
                 }
+                self.index.invalidate_placement_cache();
                 self.energy.replenish(CREATE_COST);
                 Err(e)
             }
         }
     }
-
-    const PORT_SENTINEL: TetraId = u64::MAX;
 
     fn compute_importance(content: &str, labels: &[String]) -> f64 {
         let mut score: f64 = 1.0;
@@ -620,10 +658,6 @@ impl GatewayCenter {
                 port_vid: None,
             }
         };
-        if let Some(pos) = self.index.get_cached_placement(labels) {
-            return mk(pos, false, false, false);
-        }
-
         let tetras = self.space.all_tetrahedrons();
         let zone = self.space.zone_for_layer(layer);
 
@@ -641,7 +675,10 @@ impl GatewayCenter {
         if !in_layer.is_empty() {
             use rand::Rng;
             let orphan_roll: f64 = rand::thread_rng().gen();
-            if orphan_roll < 0.07 {
+            let has_label_anchor = in_layer
+                .iter()
+                .any(|tetra| tetra.data.labels.iter().any(|label| labels.contains(label)));
+            if !has_label_anchor && orphan_roll < 0.07 {
                 let z = zone.center_z();
                 use rand::Rng;
                 let mut rng = rand::thread_rng();
@@ -649,7 +686,6 @@ impl GatewayCenter {
                 let dist: f64 = rng.gen_range(8.0..15.0);
                 let orphan_pos = Point3::new(angle.cos() * dist, angle.sin() * dist, z);
                 let result = clamp_z(self.find_adjacent_position(orphan_pos, &in_layer));
-                self.index.cache_placement(labels, result);
                 tracing::debug!(
                     "[Gateway] orphan placement at ({:.1},{:.1},{:.1})",
                     result.x,
@@ -662,7 +698,9 @@ impl GatewayCenter {
 
         if in_layer.is_empty() {
             let z = zone.center_z();
-            let port_opt = self.space.assign_cylinder_port(layer, Self::PORT_SENTINEL);
+            let port_opt = self
+                .space
+                .assign_cylinder_port(layer, PORT_RESERVATION_OWNER);
             let port_vid = port_opt.map(|(vid, _)| vid);
             let anchor = if let Some((_vid, pos)) = port_opt {
                 pos
@@ -670,7 +708,6 @@ impl GatewayCenter {
                 Point3::new(0.0, 0.0, z)
             };
             let result = clamp_z(self.find_adjacent_position(anchor, &in_layer));
-            self.index.cache_placement(labels, result);
             let mut outcome = mk(result, port_opt.is_some(), true, false);
             outcome.port_vid = port_vid; // 精确 port vid（kimi2.7 #1）
             return outcome;
@@ -694,7 +731,6 @@ impl GatewayCenter {
             }
         }
 
-        self.index.cache_placement(labels, best_result);
         // Joining an existing cluster: the new tetra shares vertices with the anchor and is
         // reachable from the cluster's seed-port via BFS — it does NOT need its own port.
         // One-port-per-polyhedron keeps Port count ≈ cluster count (avoids per-tetra port
@@ -735,7 +771,7 @@ impl GatewayCenter {
     fn find_adjacent_position(
         &self,
         anchor: Point3,
-        _tetras: &[crate::domain::tetra::Tetrahedron],
+        tetras: &[crate::domain::tetra::Tetrahedron],
     ) -> Point3 {
         let offsets = crate::domain::tetra::Tetrahedron::compute_vertices(Point3::zero());
 
@@ -748,6 +784,14 @@ impl GatewayCenter {
                 anchor.y - offset.y,
                 anchor.z - offset.z,
             );
+            // Reusing an existing center would merge all four vertices and stack
+            // a second tetrahedron on exactly the same geometry.
+            if tetras
+                .iter()
+                .any(|t| t.core.distance_to(&center) < crate::domain::vertex::VERTEX_MERGE_EPSILON)
+            {
+                continue;
+            }
             let verts = crate::domain::tetra::Tetrahedron::compute_vertices(center);
             let merges = self.space.count_vertex_merges(&verts);
 
@@ -1315,4 +1359,122 @@ pub struct SearchMetrics {
     pub miss_queries: Vec<String>,
     pub top_labels: Vec<(String, u32)>,
     pub hot_memories: Vec<(TetraId, u32)>,
+}
+
+#[cfg(test)]
+mod port_reservation_tests {
+    use super::*;
+    use crate::domain::cylinder::CylinderLayer;
+    use crate::engine::bus::EventBus;
+
+    fn test_gateway() -> (Arc<Space>, GatewayCenter) {
+        let space = Arc::new(Space::new());
+        let bus = EventBus::new(16);
+        let tx = bus.sender();
+        let energy = Arc::new(EnergyCenter::new(100.0, 0.0, tx.clone(), bus.subscribe()));
+        let gateway = GatewayCenter::new(
+            Arc::clone(&space),
+            energy,
+            Arc::new(CognitiveEngine::new("", "")),
+            Arc::new(CategoryClassifier::new("", "")),
+            tx,
+            bus.subscribe(),
+            Arc::new(KnowledgeGraph::new()),
+            Arc::new(EmbeddingService::disabled_for_test()),
+            None,
+        );
+        (space, gateway)
+    }
+
+    #[test]
+    fn first_seed_in_each_port_layer_claims_its_exact_port() {
+        let (space, gateway) = test_gateway();
+
+        // Occupy the first ring so the Instinct seed uses a Port in the upper ring.
+        let held_ports: Vec<_> = (0..8)
+            .map(|_| {
+                space
+                    .assign_cylinder_port(CylinderLayer::Instinct, PORT_RESERVATION_OWNER)
+                    .unwrap()
+                    .0
+            })
+            .collect();
+        let lower_ring_z = space
+            .cylinder_ports()
+            .into_iter()
+            .find(|(id, _)| *id == held_ports[0])
+            .unwrap()
+            .1
+            .z;
+        let cases = [
+            ("instinct", "port-test"),
+            ("relation", "relation"),
+            ("cognitive", "ai"),
+            ("service", "security"),
+            ("cycle", "cycle"),
+        ];
+        for (name, label) in cases {
+            let created = gateway
+                .create_memory(&format!("first seed for {name}"), vec![label.into()])
+                .unwrap();
+            let placement = created.placement.unwrap();
+            assert!(placement.is_seed && placement.has_port, "{name}");
+            assert_eq!(placement.layer, name);
+            let port_vid = placement.port_vid.unwrap();
+            assert!(space
+                .get_tetrahedron(created.id)
+                .unwrap()
+                .vertex_ids
+                .contains(&port_vid));
+            assert_eq!(space.tetras_connected_to_port(port_vid), vec![created.id]);
+            if name == "instinct" {
+                let port_z = space
+                    .cylinder_ports()
+                    .into_iter()
+                    .find(|(id, _)| *id == port_vid)
+                    .unwrap()
+                    .1
+                    .z;
+                assert!(port_z > lower_ring_z);
+            }
+        }
+        for port_vid in held_ports {
+            space.release_cylinder_port_reservation(port_vid).unwrap();
+        }
+        assert_eq!(space.port_stats().0, cases.len());
+        assert_eq!(space.reseed_ports(), 0);
+        assert_eq!(space.port_stats().0, cases.len());
+    }
+
+    #[test]
+    fn provisional_seeds_do_not_share_a_cached_port_and_followup_joins_cluster() {
+        let (space, gateway) = test_gateway();
+        let labels = vec!["port-test".to_string()];
+        let first_proposal = gateway.find_best_placement(&labels, CylinderLayer::Instinct);
+        let second_proposal = gateway.find_best_placement(&labels, CylinderLayer::Instinct);
+        assert!(first_proposal.is_seed && second_proposal.is_seed);
+        let first_port = first_proposal.port_vid.unwrap();
+        let second_port = second_proposal.port_vid.unwrap();
+        assert_ne!(first_port, second_port);
+        assert_ne!(first_proposal.core, second_proposal.core);
+        space.release_cylinder_port_reservation(first_port).unwrap();
+        space
+            .release_cylinder_port_reservation(second_port)
+            .unwrap();
+
+        let first = gateway
+            .create_memory("first cluster memory", labels.clone())
+            .unwrap();
+        let second = gateway
+            .create_memory("second cluster memory", labels)
+            .unwrap();
+        assert!(first.placement.as_ref().unwrap().is_seed);
+        assert!(!second.placement.as_ref().unwrap().is_seed);
+        assert!(!second.placement.as_ref().unwrap().is_orphan);
+        let first_tetra = space.get_tetrahedron(first.id).unwrap();
+        let second_tetra = space.get_tetrahedron(second.id).unwrap();
+        assert_ne!(first_tetra.vertex_ids, second_tetra.vertex_ids);
+        assert!(space.neighbors_of(first.id).contains(&second.id));
+        assert_eq!(space.port_stats().0, 1);
+    }
 }
