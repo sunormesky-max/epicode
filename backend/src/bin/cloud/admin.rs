@@ -755,24 +755,37 @@ pub async fn admin_panel() -> axum::response::Html<String> {
     axum::response::Html(html.to_string())
 }
 
-pub async fn swagger_ui() -> axum::response::Html<String> {
+/// 渗透修复#1b: swagger UI 直接加载 openapi.yaml, 同规格同门 — 管理员专用。
+pub async fn swagger_ui(
+    State(st): State<CloudState>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if let Err(resp) = require_admin(&st.admin_key, &headers) {
+        return resp.into_response();
+    }
     axum::response::Html("<!DOCTYPE html><html><head><title>Epicode API Docs</title>\
 <meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
 <link rel=\"stylesheet\" type=\"text/css\" href=\"https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css\" integrity=\"sha384-r8YJaz91NCvmpEhQ5T4DkFZ+fn0HkAzdS0JJVq62PzOmzpW3ML4GvU5zOe7+8J5\" crossorigin=\"anonymous\">
 </head><body><div id=\"swagger-ui\"></div>\
 <script src=\"https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js\" integrity=\"sha384-vDDdjH4gB3gHvUk+ja1KQg7zY4H3l2WAm4MDQ2IuPFpcd7GzQFkHNzS22Lx2dCV\" crossorigin=\"anonymous\"></script>\
 <script>SwaggerUIBundle({url:\"/openapi.yaml\",dom_id:\"#swagger-ui\"})</script>\
-</body></html>".to_string())
+</body></html>".to_string()).into_response()
 }
 
-pub async fn openapi_spec() -> (axum::http::StatusCode, axum::http::HeaderMap, &'static str) {
-    let mut headers = axum::http::HeaderMap::new();
-    headers.insert("content-type", "text/yaml; charset=utf-8".parse().unwrap());
-    (
-        axum::http::StatusCode::OK,
-        headers,
-        include_str!("../../../docs/openapi.yaml"),
-    )
+/// 渗透修复#1: OpenAPI 规格含全部端点/认证机制/环境变量名, 与 .json 同权 —
+/// 无 X-Admin-Key 一律 401(此前 yaml 无门而 json 有门, 属授权面只盖了扩展名)。
+pub async fn openapi_spec(
+    State(st): State<CloudState>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if let Err(resp) = require_admin(&st.admin_key, &headers) {
+        return resp.into_response();
+    }
+    let mut h = axum::http::HeaderMap::new();
+    h.insert("content-type", "text/yaml; charset=utf-8".parse().unwrap());
+    (axum::http::StatusCode::OK, h, include_str!("../../../docs/openapi.yaml")).into_response()
 }
 
 /// SMRP 协议规范（公开，无需认证）—— 官网发布入口，返回 RFC/W3C 风格的 HTML 规范。
