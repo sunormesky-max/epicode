@@ -7247,6 +7247,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn memory_improve_rejects_rewrites_at_the_existing_size_limit() {
+        let test_dir = MemoryImproveTestDir::new();
+        let server = MemoryImproveMockServer::start("x".repeat(300));
+        let space = Arc::new(Space::new());
+        let memory_id =
+            add_tetra_to_space(&space, Point3::new(10.0, 0.0, 0.0), "short memory", vec![]);
+        let before = space.get_tetrahedron(memory_id).unwrap();
+        let storage = Arc::new(StorageManager::new(&test_dir.0).unwrap());
+        let cognitive = Arc::new(CognitiveEngine::with_base(
+            "test-key",
+            "test-model",
+            &server.base_url,
+        ));
+        let embedding = Arc::new(EmbeddingService::with_api_url_for_test(&format!(
+            "{}/api/embed",
+            server.base_url
+        )));
+        let (scheduler, _, _) =
+            build_scheduler_with_services(space.clone(), cognitive, embedding, storage);
+
+        let result = scheduler.api_improve_memory(1);
+        let after = space.get_tetrahedron(memory_id).unwrap();
+
+        assert_eq!(result["candidates"].as_u64(), Some(1));
+        assert_eq!(result["improved"].as_u64(), Some(0));
+        assert_eq!(after.data.content, before.data.content);
+        assert_eq!(after.data.content_hash, before.data.content_hash);
+        assert_eq!(after.data.embedding, before.data.embedding);
+    }
+
     /// Scenario: Seed a space with N tetrahedrons forming multiple clusters.
     /// Spacing must be exactly EDGE_LENGTH (1.0) for vertices to merge and form clusters.
     fn seed_reality(space: &Space) -> Vec<TetraId> {
