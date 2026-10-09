@@ -1266,59 +1266,74 @@ fn check_file_integrity(state: &mut GuardState) {
     }
 }
 
-fn check_unexpected_ports() -> Vec<u16> {
-    let output = run_cmd_output("ss", &["-tlnp"]);
-    match output {
-        Some(o) => {
-            let mut ports = Vec::new();
-            for line in o.lines().skip(1) {
-                let parts: Vec<&str> = line.splitn(6, ' ').collect();
-                if let Some(local) = parts.get(4) {
-                    if let Some(port_str) = local.rsplit(':').next() {
-                        if let Ok(port) = port_str.parse::<u16>() {
-                            let honeypot = get_honeypot_ports();
-                            let is_ok = EXPECTED_PORTS.contains(&port)
-                                || port == 9111
-                                || honeypot.contains(&port);
-                            if !is_ok {
-                                let is_local =
-                                    local.starts_with("127.0.0.1") || local.starts_with("[::1]");
-                                if !is_local {
-                                    ports.push(port);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            ports
+fn parse_ss_host_port(endpoint: &str) -> Option<(&str, u16)> {
+    let (host, port) = endpoint.rsplit_once(':')?;
+    let port = port.parse().ok()?;
+    let host = host
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(host);
+    Some((host, port))
+}
+
+fn parse_unexpected_ports(output: &str, honeypot_ports: &[u16]) -> Vec<u16> {
+    let mut ports = Vec::new();
+    for line in output.lines().skip(1) {
+        let Some(local) = line.split_whitespace().nth(3) else {
+            continue;
+        };
+        let Some((host, port)) = parse_ss_host_port(local) else {
+            continue;
+        };
+        if EXPECTED_PORTS.contains(&port) || port == 9111 || honeypot_ports.contains(&port) {
+            continue;
         }
-        None => Vec::new(),
+        if host.parse::<IpAddr>().is_ok_and(|addr| addr.is_loopback()) {
+            continue;
+        }
+        ports.push(port);
     }
+    ports.sort_unstable();
+    ports.dedup();
+    ports
+}
+
+fn check_unexpected_ports() -> Vec<u16> {
+    let honeypot_ports = get_honeypot_ports();
+    run_cmd_output("ss", &["-tlnp"])
+        .map(|output| parse_unexpected_ports(&output, &honeypot_ports))
+        .unwrap_or_default()
+}
+
+fn parse_connection_flood(output: &str) -> Vec<(String, usize)> {
+    let mut counts: HashMap<IpAddr, usize> = HashMap::new();
+    for line in output.lines().skip(1) {
+        let Some(peer) = line.split_whitespace().nth(4) else {
+            continue;
+        };
+        let Some((host, _)) = parse_ss_host_port(peer) else {
+            continue;
+        };
+        let Ok(ip) = host.parse::<IpAddr>() else {
+            continue;
+        };
+        if !is_whitelisted(host) {
+            *counts.entry(ip).or_insert(0) += 1;
+        }
+    }
+    let mut floods: Vec<_> = counts
+        .into_iter()
+        .filter(|(_, count)| *count > FLOOD_THRESHOLD)
+        .map(|(ip, count)| (ip.to_string(), count))
+        .collect();
+    floods.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    floods
 }
 
 fn check_connection_flood() -> Vec<(String, usize)> {
-    let output = run_cmd_output("ss", &["-tn"]);
-    let mut counts: HashMap<String, usize> = HashMap::new();
-    if let Some(o) = output {
-        for line in o.lines().skip(1) {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 5 {
-                if let Some(peer) = parts.get(4) {
-                    if let Some(colon_pos) = peer.rfind(':') {
-                        let ip = &peer[..colon_pos];
-                        if !is_whitelisted(ip) && ip.parse::<IpAddr>().is_ok() {
-                            *counts.entry(ip.to_string()).or_insert(0) += 1;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    counts
-        .into_iter()
-        .filter(|(_, c)| *c > FLOOD_THRESHOLD)
-        .collect()
+    run_cmd_output("ss", &["-tn"])
+        .map(|output| parse_connection_flood(&output))
+        .unwrap_or_default()
 }
 
 fn acquire_guard_lock(path: &Path) -> io::Result<fs::File> {
@@ -1912,6 +1927,39 @@ mod tests {
         assert!(!is_whitelisted("not-an-ip"));
         assert!(!is_whitelisted(""));
         assert!(!is_whitelisted("999.999.999.999"));
+    }
+
+    #[test]
+    fn ss_listening_ports_handle_alignment_ipv6_and_duplicate_sockets() {
+        let output = concat!(
+            "State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process\n",
+            "LISTEN 0      128    0.0.0.0:22       0.0.0.0:*\n",
+            "LISTEN 0      128    [::]:3000        [::]:*\n",
+            "LISTEN 0 128 [::]:3000 [::]:*\n",
+            "LISTEN 0 128 [::1]:4000 [::]:*\n",
+            "LISTEN 0 128 127.0.0.2:5000 0.0.0.0:*\n",
+            "LISTEN 0 128 *:8080 *:*\n",
+            "LISTEN 0 128 0.0.0.0:6000 0.0.0.0:*\n",
+            "LISTEN 0 128 0.0.0.0:9111 0.0.0.0:*\n",
+        );
+        assert_eq!(parse_unexpected_ports(output, &[6000]), vec![3000, 8080]);
+    }
+
+    #[test]
+    fn ss_connection_flood_counts_bracketed_ipv6_and_excludes_private_peers() {
+        let mut output = "State Recv-Q Send-Q Local Address:Port Peer Address:Port\n".to_string();
+        for _ in 0..=FLOOD_THRESHOLD {
+            output.push_str("ESTAB 0 0 10.0.0.1:443 [2001:db8::5]:52345\n");
+            output.push_str("ESTAB 0 0 10.0.0.1:443 [fd00::1]:52345\n");
+        }
+        for _ in 0..FLOOD_THRESHOLD {
+            output.push_str("ESTAB 0 0 10.0.0.1:443 198.51.100.2:52345\n");
+        }
+        output.push_str("ESTAB 0 0 10.0.0.1:443 *:*\n");
+        assert_eq!(
+            parse_connection_flood(&output),
+            vec![("2001:db8::5".to_string(), FLOOD_THRESHOLD + 1)]
+        );
     }
 
     // H5 regression: nginx access log parser must take the FIRST whitespace
