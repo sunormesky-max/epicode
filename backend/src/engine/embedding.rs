@@ -27,6 +27,19 @@ impl EmbeddingService {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_api_url_for_test(api_url: &str) -> Self {
+        Self {
+            client: ureq::AgentBuilder::new().build(),
+            api_key: String::new(),
+            api_url: api_url.to_string(),
+            model: "test".to_string(),
+            enabled: true,
+            cache: Mutex::new(std::collections::HashMap::new()),
+            cache_order: Mutex::new(Vec::new()),
+        }
+    }
+
     pub fn from_env() -> Self {
         let api_url = std::env::var("EMBEDDING_API_URL")
             .unwrap_or_else(|_| DEFAULT_EMBEDDING_URL.to_string());

@@ -2412,24 +2412,32 @@ impl SchedulerCenter {
             // 用认知引擎重写：扩展为更清晰的描述
             let prompt = format!(
                 "Rewrite this memory to be clearer and more complete (max 200 chars).                  Keep the original meaning but add context. Original: \"{}\"",
-                original.chars().take(100).collect::<String>()
+                original
             );
 
             match self.cognitive.answer_from_memories(&prompt, "") {
                 Ok(rewritten) => {
                     let cleaned = rewritten.trim();
                     if cleaned.len() > original.trim().len() && cleaned.len() < 300 {
-                        // 更新记忆内容（保留原始标签）
-                        let mut updated = t.data.clone();
-                        updated.content = format!(
+                        let updated_content = format!(
                             "{}\n[improved from: {}]",
-                            cleaned.chars().take(200).collect::<String>(),
+                            cleaned,
                             original.chars().take(60).collect::<String>()
                         );
-                        if let Err(e) = self.space.update_payload(t.id, updated) {
+
+                        let still_unprotected =
+                            self.space.get_tetrahedron(t.id).is_some_and(|current| {
+                                !current.data.enforced
+                                    && current.data.valid_to.is_none()
+                                    && current.data.content == *original
+                            });
+                        if !still_unprotected {
+                            continue;
+                        }
+
+                        if let Err(e) = self.api_update_content(t.id, &updated_content) {
                             tracing::warn!("[Improve] update failed for #{}: {}", t.id, e);
                         } else {
-                            self.gateway_handle().mark_dirty(t.id);
                             improved += 1;
                             details.push(format!(
                                 "#{}: {}→{} chars",
@@ -6473,6 +6481,160 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize};
     use std::sync::Arc;
 
+    struct MemoryImproveMockServer {
+        base_url: String,
+        requests: Arc<std::sync::Mutex<Vec<(String, serde_json::Value)>>>,
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl MemoryImproveMockServer {
+        fn start(rewrite: String) -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let stop = Arc::new(AtomicBool::new(false));
+            let server_stop = Arc::clone(&stop);
+            let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let server_requests = Arc::clone(&requests);
+            let thread = std::thread::spawn(move || {
+                while !server_stop.load(Ordering::Relaxed) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            stream
+                                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                                .unwrap();
+                            let (path, request) = read_memory_improve_request(&mut stream);
+                            server_requests
+                                .lock()
+                                .unwrap()
+                                .push((path.clone(), request));
+
+                            let response = match path.as_str() {
+                                "/v1/chat/completions" => serde_json::json!({
+                                    "choices": [{"message": {"content": rewrite}}]
+                                }),
+                                "/api/embed" => {
+                                    let mut embedding =
+                                        vec![0.0; super::super::vector::EMBEDDING_DIM];
+                                    embedding[1] = 1.0;
+                                    serde_json::json!({"embeddings": [embedding]})
+                                }
+                                _ => panic!("unexpected memory-improve fixture path: {}", path),
+                            };
+                            let body = serde_json::to_vec(&response).unwrap();
+                            write!(
+                                stream,
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                body.len()
+                            )
+                            .unwrap();
+                            stream.write_all(&body).unwrap();
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(std::time::Duration::from_millis(5));
+                        }
+                        Err(error) => panic!("memory-improve fixture failed: {error}"),
+                    }
+                }
+            });
+
+            Self {
+                base_url,
+                requests,
+                stop,
+                thread: Some(thread),
+            }
+        }
+
+        fn requests(&self) -> Vec<(String, serde_json::Value)> {
+            self.requests.lock().unwrap().clone()
+        }
+    }
+
+    impl Drop for MemoryImproveMockServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(thread) = self.thread.take() {
+                let result = thread.join();
+                if !std::thread::panicking() {
+                    result.expect("memory-improve fixture should stop cleanly");
+                }
+            }
+        }
+    }
+
+    fn read_memory_improve_request(
+        stream: &mut std::net::TcpStream,
+    ) -> (String, serde_json::Value) {
+        let mut request = Vec::new();
+        let mut expected_length = None;
+        let mut buffer = [0u8; 4096];
+        loop {
+            let read = stream
+                .read(&mut buffer)
+                .expect("fixture request read failed");
+            assert!(
+                read > 0,
+                "fixture request ended before the body was complete"
+            );
+            request.extend_from_slice(&buffer[..read]);
+
+            if expected_length.is_none() {
+                if let Some(header_end) = request.windows(4).position(|part| part == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&request[..header_end]);
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())
+                                .flatten()
+                        })
+                        .expect("fixture request must include Content-Length");
+                    expected_length = Some(header_end + 4 + content_length);
+                }
+            }
+
+            if expected_length.is_some_and(|length| request.len() >= length) {
+                break;
+            }
+        }
+
+        let header_end = request
+            .windows(4)
+            .position(|part| part == b"\r\n\r\n")
+            .expect("fixture request must include headers");
+        let headers = String::from_utf8_lossy(&request[..header_end]);
+        let path = headers
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .expect("fixture request must include a path")
+            .to_string();
+        let body_end = expected_length.expect("fixture request body length must be known");
+        let body = &request[header_end + 4..body_end];
+        let body = serde_json::from_slice(body).expect("fixture request body must be JSON");
+        (path, body)
+    }
+
+    struct MemoryImproveTestDir(std::path::PathBuf);
+
+    impl MemoryImproveTestDir {
+        fn new() -> Self {
+            let path = std::env::temp_dir()
+                .join(format!("epicode-memory-improve-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for MemoryImproveTestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn periodic_save_never_acks_unexecuted_signals() {
         // An enabled cognitive engine used to turn the text "do not execute" into
@@ -6920,13 +7082,24 @@ mod tests {
         cognitive: Arc<CognitiveEngine>,
     ) -> (Arc<SchedulerCenter>, Arc<Space>, Arc<KnowledgeGraph>) {
         let space = Arc::new(Space::new());
+        let embedding = Arc::new(EmbeddingService::from_env());
+        let storage =
+            Arc::new(StorageManager::new(std::path::Path::new("test_data_scheduler")).unwrap());
+        build_scheduler_with_services(space, cognitive, embedding, storage)
+    }
+
+    fn build_scheduler_with_services(
+        space: Arc<Space>,
+        cognitive: Arc<CognitiveEngine>,
+        embedding: Arc<EmbeddingService>,
+        storage: Arc<StorageManager>,
+    ) -> (Arc<SchedulerCenter>, Arc<Space>, Arc<KnowledgeGraph>) {
         let bus = super::super::bus::EventBus::new(64);
         let tx = bus.sender();
         let rx = bus.subscribe();
         let energy = Arc::new(EnergyCenter::new(10000.0, 8.0, tx.clone(), bus.subscribe()));
         let knowledge = Arc::new(KnowledgeGraph::new());
         let classifier = Arc::new(CategoryClassifier::new("", ""));
-        let embedding = Arc::new(EmbeddingService::from_env());
         let gateway = Arc::new(GatewayCenter::new(
             space.clone(),
             energy.clone(),
@@ -6939,8 +7112,6 @@ mod tests {
             None,
         ));
         let security = Arc::new(SecurityGuard::from_env());
-        let storage =
-            Arc::new(StorageManager::new(std::path::Path::new("test_data_scheduler")).unwrap());
         let scheduler = Arc::new(SchedulerCenter::with_security(
             space.clone(),
             energy.clone(),
@@ -6955,6 +7126,125 @@ mod tests {
             storage,
         ));
         (scheduler, space, knowledge)
+    }
+
+    #[test]
+    fn memory_improve_preserves_content_refreshes_indexes_and_persists() {
+        let test_dir = MemoryImproveTestDir::new();
+        let server = MemoryImproveMockServer::start(format!(
+            "Improved context: {} tail: 重要🧠",
+            "y".repeat(180)
+        ));
+        let original = format!(
+            "{} and the original tail is important: 重要🧠",
+            "x".repeat(120)
+        );
+        let generated = format!("Improved context: {} tail: 重要🧠", "y".repeat(180));
+        let expected_content = format!(
+            "{}\n[improved from: {}]",
+            generated,
+            original.chars().take(60).collect::<String>()
+        );
+        let expected_hash = super::super::search_engine::hash_content(&expected_content);
+        let mut expected_embedding = vec![0.0; super::super::vector::EMBEDDING_DIM];
+        expected_embedding[1] = 1.0;
+
+        let space = Arc::new(Space::new());
+        let memory_id = add_tetra_to_space(&space, Point3::new(10.0, 0.0, 0.0), &original, vec![]);
+        let mut original_payload = space.get_tetrahedron(memory_id).unwrap().data;
+        original_payload.content_hash = super::super::search_engine::hash_content(&original);
+        original_payload.embedding = {
+            let mut embedding = vec![0.0; super::super::vector::EMBEDDING_DIM];
+            embedding[0] = 1.0;
+            embedding
+        };
+        space.update_payload(memory_id, original_payload).unwrap();
+
+        let protected_content = "short enforced memory";
+        let protected_id = add_tetra_to_space(
+            &space,
+            Point3::new(20.0, 0.0, 0.0),
+            protected_content,
+            vec![],
+        );
+        let mut protected_payload = space.get_tetrahedron(protected_id).unwrap().data;
+        protected_payload.enforced = true;
+        space
+            .update_payload(protected_id, protected_payload)
+            .unwrap();
+
+        let storage = Arc::new(StorageManager::new(&test_dir.0).unwrap());
+        storage.save_space_only(&space).unwrap();
+        let cognitive = Arc::new(CognitiveEngine::with_base(
+            "test-key",
+            "test-model",
+            &server.base_url,
+        ));
+        let embedding = Arc::new(EmbeddingService::with_api_url_for_test(&format!(
+            "{}/api/embed",
+            server.base_url
+        )));
+        let (scheduler, _, knowledge) =
+            build_scheduler_with_services(space.clone(), cognitive, embedding, storage.clone());
+
+        let result = scheduler.api_improve_memory(10);
+        let requests = server.requests();
+        let prompt_contains_full_source = requests
+            .iter()
+            .find(|(path, _)| path == "/v1/chat/completions")
+            .and_then(|(_, request)| request["messages"][1]["content"].as_str())
+            .is_some_and(|prompt| prompt.contains(&original));
+        let improved_once =
+            result["candidates"].as_u64() == Some(1) && result["improved"].as_u64() == Some(1);
+
+        let updated = space.get_tetrahedron(memory_id).unwrap();
+        let full_content_written = updated.data.content == expected_content;
+        let hash_refreshed = updated.data.content_hash == expected_hash;
+        let embedding_refreshed = updated.data.embedding == expected_embedding;
+        let protected = space.get_tetrahedron(protected_id).unwrap();
+        let enforcement_preserved = protected.data.enforced
+            && protected.data.content == protected_content
+            && protected.data.embedding.is_empty();
+        let search_results = scheduler
+            .gateway_handle()
+            .search_vector_only(&expected_content, 1)
+            .unwrap();
+        let hnsw_refreshed = search_results
+            .first()
+            .is_some_and(|(id, score, _, _)| *id == memory_id && (*score - 1.0).abs() < 1e-9);
+
+        drop(scheduler);
+        drop(space);
+        drop(knowledge);
+        drop(storage);
+
+        let reloaded_storage = StorageManager::new(&test_dir.0).unwrap();
+        let reloaded_space = Space::new();
+        let reloaded_knowledge = KnowledgeGraph::new();
+        let load_report = reloaded_storage.load_all(&reloaded_space, &reloaded_knowledge);
+        let persisted = reloaded_space.get_tetrahedron(memory_id);
+        let persistence_survives_restart = load_report.space_ok
+            && persisted.as_ref().is_some_and(|memory| {
+                memory.data.content == expected_content
+                    && memory.data.content_hash == expected_hash
+                    && memory.data.embedding == expected_embedding
+            });
+        let protected_survives_restart = reloaded_space
+            .get_tetrahedron(protected_id)
+            .is_some_and(|memory| memory.data.enforced && memory.data.content == protected_content);
+
+        assert!(
+            improved_once
+                && prompt_contains_full_source
+                && full_content_written
+                && hash_refreshed
+                && embedding_refreshed
+                && hnsw_refreshed
+                && persistence_survives_restart
+                && enforcement_preserved
+                && protected_survives_restart,
+            "memory_improve regression: improved={improved_once}, full_source={prompt_contains_full_source}, full_content={full_content_written}, hash={hash_refreshed}, embedding={embedding_refreshed}, HNSW={hnsw_refreshed}, restart={persistence_survives_restart}, enforced={enforcement_preserved}, enforced_after_restart={protected_survives_restart}"
+        );
     }
 
     /// Scenario: Seed a space with N tetrahedrons forming multiple clusters.
