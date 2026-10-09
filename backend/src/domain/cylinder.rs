@@ -475,6 +475,51 @@ impl Cylinder {
         false
     }
 
+    /// Transfer one reserved Port only when its current owner is the expected one.
+    /// Several in-flight placements can use the same sentinel owner, so looking up
+    /// a Port by that owner alone is ambiguous.
+    pub fn reassign_specific_port(
+        &mut self,
+        port_id: VertexId,
+        expected_tetra_id: TetraId,
+        new_tetra_id: TetraId,
+    ) -> Result<(), String> {
+        let port = self
+            .ports
+            .iter_mut()
+            .find(|p| p.id == port_id)
+            .ok_or_else(|| format!("port {} not found", port_id))?;
+        if port.status != PortStatus::Occupied || port.connected_tetra != Some(expected_tetra_id) {
+            return Err(format!(
+                "port {} is not reserved by tetra {}",
+                port_id, expected_tetra_id
+            ));
+        }
+        port.assign(new_tetra_id);
+        Ok(())
+    }
+
+    /// Release only the reservation for this exact Port and expected owner.
+    pub fn release_specific_port(
+        &mut self,
+        port_id: VertexId,
+        expected_tetra_id: TetraId,
+    ) -> Result<(), String> {
+        let port = self
+            .ports
+            .iter_mut()
+            .find(|p| p.id == port_id)
+            .ok_or_else(|| format!("port {} not found", port_id))?;
+        if port.status != PortStatus::Occupied || port.connected_tetra != Some(expected_tetra_id) {
+            return Err(format!(
+                "port {} is not reserved by tetra {}",
+                port_id, expected_tetra_id
+            ));
+        }
+        port.release();
+        Ok(())
+    }
+
     pub fn assign_specific_port(
         &mut self,
         port_id: VertexId,
@@ -826,6 +871,32 @@ mod tests {
         c.release_port(42);
         let p = c.find_port_for_tetra(42);
         assert!(p.is_none());
+    }
+
+    #[test]
+    fn reserved_ports_transfer_and_release_by_exact_id() {
+        let mut c = Cylinder::new();
+        let first = c.assign_port(CylinderLayer::Instinct, u64::MAX).unwrap();
+        let second = c.assign_port(CylinderLayer::Instinct, u64::MAX).unwrap();
+        assert_ne!(first, second);
+
+        assert!(c.reassign_specific_port(second, 7, 42).is_err());
+        assert!(c.release_specific_port(second, 7).is_err());
+        assert_eq!(c.find_port_for_tetra(u64::MAX).unwrap().id, first);
+
+        c.reassign_specific_port(second, u64::MAX, 42).unwrap();
+        assert_eq!(c.find_port_for_tetra(42).unwrap().id, second);
+        assert!(c.release_specific_port(second, u64::MAX).is_err());
+        assert_eq!(c.find_port_for_tetra(42).unwrap().id, second);
+
+        c.release_specific_port(first, u64::MAX).unwrap();
+        assert!(c
+            .all_ports()
+            .iter()
+            .find(|p| p.id == first)
+            .unwrap()
+            .is_free());
+        assert_eq!(c.find_port_for_tetra(42).unwrap().id, second);
     }
 
     #[test]

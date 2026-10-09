@@ -14,6 +14,19 @@ pub struct EmbeddingService {
 }
 
 impl EmbeddingService {
+    #[cfg(test)]
+    pub(crate) fn disabled_for_test() -> Self {
+        Self {
+            client: ureq::AgentBuilder::new().build(),
+            api_key: String::new(),
+            api_url: String::new(),
+            model: String::new(),
+            enabled: false,
+            cache: Mutex::new(std::collections::HashMap::new()),
+            cache_order: Mutex::new(Vec::new()),
+        }
+    }
+
     pub fn from_env() -> Self {
         let api_url = std::env::var("EMBEDDING_API_URL")
             .unwrap_or_else(|_| DEFAULT_EMBEDDING_URL.to_string());
