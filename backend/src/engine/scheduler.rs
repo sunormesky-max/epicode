@@ -239,6 +239,8 @@ pub struct SchedulerCenter {
     outcome: ParkMutex<OutcomeTracker>,
     adaptive: ParkMutex<AdaptiveParams>,
     last_merge_pairs: ParkMutex<HashSet<(usize, usize)>>,
+    /// 冷记忆复习冷却:tetra → 最近一次送审时间(秒)。过期条目在每次复习时清理,规模有界。
+    cold_reviewed_at: ParkMutex<HashMap<TetraId, i64>>,
     feedback_agg_cache: ParkMutex<Option<(usize, std::time::Instant, HashSet<u64>)>>,
     skill_feedback_agg_cache: ParkMutex<Option<(usize, std::time::Instant, HashSet<u64>)>>,
     drive_queue: Arc<super::drive::DriveQueue>,
@@ -325,6 +327,7 @@ impl SchedulerCenter {
             outcome: ParkMutex::new(OutcomeTracker::new()),
             adaptive: ParkMutex::new(AdaptiveParams::new()),
             last_merge_pairs: ParkMutex::new(HashSet::new()),
+            cold_reviewed_at: ParkMutex::new(HashMap::new()),
             feedback_agg_cache: ParkMutex::new(None),
             skill_feedback_agg_cache: ParkMutex::new(None),
             drive_queue: Arc::new(super::drive::DriveQueue::new()),
@@ -3398,12 +3401,31 @@ impl SchedulerCenter {
 
     /// P2: dream复习相 — 78%记忆从未被检索命中, 沉默老化未经价值验证
     /// 采样cold记忆→LLM判断→有值标记reviewed+升importance / 无值降权
+    ///
+    /// 每条记忆在冷却期内只复习一次:以前同一批(list_nodes 顺序的前 10 条)每次都被重新抽中,
+    /// KEEP 每轮 +0.3 直到封顶、FADE 每轮减半直到跌出候选 —— 一次判断被重复施加多次,
+    /// 其余冷记忆永远轮不到。
     fn review_cold_memories(&self) -> usize {
+        /// 同一条冷记忆两次复习之间的最短间隔(7 天)。
+        const COLD_REVIEW_COOLDOWN_SECS: i64 = 7 * 86_400;
+        let now = chrono::Utc::now().timestamp();
+        let recently_reviewed = {
+            let mut map = self.cold_reviewed_at.lock();
+            map.retain(|_, at| now - *at < COLD_REVIEW_COOLDOWN_SECS);
+            map.keys().copied().collect::<HashSet<TetraId>>()
+        };
         let cold: Vec<(u64, String)> = self
             .gateway
             .list_nodes()
             .into_iter()
-            .filter(|(_, p)| p.valid_to.is_none() && p.importance > 0.1 && p.access_count == 0)
+            .filter(|(id, p)| {
+                p.valid_to.is_none()
+                    && p.importance > 0.1
+                    && p.access_count == 0
+                    && !recently_reviewed.contains(id)
+                    && p.last_reviewed_ts
+                        .is_none_or(|ts| now - ts >= COLD_REVIEW_COOLDOWN_SECS)
+            })
             .take(10)
             .map(|(id, p)| (id, p.content.chars().take(200).collect()))
             .collect();
@@ -3423,6 +3445,13 @@ impl SchedulerCenter {
         };
 
         let mut reviewed = 0;
+        {
+            // 已送审即进入冷却(含模型未给出判断的条目),避免下一轮又抽到同一批
+            let mut map = self.cold_reviewed_at.lock();
+            for (id, _) in &cold {
+                map.insert(*id, now);
+            }
+        }
         for (id, _) in &cold {
             let keep = response.contains(&format!("#{}:KEEP", id))
                 || response.contains(&format!("{}: KEEP", id));
@@ -3432,9 +3461,12 @@ impl SchedulerCenter {
                 // 有价值: 标记已复习+提升importance
                 if let Some(t) = self.space.get_tetrahedron(*id) {
                     let mut d = t.data.clone();
-                    d.last_reviewed_ts = Some(chrono::Utc::now().timestamp());
+                    d.last_reviewed_ts = Some(now);
                     d.importance = (d.importance + 0.3).min(3.0);
                     let _ = self.space.update_payload(*id, d);
+                    if let Some(t) = self.space.get_tetrahedron(*id) {
+                        let _ = self.storage.upsert_tetra(&t);
+                    }
                     reviewed += 1;
                 }
             } else if fade {
@@ -3443,6 +3475,9 @@ impl SchedulerCenter {
                     let mut d = t.data.clone();
                     d.importance = (d.importance * 0.5).max(0.05);
                     let _ = self.space.update_payload(*id, d);
+                    if let Some(t) = self.space.get_tetrahedron(*id) {
+                        let _ = self.storage.upsert_tetra(&t);
+                    }
                     reviewed += 1;
                 }
             }
@@ -7407,6 +7442,93 @@ mod tests {
     }
 
     // ---- Test: generate_aliases doesn't crash with snapshot ----
+
+    /// Reproduction: the same first 10 cold memories were re-sampled on every
+    /// review, so one KEEP verdict was applied again and again (importance
+    /// ratcheted to the 3.0 cap) and the remaining cold memories were never seen.
+    #[test]
+    fn cold_review_applies_each_verdict_once_and_covers_all_cold_memories() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let stop = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = {
+            let (stop, calls) = (Arc::clone(&stop), Arc::clone(&calls));
+            std::thread::spawn(move || {
+                let verdicts: String = (0..64).map(|i| format!("#{i}:KEEP\\n")).collect();
+                let body = format!(r#"{{"choices":[{{"message":{{"content":"{verdicts}"}}}}]}}"#);
+                while !stop.load(Ordering::Relaxed) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            calls.fetch_add(1, Ordering::Relaxed);
+                            let _ = stream.set_nonblocking(false);
+                            let _ =
+                                stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+                            let mut request = [0u8; 65536];
+                            let _ = stream.read(&mut request);
+                            let response = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                body.len(),
+                                body
+                            );
+                            let _ = stream.write_all(response.as_bytes());
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(std::time::Duration::from_millis(2));
+                        }
+                        Err(e) => panic!("model fixture failed: {e}"),
+                    }
+                }
+            })
+        };
+        let cognitive = Arc::new(CognitiveEngine::with_base(
+            "test-key",
+            "test-model",
+            &base_url,
+        ));
+        let (scheduler, space, _) = build_scheduler_with_cognitive(cognitive);
+        let ids: Vec<TetraId> = (0..30)
+            .map(|i| {
+                add_tetra_to_space(
+                    &space,
+                    Point3 {
+                        x: 20.0 * i as f64,
+                        y: 7.0,
+                        z: 3.0,
+                    },
+                    &format!("cold memory {i}"),
+                    vec!["note".into()],
+                )
+            })
+            .collect();
+        let rounds = 10;
+        let reviewed: usize = (0..rounds).map(|_| scheduler.review_cold_memories()).sum();
+        stop.store(true, Ordering::Relaxed);
+        server.join().unwrap();
+
+        let importances: Vec<f64> = ids
+            .iter()
+            .map(|id| space.get_tetrahedron(*id).unwrap().data.importance)
+            .collect();
+        let max = importances.iter().cloned().fold(0.0, f64::max);
+        let covered = importances.iter().filter(|v| **v > 1.0).count();
+        eprintln!(
+            "R11COLD rounds={rounds} model_calls={} reviewed={reviewed} covered={covered}/30 max_importance={max:.2}",
+            calls.load(Ordering::Relaxed)
+        );
+        assert_eq!(covered, 30, "every cold memory reviewed once");
+        assert!(
+            (max - 1.3).abs() < 1e-9,
+            "one KEEP verdict = one +0.3 boost"
+        );
+        assert_eq!(reviewed, 30);
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            3,
+            "no model call once nothing is due"
+        );
+    }
 
     #[test]
     fn generate_aliases_with_snapshot() {
