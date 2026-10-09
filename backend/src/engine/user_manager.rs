@@ -212,6 +212,9 @@ impl UserRole {
             LibraryManage,
             SubaccountManage,
             ApiKeyManage,
+            ThemeCustom,
+            MemoryOutputControl,
+            PermissionEdit,
         ];
         all.iter().copied().filter(|p| self.can(*p)).collect()
     }
@@ -286,6 +289,18 @@ impl UserInfo {
             .filter(|p| self.allows(*p))
             .map(Permission::as_str)
             .collect()
+    }
+
+    pub fn can_customize_theme(&self) -> bool {
+        self.plan.allows_theme_custom() && self.allows(Permission::ThemeCustom)
+    }
+
+    pub fn can_control_memory_output(&self) -> bool {
+        !matches!(&self.plan, UserPlan::Free) && self.allows(Permission::MemoryOutputControl)
+    }
+
+    pub fn can_edit_permissions(&self) -> bool {
+        !matches!(&self.plan, UserPlan::Free) && self.allows(Permission::PermissionEdit)
     }
 }
 
@@ -943,7 +958,7 @@ impl UserManager {
         }))
     }
 
-    /// 账户设置写入(计划门控: Free不可写theme_custom_css)
+    /// Account settings: paid-plan and role grants are both required for protected fields.
     pub fn set_user_settings(
         &self,
         user_id: &str,
@@ -961,18 +976,33 @@ impl UserManager {
         let obj = cur.as_object_mut().ok_or("settings corrupt")?;
         if let Some(patch_obj) = patch.as_object() {
             for (k, v) in patch_obj {
-                // 计划门控: Free 只能换主题, 不能带自定义CSS
-                if k == "theme_custom_css" && !u.plan.allows_theme_custom() {
-                    let css = v.as_str().unwrap_or("");
-                    if !css.trim().is_empty() {
-                        return Err("theme customization requires a paid plan".into());
+                // Removing custom CSS remains available after a plan or permission downgrade.
+                if k == "theme_custom_css" {
+                    let css = v.as_str().ok_or("theme_custom_css must be a string")?;
+                    if !css.trim().is_empty() && !u.can_customize_theme() {
+                        return Err(
+                            "theme customization requires a paid plan and permission".into()
+                        );
                     }
                 }
                 if k == "theme" {
-                    let id = v.as_str().unwrap_or("synapse");
-                    // 免费用户只能选内置主题(非custom前缀)
-                    if id.starts_with("custom:") && !u.plan.allows_theme_custom() {
-                        return Err("custom themes require a paid plan".into());
+                    let id = v.as_str().ok_or("theme must be a string")?;
+                    if id.starts_with("custom:") && !u.can_customize_theme() {
+                        return Err("custom themes require a paid plan and permission".into());
+                    }
+                }
+                if k == "memory_output" {
+                    if !u.can_control_memory_output() {
+                        return Err(
+                            "memory output control requires a paid plan and permission".into()
+                        );
+                    }
+                    let mode = v
+                        .get("mode")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or("memory_output.mode must be a string")?;
+                    if !matches!(mode, "full" | "truncated" | "summary") {
+                        return Err("unsupported memory_output.mode".into());
                     }
                 }
                 obj.insert(k.clone(), v.clone());
@@ -1010,8 +1040,8 @@ impl UserManager {
         };
         let mut db = self.users_db.write();
         let actor = db.get(actor_id).ok_or("actor not found")?.clone();
-        if actor.parent.is_some() {
-            return Err("only the main account can edit permissions".into());
+        if !actor.can_edit_permissions() {
+            return Err("permission editing requires a paid main account".into());
         }
         let sub = db.get_mut(sub_user_id).ok_or("sub-account not found")?;
         if sub.parent.is_none() {
@@ -1800,12 +1830,18 @@ mod rbac_tests {
             (UserRole::Admin, LibraryManage, true),
             (UserRole::Admin, SubaccountManage, true),
             (UserRole::Admin, ApiKeyManage, true),
+            (UserRole::Admin, ThemeCustom, true),
+            (UserRole::Admin, MemoryOutputControl, true),
+            (UserRole::Admin, PermissionEdit, false),
             (UserRole::Developer, MemoryDelete, true),
             (UserRole::Developer, PersonaImport, true),
             (UserRole::Developer, SkillManage, true),
             (UserRole::Developer, LibraryManage, true),
             (UserRole::Developer, SubaccountManage, false),
             (UserRole::Developer, ApiKeyManage, true),
+            (UserRole::Developer, ThemeCustom, true),
+            (UserRole::Developer, MemoryOutputControl, true),
+            (UserRole::Developer, PermissionEdit, false),
             (UserRole::Tester, MemoryRead, true),
             (UserRole::Tester, MemoryWrite, true),
             (UserRole::Tester, MemoryDelete, false),
@@ -1814,6 +1850,8 @@ mod rbac_tests {
             (UserRole::Tester, LibraryManage, false),
             (UserRole::Tester, SubaccountManage, false),
             (UserRole::Tester, ApiKeyManage, true),
+            (UserRole::Tester, ThemeCustom, false),
+            (UserRole::Tester, MemoryOutputControl, false),
             (UserRole::Viewer, MemoryRead, true),
             (UserRole::Viewer, MemoryWrite, false),
             (UserRole::Viewer, MemoryDelete, false),
@@ -1822,6 +1860,8 @@ mod rbac_tests {
             (UserRole::Viewer, LibraryManage, false),
             (UserRole::Viewer, SubaccountManage, false),
             (UserRole::Viewer, ApiKeyManage, false),
+            (UserRole::Viewer, ThemeCustom, false),
+            (UserRole::Viewer, MemoryOutputControl, false),
         ];
         for (role, perm, expect) in cases {
             assert_eq!(
@@ -1831,6 +1871,13 @@ mod rbac_tests {
                 role,
                 perm,
                 expect
+            );
+            assert_eq!(
+                role.permissions().contains(perm),
+                *expect,
+                "{:?}.permissions() disagrees with can({:?})",
+                role,
+                perm
             );
         }
     }
@@ -1873,6 +1920,138 @@ mod rbac_tests {
         assert!(user.allows(Permission::PermissionEdit));
     }
 
+    #[test]
+    fn settings_fields_require_both_plan_and_effective_permission() {
+        fn user(
+            id: &str,
+            parent: Option<&str>,
+            role: &str,
+            plan: &str,
+            grants: Option<Vec<&str>>,
+        ) -> UserInfo {
+            serde_json::from_value(serde_json::json!({
+                "user_id": id,
+                "api_key": format!("key-{id}"),
+                "plan": plan,
+                "max_memories": 0,
+                "memories_used": 0,
+                "created_at": 1,
+                "parent": parent,
+                "role": role,
+                "custom_permissions": grants,
+            }))
+            .unwrap()
+        }
+
+        let dir = std::env::temp_dir().join(format!("epicode_settings_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = UserManager::new(&dir);
+        {
+            let mut users = manager.users_db.write();
+            users.insert("owner".into(), user("owner", None, "admin", "Free", None));
+            users.insert(
+                "viewer".into(),
+                user("viewer", Some("owner"), "viewer", "Pro", None),
+            );
+            users.insert(
+                "developer".into(),
+                user("developer", Some("owner"), "developer", "Pro", None),
+            );
+            users.insert(
+                "revoked".into(),
+                user("revoked", Some("owner"), "developer", "Pro", Some(vec![])),
+            );
+            users.insert(
+                "granted".into(),
+                user(
+                    "granted",
+                    Some("owner"),
+                    "viewer",
+                    "Pro",
+                    Some(vec!["theme_custom", "memory_output_control"]),
+                ),
+            );
+        }
+
+        assert!(manager
+            .set_user_settings("viewer", serde_json::json!({"theme": "aurora"}))
+            .is_ok());
+        for id in ["viewer", "revoked"] {
+            assert!(manager
+                .set_user_settings(
+                    id,
+                    serde_json::json!({"theme_custom_css": "body { color: red }"})
+                )
+                .is_err());
+            assert!(manager
+                .set_user_settings(id, serde_json::json!({"theme": "custom:one"}))
+                .is_err());
+            assert!(manager
+                .set_user_settings(
+                    id,
+                    serde_json::json!({"memory_output": {"mode": "summary"}})
+                )
+                .is_err());
+            assert_eq!(
+                manager.get_user_settings(id).unwrap()["memory_output"]["mode"],
+                "full"
+            );
+            assert!(manager
+                .set_user_settings(
+                    id,
+                    serde_json::json!({"theme_custom_css": {"css": "body {}"}})
+                )
+                .is_err());
+        }
+        for id in ["developer", "granted"] {
+            assert!(manager
+                .set_user_settings(
+                    id,
+                    serde_json::json!({"theme_custom_css": "body { color: red }"})
+                )
+                .is_ok());
+            assert!(manager
+                .set_user_settings(id, serde_json::json!({"theme": "custom:one"}))
+                .is_ok());
+            assert!(manager
+                .set_user_settings(
+                    id,
+                    serde_json::json!({"memory_output": {"mode": "summary"}})
+                )
+                .is_ok());
+            assert!(manager
+                .set_user_settings(
+                    id,
+                    serde_json::json!({"memory_output": {"mode": "unknown"}})
+                )
+                .is_err());
+        }
+        assert!(manager
+            .set_user_settings(
+                "owner",
+                serde_json::json!({"theme_custom_css": "body { color: red }"})
+            )
+            .is_err());
+        assert!(manager
+            .set_user_settings(
+                "owner",
+                serde_json::json!({"memory_output": {"mode": "summary"}})
+            )
+            .is_err());
+        assert!(manager
+            .set_user_settings("owner", serde_json::json!({"theme_custom_css": ""}))
+            .is_ok());
+        assert!(manager
+            .set_subaccount_permissions("owner", "viewer", Some(vec!["memory_read".into()]))
+            .is_err());
+        manager.users_db.write().get_mut("owner").unwrap().plan = UserPlan::Pro;
+        assert!(manager
+            .set_subaccount_permissions("owner", "viewer", Some(vec!["memory_read".into()]))
+            .is_ok());
+        drop(manager);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// 角色序列化往返 + parse
     #[test]
     fn role_serde_roundtrip() {
@@ -1903,7 +2082,7 @@ mod rbac_tests {
                 assert!(r.can(p), "{:?} listed {:?} but can()=false", r, p);
             }
         }
-        assert_eq!(UserRole::Admin.permissions().len(), 8);
+        assert_eq!(UserRole::Admin.permissions().len(), 10);
         assert_eq!(UserRole::Viewer.permissions().len(), 1);
     }
 

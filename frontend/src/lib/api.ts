@@ -1145,7 +1145,7 @@ export interface UserSettings {
   [k: string]: unknown;
 }
 
-export function getUserSettings(): Promise<{ settings: UserSettings; plan: string; can_theme_custom: boolean }> {
+export function getUserSettings(): Promise<{ settings: UserSettings; plan: string; can_theme_custom: boolean; can_memory_output_control: boolean; can_permission_edit: boolean }> {
   return request('/v1/settings', { skipCache: true });
 }
 

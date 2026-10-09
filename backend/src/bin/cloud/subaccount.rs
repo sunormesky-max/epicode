@@ -201,7 +201,9 @@ pub async fn get_user_settings(
                 serde_json::json!({
                     "settings": settings,
                     "plan": serde_json::to_value(&user.plan).unwrap_or_default(),
-                    "can_theme_custom": user.plan.allows_theme_custom(),
+                    "can_theme_custom": user.can_customize_theme(),
+                    "can_memory_output_control": user.can_control_memory_output(),
+                    "can_permission_edit": user.can_edit_permissions(),
                 }),
             )),
         ),
@@ -322,6 +324,12 @@ pub async fn set_subaccount_permissions(
 ) -> (StatusCode, Json<serde_json::Value>) {
     if let Some(r) = require_perm(&user, Permission::PermissionEdit) {
         return r;
+    }
+    if !user.can_edit_permissions() {
+        return forbidden(
+            "subaccount_set_permissions",
+            "permission editing requires a paid plan",
+        );
     }
     match st
         .user_mgr
