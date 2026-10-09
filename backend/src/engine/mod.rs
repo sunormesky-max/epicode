@@ -265,6 +265,13 @@ impl Engine {
         });
 
         let report = storage.load_all(&space, &knowledge);
+        assert!(
+            report.space_ok,
+            "[{}] refused to start with an incomplete memory load: {}",
+            uid,
+            report.space_error.as_deref().unwrap_or("unknown error")
+        );
+
         // Geometric Port anchors are rebuilt by load_all. Existing orphan
         // clusters need their logical entry edges before any API call, including
         // in quiet mode where start() is never used.
