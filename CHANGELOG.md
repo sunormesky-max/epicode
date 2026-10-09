@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.2](https://github.com/sunormesky-max/epicode/compare/v1.8.1...v1.8.2) (2026-10-09)
+
+
+### Bug Fixes
+
+* **guard:** preserve state across failures and manual commands ([#233](https://github.com/sunormesky-max/epicode/issues/233)) ([b12d32b](https://github.com/sunormesky-max/epicode/commit/b12d32b8a3bac64c419c0db62d2232c21110be9a))
+
 ## [1.8.1](https://github.com/sunormesky-max/epicode/compare/v1.8.0...v1.8.1) (2026-10-09)
 
 

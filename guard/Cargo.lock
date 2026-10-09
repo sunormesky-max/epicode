@@ -140,7 +140,7 @@ dependencies = [
 
 [[package]]
 name = "epicode-guard"
-version = "1.8.1"
+version = "1.8.2"
 dependencies = [
  "chrono",
  "fs2",
