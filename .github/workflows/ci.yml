@@ -148,6 +148,8 @@ jobs:
           key: ${{ runner.os }}-guard-cargo-${{ hashFiles('guard/Cargo.lock') }}
       - name: Check formatting
         run: cargo fmt --all --check
+      - name: Check installer syntax
+        run: bash -n install.sh
       - name: Run clippy
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Check build

@@ -23,13 +23,23 @@ if ! command -v nft >/dev/null 2>&1; then
     exit 1
 fi
 
-# Clean up any legacy v2 ipset + firewalld rich rule from previous installs.
-ipset destroy epicode-ban 2>/dev/null || true
-LEGACY_RULE=$(firewall-cmd --list-rich-rules 2>/dev/null | grep 'ipset=epicode-ban' || true)
-if [ -n "$LEGACY_RULE" ]; then
-    firewall-cmd --permanent --remove-rich-rule="$LEGACY_RULE" 2>/dev/null || true
-    firewall-cmd --reload 2>/dev/null || true
-    echo "  Removed legacy v2 firewalld ipset rich rule"
+# Remove only Epicode's named v2 rule, one rule at a time, from both runtime
+# and permanent configuration. A blanket reload would also reset unrelated
+# runtime firewall changes made by the operator.
+if command -v firewall-cmd >/dev/null 2>&1; then
+    for mode in runtime permanent; do
+        args=()
+        if [ "$mode" = permanent ]; then args=(--permanent); fi
+        while IFS= read -r rule; do
+            if [[ ( "$rule" == *'source ipset=epicode-ban'* || "$rule" == *'source ipset="epicode-ban"'* ) && "$rule" == *' drop' ]]; then
+                firewall-cmd "${args[@]}" --remove-rich-rule="$rule"
+                echo "  Removed legacy v2 $mode rule: $rule"
+            fi
+        done < <(firewall-cmd "${args[@]}" --list-rich-rules 2>/dev/null)
+    done
+fi
+if command -v ipset >/dev/null 2>&1; then
+    ipset destroy epicode-ban 2>/dev/null || true
 fi
 
 echo "[4] Installing systemd service..."
