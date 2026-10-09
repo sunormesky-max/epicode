@@ -3,6 +3,7 @@ import { AUTH_CHANGE_EVENT, isAuthenticated, mintStreamTicket } from '@/lib/api'
 import { createTicketedEventStream } from '@/lib/cognitive-stream';
 import { publishCognitiveState } from './cognitive-context';
 import type { CognitiveState } from './cognitive-context';
+import { currentPageTitle, isConsolePath } from '@/lib/page-meta';
 
 /**
  * 意识地平线 — Consciousness Horizon
@@ -423,7 +424,6 @@ export default function NeuralNetworkBackground() {
     document.addEventListener('visibilitychange', onVis);
 
     // SSE tickets are one-use, so every reconnect mints a fresh ticket.
-    const originalTitle = document.title;
     const stream = createTicketedEventStream({
       requestTicket: mintStreamTicket,
       canConnect: isAuthenticated,
@@ -445,7 +445,10 @@ export default function NeuralNetworkBackground() {
             sysState.current.connected = true;
           }
           if (d.cognitive_status) {
-            document.title = "epicode :: " + d.cognitive_status + " :: e=" + (d.energy || 0);
+            // 实时认知状态只在控制台占用标签页标题;官网页面保留各自的页面标题(SEO / 读屏)
+            if (isConsolePath(window.location.hash.replace(/^#/, ''))) {
+              document.title = "epicode :: " + d.cognitive_status + " :: e=" + (d.energy || 0);
+            }
             const cognitiveData: CognitiveState = {
               energy: d.energy ?? 0,
               memories: d.memories ?? 0,
@@ -468,7 +471,7 @@ export default function NeuralNetworkBackground() {
     const resetUserState = () => {
       sysState.current = { energy: 1.0, memories: 0, pulseIntensity: 0.25, connected: false };
       driveFlash.current = 0;
-      document.title = originalTitle;
+      document.title = currentPageTitle();
       window.dispatchEvent(new CustomEvent('drive-update', { detail: { signals: [] } }));
     };
     const onAuthChange = (event: Event) => {
