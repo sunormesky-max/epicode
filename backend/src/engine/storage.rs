@@ -2504,7 +2504,7 @@ mod tests {
             let mut tetra = make_tetra(id, &format!("memory_{id}"), 1.0);
             tetra.data.labels = vec!["rust".to_string()];
             let positions = Tetrahedron::compute_vertices(tetra.core);
-            space.add_tetrahedron(&tetra, &positions).unwrap();
+            space.add_tetrahedron_with_id(&tetra, &positions).unwrap();
         }
         storage.save_space_only(&space).unwrap();
 
