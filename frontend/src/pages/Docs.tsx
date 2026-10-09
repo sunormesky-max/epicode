@@ -1,266 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router';
 import { motion } from 'framer-motion';
 import Layout from '@/components/Layout';
-import { ArrowRight, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronRight, Copy, Check, Search, X } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
 import { copyText } from '@/lib/clipboard';
 import type { TranslationKey } from '@/i18n/translations';
-
-interface Endpoint {
-  method: string;
-  path: string;
-  descKey: string;
-  auth: boolean;
-  body?: string;
-  response?: string;
-}
-
-const API_SECTIONS: { titleKey: string; descKey: string; endpoints: Endpoint[] }[] = [
-  {
-    titleKey: 'docs.section.auth.title',
-    descKey: 'docs.section.auth.desc',
-    endpoints: [
-      {
-        method: 'POST', path: '/register', descKey: 'docs.section.auth.ep1.desc',
-        auth: false,
-        body: '{ "user_id": "alice", "password": "secret" }',
-        response: '{ "success": true, "user_id": "alice", "api_key": "tm-...", "plan": "Free" }',
-      },
-      {
-        method: 'POST', path: '/v1/login', descKey: 'docs.section.auth.ep2.desc',
-        auth: false,
-        body: '{ "user_id": "alice", "password": "secret" }',
-        response: 'JSON: { "success": true, "user_id": "alice", "plan": "Free", "max_memories": 100 }\nSet-Cookie: epicode_session=<HttpOnly; Secure; SameSite=Strict>',
-      },
-    ],
-  },
-  {
-    titleKey: 'docs.section.memory.title',
-    descKey: 'docs.section.memory.desc',
-    endpoints: [
-      {
-        method: 'POST', path: '/v1/remember', descKey: 'docs.section.memory.ep1.desc',
-        auth: true,
-        body: '{ "content": "用户偏好深色模式", "labels": ["preference"] }',
-        response: '{ "protocol": {"ok": true, "schema_version": "1.0"}, "data": {"status": "created", "id": 42, "placement": {"layer": "cognitive", "has_port": true}}, "status": {...} }',
-      },
-      {
-        method: 'POST', path: '/v1/search', descKey: 'docs.section.memory.ep2.desc',
-        auth: true,
-        body: '{ "query": "用户偏好", "limit": 10 }',
-        response: '{ "results": [{ "id": 42, "content": "...", "similarity": 0.87, "matched_by": ["bm25"] }], "tiers": {}, "score_notes": { "base": "..." } }',
-      },
-      {
-        method: 'POST', path: '/v1/recall', descKey: 'docs.section.memory.ep3.desc',
-        auth: true,
-        body: '{ "query": "用户偏好", "depth": 2 }',
-        response: '{ "query": "...", "tiers": { "primary": [], "hub": [], "experiential": [], "contextual": [] }, "sections": { "general": [] } }',
-      },
-      {
-        method: 'POST', path: '/v1/ask', descKey: 'docs.section.memory.ep4.desc',
-        auth: true,
-        body: '{ "question": "用户的 UI 偏好是什么？" }',
-        response: '{ "answer": "...", "memories": [{ "id": 1, "content": "...", "relevance": 0.8 }], "memory_count": 1 }',
-      },
-      {
-        method: 'POST', path: '/v1/digest', descKey: 'docs.section.memory.ep5.desc',
-        auth: true,
-        body: '{ "content": "很长的文本内容..." }',
-        response: '{ "total_chunks": 5, "memories_created": 5, "ids": [50,51,52,53,54] }',
-      },
-      {
-        method: 'GET', path: '/v1/timeline', descKey: 'docs.section.memory.ep6.desc',
-        auth: true,
-        body: '?limit=20&offset=0',
-        response: '{ "success": true, "total": 365, "events": [...] }',
-      },
-      {
-        method: 'DELETE', path: '/v1/memories/:id', descKey: 'docs.section.memory.ep7.desc',
-        auth: true,
-        response: '{ "forgotten": 42, "mode": "forget", "valid_to": 1786970000 }',
-      },
-      {
-        method: 'POST', path: '/v1/memories/batch-delete', descKey: 'docs.section.memory.ep8.desc',
-        auth: true,
-        body: '{ "ids": [1, 2, 3] }',
-        response: '{ "forgotten": [1, 2, 3], "forgotten_count": 3, "mode": "forget" }',
-      },
-    ],
-  },
-  {
-    titleKey: 'docs.section.docs.title',
-    descKey: 'docs.section.docs.desc',
-    endpoints: [
-      {
-        method: 'POST', path: '/v1/docs/import', descKey: 'docs.section.docs.ep1.desc',
-        auth: true,
-        body: '{ "name": "ARCHITECTURE", "content": "# Title\\n..." }',
-        response: '{ "success": true, "document": "ARCHITECTURE", "id": 660, "chars": 6740 }',
-      },
-      {
-        method: 'GET', path: '/v1/docs', descKey: 'docs.section.docs.ep2.desc',
-        auth: true,
-        response: '{ "success": true, "documents": 3, "docs": [{"id":660,"name":"ARCHITECTURE","chars":6740,"preview":"..."}] }',
-      },
-    ],
-  },
-  {
-    titleKey: 'docs.section.stats.title',
-    descKey: 'docs.section.stats.desc',
-    endpoints: [
-      {
-        method: 'GET', path: '/v1/stats', descKey: 'docs.section.stats.ep1.desc',
-        auth: true,
-        response: '{ "memories_used": 454, "clusters": 48, "energy": 10000, "plan": "Enterprise" }',
-      },
-      {
-        method: 'GET', path: '/v1/graph/export', descKey: 'docs.section.stats.ep2.desc',
-        auth: true,
-        response: '{ "nodes": [...], "edges": [...], "clusters": [...], "total_nodes": 365 }',
-      },
-      {
-        method: 'GET', path: '/v1/graph/analysis', descKey: 'docs.section.stats.ep3.desc',
-        auth: true,
-        response: '{ "cluster_count": 48, "concept_count": 12, "total_memories": 454 }',
-      },
-      {
-        method: 'POST', path: '/v1/knowledge', descKey: 'docs.section.stats.ep4.desc',
-        auth: true,
-        body: '{ "id": 42 }',
-        response: '{ "success": true, "id": 42, "relations": 5, "details": [...] }',
-      },
-    ],
-  },
-  {
-    titleKey: 'docs.section.realtime.title',
-    descKey: 'docs.section.realtime.desc',
-    endpoints: [
-      {
-        method: 'POST', path: '/v1/stream/ticket', descKey: 'docs.section.realtime.ep1.desc',
-        auth: true,
-        response: '{ "success": true, "ticket": "<one-use-ticket>", "expires_in": 120 }',
-      },
-      {
-        method: 'GET', path: '/v1/stream?ticket=YOUR_ONE_USE_TICKET', descKey: 'docs.section.realtime.ep2.desc',
-        auth: true,
-        response: 'text/event-stream — request a fresh ticket for every reconnect',
-      },
-    ],
-  },
-  {
-    titleKey: 'docs.section.drive.title',
-    descKey: 'docs.section.drive.desc',
-    endpoints: [
-      {
-        method: 'GET', path: '/v1/drive/inbox', descKey: 'docs.section.drive.ep1.desc',
-        auth: true,
-        response: 'SMRP envelope: data = { "signals": [DriveSignal + "retryable" + optional "grounding"], "stats": {...}, "empty_reason": "has_signals" | "no_signals" | "no_pending" }',
-      },
-      {
-        method: 'POST', path: '/v1/drive/ack', descKey: 'docs.section.drive.ep2.desc',
-        auth: true,
-        body: '{ "drive_id": 1, "executed": true, "outcome": "Completed", "reflection": "Optional quality feedback" }',
-        response: 'SMRP envelope: data includes drive_id, acknowledged, first_ack, and learned',
-      },
-      {
-        method: 'POST', path: '/v1/runtime/register', descKey: 'docs.section.drive.ep3.desc',
-        auth: true,
-        body: '{ "agent_id": "my-agent", "capabilities": ["ack"], "e2e_enabled": false }',
-        response: 'SMRP envelope when an engine is loaded; otherwise the registration payload is returned directly.',
-      },
-      {
-        method: 'GET', path: '/v1/runtime/status', descKey: 'docs.section.drive.ep5.desc',
-        auth: true,
-        response: 'SMRP envelope when an engine is loaded; otherwise { "bound": true, "agent_id": "my-agent", "e2e_enabled": false, "capabilities": ["ack"], "expired": false } is returned directly.',
-      },
-      {
-        method: 'POST', path: '/v1/runtime/heartbeat', descKey: 'docs.section.drive.ep4.desc',
-        auth: true,
-        response: 'SMRP envelope when an engine is loaded; otherwise { "success": true, "timestamp": 1780000000 } is returned directly. success is false when no binding exists.',
-      },
-      {
-        method: 'POST', path: '/v1/runtime/unregister', descKey: 'docs.section.drive.ep6.desc',
-        auth: true,
-        response: 'SMRP envelope when an engine is loaded; otherwise { "success": true, "removed": true } is returned directly.',
-      },
-    ],
-  },
-  {
-    titleKey: 'docs.section.protocol.title',
-    descKey: 'docs.section.protocol.desc',
-    endpoints: [
-      {
-        method: 'GET', path: '/v1/smrp', descKey: 'docs.section.protocol.ep1.desc',
-        auth: false,
-        response: 'text/html; charset=utf-8 — canonical SMRP 1.0 specification',
-      },
-    ],
-  },
-  {
-    titleKey: 'docs.section.identity.title',
-    descKey: 'docs.section.identity.desc',
-    endpoints: [
-      {
-        method: 'GET', path: '/v1/identity', descKey: 'docs.section.identity.ep1.desc',
-        auth: true,
-        response: '{ "success": true, "confirmed": true, "identity": { "name": "David" } }',
-      },
-      {
-        method: 'POST', path: '/v1/identity/confirm', descKey: 'docs.section.identity.ep2.desc',
-        auth: true,
-        body: '{ "name": "David", "mission": "...", "author": "..." }',
-        response: '{ "success": true, "identity": { "name": "David", "confirmed": true } }',
-      },
-      {
-        method: 'PUT', path: '/v1/identity', descKey: 'docs.section.identity.ep3.desc',
-        auth: true,
-        body: '{ "name": "David", "mission": "新使命" }',
-        response: '{ "success": true, "identity": { ... } }',
-      },
-    ],
-  },
-  {
-    titleKey: 'docs.section.mcp.title',
-    descKey: 'docs.section.mcp.desc',
-    endpoints: [
-      {
-        method: 'POST', path: '/mcp', descKey: 'docs.section.mcp.ep1.desc',
-        auth: true,
-        body: '{ "jsonrpc": "2.0", "method": "tools/call", "params": { "name": "memory_search", "arguments": { "query": "..." } }, "id": 1 }',
-        response: '{ "jsonrpc": "2.0", "id": 1, "result": { "content": [{ "type": "text", "text": "{...}" }] } }',
-      },
-      {
-        method: 'POST', path: '/mcp', descKey: 'docs.section.mcp.ep2.desc',
-        auth: true,
-        body: '{ "jsonrpc": "2.0", "method": "tools/call", "params": { "name": "skill_execute", "arguments": { "query": "error handling", "context": "Rust project" } }, "id": 2 }',
-        response: '{ "result": { "content": [{ "type": "text", "text": "Skill content with frontmatter..." }] } }',
-      },
-      {
-        method: 'POST', path: '/mcp', descKey: 'docs.section.mcp.ep3.desc',
-        auth: true,
-        body: '{ "jsonrpc": "2.0", "method": "tools/call", "params": { "name": "skill_feedback", "arguments": { "skill_id": 900031, "helpful": true } }, "id": 3 }',
-        response: '{ "result": { "content": [{ "type": "text", "text": "Feedback recorded. skill updated." }] } }',
-      },
-      {
-        method: 'POST', path: '/mcp', descKey: 'docs.section.mcp.ep4.desc',
-        auth: true,
-        body: '{ "jsonrpc": "2.0", "method": "tools/call", "params": { "name": "skills_sync", "arguments": { "format": "opencode" } }, "id": 4 }',
-        response: '{ "result": { "content": [{ "type": "text", "text": "[{\\"name\\":\\"...\\",\\"slug\\":\\"...\\",\\"content\\":\\"---\\ncategory: ...\\n---\\n# Skill content\\"}]" }] } }',
-      },
-      {
-        method: 'POST', path: '/mcp', descKey: 'docs.section.mcp.ep5.desc',
-        auth: true,
-        body: '{ "jsonrpc": "2.0", "method": "tools/call", "params": { "name": "feedback_submit", "arguments": { "memory_ids": [1,2], "relevance": "highly_relevant", "outcome": "task_completed" } }, "id": 5 }',
-        response: '{ "result": { "content": [{ "type": "text", "text": "Feedback submitted successfully." }] } }',
-      },
-      {
-        method: 'GET', path: '/v1/agent-guide', descKey: 'docs.section.mcp.ep6.desc',
-        auth: false,
-        response: '# Epicode Agent Guide\n...',
-      },
-    ],
-  },
-];
+import { API_SECTIONS, endpointAnchor, type Endpoint } from '@/lib/docs-endpoints';
+import { filterEndpoints } from '@/lib/site-search';
 
 const METHOD_COLORS: Record<string, { bg: string; text: string }> = {
   GET: { bg: 'rgba(52, 199, 89, 0.1)', text: '#3ecfae' },
@@ -269,9 +16,9 @@ const METHOD_COLORS: Record<string, { bg: string; text: string }> = {
   DELETE: { bg: 'rgba(248, 113, 113, 0.1)', text: '#f87171' },
 };
 
-function EndpointCard({ ep }: { ep: Endpoint }) {
+function EndpointCard({ ep, defaultOpen = false }: { ep: Endpoint; defaultOpen?: boolean }) {
   const { t } = useI18nContext();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [copied, setCopied] = useState(false);
 
   const fullUrl = `https://epicode.cn/api${ep.path}`;
@@ -284,11 +31,13 @@ function EndpointCard({ ep }: { ep: Endpoint }) {
 
   return (
     <div
+      id={endpointAnchor(ep)}
       className="rounded-xl transition-all duration-200"
-      style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)' }}
+      style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', scrollMarginTop: 120 }}
     >
       <button
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
         className="w-full flex items-center gap-3 px-5 py-4 text-left"
       >
         <span
@@ -344,8 +93,27 @@ function EndpointCard({ ep }: { ep: Endpoint }) {
 }
 
 export default function Docs() {
-  const { t } = useI18nContext();
+  const { t, lang } = useI18nContext();
+  const zh = lang === 'zh';
   const [activeSection, setActiveSection] = useState<number | null>(null);
+  // 深链:#/docs?q=search 预填筛选;#/docs?ep=memory-ep2 直达并展开某个端点(站内搜索结果使用)
+  const { search } = useLocation();
+  const params = useMemo(() => new URLSearchParams(search), [search]);
+  const focusEp = params.get('ep');
+  const [query, setQuery] = useState(() => params.get('q') ?? '');
+  // 站内搜索跳到某个端点时清掉旧筛选,保证目标可见(渲染期调整,避免 effect 内 setState)
+  const [prevFocus, setPrevFocus] = useState(focusEp);
+  if (prevFocus !== focusEp) { setPrevFocus(focusEp); if (focusEp) setQuery(''); }
+  const filtered = useMemo(() => filterEndpoints(API_SECTIONS, query, t), [query, t]);
+  const total = API_SECTIONS.reduce((n, s) => n + s.endpoints.length, 0);
+  const shown = filtered.reduce((n, f) => n + f.endpoints.length, 0);
+  const filtering = query.trim().length > 0;
+
+  useEffect(() => {
+    if (!focusEp) return;
+    const frame = requestAnimationFrame(() => document.getElementById(focusEp)?.scrollIntoView({ block: 'start' }));
+    return () => cancelAnimationFrame(frame);
+  }, [focusEp]);
 
   return (
     <Layout>
@@ -383,10 +151,44 @@ export default function Docs() {
             </p>
 </motion.div>
 
+          <div className="mb-8 flex flex-col sm:flex-row sm:items-center gap-3">
+            <label className="relative flex-1 max-w-xl">
+              <span className="sr-only">{zh ? '筛选 API 端点' : 'Filter API endpoints'}</span>
+              <Search size={15} aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} />
+              <input
+                type="text"
+                inputMode="search"
+                enterKeyHint="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={zh ? '筛选端点:路径、方法或用途,如 search / POST 记忆' : 'Filter endpoints: path, method or purpose, e.g. search / POST memory'}
+                className="dark-input w-full"
+                style={{ paddingLeft: 36, paddingRight: 36 }}
+              />
+              {filtering && (
+                <button type="button" onClick={() => setQuery('')} aria-label={zh ? '清除筛选' : 'Clear filter'}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 p-2 inline-flex" style={{ color: 'var(--text-tertiary)' }}>
+                  <X size={14} aria-hidden="true" />
+                </button>
+              )}
+            </label>
+            <p role="status" aria-live="polite" className="text-xs" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>
+              {filtering ? (zh ? `显示 ${shown} / ${total} 个端点` : `${shown} of ${total} endpoints`) : (zh ? `共 ${total} 个端点` : `${total} endpoints`)}
+            </p>
+          </div>
+
+          {filtering && shown === 0 && (
+            <p className="mb-8 text-sm" style={{ color: 'var(--text-secondary)' }}>
+              {zh ? '没有匹配的端点。试试更短的关键词,或查看 ' : 'No matching endpoint. Try a shorter keyword, or see '}
+              <a href="/llms.txt" style={{ color: 'var(--accent-purple)' }}>llms.txt</a>
+              {zh ? '(完整机器可读说明)。' : ' (full machine-readable manifest).'}
+            </p>
+          )}
+
           <div className="flex flex-col lg:flex-row gap-8">
             <nav className="lg:w-56 flex-shrink-0">
               <div className="lg:sticky lg:top-32 space-y-1">
-                {API_SECTIONS.map((s, i) => (
+                {API_SECTIONS.map((s, i) => filtered[i].endpoints.length === 0 ? null : (
                   <button
                     key={s.titleKey}
                     onClick={() => {
@@ -402,23 +204,26 @@ export default function Docs() {
                     onMouseLeave={(e) => { if (activeSection !== i) e.currentTarget.style.background = 'transparent'; }}
                   >
                     {t(s.titleKey as TranslationKey)}
-                    <span className="ml-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>{s.endpoints.length}</span>
+                    <span className="ml-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>{filtered[i].endpoints.length}</span>
                   </button>
                 ))}
               </div>
             </nav>
 
             <div className="flex-1 space-y-12">
-              {API_SECTIONS.map((section, si) => (
+              {filtered.map(({ section, endpoints }, si) => endpoints.length === 0 ? null : (
                 <div key={section.titleKey} id={`section-${si}`}>
                   <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
                     {t(section.titleKey as TranslationKey)}
                   </h2>
                   <p className="text-sm mb-4" style={{ color: 'var(--text-tertiary)' }}>{t(section.descKey as TranslationKey)}</p>
                   <div className="space-y-2">
-                    {section.endpoints.map((ep) => (
-                      <EndpointCard key={ep.method + ep.path} ep={ep} />
-                    ))}
+                    {endpoints.map((ep) => {
+                      // 深链目标或筛选后只剩 ≤3 个时自动展开;key 带上该状态以便切换时重新挂载
+                      const autoOpen = focusEp === endpointAnchor(ep) || (filtering && shown <= 3);
+                      // key 用描述 key:POST /mcp 有 5 个用途,method+path 会重复(React key 冲突)
+                      return <EndpointCard key={`${ep.descKey}:${autoOpen ? 1 : 0}`} ep={ep} defaultOpen={autoOpen} />;
+                    })}
                   </div>
                 </div>
               ))}
