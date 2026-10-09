@@ -18,6 +18,7 @@ use super::dynamics;
 use super::energy::EnergyCenter;
 use super::knowledge::KnowledgeGraph;
 use super::outcome::{ActionOutcome, ActionType, OutcomeTracker};
+use super::run_layers::{LayerMetrics, RunLayer};
 use super::security::SecurityGuard;
 
 /// SMRP §6 — 分数可解释性：记录各 boost 调整作用于哪些记忆。
@@ -138,6 +139,9 @@ fn local_exploration_summary(
     ))
 }
 
+/// 模型返回后等待 cycle 门以应用决策的上限;routine tick 通常为毫秒级。
+const COMMIT_APPLY_WAIT: Duration = Duration::from_secs(30);
+
 #[derive(Default)]
 struct SingleFlightGate {
     in_flight: AtomicBool,
@@ -205,6 +209,9 @@ pub struct SchedulerCenter {
     /// 所有 dream 入口(手动 api_dream / LLM Dream 动作 / auto_dream)共享:同一时刻只允许一个 dream 周期,
     /// 否则两个周期基于各自快照写回 payload,互相覆盖(lost update)并重复扣能量。
     dream_gate: Arc<SingleFlightGate>,
+    /// 调度器发起的模型调用(decide 与认知钩子)单飞:慢层只占自己的门,不占 cycle_gate。
+    deliberative_gate: Arc<SingleFlightGate>,
+    layers: LayerMetrics,
     tx: EventSender,
     tick_interval: parking_lot::RwLock<Duration>,
     horizon: parking_lot::Mutex<super::horizon::Horizon>,
@@ -232,6 +239,8 @@ pub struct SchedulerCenter {
     outcome: ParkMutex<OutcomeTracker>,
     adaptive: ParkMutex<AdaptiveParams>,
     last_merge_pairs: ParkMutex<HashSet<(usize, usize)>>,
+    /// 冷记忆复习冷却:tetra → 最近一次送审时间(秒)。过期条目在每次复习时清理,规模有界。
+    cold_reviewed_at: ParkMutex<HashMap<TetraId, i64>>,
     feedback_agg_cache: ParkMutex<Option<(usize, std::time::Instant, HashSet<u64>)>>,
     skill_feedback_agg_cache: ParkMutex<Option<(usize, std::time::Instant, HashSet<u64>)>>,
     drive_queue: Arc<super::drive::DriveQueue>,
@@ -292,6 +301,8 @@ impl SchedulerCenter {
             loop_gate: Arc::new(SingleFlightGate::default()),
             cycle_gate: Arc::new(SingleFlightGate::default()),
             dream_gate: Arc::new(SingleFlightGate::default()),
+            deliberative_gate: Arc::new(SingleFlightGate::default()),
+            layers: LayerMetrics::default(),
             tx,
             tick_interval: parking_lot::RwLock::new(Duration::from_millis(tick_interval_ms)),
             horizon: parking_lot::Mutex::new(super::horizon::Horizon::new(tick_interval_ms)),
@@ -316,6 +327,7 @@ impl SchedulerCenter {
             outcome: ParkMutex::new(OutcomeTracker::new()),
             adaptive: ParkMutex::new(AdaptiveParams::new()),
             last_merge_pairs: ParkMutex::new(HashSet::new()),
+            cold_reviewed_at: ParkMutex::new(HashMap::new()),
             feedback_agg_cache: ParkMutex::new(None),
             skill_feedback_agg_cache: ParkMutex::new(None),
             drive_queue: Arc::new(super::drive::DriveQueue::new()),
@@ -1292,9 +1304,27 @@ impl SchedulerCenter {
         if let Err(e) = self.storage.save_drive_kv("scheduler_tick", &body) {
             tracing::warn!("[Scheduler] save tick failed: {}", e);
         }
+        let adaptive = self.adaptive.lock().to_json().to_string();
+        if let Err(e) = self.storage.save_drive_kv("adaptive_params", &adaptive) {
+            tracing::warn!("[Scheduler] save adaptive params failed: {}", e);
+        }
+    }
+
+    /// 学到的自适应阈值(值 + 默认 + 边界),供稳态观测。
+    pub fn adaptive_params_snapshot(&self) -> serde_json::Value {
+        self.adaptive.lock().describe()
     }
 
     pub fn restore_tick_state(&self) {
+        if let Some(raw) = self.storage.load_drive_kv("adaptive_params") {
+            match serde_json::from_str::<serde_json::Value>(&raw) {
+                Ok(v) => {
+                    let n = self.adaptive.lock().restore_json(&v);
+                    tracing::info!("[Scheduler] restored {} adaptive params", n);
+                }
+                Err(e) => tracing::warn!("[Scheduler] adaptive params snapshot unreadable: {}", e),
+            }
+        }
         if let Some(s) = self.storage.load_drive_kv("scheduler_tick") {
             let parts: Vec<&str> = s.split(',').collect();
             if parts.len() >= 2 {
@@ -3371,12 +3401,31 @@ impl SchedulerCenter {
 
     /// P2: dream复习相 — 78%记忆从未被检索命中, 沉默老化未经价值验证
     /// 采样cold记忆→LLM判断→有值标记reviewed+升importance / 无值降权
+    ///
+    /// 每条记忆在冷却期内只复习一次:以前同一批(list_nodes 顺序的前 10 条)每次都被重新抽中,
+    /// KEEP 每轮 +0.3 直到封顶、FADE 每轮减半直到跌出候选 —— 一次判断被重复施加多次,
+    /// 其余冷记忆永远轮不到。
     fn review_cold_memories(&self) -> usize {
+        /// 同一条冷记忆两次复习之间的最短间隔(7 天)。
+        const COLD_REVIEW_COOLDOWN_SECS: i64 = 7 * 86_400;
+        let now = chrono::Utc::now().timestamp();
+        let recently_reviewed = {
+            let mut map = self.cold_reviewed_at.lock();
+            map.retain(|_, at| now - *at < COLD_REVIEW_COOLDOWN_SECS);
+            map.keys().copied().collect::<HashSet<TetraId>>()
+        };
         let cold: Vec<(u64, String)> = self
             .gateway
             .list_nodes()
             .into_iter()
-            .filter(|(_, p)| p.valid_to.is_none() && p.importance > 0.1 && p.access_count == 0)
+            .filter(|(id, p)| {
+                p.valid_to.is_none()
+                    && p.importance > 0.1
+                    && p.access_count == 0
+                    && !recently_reviewed.contains(id)
+                    && p.last_reviewed_ts
+                        .is_none_or(|ts| now - ts >= COLD_REVIEW_COOLDOWN_SECS)
+            })
             .take(10)
             .map(|(id, p)| (id, p.content.chars().take(200).collect()))
             .collect();
@@ -3396,6 +3445,13 @@ impl SchedulerCenter {
         };
 
         let mut reviewed = 0;
+        {
+            // 已送审即进入冷却(含模型未给出判断的条目),避免下一轮又抽到同一批
+            let mut map = self.cold_reviewed_at.lock();
+            for (id, _) in &cold {
+                map.insert(*id, now);
+            }
+        }
         for (id, _) in &cold {
             let keep = response.contains(&format!("#{}:KEEP", id))
                 || response.contains(&format!("{}: KEEP", id));
@@ -3405,9 +3461,12 @@ impl SchedulerCenter {
                 // 有价值: 标记已复习+提升importance
                 if let Some(t) = self.space.get_tetrahedron(*id) {
                     let mut d = t.data.clone();
-                    d.last_reviewed_ts = Some(chrono::Utc::now().timestamp());
+                    d.last_reviewed_ts = Some(now);
                     d.importance = (d.importance + 0.3).min(3.0);
                     let _ = self.space.update_payload(*id, d);
+                    if let Some(t) = self.space.get_tetrahedron(*id) {
+                        let _ = self.storage.upsert_tetra(&t);
+                    }
                     reviewed += 1;
                 }
             } else if fade {
@@ -3416,6 +3475,9 @@ impl SchedulerCenter {
                     let mut d = t.data.clone();
                     d.importance = (d.importance * 0.5).max(0.05);
                     let _ = self.space.update_payload(*id, d);
+                    if let Some(t) = self.space.get_tetrahedron(*id) {
+                        let _ = self.storage.upsert_tetra(&t);
+                    }
                     reviewed += 1;
                 }
             }
@@ -4078,6 +4140,25 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             horizon.pressure(),
             horizon.debt(),
         )
+    }
+
+    /// 分层运行观测:每层运行/推迟/耗时 + horizon 状态。
+    pub fn run_layers_snapshot(&self) -> serde_json::Value {
+        let (phase, pressure, debt, missed) = self.horizon_observability();
+        serde_json::json!({
+            "layers": self.layers.snapshot(),
+            "horizon": {
+                "phase": phase,
+                "pressure": pressure,
+                "debt": debt,
+                "missed_beats": missed,
+            },
+            "in_flight": {
+                "cycle": self.cycle_gate.in_flight.load(Ordering::Acquire),
+                "deliberative": self.deliberative_gate.in_flight.load(Ordering::Acquire),
+                "dream": self.dream_gate.in_flight.load(Ordering::Acquire),
+            },
+        })
     }
 
     /// Tick observability: phase / pressure / debt / cumulative missed commits.
@@ -5029,7 +5110,8 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
 
     fn auto_save(&self) {
         // P2/P5/P6: 空间维护(dream不做, tick做轻量版)
-        let _ = self.review_cold_memories();
+        // 冷记忆复习(P2)是模型调用,已移到 Deliberative 层(cold_review_*):
+        // auto_save 在事件循环线程里被频繁内联调用,不能在这里做网络往返。
         let _ = self.synaptic_pruning();
         let _ = self.storage.archive_old_drive_signals();
         // 2026-09-22审计接线: 过期记忆归档(此前archive_stale_superseded从未被调用, 最后归档停在8/16)
@@ -5287,14 +5369,26 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
 
         // Phase 6: Think — LLM cognitive decision every 5 ticks (when enabled)
         if count.is_multiple_of(5) && self.cognitive.enabled() {
-            if count.is_multiple_of(15) && count > 0 {
-                self.generate_aliases((count / 15) as usize, &snap);
-            }
-            if count.is_multiple_of(30) && count > 0 {
-                self.reclassify_memories((count / 30) as usize, &snap);
-            }
-            if count.is_multiple_of(20) && count > 0 {
-                self.extract_entities((count / 20) as usize, &snap);
+            let hooks_due = count > 0
+                && (count.is_multiple_of(15)
+                    || count.is_multiple_of(30)
+                    || count.is_multiple_of(20));
+            // 认知钩子也是模型调用:与 decide 共用单飞门,上一轮模型调用未返回时本轮跳过
+            if hooks_due {
+                if let Some(_deliberative) = self.deliberative_gate.try_acquire() {
+                    let _timer = self.layers.time(RunLayer::Deliberative);
+                    if count.is_multiple_of(15) {
+                        self.generate_aliases((count / 15) as usize, &snap);
+                    }
+                    if count.is_multiple_of(30) {
+                        self.reclassify_memories((count / 30) as usize, &snap);
+                    }
+                    if count.is_multiple_of(20) {
+                        self.extract_entities((count / 20) as usize, &snap);
+                    }
+                } else {
+                    self.layers.record_deferred(RunLayer::Deliberative);
+                }
             }
 
             // Idle Stopper: skip LLM call if space is healthy
@@ -5540,8 +5634,10 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
     fn auto_dream(&self) {
         let Some(_dream_permit) = self.dream_gate.try_acquire() else {
             tracing::debug!("[AutoDream] another dream cycle is running, skipped");
+            self.layers.record_deferred(RunLayer::Consolidation);
             return;
         };
+        let _timer = self.layers.time(RunLayer::Consolidation);
         let tick = self.tick_count.load(Ordering::SeqCst);
         let last = self.last_dream_tick.load(Ordering::SeqCst);
 
@@ -6073,6 +6169,133 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
         }
     }
 
+    /// 冷记忆复习(Deliberative 层,阻塞线程内调用):与其他调度器模型调用共用单飞门,忙则跳过。
+    fn cold_review_blocking(&self) {
+        if !self.cognitive.enabled() {
+            return;
+        }
+        let Some(_deliberative) = self.deliberative_gate.try_acquire() else {
+            self.layers.record_deferred(RunLayer::Deliberative);
+            return;
+        };
+        let _timer = self.layers.time(RunLayer::Deliberative);
+        let _ = self.review_cold_memories();
+    }
+
+    /// 冷记忆复习(Deliberative 层,事件循环内调用):放进阻塞线程池,不占用 async 工作线程。
+    fn spawn_cold_review(self: &Arc<Self>) {
+        if !self.cognitive.enabled() {
+            return;
+        }
+        let Some(permit) = self.deliberative_gate.try_acquire() else {
+            self.layers.record_deferred(RunLayer::Deliberative);
+            return;
+        };
+        let me = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let _deliberative = permit;
+            let _timer = me.layers.time(RunLayer::Deliberative);
+            let _ = me.review_cold_memories();
+        });
+    }
+
+    /// 等待重新取得 cycle 门(阻塞线程内调用)。超时返回 None。
+    fn reacquire_cycle(&self, timeout: Duration) -> Option<SingleFlightPermit> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if let Some(p) = self.cycle_gate.try_acquire() {
+                return Some(p);
+            }
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// Commit 周期,分层执行:
+    /// 1. Routine(持 cycle 门):tick + 生成待思考状态
+    /// 2. Deliberative(只持 deliberative 门,**释放** cycle 门):模型 decide —— 网络往返期间
+    ///    attend/commit 的 routine tick 照常运行,不再整段被推迟
+    /// 3. 重新取得 cycle 门后应用决策,写空间仍与 routine 串行
+    ///
+    /// 上一轮模型调用尚未返回时,本轮的 thought 直接跳过(背压),不会堆积并发模型调用。
+    fn run_commit_cycle(self: &Arc<Self>, cycle_permit: SingleFlightPermit) {
+        let thought = {
+            let _timer = self.layers.time(RunLayer::Routine);
+            self.tick_and_maybe_think()
+        };
+        let Some(ct) = thought else {
+            let count = self.tick_count.load(Ordering::SeqCst);
+            if count.is_multiple_of(3) {
+                self.auto_save();
+            } // P0: flush every 3 ticks
+            if count.is_multiple_of(5) {
+                self.flush_access_counts();
+                drop(cycle_permit);
+                self.cold_review_blocking();
+            }
+            return;
+        };
+        let Some(deliberative) = self.deliberative_gate.try_acquire() else {
+            self.layers.record_deferred(RunLayer::Deliberative);
+            tracing::debug!(
+                "[Layers] tick {} thought skipped; previous model call still running",
+                ct.tick
+            );
+            return;
+        };
+        // 批次C：注入自适应参数+行动效果到认知引擎（断裂点5+6）
+        {
+            use super::adaptive::Param;
+            let ad = self.adaptive.lock();
+            let snap = format!(
+                "fission_entropy: {:.3} (default 0.3)\nfission_min_size: {:.0} (default 6)\nmerge_distance: {:.1} (default 5.0)\ndream_interval: {:.0} (default 50)\nevict_mass: {:.3} (default 0.3)\npulse_budget: {:.0} (default 3)",
+                ad.get(Param::FissionEntropyThreshold),
+                ad.get(Param::FissionMinClusterSize),
+                ad.get(Param::MergeDistance),
+                ad.get(Param::DreamInterval),
+                ad.get(Param::EvictionMassThreshold),
+                ad.get(Param::PulseBudget),
+            );
+            self.cognitive.set_adaptive_snapshot(&snap);
+        }
+        {
+            let tracker = self.outcome.lock();
+            let summary = tracker.effectiveness_summary();
+            if !summary.is_empty() {
+                let text: Vec<String> = summary
+                    .iter()
+                    .map(|(action, eff)| format!("{:?}: {:.0}%", action, eff * 100.0))
+                    .collect();
+                self.cognitive.set_effectiveness_summary(&text.join("\n"));
+            }
+        }
+        // 慢层不占快层的门:模型往返期间释放 cycle 门
+        drop(cycle_permit);
+        let decision = {
+            let _timer = self.layers.time(RunLayer::Deliberative);
+            self.cognitive.decide(&ct.state)
+        };
+        drop(deliberative);
+        match decision {
+            Ok(response) => {
+                // 应用决策会写空间:重新与 routine 串行
+                let Some(_cycle_permit) = self.reacquire_cycle(COMMIT_APPLY_WAIT) else {
+                    self.layers.record_apply_dropped();
+                    tracing::warn!(
+                        "[Layers] tick {} decision dropped: cycle gate busy for {:?}",
+                        ct.tick,
+                        COMMIT_APPLY_WAIT
+                    );
+                    return;
+                };
+                self.apply_thought(ct.tick, response);
+            }
+            Err(e) => tracing::warn!("[LLM] cognitive error: {}", e),
+        }
+    }
+
     pub async fn run_with_rx(self: Arc<Self>, rx: broadcast::Receiver<EngineEvent>) {
         self.run_unified(rx, true).await;
     }
@@ -6107,6 +6330,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                 _ = tokio::time::sleep(tick_interval) => {
                     if commit {
                         let Some(cycle_permit) = self.cycle_gate.try_acquire() else {
+                            self.layers.record_deferred(RunLayer::Routine);
                             let missed = {
                                 let mut h = self.horizon.lock();
                                 h.note_defer();
@@ -6120,43 +6344,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         };
                         let me = self.clone();
                         let handle = tokio::task::spawn_blocking(move || {
-                            let _cycle_permit = cycle_permit;
-                            let thought = me.tick_and_maybe_think();
-                            if let Some(ct) = thought {
-                                // 批次C：注入自适应参数+行动效果到认知引擎（断裂点5+6）
-                                {
-                                    use super::adaptive::Param;
-                                    let ad = me.adaptive.lock();
-                                    let snap = format!(
-                                        "fission_entropy: {:.3} (default 0.3)\nfission_min_size: {:.0} (default 6)\nmerge_distance: {:.1} (default 5.0)\ndream_interval: {:.0} (default 50)\nevict_mass: {:.3} (default 0.3)\npulse_budget: {:.0} (default 3)",
-                                        ad.get(Param::FissionEntropyThreshold),
-                                        ad.get(Param::FissionMinClusterSize),
-                                        ad.get(Param::MergeDistance),
-                                        ad.get(Param::DreamInterval),
-                                        ad.get(Param::EvictionMassThreshold),
-                                        ad.get(Param::PulseBudget),
-                                    );
-                                    me.cognitive.set_adaptive_snapshot(&snap);
-                                }
-                                {
-                                    let tracker = me.outcome.lock();
-                                    let summary = tracker.effectiveness_summary();
-                                    if !summary.is_empty() {
-                                        let text: Vec<String> = summary.iter()
-                                            .map(|(action, eff)| format!("{:?}: {:.0}%", action, eff * 100.0))
-                                            .collect();
-                                        me.cognitive.set_effectiveness_summary(&text.join("\n"));
-                                    }
-                                }
-                                match me.cognitive.decide(&ct.state) {
-                                    Ok(response) => me.apply_thought(ct.tick, response),
-                                    Err(e) => tracing::warn!("[LLM] cognitive error: {}", e),
-                                }
-                            } else {
-                                let count = me.tick_count.load(Ordering::SeqCst);
-                                if count.is_multiple_of(3) { me.auto_save(); } // P0: flush every 3 ticks
-                                if count.is_multiple_of(5) { me.flush_access_counts(); }
-                            }
+                            me.run_commit_cycle(cycle_permit);
                         });
                         // tick panic 恢复：监控线程存活，panic 后下一 tick 自动重试
                         tokio::spawn(async move {
@@ -6166,6 +6354,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         });
                     } else {
                         let Some(_cycle_permit) = self.cycle_gate.try_acquire() else {
+                            self.layers.record_deferred(RunLayer::Routine);
                             let missed = {
                                 let mut h = self.horizon.lock();
                                 h.note_defer();
@@ -6177,6 +6366,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                             );
                             continue;
                         };
+                        let _timer = self.layers.time(RunLayer::Routine);
                         let count = self.tick_count.fetch_add(1, Ordering::SeqCst);
                         self.energy.replenish(12.0);
                         let tasks: Vec<ScheduledTask> = self.queue.lock().drain(..).collect();
@@ -6186,6 +6376,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                             self.auto_fission(&snap);
                             self.auto_save();
                             self.flush_access_counts();
+                            self.spawn_cold_review();
                         }
                         if count.is_multiple_of(50) && count > 0 && self.energy.available() >= 50.0 {
                             self.auto_dream();
@@ -6197,6 +6388,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                     }
                 }
                 event = rx.recv() => {
+                    let _timer = self.layers.time(RunLayer::Reflex);
                     match event {
                         Ok(EngineEvent::Shutdown) => {
                             tracing::info!("[Scheduler] shutdown, persisting state");
@@ -7251,6 +7443,93 @@ mod tests {
 
     // ---- Test: generate_aliases doesn't crash with snapshot ----
 
+    /// Reproduction: the same first 10 cold memories were re-sampled on every
+    /// review, so one KEEP verdict was applied again and again (importance
+    /// ratcheted to the 3.0 cap) and the remaining cold memories were never seen.
+    #[test]
+    fn cold_review_applies_each_verdict_once_and_covers_all_cold_memories() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let stop = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = {
+            let (stop, calls) = (Arc::clone(&stop), Arc::clone(&calls));
+            std::thread::spawn(move || {
+                let verdicts: String = (0..64).map(|i| format!("#{i}:KEEP\\n")).collect();
+                let body = format!(r#"{{"choices":[{{"message":{{"content":"{verdicts}"}}}}]}}"#);
+                while !stop.load(Ordering::Relaxed) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            calls.fetch_add(1, Ordering::Relaxed);
+                            let _ = stream.set_nonblocking(false);
+                            let _ =
+                                stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+                            let mut request = [0u8; 65536];
+                            let _ = stream.read(&mut request);
+                            let response = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                body.len(),
+                                body
+                            );
+                            let _ = stream.write_all(response.as_bytes());
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(std::time::Duration::from_millis(2));
+                        }
+                        Err(e) => panic!("model fixture failed: {e}"),
+                    }
+                }
+            })
+        };
+        let cognitive = Arc::new(CognitiveEngine::with_base(
+            "test-key",
+            "test-model",
+            &base_url,
+        ));
+        let (scheduler, space, _) = build_scheduler_with_cognitive(cognitive);
+        let ids: Vec<TetraId> = (0..30)
+            .map(|i| {
+                add_tetra_to_space(
+                    &space,
+                    Point3 {
+                        x: 20.0 * i as f64,
+                        y: 7.0,
+                        z: 3.0,
+                    },
+                    &format!("cold memory {i}"),
+                    vec!["note".into()],
+                )
+            })
+            .collect();
+        let rounds = 10;
+        let reviewed: usize = (0..rounds).map(|_| scheduler.review_cold_memories()).sum();
+        stop.store(true, Ordering::Relaxed);
+        server.join().unwrap();
+
+        let importances: Vec<f64> = ids
+            .iter()
+            .map(|id| space.get_tetrahedron(*id).unwrap().data.importance)
+            .collect();
+        let max = importances.iter().cloned().fold(0.0, f64::max);
+        let covered = importances.iter().filter(|v| **v > 1.0).count();
+        eprintln!(
+            "R11COLD rounds={rounds} model_calls={} reviewed={reviewed} covered={covered}/30 max_importance={max:.2}",
+            calls.load(Ordering::Relaxed)
+        );
+        assert_eq!(covered, 30, "every cold memory reviewed once");
+        assert!(
+            (max - 1.3).abs() < 1e-9,
+            "one KEEP verdict = one +0.3 boost"
+        );
+        assert_eq!(reviewed, 30);
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            3,
+            "no model call once nothing is due"
+        );
+    }
+
     #[test]
     fn generate_aliases_with_snapshot() {
         let (sched, space, _kg) = build_scheduler();
@@ -7436,5 +7715,347 @@ mod tests {
             "should have at least 1 cluster with 100 memories"
         );
         assert_eq!(state.total_tetras, 100);
+    }
+
+    /// Local slow model fixture: one thread per connection, sleeps `llm_ms`,
+    /// tracks total requests, current and peak concurrent requests.
+    struct SlowModel {
+        base_url: String,
+        stop: Arc<AtomicBool>,
+        requests: Arc<AtomicUsize>,
+        in_flight: Arc<AtomicUsize>,
+        peak: Arc<AtomicUsize>,
+        server: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl SlowModel {
+        fn start(llm_ms: u64) -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let stop = Arc::new(AtomicBool::new(false));
+            let requests = Arc::new(AtomicUsize::new(0));
+            let in_flight = Arc::new(AtomicUsize::new(0));
+            let peak = Arc::new(AtomicUsize::new(0));
+            let server = {
+                let (stop, requests, in_flight, peak) = (
+                    Arc::clone(&stop),
+                    Arc::clone(&requests),
+                    Arc::clone(&in_flight),
+                    Arc::clone(&peak),
+                );
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        match listener.accept() {
+                            Ok((mut stream, _)) => {
+                                let (requests, in_flight, peak) =
+                                    (requests.clone(), in_flight.clone(), peak.clone());
+                                std::thread::spawn(move || {
+                                    requests.fetch_add(1, Ordering::Relaxed);
+                                    let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                                    peak.fetch_max(now, Ordering::SeqCst);
+                                    let _ = stream.set_nonblocking(false);
+                                    let _ = stream
+                                        .set_read_timeout(Some(std::time::Duration::from_secs(2)));
+                                    let mut request = [0u8; 65536];
+                                    let _ = stream.read(&mut request);
+                                    std::thread::sleep(std::time::Duration::from_millis(llm_ms));
+                                    let body = r#"{"choices":[{"message":{"content":"no action needed"}}]}"#;
+                                    let response = format!(
+                                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                        body.len(),
+                                        body
+                                    );
+                                    let _ = stream.write_all(response.as_bytes());
+                                    in_flight.fetch_sub(1, Ordering::SeqCst);
+                                });
+                            }
+                            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                std::thread::sleep(std::time::Duration::from_millis(2));
+                            }
+                            Err(e) => panic!("model fixture failed: {e}"),
+                        }
+                    }
+                })
+            };
+            SlowModel {
+                base_url,
+                stop,
+                requests,
+                in_flight,
+                peak,
+                server: Some(server),
+            }
+        }
+
+        fn finish(mut self) -> (usize, usize) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(s) = self.server.take() {
+                s.join().unwrap();
+            }
+            (
+                self.requests.load(Ordering::Relaxed),
+                self.peak.load(Ordering::SeqCst),
+            )
+        }
+    }
+
+    /// Layered-run harness: a slow model (LLM_MS per call) behind the real
+    /// `run_unified` loop. Measures how many scheduler ticks (routine layer)
+    /// complete in a fixed window, how many beats were deferred, and the peak
+    /// number of concurrent model calls (deliberative single-flight).
+    fn run_layer_harness(llm_ms: u64, window_ms: u64) -> (u64, u64, usize, usize) {
+        let model = SlowModel::start(llm_ms);
+        let cognitive = Arc::new(CognitiveEngine::with_base(
+            "test-key",
+            "test-model",
+            &model.base_url,
+        ));
+        let (scheduler, space, _) = build_scheduler_with_cognitive(cognitive);
+        // unlabeled memories keep the space "unhealthy" so every 5th tick wants the model
+        for i in 0..12 {
+            add_tetra_to_space(
+                &space,
+                Point3 {
+                    x: 20.0 * i as f64,
+                    y: 7.0,
+                    z: 3.0,
+                },
+                &format!("orphan memory {i}"),
+                vec![],
+            );
+        }
+        scheduler.set_tick_interval(50);
+        scheduler.horizon.lock().note_stimulus(1.0);
+        let rx = scheduler.tx.subscribe();
+        let start_tick = scheduler.tick_count.load(Ordering::SeqCst);
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let ticks = rt.block_on(async {
+            let handle = tokio::spawn(scheduler.clone().run_with_rx(rx));
+            tokio::time::sleep(std::time::Duration::from_millis(window_ms)).await;
+            let ticks = scheduler.tick_count.load(Ordering::SeqCst) - start_tick;
+            let _ = scheduler.tx.send(EngineEvent::Shutdown);
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(10), handle).await;
+            ticks
+        });
+        rt.shutdown_timeout(std::time::Duration::from_millis(llm_ms * 3 + 2000));
+        let missed = scheduler.horizon_observability().3;
+        let (calls, peak) = model.finish();
+        (ticks, missed, calls, peak)
+    }
+
+    /// Timing harness (machine-dependent, so not part of the default suite):
+    /// `cargo test --lib -- --ignored --nocapture layered_loop quiet_loop`
+    #[test]
+    #[ignore]
+    fn layered_loop_keeps_model_calls_single_flight() {
+        let (ticks, missed, calls, peak) = run_layer_harness(800, 4000);
+        eprintln!("R11LAYER llm_ms=800 window_ms=4000 ticks={ticks} deferred_beats={missed} model_calls={calls} peak_concurrent_calls={peak}");
+        assert!(calls >= 1, "the slow model was never called");
+        assert_eq!(peak, 1, "scheduler model calls must stay single-flight");
+    }
+
+    /// Reproduction: the commit cycle used to hold `cycle_gate` for the whole
+    /// model round-trip, so every routine tick in that window was deferred.
+    #[test]
+    fn slow_model_call_releases_cycle_gate_and_back_pressures_new_thoughts() {
+        let model = SlowModel::start(5_000);
+        let cognitive = Arc::new(CognitiveEngine::with_base(
+            "test-key",
+            "test-model",
+            &model.base_url,
+        ));
+        let (scheduler, space, _) = build_scheduler_with_cognitive(cognitive);
+        for i in 0..12 {
+            add_tetra_to_space(
+                &space,
+                Point3 {
+                    x: 20.0 * i as f64,
+                    y: 7.0,
+                    z: 3.0,
+                },
+                &format!("orphan memory {i}"),
+                vec![],
+            );
+        }
+        let permit = scheduler.cycle_gate.try_acquire().unwrap();
+        let worker = {
+            let s = scheduler.clone();
+            std::thread::spawn(move || s.run_commit_cycle(permit))
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while model.in_flight.load(Ordering::SeqCst) == 0 {
+            assert!(std::time::Instant::now() < deadline, "model never called");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // Routine layer can run while the model call is in flight.
+        let routine = scheduler.cycle_gate.try_acquire();
+        assert!(routine.is_some(), "cycle gate still held during model call");
+        assert!(scheduler
+            .deliberative_gate
+            .in_flight
+            .load(Ordering::Acquire));
+        // A second commit cycle that wants to think (tick 30: metacognition check +
+        // cognitive hooks) is back-pressured, not stacked on top of the slow call.
+        scheduler.tick_count.store(30, Ordering::SeqCst);
+        scheduler.run_commit_cycle(routine.unwrap());
+        assert_eq!(scheduler.layers.deferred(RunLayer::Deliberative), 2);
+        assert_eq!(model.requests.load(Ordering::SeqCst), 1);
+        worker.join().unwrap();
+        assert_eq!(scheduler.layers.runs(RunLayer::Deliberative), 1);
+        assert_eq!(scheduler.layers.runs(RunLayer::Routine), 2);
+        assert!(!scheduler.cycle_gate.in_flight.load(Ordering::Acquire));
+        assert!(!scheduler
+            .deliberative_gate
+            .in_flight
+            .load(Ordering::Acquire));
+        let snapshot = scheduler.run_layers_snapshot();
+        assert_eq!(snapshot["layers"]["deliberative"]["deferred"], 2);
+        assert!(
+            snapshot["layers"]["deliberative"]["max_ms"]
+                .as_f64()
+                .unwrap()
+                >= 4_000.0
+        );
+        let (calls, peak) = model.finish();
+        assert_eq!((calls, peak), (1, 1));
+    }
+
+    /// Quiet-mode harness (cloud default without ENABLE_COGNITIVE): the attend
+    /// path runs inline on the async loop. Measures ticks completed and the worst
+    /// scheduling lag seen by a 10 ms probe task on a single-worker runtime.
+    fn run_quiet_harness(llm_ms: u64, window_ms: u64) -> (u64, u64, usize, usize) {
+        let model = SlowModel::start(llm_ms);
+        let cognitive = Arc::new(CognitiveEngine::with_base(
+            "test-key",
+            "test-model",
+            &model.base_url,
+        ));
+        let (scheduler, space, _) = build_scheduler_with_cognitive(cognitive);
+        for i in 0..12 {
+            add_tetra_to_space(
+                &space,
+                Point3 {
+                    x: 20.0 * i as f64,
+                    y: 7.0,
+                    z: 3.0,
+                },
+                &format!("cold memory {i}"),
+                vec!["note".into()],
+            );
+        }
+        scheduler.set_tick_interval(50);
+        scheduler.horizon.lock().note_stimulus(1.0);
+        let rx = scheduler.tx.subscribe();
+        let start_tick = scheduler.tick_count.load(Ordering::SeqCst);
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let (ticks, max_lag_ms) = rt.block_on(async {
+            let handle = tokio::spawn(scheduler.clone().run_quiet(rx));
+            let probe = tokio::spawn(async move {
+                let mut worst = 0u64;
+                let end = std::time::Instant::now() + std::time::Duration::from_millis(window_ms);
+                while std::time::Instant::now() < end {
+                    let t = std::time::Instant::now();
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    let lag = t.elapsed().as_millis() as u64;
+                    worst = worst.max(lag.saturating_sub(10));
+                }
+                worst
+            });
+            let worst = probe.await.unwrap();
+            let ticks = scheduler.tick_count.load(Ordering::SeqCst) - start_tick;
+            let _ = scheduler.tx.send(EngineEvent::Shutdown);
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(10), handle).await;
+            (ticks, worst)
+        });
+        rt.shutdown_timeout(std::time::Duration::from_millis(llm_ms * 3 + 2000));
+        let (calls, peak) = model.finish();
+        (ticks, max_lag_ms, calls, peak)
+    }
+
+    /// Timing harness, see `layered_loop_keeps_model_calls_single_flight`.
+    #[test]
+    #[ignore]
+    fn quiet_loop_never_blocks_async_worker_on_model_calls() {
+        let (ticks, lag, calls, peak) = run_quiet_harness(800, 4000);
+        eprintln!("R11QUIET llm_ms=800 window_ms=4000 ticks={ticks} max_async_lag_ms={lag} model_calls={calls} peak_concurrent_calls={peak}");
+        assert!(lag < 400, "async worker blocked for {lag} ms");
+        assert!(peak <= 1);
+    }
+
+    /// Reproduction: `auto_save` (called inline from the event loop, on every
+    /// few ticks and on creation events) used to make a blocking model call to
+    /// review cold memories.
+    #[test]
+    fn auto_save_makes_no_model_calls() {
+        let model = SlowModel::start(10);
+        let cognitive = Arc::new(CognitiveEngine::with_base(
+            "test-key",
+            "test-model",
+            &model.base_url,
+        ));
+        let (scheduler, space, _) = build_scheduler_with_cognitive(cognitive);
+        for i in 0..5 {
+            add_tetra_to_space(
+                &space,
+                Point3 {
+                    x: 20.0 * i as f64,
+                    y: 7.0,
+                    z: 3.0,
+                },
+                &format!("cold memory {i}"),
+                vec!["note".into()],
+            );
+        }
+        for _ in 0..3 {
+            scheduler.auto_save();
+        }
+        assert_eq!(model.requests.load(Ordering::SeqCst), 0);
+        // the review still runs, on the deliberative layer
+        scheduler.cold_review_blocking();
+        assert_eq!(model.requests.load(Ordering::SeqCst), 1);
+        assert_eq!(scheduler.layers.runs(RunLayer::Deliberative), 1);
+        let (calls, peak) = model.finish();
+        assert_eq!((calls, peak), (1, 1));
+    }
+
+    /// Reproduction: learned thresholds used to reset to defaults on every restart.
+    #[test]
+    fn learned_adaptive_params_survive_engine_restart() {
+        use crate::engine::adaptive::Param;
+        let dir = std::env::temp_dir().join(format!("epicode-adaptive-{}", uuid::Uuid::new_v4()));
+        let learned = {
+            let engine = crate::engine::Engine::with_data_dir(dir.clone());
+            {
+                let mut ad = engine.scheduler.adaptive.lock();
+                for _ in 0..30 {
+                    ad.adapt_from_outcome(ActionType::Dream, 1.0);
+                    ad.adapt_from_outcome(ActionType::Pulse, 0.0);
+                }
+            }
+            engine.scheduler.save_tick_state();
+            let ad = engine.scheduler.adaptive.lock();
+            (ad.get(Param::DreamInterval), ad.get(Param::PulseBudget))
+        };
+        assert!(learned.0 > 50.0 && learned.1 < 3.0, "{learned:?}");
+        let engine = crate::engine::Engine::with_data_dir(dir.clone());
+        let ad = engine.scheduler.adaptive.lock();
+        assert_eq!(
+            (ad.get(Param::DreamInterval), ad.get(Param::PulseBudget)),
+            learned
+        );
+        drop(ad);
+        let described = engine.scheduler.adaptive_params_snapshot();
+        assert_eq!(described["dream_interval"]["default"], 50.0);
+        drop(engine);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
