@@ -3,6 +3,7 @@ import { useI18nContext } from '@/i18n/useI18n';
 import { isAuthenticated } from '@/lib/api';
 import { Menu, X } from 'lucide-react';
 import ThemeSwitcher from '@/components/ThemeSwitcher';
+import SiteSearch from '@/components/SiteSearch';
 import { useState, useEffect } from "react";
 
 export default function Navbar() {
@@ -94,8 +95,13 @@ export default function Navbar() {
         ))}
       </div>
 
+      {/* 站内搜索:全尺寸可见(移动端只显示图标) */}
+      <div className="flex items-center ml-auto md:ml-1 flex-shrink-0">
+        <SiteSearch />
+      </div>
+
       {/* Right: CTA */}
-      <div className="hidden md:flex items-center gap-2 ml-auto flex-shrink-0">
+      <div className="hidden md:flex items-center gap-2 md:ml-2 flex-shrink-0">
         <ThemeSwitcher compact />
         {authed ? (
           <a href="#/dashboard" className="btn-primary text-xs py-2 px-4 whitespace-nowrap flex-shrink-0">
@@ -121,7 +127,7 @@ export default function Navbar() {
 
       {/* Mobile menu button */}
       <button
-        className="md:hidden p-2 rounded-lg ml-auto"
+        className="md:hidden p-2 rounded-lg ml-1"
         onClick={() => setMobileOpen(!mobileOpen)}
         aria-label={mobileOpen ? t('common.closeMenu') : t('common.openMenu')}
         aria-expanded={mobileOpen}
