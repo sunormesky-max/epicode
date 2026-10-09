@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0](https://github.com/sunormesky-max/epicode/compare/v1.7.0...v1.8.0) (2026-10-09)
+
+
+### Features
+
+* **adaptive:** 自适应阈值跨重启持久化并在 user_stats 中可观测 ([#215](https://github.com/sunormesky-max/epicode/issues/215)) ([4bf83c4](https://github.com/sunormesky-max/epicode/commit/4bf83c46dfc00b5c78e43a235630059254eb24a1))
+* **scheduler:** 分层运行协调 — 模型调用不再占用 cycle 门,冷记忆复习移出 auto_save,分层指标可观测 ([#218](https://github.com/sunormesky-max/epicode/issues/218)) ([f18cbfa](https://github.com/sunormesky-max/epicode/commit/f18cbfaf9d104cd0bf38d954678b8b8a9ecc5d96))
+* **site:** per-route titles/meta (zh/en), real footer links, a11y fixes ([#217](https://github.com/sunormesky-max/epicode/issues/217)) ([22ca8db](https://github.com/sunormesky-max/epicode/commit/22ca8db61210527e70a35c8958d0799d95d3fe22))
+* **site:** zero-dependency site search (pages + API endpoints) and docs filter ([#220](https://github.com/sunormesky-max/epicode/issues/220)) ([6413daf](https://github.com/sunormesky-max/epicode/commit/6413daf4650b3c661d3dc678a9b02fa25549f3ed))
+
+
+### Bug Fixes
+
+* **dream:** protect enforced memories during consolidation ([#224](https://github.com/sunormesky-max/epicode/issues/224)) ([0122814](https://github.com/sunormesky-max/epicode/commit/01228146abb641eda57ea82884cf9ad5ca4ad5bd))
+* **drive:** retain signals until archival is durable ([#227](https://github.com/sunormesky-max/epicode/issues/227)) ([45c4bc3](https://github.com/sunormesky-max/epicode/commit/45c4bc32c70deba58e438c895881ce5c16c84120))
+* **knowledge:** make concept membership idempotent ([#228](https://github.com/sunormesky-max/epicode/issues/228)) ([4b2036b](https://github.com/sunormesky-max/epicode/commit/4b2036b600f9b5e03116d84ec0572b1559429459))
+* **pulse:** traverse logical Port links for reseeded clusters ([#221](https://github.com/sunormesky-max/epicode/issues/221)) ([9d0a530](https://github.com/sunormesky-max/epicode/commit/9d0a5306e0db9ce79f07696a1fd617a9acce7203))
+* **runtime:** 只在绑定身份变化时写 binding-anchor 记忆,控制台重复注册不再无界增长 ([#214](https://github.com/sunormesky-max/epicode/issues/214)) ([184efb8](https://github.com/sunormesky-max/epicode/commit/184efb878271b9deb77c9089a687c0bcc420fdda))
+* **scheduler:** 冷记忆复习每条记忆冷却期内只复习一次,判断不再被重复施加 ([#219](https://github.com/sunormesky-max/epicode/issues/219)) ([4965fc2](https://github.com/sunormesky-max/epicode/commit/4965fc2657780bc41d3531a8be2715a792f6dafb))
+* **security:** enforce paid setting and grant permissions ([#229](https://github.com/sunormesky-max/epicode/issues/229)) ([770014e](https://github.com/sunormesky-max/epicode/commit/770014e8157ae61276140c1e3e1ac639eba0a2b7))
+* **space:** transfer seed Port reservations by exact ID ([#213](https://github.com/sunormesky-max/epicode/issues/213)) ([991e369](https://github.com/sunormesky-max/epicode/commit/991e36986c057f1e158455b05cab4e499e04bb3b))
+* **storage:** refuse incomplete encrypted memory loads ([#226](https://github.com/sunormesky-max/epicode/issues/226)) ([bb3ce24](https://github.com/sunormesky-max/epicode/commit/bb3ce24da892fa3e7598f3717f590b0940ea58cc))
+
+
+### Performance Improvements
+
+* **frontend:** stop preloading recharts + framer-motion on every page ([#216](https://github.com/sunormesky-max/epicode/issues/216)) ([33543da](https://github.com/sunormesky-max/epicode/commit/33543da0a0e09666ece15f216c5d33c78ec06866))
+
 ## [1.7.0](https://github.com/sunormesky-max/epicode/compare/v1.6.1...v1.7.0) (2026-10-08)
 
 
