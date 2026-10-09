@@ -1,4 +1,5 @@
 ﻿use super::tetra::TetraId;
+use super::vertex::VertexId;
 
 pub type PulseId = u64;
 
@@ -22,6 +23,8 @@ pub struct PulseResult {
     pub pulse_id: PulseId,
     pub origin: TetraId,
     pub reached_target: bool,
+    /// Port reached by this pulse within its TTL, if any.
+    pub returned_to_port: Option<VertexId>,
     pub data: PulseData,
     pub energy_cost: f64,
     /// 被 pulse 修改了 mass 的 tetra id（供 scheduler 增量持久化）
