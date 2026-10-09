@@ -54,6 +54,7 @@ pub struct Space {
 }
 
 const GRID_CELL: f64 = 1.0;
+pub const PORT_RESERVATION_OWNER: TetraId = u64::MAX;
 
 fn grid_key(p: &Point3) -> (i64, i64, i64) {
     (
@@ -779,7 +780,37 @@ impl Space {
             .reassign_port(old_tetra_id, new_tetra_id)
     }
 
-    /// 按 vid 精确指定 port 连接（kimi2.7 #1：替代 sentinel 匹配，防并发泄漏）
+    /// Complete a seed placement only when this tetrahedron actually touches
+    /// the reserved Port. The Port ID disambiguates simultaneous reservations.
+    pub fn transfer_cylinder_port_reservation(
+        &self,
+        port_vid: VertexId,
+        tetra_id: TetraId,
+    ) -> Result<(), String> {
+        let mut inner = self.inner.write();
+        let tetra = inner
+            .tetrahedrons
+            .get(&tetra_id)
+            .ok_or_else(|| format!("tetrahedron {} not found", tetra_id))?;
+        if !tetra.vertex_ids.contains(&port_vid) {
+            return Err(format!(
+                "tetrahedron {} does not touch port {}",
+                tetra_id, port_vid
+            ));
+        }
+        inner
+            .cylinder
+            .reassign_specific_port(port_vid, PORT_RESERVATION_OWNER, tetra_id)
+    }
+
+    pub fn release_cylinder_port_reservation(&self, port_vid: VertexId) -> Result<(), String> {
+        self.inner
+            .write()
+            .cylinder
+            .release_specific_port(port_vid, PORT_RESERVATION_OWNER)
+    }
+
+    /// Assign a free Port by ID (for occupancy recovery and anchor changes).
     pub fn assign_specific_port(&self, port_vid: VertexId, tetra_id: TetraId) -> bool {
         self.inner
             .write()
@@ -1764,6 +1795,79 @@ mod tests {
             tet.vertex_ids,
             port_vid
         );
+    }
+
+    #[test]
+    fn reserved_seed_port_transfers_to_geometric_tetra_and_reseed_is_idempotent() {
+        let space = Space::new();
+        let (port_vid, port_pos) = space
+            .assign_cylinder_port(
+                super::super::cylinder::CylinderLayer::Instinct,
+                PORT_RESERVATION_OWNER,
+            )
+            .unwrap();
+        let (tetra, positions) = make_tetra(0, center_with_vertex_at(port_pos));
+        let id = space.add_tetrahedron(&tetra, &positions).unwrap();
+        assert!(space
+            .get_tetrahedron(id)
+            .unwrap()
+            .vertex_ids
+            .contains(&port_vid));
+
+        space
+            .transfer_cylinder_port_reservation(port_vid, id)
+            .unwrap();
+        assert_eq!(
+            space
+                .inner
+                .read()
+                .cylinder
+                .find_port_for_tetra(id)
+                .map(|p| p.id),
+            Some(port_vid)
+        );
+        assert_eq!(space.tetras_connected_to_port(port_vid), vec![id]);
+        assert_eq!(space.port_stats().0, 1);
+        assert_eq!(space.reseed_ports(), 0);
+        assert_eq!(space.port_stats().0, 1);
+    }
+
+    #[test]
+    fn invalid_seed_transfer_releases_only_its_own_reservation() {
+        let space = Space::new();
+        let layer = super::super::cylinder::CylinderLayer::Instinct;
+        let (first_port, _) = space
+            .assign_cylinder_port(layer, PORT_RESERVATION_OWNER)
+            .unwrap();
+        let (second_port, _) = space
+            .assign_cylinder_port(layer, PORT_RESERVATION_OWNER)
+            .unwrap();
+        let (tetra, positions) = make_tetra(0, Point3::new(20.0, 20.0, 0.5));
+        let id = space.add_tetrahedron(&tetra, &positions).unwrap();
+
+        assert!(space
+            .transfer_cylinder_port_reservation(second_port, id)
+            .is_err());
+        space.remove_tetrahedron(id).unwrap();
+        space
+            .release_cylinder_port_reservation(second_port)
+            .unwrap();
+
+        let inner = space.inner.read();
+        let first = inner
+            .cylinder
+            .all_ports()
+            .iter()
+            .find(|p| p.id == first_port)
+            .unwrap();
+        let second = inner
+            .cylinder
+            .all_ports()
+            .iter()
+            .find(|p| p.id == second_port)
+            .unwrap();
+        assert_eq!(first.connected_tetra, Some(PORT_RESERVATION_OWNER));
+        assert!(second.is_free());
     }
 
     #[test]
