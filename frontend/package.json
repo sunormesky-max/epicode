@@ -12,7 +12,8 @@
     "check": "tsc -b",
     "format": "prettier --write .",
     "test": "vitest run",
-    "prebuild": "node scripts/gen-mirrors.mjs"
+    "prebuild": "node scripts/gen-mirrors.mjs",
+    "postbuild": "node scripts/check-entry-chunks.mjs"
   },
   "dependencies": {
     "cookie": "^1.1.1",
