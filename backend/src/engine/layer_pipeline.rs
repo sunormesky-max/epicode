@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::domain::cylinder::CylinderLayer;
-use crate::domain::space::Space;
+use crate::domain::space::{Space, PORT_RESERVATION_OWNER};
 
 #[derive(Debug, Clone)]
 pub struct RequestContext {
@@ -263,14 +263,15 @@ pub fn memorialize_security_event(space: &Space, operation: &str, reason: &str, 
     let zone = space.zone_for_layer(layer);
     let z = zone.center_z();
 
-    let port_opt = space.assign_cylinder_port(layer, u64::MAX);
+    let port_opt = space.assign_cylinder_port(layer, PORT_RESERVATION_OWNER);
     let anchor = if let Some((_vid, pos)) = port_opt {
         pos
     } else {
         crate::domain::vertex::Point3::new(0.0, 0.0, z)
     };
 
-    let offsets = crate::domain::tetra::Tetrahedron::compute_vertices(anchor);
+    let offsets =
+        crate::domain::tetra::Tetrahedron::compute_vertices(crate::domain::vertex::Point3::zero());
     let core = crate::domain::vertex::Point3::new(
         anchor.x - offsets[0].x,
         anchor.y - offsets[0].y,
@@ -308,8 +309,30 @@ pub fn memorialize_security_event(space: &Space, operation: &str, reason: &str, 
     };
     match space.add_tetrahedron(&tetra, &positions) {
         Ok(id) => {
-            if port_opt.is_some() {
-                space.reassign_cylinder_port(u64::MAX, id);
+            if let Some((port_vid, _)) = port_opt {
+                if let Err(e) = space.transfer_cylinder_port_reservation(port_vid, id) {
+                    if let Err(rollback_error) = space.remove_tetrahedron(id) {
+                        tracing::error!(
+                            "[LayerPipeline] failed to roll back tetra {}: {}",
+                            id,
+                            rollback_error
+                        );
+                    }
+                    if let Err(release_error) = space.release_cylinder_port_reservation(port_vid) {
+                        tracing::error!(
+                            "[LayerPipeline] failed to release Port {}: {}",
+                            port_vid,
+                            release_error
+                        );
+                    }
+                    tracing::error!(
+                        "[LayerPipeline] failed to connect security event tetra {} to Port {}: {}",
+                        id,
+                        port_vid,
+                        e
+                    );
+                    return;
+                }
             }
             tracing::info!(
                 "[LayerPipeline] security event memorialized as tetra {}",
@@ -317,8 +340,14 @@ pub fn memorialize_security_event(space: &Space, operation: &str, reason: &str, 
             );
         }
         Err(e) => {
-            if port_opt.is_some() {
-                space.release_cylinder_port(u64::MAX);
+            if let Some((port_vid, _)) = port_opt {
+                if let Err(release_error) = space.release_cylinder_port_reservation(port_vid) {
+                    tracing::error!(
+                        "[LayerPipeline] failed to release Port {}: {}",
+                        port_vid,
+                        release_error
+                    );
+                }
             }
             tracing::error!(
                 "[LayerPipeline] failed to memorialize security event: {}",
@@ -368,5 +397,26 @@ mod tests {
             .with_label("boosted");
         assert_eq!(d.modified_importance, Some(2.0));
         assert_eq!(d.boost_labels, vec!["boosted"]);
+    }
+
+    #[test]
+    fn security_memorialization_touches_and_owns_its_reserved_port() {
+        let space = Space::new();
+        memorialize_security_event(&space, "create", "denied", "test trail");
+
+        let tetra = space.all_tetrahedrons().pop().unwrap();
+        let port_vids: std::collections::HashSet<_> = space
+            .cylinder_ports()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        let port_vid = tetra
+            .vertex_ids
+            .into_iter()
+            .find(|id| port_vids.contains(id))
+            .expect("security event must touch its Port");
+        assert_eq!(space.tetras_connected_to_port(port_vid), vec![tetra.id]);
+        assert_eq!(space.port_stats().0, 1);
+        assert_eq!(space.reseed_ports(), 0);
     }
 }
