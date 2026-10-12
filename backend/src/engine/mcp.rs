@@ -243,7 +243,14 @@ impl McpHandler {
         let has_strict = args["strict_filter"].is_boolean();
         let has_as_of = args["as_of"].is_number();
         // Phase 1: mode/strict_filter 也算"有过滤参数", 不能返回 None 否则 mode 丢失
-        if !has_labels && !has_min_imp && !has_project && !has_since && !has_mode && !has_strict && !has_as_of {
+        if !has_labels
+            && !has_min_imp
+            && !has_project
+            && !has_since
+            && !has_mode
+            && !has_strict
+            && !has_as_of
+        {
             return None;
         }
         let mut f = super::search_engine::SearchFilters::default();
@@ -6509,7 +6516,9 @@ mod tests {
             .expect("filters present");
         assert_eq!(f0.as_of, None);
         // 无任何过滤参数仍返回 None(向后兼容)
-        assert!(h.build_search_filters(&serde_json::json!({"query": "x"})).is_none());
+        assert!(h
+            .build_search_filters(&serde_json::json!({"query": "x"}))
+            .is_none());
     }
 
     fn isolated_engine() -> Engine {
