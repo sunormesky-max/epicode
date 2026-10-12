@@ -267,7 +267,44 @@ fn record_api_call(st: &CloudState, api_key: &str) {
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let mut daily = st.api_calls_daily.lock();
     let user_daily = daily.entry(api_key.to_string()).or_default();
-    *user_daily.entry(today).or_insert(0) += 1;
+    let n = {
+        let e = user_daily.entry(today).or_insert(0);
+        *e += 1;
+        *e
+    };
+    // 密钥治理第一刀(渗透#Critical建议5): owner级凭据异常调用量告警。
+    // 恰好跨过阈值时告警一次(==判断天然去重), 阈值env可配。
+    // 只打key前缀, 不上日志全文——凭据不落盘。
+    if let Some(threshold) = daily_call_alert_threshold() {
+        if n == threshold {
+            tracing::warn!(
+                "[SECURITY] api key {}... exceeded {} calls today ({} calls) — possible credential abuse or runaway batch job",
+                &api_key[..api_key.len().min(8)],
+                threshold,
+                n
+            );
+        }
+    }
+}
+
+/// 每日调用告警阈值: EPICODE_DAILY_CALL_ALERT(默认5000, 0=关)。
+/// 参考基线: 正常日几十次; 9/22审计批量日17852次(应触发); 设5000放过日常批量、拦持续滥用。
+fn daily_call_alert_threshold() -> Option<u64> {
+    let raw = std::env::var("EPICODE_DAILY_CALL_ALERT")
+        .ok()?
+        .trim()
+        .to_string();
+    if raw.is_empty() {
+        return None;
+    }
+    raw.parse::<u64>()
+        .ok()
+        .filter(|v| *v > 0)
+        .or(None)
+        .or_else(|| {
+            tracing::warn!("[SECURITY] invalid EPICODE_DAILY_CALL_ALERT={raw:?}, ignoring");
+            None
+        })
 }
 
 #[cfg(test)]
