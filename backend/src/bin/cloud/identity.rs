@@ -7,15 +7,19 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 
-use epicode::engine::user_manager::UserInfo;
+use epicode::engine::user_manager::{Permission, UserInfo};
 
-use super::helpers::get_engine;
+use super::helpers::{get_engine, require_perm};
 use super::state::CloudState;
 
 pub async fn user_identity(
     State(st): State<CloudState>,
     user: axum::extract::Extension<UserInfo>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    // 与其他读取接口一致:身份信息属于空间内容,需要 MemoryRead
+    if let Some(denied) = require_perm(&user, Permission::MemoryRead) {
+        return denied;
+    }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
@@ -301,6 +305,10 @@ pub async fn update_identity_http(
     user: axum::extract::Extension<UserInfo>,
     Json(req): Json<UpdateIdentityRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    // 身份校准(personality/language)属于人格编辑,与人格导入同一权限点
+    if let Some(denied) = require_perm(&user, Permission::PersonaImport) {
+        return denied;
+    }
     let engine = match get_engine(&st, &user) {
         Ok(e) => e,
         Err(json) => return (StatusCode::INTERNAL_SERVER_ERROR, json),
@@ -366,5 +374,94 @@ pub async fn update_identity_http(
                 &e,
             )),
         ),
+    }
+}
+
+#[cfg(test)]
+mod permission_tests {
+    use super::*;
+    use axum::extract::Extension;
+    use epicode::engine::user_manager::{UserPlan, UserRole};
+
+    fn sub_account(role: UserRole, custom: Option<Vec<String>>) -> UserInfo {
+        UserInfo {
+            user_id: "identity-sub".into(),
+            api_key: String::new(),
+            password_hash: String::new(),
+            plan: UserPlan::Free,
+            max_memories: 1000,
+            memories_used: 0,
+            created_at: 0,
+            parent: Some("owner".into()),
+            sub_accounts: Vec::new(),
+            role,
+            email: String::new(),
+            custom_permissions: custom,
+            settings: None,
+        }
+    }
+
+    fn state(dir: &std::path::Path) -> CloudState {
+        CloudState {
+            user_mgr: std::sync::Arc::new(epicode::engine::user_manager::UserManager::new(dir)),
+            admin_key: String::new(),
+            rate_limits: Default::default(),
+            active_tasks: Default::default(),
+            pub_skills: std::sync::Arc::new(epicode::engine::skills::SkillEngine::new(
+                std::sync::Arc::new(
+                    epicode::engine::storage::StorageManager::new(&dir.join("pub_skills")).unwrap(),
+                ),
+            )),
+            api_call_counts: Default::default(),
+            api_calls_daily: Default::default(),
+            insight_tx: std::sync::Arc::new(tokio::sync::broadcast::channel(4).0),
+            startup_phase: Default::default(),
+            primary_executors: Default::default(),
+            stream_tickets: Default::default(),
+            library: std::sync::Arc::new(
+                epicode::engine::library::LibraryStore::open_in_data_dir(dir, None).unwrap(),
+            ),
+        }
+    }
+
+    fn assert_denied(r: (StatusCode, Json<serde_json::Value>), perm: &str) {
+        assert_eq!(r.0, StatusCode::FORBIDDEN);
+        assert_eq!(r.1 .0["code"], "FORBIDDEN_ROLE");
+        assert_eq!(r.1 .0["required_permission"], perm);
+    }
+
+    #[tokio::test]
+    async fn identity_recalibration_and_reads_follow_role_permissions() {
+        let dir =
+            std::env::temp_dir().join(format!("epicode-identity-rbac-{}", uuid::Uuid::new_v4()));
+        let st = state(&dir);
+        let recalibrate = || UpdateIdentityRequest {
+            name: None,
+            mission: None,
+            author: None,
+            personality: Some("curious".into()),
+            language: None,
+        };
+        // read-only roles cannot recalibrate the persona
+        for role in [UserRole::Viewer, UserRole::Tester] {
+            let r = update_identity_http(
+                State(st.clone()),
+                Extension(sub_account(role, None)),
+                Json(recalibrate()),
+            )
+            .await;
+            assert_denied(r, "personaimport");
+        }
+        // a sub-account whose custom grants exclude memory_read cannot read identity
+        let r = user_identity(
+            State(st.clone()),
+            Extension(sub_account(
+                UserRole::Developer,
+                Some(vec!["memory_write".into()]),
+            )),
+        )
+        .await;
+        assert_denied(r, "memoryread");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
