@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0](https://github.com/sunormesky-max/epicode/compare/v1.8.3...v1.9.0) (2026-10-12)
+
+
+### Features
+
+* **persona:** 人格导出/导入保留记忆时间线与来源,导入计入配额 ([#239](https://github.com/sunormesky-max/epicode/issues/239)) ([8d961e7](https://github.com/sunormesky-max/epicode/commit/8d961e71cc1b1312629fdabd0087398ea2833cad))
+
+
+### Bug Fixes
+
+* **console:** consistent load-error states with retry; no raw JSON parse errors ([#242](https://github.com/sunormesky-max/epicode/issues/242)) ([d45074f](https://github.com/sunormesky-max/epicode/commit/d45074ffef8f2f8e0b36247a71287321d9cb0426))
+* **identity:** 身份读取与校准接口按角色权限校验,与其他人格/记忆接口一致 ([#240](https://github.com/sunormesky-max/epicode/issues/240)) ([5baad71](https://github.com/sunormesky-max/epicode/commit/5baad71aaaac9deb6a3d3000da2b7ecf841f663a))
+
+
+### Performance Improvements
+
+* **console:** single-flight concurrent GETs; keep sub-account rail item stable ([#241](https://github.com/sunormesky-max/epicode/issues/241)) ([1b119de](https://github.com/sunormesky-max/epicode/commit/1b119dee3b0136e1751aa6e3850de456f3f9dd21))
+
 ## [1.8.3](https://github.com/sunormesky-max/epicode/compare/v1.8.2...v1.8.3) (2026-10-09)
 
 
