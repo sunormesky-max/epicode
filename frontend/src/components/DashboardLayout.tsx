@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router';
 import { useI18nContext } from '@/i18n/useI18n';
-import { getApiKey, getStats, logout } from '@/lib/api';
+import { getApiKey, getStats, getUserId, logout } from '@/lib/api';
 import { copyText } from '@/lib/clipboard';
 import CommandBar from '@/components/CommandBar';
 import ObservationStatus from '@/components/ObservationStatus';
@@ -12,6 +12,11 @@ import {
 
 const RAIL_W = 64;
 
+// 每个控制台页面都会重新挂载 DashboardLayout:记住本标签页内已确认的主账户身份,
+// 切页时"子账户"入口不再先消失再出现(导航轨跳动),也省掉缓存过期后的等待。
+// 以 userId 为键,换账号不会串用(ProtectedRoute 亦按 userId 重挂载)。
+const knownIsMain = new Map<string, boolean>();
+
 export default function DashboardLayout({ children, viewport = false }: { children: React.ReactNode; viewport?: boolean }) {
   const { t, lang } = useI18nContext();
   const location = useLocation();
@@ -20,7 +25,7 @@ export default function DashboardLayout({ children, viewport = false }: { childr
   const [copyFailed, setCopyFailed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   // 保守默认false: 子账户用户不再闪现"子账户管理"入口, 主账户在stats确认后出现(UX债修复)
-  const [isMain, setIsMain] = useState(false);
+  const [isMain, setIsMain] = useState(() => knownIsMain.get(getUserId() ?? '') ?? false);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -52,7 +57,13 @@ export default function DashboardLayout({ children, viewport = false }: { childr
 
   useEffect(() => {
     const controller = new AbortController();
-    getStats(controller.signal).then(s => { if (!controller.signal.aborted) setIsMain(s.is_main_account !== false); }).catch(() => {});
+    getStats(controller.signal).then(s => {
+      if (controller.signal.aborted) return;
+      const main = s.is_main_account !== false;
+      const uid = getUserId();
+      if (uid) knownIsMain.set(uid, main);
+      setIsMain(main);
+    }).catch(() => {});
     return () => controller.abort();
   }, []);
 
