@@ -1006,7 +1006,14 @@ pub async fn import_personality(
             )),
         );
     }
-    match engine.scheduler.api_import_personality(&pkg) {
+    // 导入的核心记忆与其他写入路径一样计入账户配额(逐条预占,未新建则退还)
+    let uid = engine.user_id.clone();
+    let mut reserve = || st.user_mgr.check_and_increment_memory(&uid);
+    let mut release = || st.user_mgr.decrement_memory_count(&uid, 1);
+    match engine
+        .scheduler
+        .api_import_personality_with_quota(&pkg, &mut reserve, &mut release)
+    {
         Ok(result) => (
             StatusCode::OK,
             Json(epicode::engine::smrp::envelope_ok(
@@ -4261,6 +4268,40 @@ mod quota_rollback_tests {
             before,
             "failed writes must not consume quota"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reproduction: personality import created memories without charging quota.
+    #[tokio::test]
+    async fn personality_import_counts_against_quota() {
+        let dir = std::env::temp_dir().join(format!("epicode-quota-{}", uuid::Uuid::new_v4()));
+        let st = state(&dir);
+        let info = st
+            .user_mgr
+            .register(
+                "importuser",
+                "ik-fixture-only",
+                UserPlan::Free,
+                "password",
+                None,
+            )
+            .unwrap();
+        let _engine = st.user_mgr.get_engine("importuser").unwrap();
+        let before = used(&st, "importuser");
+        let pkg = serde_json::json!({
+            "format": "epicode-personality/1.1",
+            "core_memories": [
+                {"content": "first imported fact about release cadence", "timestamp": 1_735_689_600},
+                {"content": "second imported fact about on-call rotation", "timestamp": 1_735_689_600},
+                {"content": "third imported fact about storage retention", "timestamp": 1_735_689_600},
+            ]
+        });
+        let (code, body) =
+            import_personality(State(st.clone()), Extension(info.clone()), Json(pkg)).await;
+        assert_eq!(code, StatusCode::OK, "{:?}", body.0);
+        let restored = body.0["data"]["core_memories_restored"].as_u64().unwrap() as usize;
+        assert!(restored > 0);
+        assert_eq!(used(&st, "importuser"), before + restored);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
