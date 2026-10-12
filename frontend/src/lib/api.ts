@@ -278,19 +278,85 @@ export function invalidateCache(...prefixes: string[]): void {
 }
 
 // ── Request helper ──
+export interface RequestOptions {
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+  body?: unknown;
+  skipCache?: boolean;
+  public?: boolean;
+  extraHeaders?: Record<string, string>;
+  rawResponse?: boolean;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+// ── 并发 GET 合并(single-flight)──
+// 控制台每个页面都自带 DashboardLayout,而布局与页面会在同一时刻各自请求 /v1/stats 等接口;
+// 30s 缓存只对"已完成"的请求生效,并发的同一 GET 之前会各发一次。这里让同用户、同认证代、
+// 同参数的并发 GET 共享一次网络请求。每个调用方仍可用自己的 signal 取消(只影响它自己),
+// 所有调用方都取消后才真正 abort 底层 fetch —— 保持 F3(卸载即取消)语义。
+interface InflightEntry { promise: Promise<unknown>; controller: AbortController; subscribers: number }
+const inflight = new Map<string, InflightEntry>();
+
+/** 测试用:当前合并中的 GET 数 */
+export function inflightRequestCount(): number { return inflight.size; }
+
+function abortedError(): Error {
+  // 与旧行为一致:外部 signal 取消时请求以同一条错误结束(调用方均以 signal.aborted 判定)
+  return new Error('请求超时，请检查网络后重试。');
+}
+
+export function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+  const { method = 'GET', skipCache = false, signal } = options;
+  if (method !== 'GET' || skipCache) return performRequest<T>(endpoint, options);
+  if (signal?.aborted) return performRequest<T>(endpoint, options);
+
+  const key = [
+    authGeneration, options.public ? 'pub' : 'auth', options.rawResponse ? 'raw' : 'json',
+    options.timeoutMs ?? '', options.extraHeaders ? JSON.stringify(options.extraHeaders) : '',
+    getCacheKey(`${API_BASE}${endpoint}`, options.body),
+  ].join('|');
+
+  let entry = inflight.get(key);
+  if (!entry) {
+    const controller = new AbortController();
+    const created: InflightEntry = { controller, subscribers: 0, promise: Promise.resolve() };
+    created.promise = performRequest<T>(endpoint, { ...options, signal: controller.signal });
+    const clear = () => { if (inflight.get(key) === created) inflight.delete(key); };
+    created.promise.then(clear, clear);
+    inflight.set(key, created);
+    entry = created;
+  }
+  const shared = entry;
+  shared.subscribers++;
+  const shared$ = shared.promise as Promise<T>;
+  if (!signal) {
+    return shared$.finally(() => { shared.subscribers--; });
+  }
+  return new Promise<T>((resolve, reject) => {
+    let done = false;
+    const onAbort = () => {
+      if (done) return;
+      done = true;
+      shared.subscribers--;
+      if (shared.subscribers <= 0) {
+        // 最后一个调用方离开:真正取消底层请求,并让后来者重新发起
+        if (inflight.get(key) === shared) inflight.delete(key);
+        shared.controller.abort();
+      }
+      reject(abortedError());
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    shared$.then(
+      (v) => { if (done) return; done = true; shared.subscribers--; signal.removeEventListener('abort', onAbort); resolve(v); },
+      (e) => { if (done) return; done = true; shared.subscribers--; signal.removeEventListener('abort', onAbort); reject(e); },
+    );
+  });
+}
+
 // F3修复:支持外部 signal,组件卸载时可 abort 避免 setState on unmounted。
-export async function request<T>(
+async function performRequest<T>(
   endpoint: string,
-  options: {
-    method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
-    body?: unknown;
-    skipCache?: boolean;
-    public?: boolean;
-    extraHeaders?: Record<string, string>;
-    rawResponse?: boolean;
-    signal?: AbortSignal;
-    timeoutMs?: number;
-  } = {}
+  options: RequestOptions = {}
 ): Promise<T> {
   const { method = 'GET', body, skipCache = false, public: isPublic = false, extraHeaders, rawResponse, signal: externalSignal, timeoutMs } = options;
   if (!isPublic && authTransitionInProgress) {
