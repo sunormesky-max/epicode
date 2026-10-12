@@ -423,14 +423,30 @@ impl McpHandler {
             | "memory_export"
             | "session_list"
             | "drive_inbox"
+            | "action_list"
             | "blocks_get" => Some(P::MemoryRead),
             // These tools change memories or persistent session/drive state.
-            "epicode_handshake" | "task_start" | "task_check" | "task_complete" | "task_alert"
-            | "memory_create" | "memory_update" | "ctx_save" | "pattern_learn"
-            | "decision_record" | "bug_memory" | "session_summary" | "context_observe"
-            | "feedback_submit" | "doc_import" | "memory_improve" | "drive_ack" | "blocks_set" => {
-                Some(P::MemoryWrite)
-            }
+            "epicode_handshake"
+            | "task_start"
+            | "task_check"
+            | "task_complete"
+            | "task_alert"
+            | "memory_create"
+            | "memory_update"
+            | "ctx_save"
+            | "pattern_learn"
+            | "decision_record"
+            | "bug_memory"
+            | "session_summary"
+            | "context_observe"
+            | "feedback_submit"
+            | "doc_import"
+            | "memory_improve"
+            | "drive_ack"
+            | "blocks_set"
+            | "memory_propose_actions"
+            | "action_claim"
+            | "action_complete" => Some(P::MemoryWrite),
             // Deletion, quarantine and restoration change protected memory state.
             "memory_delete" | "memory_forget" | "memory_restore" => Some(P::MemoryDelete),
             // Skill and library management.
@@ -1225,6 +1241,56 @@ impl McpHandler {
                     }
                 },
                 {
+                    "name": "memory_propose_actions",
+                    "description": "Memory Action Envelope (planner-ish): turn a query into claimable next actions grounded in personal memories. Searches evidence, matches skills, and enqueues open actions on the frontier. Each action cites evidence_memory_ids and suggests skills — claim with action_claim, finish with action_complete (writes an outcome memory linked to evidence). Complements memory_ask (answer) and drive_inbox (will signals).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string", "description": "What you want to act on (natural language)" },
+                            "limit": { "type": "integer", "description": "Max actions to propose (default 3, max 5)", "default": 3, "minimum": 1, "maximum": 5 }
+                        },
+                        "required": ["query"]
+                    }
+                },
+                {
+                    "name": "action_list",
+                    "description": "List actions on the memory-action frontier. Filter by state: open|claimed|done|blocked|exhausted.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "state": { "type": "string", "enum": ["open", "claimed", "done", "blocked", "exhausted"], "description": "Optional state filter" },
+                            "limit": { "type": "integer", "description": "Max actions (default 20)", "default": 20, "minimum": 1, "maximum": 100 }
+                        }
+                    }
+                },
+                {
+                    "name": "action_claim",
+                    "description": "Claim one open action for exclusive execution (compare-and-set). Second claim fails. Worker-ish step of the Memory Action Envelope.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "action_id": { "type": "integer", "description": "Action id from memory_propose_actions / action_list" },
+                            "claimed_by": { "type": "string", "description": "Optional agent label (defaults to user id)" }
+                        },
+                        "required": ["action_id"]
+                    }
+                },
+                {
+                    "name": "action_complete",
+                    "description": "Finish a claimed/open action: creates an outcome memory, links each evidence memory to it (Precedes), and marks the action done|blocked|exhausted. Requires non-empty outcome text — this is the structured memory write-back that closes the loop.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "action_id": { "type": "integer" },
+                            "outcome": { "type": "string", "description": "What was delivered / learned (becomes a memory)" },
+                            "success": { "type": "boolean", "description": "true → state=done (default); false → blocked", "default": true },
+                            "labels": { "type": "array", "items": { "type": "string" }, "description": "Extra labels for the outcome memory" },
+                            "state": { "type": "string", "enum": ["done", "blocked", "exhausted"], "description": "Override terminal state" }
+                        },
+                        "required": ["action_id", "outcome"]
+                    }
+                },
+                {
                     "name": "skill_auto_extract",
                     "description": "L3 Skill Learning: automatically extract a reusable skill document from the cognitive engine's effective decision patterns. Analyzes recent decision history for actions with >60% success rate and uses LLM to generalize them into a skill. Letta-inspired continual learning.",
                     "inputSchema": {
@@ -1323,13 +1389,21 @@ impl McpHandler {
             | "skill_execute"
             | "task_status"
             | "drive_inbox"
+            | "action_list"
             | "ctx_load" => (true, false, true, false),
             // Destructive / hard-to-reverse
             "memory_delete" | "memory_forget" | "dream_cycle" | "embedding_migrate"
             | "identity_finalize" => (false, true, false, false),
             // Re-runnable writes (idempotent-ish)
-            "memory_update" | "identity_confirm" | "drive_ack" | "skill_feedback"
-            | "feedback_submit" | "task_check" => (false, false, true, false),
+            "memory_update"
+            | "identity_confirm"
+            | "drive_ack"
+            | "memory_propose_actions"
+            | "action_claim"
+            | "action_complete"
+            | "skill_feedback"
+            | "feedback_submit"
+            | "task_check" => (false, false, true, false),
             // Other writes / side-effects
             "memory_create" | "memory_restore" | "memory_improve" | "ctx_save"
             | "pattern_learn" | "decision_record" | "bug_memory" | "session_summary"
@@ -1518,6 +1592,10 @@ impl McpHandler {
             "skill_auto_extract" => self.tool_skill_auto_extract(&args),
             "drive_inbox" => self.tool_drive_inbox(&args),
             "drive_ack" => self.tool_drive_ack(&args),
+            "memory_propose_actions" => self.tool_memory_propose_actions(&args),
+            "action_list" => self.tool_action_list(&args),
+            "action_claim" => self.tool_action_claim(&args),
+            "action_complete" => self.tool_action_complete(&args),
             "memory_forget" => self.tool_memory_forget(&args),
             "blocks_get" => self.tool_blocks_get(&args),
             "blocks_set" => self.tool_blocks_set(&args),
@@ -6491,6 +6569,253 @@ impl McpHandler {
         let result = self.engine.scheduler().api_extract_skill();
         self.smrp_ok("skill_auto_extract", result)
     }
+
+    fn tool_memory_propose_actions(&self, args: &serde_json::Value) -> serde_json::Value {
+        let query = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        if query.is_empty() {
+            return self.smrp_err("memory_propose_actions", 400, "query is required");
+        }
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(3)
+            .clamp(1, 5) as usize;
+
+        let hits = match self.engine.scheduler.api_search(query, 8) {
+            Ok(h) => h,
+            Err(e) => return self.smrp_err("memory_propose_actions", 500, &e),
+        };
+        let evidence: Vec<(u64, String)> = hits
+            .into_iter()
+            .map(|(id, _sim, _imp, payload)| (id, payload.content))
+            .collect();
+        if evidence.is_empty() {
+            return self.smrp_ok(
+                "memory_propose_actions",
+                serde_json::json!({
+                    "actions": [],
+                    "memory_count": 0,
+                    "note": "No memories matched — create or import evidence first, then propose again.",
+                }),
+            );
+        }
+
+        let skills: Vec<(String, f64)> = self
+            .engine
+            .skills
+            .match_skills_scored(query, &self.engine.user_id, 5)
+            .into_iter()
+            .map(|(sk, score)| (sk.name, score))
+            .collect();
+
+        let drafts = crate::engine::agent_action::build_proposals(query, &evidence, &skills, limit);
+        let frontier = self.engine.scheduler.action_frontier();
+        let mut actions = Vec::new();
+        let mut errors = Vec::new();
+        for draft in drafts {
+            match frontier.enqueue(draft.into_action(query)) {
+                Ok(a) => actions.push(a.to_json()),
+                Err(e) => errors.push(e),
+            }
+        }
+        self.engine.scheduler.save_action_frontier();
+        self.smrp_ok(
+            "memory_propose_actions",
+            serde_json::json!({
+                "actions": actions,
+                "memory_count": evidence.len(),
+                "evidence_memory_ids": evidence.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+                "errors": errors,
+                "loop": ["memory_propose_actions", "action_claim", "execute", "action_complete"],
+            }),
+        )
+    }
+
+    fn tool_action_list(&self, args: &serde_json::Value) -> serde_json::Value {
+        let state = args
+            .get("state")
+            .and_then(|v| v.as_str())
+            .and_then(crate::engine::agent_action::ActionState::parse);
+        if let Some(_raw) = args.get("state").and_then(|v| v.as_str()) {
+            if state.is_none() {
+                return self.smrp_err(
+                    "action_list",
+                    400,
+                    "state must be open|claimed|done|blocked|exhausted",
+                );
+            }
+        }
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 100) as usize;
+        let actions: Vec<serde_json::Value> = self
+            .engine
+            .scheduler
+            .action_frontier()
+            .list(state, limit)
+            .into_iter()
+            .map(|a| a.to_json())
+            .collect();
+        self.smrp_ok(
+            "action_list",
+            serde_json::json!({
+                "actions": actions,
+                "open_count": self.engine.scheduler.action_frontier().open_count(),
+            }),
+        )
+    }
+
+    fn tool_action_claim(&self, args: &serde_json::Value) -> serde_json::Value {
+        let action_id = match args.get("action_id").and_then(|v| v.as_u64()) {
+            Some(id) => id,
+            None => return self.smrp_err("action_claim", 400, "action_id is required"),
+        };
+        let claimed_by = args
+            .get("claimed_by")
+            .and_then(|v| v.as_str())
+            .unwrap_or(self.engine.user_id.as_str());
+        match self
+            .engine
+            .scheduler
+            .action_frontier()
+            .claim(action_id, claimed_by)
+        {
+            Ok(a) => {
+                self.engine.scheduler.save_action_frontier();
+                self.smrp_ok("action_claim", a.to_json())
+            }
+            Err(e) => self.smrp_err("action_claim", 409, &e),
+        }
+    }
+
+    fn tool_action_complete(&self, args: &serde_json::Value) -> serde_json::Value {
+        let action_id = match args.get("action_id").and_then(|v| v.as_u64()) {
+            Some(id) => id,
+            None => return self.smrp_err("action_complete", 400, "action_id is required"),
+        };
+        let outcome = args
+            .get("outcome")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        if outcome.is_empty() {
+            return self.smrp_err(
+                "action_complete",
+                400,
+                "outcome is required — structured write-back cannot be empty",
+            );
+        }
+        let frontier = self.engine.scheduler.action_frontier();
+        let action = match frontier.get(action_id) {
+            Some(a) => a,
+            None => {
+                return self.smrp_err(
+                    "action_complete",
+                    404,
+                    &format!("action {} not found", action_id),
+                )
+            }
+        };
+        if action.state.is_terminal() {
+            return self.smrp_err(
+                "action_complete",
+                409,
+                &format!("action {} already terminal", action_id),
+            );
+        }
+
+        let success = args
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let terminal = match args.get("state").and_then(|v| v.as_str()) {
+            Some(s) => match crate::engine::agent_action::ActionState::parse(s) {
+                Some(st) if st.is_terminal() => st,
+                _ => {
+                    return self.smrp_err(
+                        "action_complete",
+                        400,
+                        "state must be done|blocked|exhausted",
+                    )
+                }
+            },
+            None => {
+                if success {
+                    crate::engine::agent_action::ActionState::Done
+                } else {
+                    crate::engine::agent_action::ActionState::Blocked
+                }
+            }
+        };
+
+        let mut labels = vec![
+            "action-outcome".to_string(),
+            format!("action:{}", action_id),
+        ];
+        if let Some(extra) = args.get("labels").and_then(|v| v.as_array()) {
+            for v in extra {
+                if let Some(s) = v.as_str() {
+                    let t = s.trim();
+                    if !t.is_empty() && !labels.iter().any(|x| x == t) {
+                        labels.push(t.to_string());
+                    }
+                }
+            }
+        }
+
+        let content = format!(
+            "[action-outcome #{}] {}\n\nEvidence: {:?}\nSource query: {}",
+            action_id,
+            outcome,
+            action.evidence_memory_ids,
+            action.source_query.as_deref().unwrap_or("")
+        );
+
+        let report = match self
+            .engine
+            .scheduler
+            .api_create_memory_full(&content, labels)
+        {
+            Ok(r) => r,
+            Err(e) => return self.smrp_err("action_complete", 500, &e),
+        };
+        let outcome_id = report.id;
+
+        let kg = self.engine.scheduler.kg_handle();
+        let mut linked = 0usize;
+        for &eid in &action.evidence_memory_ids {
+            if self.engine.space.get_tetrahedron(eid).is_some() {
+                kg.add_relation(
+                    eid,
+                    outcome_id,
+                    crate::engine::knowledge::RelationType::Precedes,
+                    0.85,
+                );
+                linked += 1;
+            }
+        }
+
+        match frontier.complete(action_id, outcome_id, terminal) {
+            Ok(done) => {
+                self.engine.scheduler.save_action_frontier();
+                self.smrp_ok(
+                    "action_complete",
+                    serde_json::json!({
+                        "action": done.to_json(),
+                        "outcome_memory_id": outcome_id,
+                        "relations_created": linked,
+                    }),
+                )
+            }
+            Err(e) => self.smrp_err("action_complete", 409, &e),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -6600,6 +6925,10 @@ mod tests {
         let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
         assert!(names.contains(&"memory_create"));
         assert!(names.contains(&"memory_search"));
+        assert!(names.contains(&"memory_propose_actions"));
+        assert!(names.contains(&"action_claim"));
+        assert!(names.contains(&"action_complete"));
+        assert!(names.contains(&"action_list"));
         assert!(names.contains(&"memory_recall"));
         assert!(names.contains(&"memory_ask"));
         assert!(names.contains(&"ctx_load"));
@@ -7793,5 +8122,86 @@ mod tests {
         }
 
         std::env::remove_var("EPICODE_MEMCARD");
+    }
+
+    #[test]
+    fn memory_action_envelope_propose_claim_complete_writes_outcome() {
+        let eng = isolated_engine();
+        let handler = McpHandler::new(std::sync::Arc::new(eng));
+        confirm_test_identity(&handler);
+
+        let r1 = handler.tool_memory_create(&serde_json::json!({
+            "content": "Epicode production deploy uses blue-green with health checks on /healthz",
+            "labels": ["deploy", "ops", "epicode"]
+        }));
+        let r2 = handler.tool_memory_create(&serde_json::json!({
+            "content": "Rollback runbook: switch traffic back to green within 5 minutes",
+            "labels": ["deploy", "rollback"]
+        }));
+        assert_eq!(r1["protocol"]["ok"], true, "{r1}");
+        assert_eq!(r2["protocol"]["ok"], true, "{r2}");
+
+        let proposed = handler.tool_memory_propose_actions(&serde_json::json!({
+            "query": "production deploy checklist",
+            "limit": 2
+        }));
+        assert_eq!(proposed["protocol"]["ok"], true, "{proposed}");
+        let actions = proposed["data"]["actions"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            !actions.is_empty(),
+            "expected at least one action: {proposed}"
+        );
+        let action_id = actions[0]["id"].as_u64().expect("action id");
+        let evidence = actions[0]["evidence_memory_ids"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert!(!evidence.is_empty(), "action must cite evidence memories");
+
+        let claim = handler.tool_action_claim(&serde_json::json!({
+            "action_id": action_id,
+            "claimed_by": "test-agent"
+        }));
+        assert_eq!(claim["protocol"]["ok"], true, "{claim}");
+        let claim2 = handler.tool_action_claim(&serde_json::json!({
+            "action_id": action_id,
+            "claimed_by": "other-agent"
+        }));
+        assert_eq!(
+            claim2["protocol"]["ok"], false,
+            "second claim must fail: {claim2}"
+        );
+
+        let empty = handler.tool_action_complete(&serde_json::json!({
+            "action_id": action_id,
+            "outcome": "   "
+        }));
+        assert_eq!(
+            empty["protocol"]["ok"], false,
+            "empty outcome rejected: {empty}"
+        );
+
+        let done = handler.tool_action_complete(&serde_json::json!({
+            "action_id": action_id,
+            "outcome": "Documented deploy checklist with blue-green steps and rollback pointer",
+            "success": true
+        }));
+        assert_eq!(done["protocol"]["ok"], true, "{done}");
+        let outcome_id = done["data"]["outcome_memory_id"]
+            .as_u64()
+            .expect("outcome id");
+        assert!(outcome_id > 0);
+        assert!(done["data"]["relations_created"].as_u64().unwrap_or(0) >= 1);
+
+        let listed = handler.tool_action_list(&serde_json::json!({ "state": "done" }));
+        assert_eq!(listed["protocol"]["ok"], true, "{listed}");
+        let done_actions = listed["data"]["actions"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert!(done_actions.iter().any(|a| a["id"] == action_id));
     }
 }

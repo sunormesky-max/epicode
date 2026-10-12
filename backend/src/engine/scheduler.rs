@@ -353,6 +353,8 @@ pub struct SchedulerCenter {
     skill_feedback_agg_cache: ParkMutex<Option<(usize, std::time::Instant, HashSet<u64>)>>,
     drive_queue: Arc<super::drive::DriveQueue>,
     drive_save_gate: ParkMutex<()>,
+    /// Agent-facing memory action frontier (propose → claim → complete → outcome memory).
+    action_frontier: Arc<super::agent_action::ActionFrontier>,
 }
 
 impl SchedulerCenter {
@@ -441,6 +443,7 @@ impl SchedulerCenter {
             skill_feedback_agg_cache: ParkMutex::new(None),
             drive_queue: Arc::new(super::drive::DriveQueue::new()),
             drive_save_gate: ParkMutex::new(()),
+            action_frontier: Arc::new(super::agent_action::ActionFrontier::new()),
         }
     }
 
@@ -1342,6 +1345,37 @@ impl SchedulerCenter {
 
     pub fn drive_queue(&self) -> &Arc<super::drive::DriveQueue> {
         &self.drive_queue
+    }
+
+    pub fn action_frontier(&self) -> &Arc<super::agent_action::ActionFrontier> {
+        &self.action_frontier
+    }
+
+    pub fn save_action_frontier(&self) {
+        let snap = self.action_frontier.snapshot();
+        match serde_json::to_string(&snap) {
+            Ok(js) => {
+                if let Err(e) = self.storage.save_drive_kv("agent_action_frontier", &js) {
+                    tracing::warn!("[action] frontier save failed: {}", e);
+                }
+            }
+            Err(e) => tracing::warn!("[action] frontier serialize failed: {}", e),
+        }
+    }
+
+    pub fn restore_action_frontier(&self) {
+        if let Some(js) = self.storage.load_drive_kv("agent_action_frontier") {
+            match serde_json::from_str::<Vec<super::agent_action::AgentAction>>(&js) {
+                Ok(actions) => {
+                    self.action_frontier.restore(actions);
+                    tracing::info!(
+                        "[action] restored {} actions from storage",
+                        self.action_frontier.snapshot().len()
+                    );
+                }
+                Err(e) => tracing::warn!("[action] frontier restore failed: {}", e),
+            }
+        }
     }
     pub fn api_stats(&self) -> super::gateway::SpaceStats {
         self.gateway.stats()
