@@ -9,7 +9,7 @@ import { errMsg,
   type ArchiveNode,
 } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
-import { DashboardLoading } from '@/components/DashboardUI';
+import { DashboardLoading, ErrorBanner } from '@/components/DashboardUI';
 import { useI18nContext } from '@/i18n/useI18n';
 import type { TranslationKey } from '@/i18n/translations';
 import {
@@ -92,6 +92,8 @@ export default function DashboardArchive() {
   const [tree, setTree] = useState<ArchiveNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // 档案树加载失败单独展示,带"重试"
+  const [loadError, setLoadError] = useState('');
   const [notice, setNotice] = useState('');
 
   const [searchQ, setSearchQ] = useState('');
@@ -126,9 +128,9 @@ export default function DashboardArchive() {
     try {
       const t = await getArchiveTree();
       setTree(t);
-      setError('');
+      setLoadError('');
     } catch (e: unknown) {
-      setError(errMsg(e) || t('dash.arc.loadFail'));
+      setLoadError(errMsg(e) || t('dash.arc.loadFail'));
     } finally {
       setLoading(false);
     }
@@ -370,12 +372,8 @@ export default function DashboardArchive() {
         <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{totalCount} {t('dash.arc.nodesSuffix')}</p>
       </div>
 
-      {error && (
-        <div style={{ background: 'rgba(var(--danger-red-rgb), 0.08)', color: 'var(--danger-red)', border: '1px solid rgba(var(--danger-red-rgb), 0.15)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          {error}
-          <button onClick={() => setError('')} style={{ color: 'var(--danger-red)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
-        </div>
-      )}
+      {loadError && <ErrorBanner message={loadError} onRetry={() => { setLoadError(''); reload(); }} />}
+      {error && <ErrorBanner message={error} onClose={() => setError('')} />}
       {notice && (
         <div style={{ background: 'rgba(52,211,153,0.06)', color: 'var(--success-green)', border: '1px solid rgba(52,211,153,0.12)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {notice}

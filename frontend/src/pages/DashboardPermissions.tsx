@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { errMsg, getStats, getSubAccounts, setSubAccountPermissions, getUserSettings, setUserSettings, PERMISSIONS, type SubAccount, type StatsData, type UserSettings } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
-import { DashboardLoading } from '@/components/DashboardUI';
+import { DashboardLoading, ErrorBanner } from '@/components/DashboardUI';
 import { Shield, Lock, Check, Minus, Users, Eye } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
 
@@ -33,6 +33,10 @@ export default function DashboardPermissions() {
   const [, setSettings] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // 初次加载失败与操作失败分开:加载失败给"重试",且不再同时显示误导性的空状态
+  const [loadError, setLoadError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const retryLoad = () => { setLoadError(''); setLoading(true); setReloadKey((k) => k + 1); };
   const [notice, setNotice] = useState('');
 
   const [outputMode, setOutputMode] = useState('full');
@@ -61,11 +65,11 @@ export default function DashboardPermissions() {
           setCanOutputControl(s.can_memory_output_control);
           setCanEditPermissions(s.can_permission_edit);
         }
-      } catch (e) { if (mounted) setError(errMsg(e)); }
+      } catch (e) { if (mounted) setLoadError(errMsg(e)); }
       if (mounted) setLoading(false);
     })();
     return () => { mounted = false; };
-  }, []);
+  }, [reloadKey]);
 
   const saveOutputMode = async (mode: string) => {
     if (!canOutputControl) return;
@@ -106,7 +110,8 @@ export default function DashboardPermissions() {
         </p>
       </div>
 
-      {error && <div onClick={() => setError('')} style={{ background: 'rgba(var(--danger-red-rgb), 0.1)', color: 'var(--danger-red)', border: '1px solid rgba(var(--danger-red-rgb), 0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13 }}>{error}</div>}
+      {loadError && <ErrorBanner message={loadError} onRetry={retryLoad} />}
+      {error && <ErrorBanner message={error} onClose={() => setError('')} />}
       {notice && <div onClick={() => setNotice('')} style={{ background: 'rgba(var(--accent-cyan-rgb), 0.08)', color: 'var(--accent-cyan)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13 }}>{notice}</div>}
 
       {/* 计划分级与门控 */}
@@ -177,7 +182,7 @@ export default function DashboardPermissions() {
             </span>
             {!canEditPermissions && <Lock size={13} style={{ color: 'var(--warning-orange)' }} />}
           </div>
-          {accounts.length === 0 ? (
+          {accounts.length === 0 && loadError ? null : accounts.length === 0 ? (
             <p style={{ color: 'var(--text-tertiary)', fontSize: 13, textAlign: 'center', padding: 24 }}>{zh ? '暂无子账户' : 'No sub-accounts'}</p>
           ) : accounts.map(acc => (
             <div key={acc.user_id} style={{ borderTop: '1px solid var(--border-light)', paddingTop: 12, marginTop: 12 }}>
