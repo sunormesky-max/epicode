@@ -297,10 +297,14 @@ fn daily_call_alert_threshold() -> Option<u64> {
     if raw.is_empty() {
         return None;
     }
-    raw.parse::<u64>().ok().filter(|v| *v > 0).or(None).or_else(|| {
-        tracing::warn!("[SECURITY] invalid EPICODE_DAILY_CALL_ALERT={raw:?}, ignoring");
-        None
-    })
+    raw.parse::<u64>()
+        .ok()
+        .filter(|v| *v > 0)
+        .or(None)
+        .or_else(|| {
+            tracing::warn!("[SECURITY] invalid EPICODE_DAILY_CALL_ALERT={raw:?}, ignoring");
+            None
+        })
 }
 
 #[cfg(test)]
