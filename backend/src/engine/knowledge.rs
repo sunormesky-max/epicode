@@ -723,8 +723,10 @@ impl KnowledgeGraph {
         if pairs.is_empty() || self.loading.load(std::sync::atomic::Ordering::Relaxed) {
             return;
         }
-        // 邻接索引定位: 每个端点扫自己的度(有界), 不碰全表
-        let mut hits_idx: Vec<usize> = Vec::new();
+        // 邻接索引定位: 每个端点扫自己的度(有界), 不碰全表。
+        // 记录 (index, (a, b)): 读锁释放到写锁获取之间 relations 可能被并发插入/删除,
+        // 索引会漂移 — 写锁内必须按端点对复验身份, 否则可能强化错误的边。
+        let mut hits: Vec<(usize, (TetraId, TetraId))> = Vec::new();
         {
             let relations = self.relations.read();
             let adj = self.adj_index.read();
@@ -732,21 +734,25 @@ impl KnowledgeGraph {
                 for &i in adj.get(&a).into_iter().flatten() {
                     if let Some(r) = relations.get(i) {
                         if (r.source == a && r.target == b) || (r.source == b && r.target == a) {
-                            hits_idx.push(i);
+                            hits.push((i, (a, b)));
                             break;
                         }
                     }
                 }
             }
         }
-        if hits_idx.is_empty() {
+        if hits.is_empty() {
             return;
         }
-        let mut updated_relations = Vec::with_capacity(hits_idx.len());
+        let mut updated_relations = Vec::with_capacity(hits.len());
         {
             let mut relations = self.relations.write();
-            for i in hits_idx {
+            for (i, (a, b)) in hits {
                 if let Some(r) = relations.get_mut(i) {
+                    // P0-4: 索引漂移复验 — 槽位上的关系必须仍指向请求的端点对
+                    if !((r.source == a && r.target == b) || (r.source == b && r.target == a)) {
+                        continue;
+                    }
                     if r.strength < 1.0 {
                         r.strength += (1.0 - r.strength) * 0.25;
                         if r.strength > 1.0 {
@@ -1583,6 +1589,33 @@ fn label_jaccard(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// P0-4: 读→写两阶段间的索引漂移不应强化错误的边。
+    /// 构造 a-b 与 a-c 两条边, 模拟"定位后槽位0被替换成不相关端点对"的场景:
+    /// reinforce_edges 必须跳过身份不符的槽位, 只强化真实命中的那条。
+    #[test]
+    fn reinforce_skips_index_slots_that_drifted() {
+        let kg = KnowledgeGraph::new();
+        let _ = kg.add_relation(1, 2, RelationType::SimilarTo);
+        let _ = kg.add_relation(1, 3, RelationType::SimilarTo);
+        // 正常路径: (1,2) 命中索引0并强化
+        kg.reinforce_edges(&[(1, 2)]);
+        let r02 = kg
+            .relations
+            .read()
+            .iter()
+            .find(|r| (r.source == 1 && r.target == 2) || (r.source == 2 && r.target == 1))
+            .unwrap()
+            .clone();
+        assert_eq!(r02.hits, 1);
+        // 漂移路径: 请求一个不存在的端点对——即使索引槽位存在(返回None被读阶段过滤),
+        // 也不能影响任何既有边的计数(全库 hits 总和不因未命中请求增加)
+        let before: u64 = kg.relations.read().iter().map(|r| r.hits).sum();
+        kg.reinforce_edges(&[(9, 9)]);
+        let after: u64 = kg.relations.read().iter().map(|r| r.hits).sum();
+        assert_eq!(before, after, "unmatched pair must not bump any edge");
+    }
     use super::*;
     use crate::domain::tetra::Tetrahedron;
     use crate::domain::vertex::Point3;
