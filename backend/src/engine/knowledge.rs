@@ -1597,8 +1597,8 @@ mod tests {
     #[test]
     fn reinforce_skips_index_slots_that_drifted() {
         let kg = KnowledgeGraph::new();
-        let _ = kg.add_relation(1, 2, RelationType::SimilarTo);
-        let _ = kg.add_relation(1, 3, RelationType::SimilarTo);
+        let _ = kg.add_relation(1, 2, RelationType::SimilarTo, 0.5);
+        let _ = kg.add_relation(1, 3, RelationType::SimilarTo, 0.5);
         // 正常路径: (1,2) 命中索引0并强化
         kg.reinforce_edges(&[(1, 2)]);
         let r02 = kg
@@ -1611,9 +1611,9 @@ mod tests {
         assert_eq!(r02.hits, 1);
         // 漂移路径: 请求一个不存在的端点对——即使索引槽位存在(返回None被读阶段过滤),
         // 也不能影响任何既有边的计数(全库 hits 总和不因未命中请求增加)
-        let before: u64 = kg.relations.read().iter().map(|r| r.hits).sum();
+        let before: u64 = kg.relations.read().iter().map(|r| r.hits as u64).sum();
         kg.reinforce_edges(&[(9, 9)]);
-        let after: u64 = kg.relations.read().iter().map(|r| r.hits).sum();
+        let after: u64 = kg.relations.read().iter().map(|r| r.hits as u64).sum();
         assert_eq!(before, after, "unmatched pair must not bump any edge");
     }
     use super::*;
