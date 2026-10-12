@@ -1597,8 +1597,8 @@ mod tests {
     #[test]
     fn reinforce_skips_index_slots_that_drifted() {
         let kg = KnowledgeGraph::new();
-        let _ = kg.add_relation(1, 2, RelationType::SimilarTo, 0.5);
-        let _ = kg.add_relation(1, 3, RelationType::SimilarTo, 0.5);
+        kg.add_relation(1, 2, RelationType::SimilarTo, 0.5);
+        kg.add_relation(1, 3, RelationType::SimilarTo, 0.5);
         // 正常路径: (1,2) 命中索引0并强化
         kg.reinforce_edges(&[(1, 2)]);
         let r02 = kg
