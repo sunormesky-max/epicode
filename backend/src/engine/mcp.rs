@@ -241,8 +241,16 @@ impl McpHandler {
         let has_since = args["since_days"].is_number();
         let has_mode = args["mode"].is_string();
         let has_strict = args["strict_filter"].is_boolean();
+        let has_as_of = args["as_of"].is_number();
         // Phase 1: mode/strict_filter 也算"有过滤参数", 不能返回 None 否则 mode 丢失
-        if !has_labels && !has_min_imp && !has_project && !has_since && !has_mode && !has_strict {
+        if !has_labels
+            && !has_min_imp
+            && !has_project
+            && !has_since
+            && !has_mode
+            && !has_strict
+            && !has_as_of
+        {
             return None;
         }
         let mut f = super::search_engine::SearchFilters::default();
@@ -273,6 +281,12 @@ impl McpHandler {
         // Phase 1: 解析 strict_filter
         if let Some(strict) = args["strict_filter"].as_bool() {
             f.strict_filter = strict;
+        }
+        // P1-6(路线图#170): 时点查询暴露给 agent — 只返回 as_of 时刻有效的记忆
+        // (valid_from <= as_of 且 (valid_to为空 或 valid_to > as_of)), 让"上个月他住哪"这类
+        // 历史问题不被当前事实覆盖。REST /v1/search 已有同参数, 此处补齐 MCP 面。
+        if has_as_of {
+            f.as_of = args["as_of"].as_i64().filter(|t| *t > 0);
         }
         Some(f)
     }
@@ -725,6 +739,7 @@ impl McpHandler {
                             "min_importance": { "type": "number", "description": "Filter: minimum importance score" },
                             "project": { "type": "string", "description": "Filter: project name" },
                             "since_days": { "type": "integer", "description": "Filter: only memories from the last N days" },
+                            "as_of": { "type": "integer", "description": "Temporal query (unix seconds): return only memories valid at that moment (valid_from <= as_of < valid_to). Ask historical questions like 'where did they live last month' without current facts overriding." },
                             "mode": { "type": "string", "enum": ["hybrid", "exact", "semantic", "graph", "auto", "fusion"], "default": "hybrid", "description": "Search mode: hybrid (vector+BM25 blend), exact (pure BM25 for identifiers and known phrases), semantic (vector similarity), graph (hybrid-search seeds expanded/reranked with knowledge-graph PPR), auto (routes temporal/aggregation queries to graph and other queries to semantic), fusion (reciprocal-rank fusion of semantic and graph results)." },
                             "strict_filter": { "type": "boolean", "default": false, "description": "Phase 1: strict filter mode — no semantic backfill, only return exact filter matches. Combine with mode=exact for database-like lookups." },
                             "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "full", "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections/results duplicates); retains valid + timestamp fields when present. Also enabled by EPICODE_SLIM_ENVELOPE=1." }
@@ -6487,6 +6502,25 @@ mod tests {
     /// 测试专用:每次调用使用全新的唯一临时数据目录,
     /// 避免多个测试(及多次运行)共享并持久化 `./data`(identity.json / tetramem.db)
     /// 而互相影响。
+    #[test]
+    fn build_search_filters_parses_as_of() {
+        let h = McpHandler::new(Arc::new(isolated_engine()));
+        // P1-6: as_of 时点查询进 filter
+        let f = h
+            .build_search_filters(&serde_json::json!({"query": "x", "as_of": 1_700_000_000}))
+            .expect("as_of alone must produce filters");
+        assert_eq!(f.as_of, Some(1_700_000_000));
+        // 非正数被过滤(防误传0当"全部")
+        let f0 = h
+            .build_search_filters(&serde_json::json!({"query": "x", "as_of": 0}))
+            .expect("filters present");
+        assert_eq!(f0.as_of, None);
+        // 无任何过滤参数仍返回 None(向后兼容)
+        assert!(h
+            .build_search_filters(&serde_json::json!({"query": "x"}))
+            .is_none());
+    }
+
     fn isolated_engine() -> Engine {
         let dir = std::env::temp_dir().join(format!(
             "epicode-mcp-test-{}-{}",
