@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { AUTH_CHANGE_EVENT, getUserId, searchMemories, getTimeline, deleteMemory, updateMemoryContent, storeMemory, importDocument, recallMemories, errMsg, type SearchResult, type TimelineEvent } from '@/lib/api';
 import { SearchLifecycle, visibleSearchResults } from '@/lib/search-lifecycle';
 import DashboardLayout from '@/components/DashboardLayout';
-import { DashboardLoading } from '@/components/DashboardUI';
+import { DashboardLoading, ErrorBanner } from '@/components/DashboardUI';
 import { Search, Plus, Filter, X, ChevronDown, Calendar, Tag, Hash, Pencil, FileText, Brain, Loader2, Sparkles } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
 import { copyText } from '@/lib/clipboard';
@@ -43,6 +43,10 @@ export default function DashboardMemories() {
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [page, setPage] = useState(0);
   const [error, setError] = useState('');
+  // 初次加载失败与操作失败分开:加载失败给"重试",且不再同时显示误导性的空状态
+  const [loadError, setLoadError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const retryLoad = () => { setLoadError(''); setInitialLoading(true); setReloadKey((k) => k + 1); };
   const [notice, setNotice] = useState(''); // 非错误性提示（去重/已存在等）
   const [showStore, setShowStore] = useState(false);
   const [storeText, setStoreText] = useState('');
@@ -81,6 +85,7 @@ export default function DashboardMemories() {
       setEvents([]);
       setTotalEvents(0);
       setError('');
+      setLoadError('');
       setLoading(false);
       setPage(0);
       setAuthChanging(transitioning);
@@ -108,14 +113,15 @@ export default function DashboardMemories() {
         // 审查发现A修复: 快照跟随数据刷新 — 时间筛选cutoff与数据同刻,
         // 长停留页面后切'今天'不再漏掉挂载后新增的记忆(渲染仍纯: 只在事件回调setState)
         setNowSnapshot(Date.now());
+        setLoadError('');
       } catch (e: unknown) {
-        if (mounted) setError(errMsg(e));
+        if (mounted) setLoadError(errMsg(e));
       }
       if (mounted) setInitialLoading(false);
     }
     load();
     return () => { mounted = false; };
-  }, [page, authRevision, authChanging]);
+  }, [page, authRevision, authChanging, reloadKey]);
 
   const allLabels = useMemo(() => {
     const s = new Set<string>();
@@ -364,12 +370,8 @@ export default function DashboardMemories() {
         <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{searchResults !== null ? `${displayItems.length} ${t('dash.mem.searchResultSuffix')}` : `${displayItems.length} ${contentTab === 'docs' ? t('dash.mem.docSuffix') : contentTab === 'memories' ? t('dash.mem.memorySuffix') : t('dash.mem.contentSuffix')}（${t('dash.mem.totalPrefix')} ${totalEvents}）`}</p>
       </div>
 
-      {error && (
-        <div style={{ background: 'rgba(var(--danger-red-rgb), 0.1)', color: 'var(--danger-red)', border: '1px solid rgba(var(--danger-red-rgb), 0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          {error}
-          <button onClick={() => setError('')} style={{ color: 'var(--danger-red)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
-        </div>
-      )}
+      {loadError && <ErrorBanner message={loadError} onRetry={retryLoad} />}
+      {error && <ErrorBanner message={error} onClose={() => setError('')} />}
       {notice && (
         <div style={{ background: 'rgba(52,211,153,0.08)', color: 'var(--accent-cyan)', border: '1px solid rgba(52,211,153,0.15)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {notice}
@@ -662,7 +664,7 @@ export default function DashboardMemories() {
           </Fragment>
         ))}
 
-        {displayItems.length === 0 && !loading && (
+        {displayItems.length === 0 && !loading && !(loadError && searchResults === null) && (
           <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-tertiary)', fontSize: 14 }}>
             {searchMode && query.trim() ? (
               <>

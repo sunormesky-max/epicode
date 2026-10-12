@@ -217,6 +217,18 @@ export function isAuthenticated(): boolean {
 
 // ── Error utilities ──
 /** 从 catch 块中安全提取错误消息（替代 catch(e:any) → e.message） */
+/**
+ * 非 JSON 错误体的提示:空响应体或网关/代理返回的 HTML 错误页(nginx 502 等)不直接展示,
+ * 改用按状态码的友好文案;简短的纯文本错误保留原文。
+ * 之前 JSON.parse 的 SyntaxError 会被原样抛出,页面上显示 "Unexpected end of JSON input"。
+ */
+export function friendlyHttpError(status: number, bodyText: string, statusMessages: Record<number, string>): string {
+  const text = (bodyText || '').trim();
+  const looksHtml = /^<(!doctype|html|head|body|center|h1)\b/i.test(text);
+  if (text && !looksHtml) return text.slice(0, 200);
+  return statusMessages[status] || (status >= 500 ? '服务暂时不可用，请稍后重试。' : `请求失败 (${status})`);
+}
+
 export function errMsg(e: unknown): string {
   if (e instanceof Error) return e.message;
   if (typeof e === 'string') return e;
@@ -390,10 +402,11 @@ export async function request<T>(
   }
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => 'Unknown error');
+    const errorText = await response.text().catch(() => '');
     // 友好解析错误：后端可能返回 SMRP 信封或裸 JSON（如 identity_not_confirmed）
-    try {
-      const errJson = JSON.parse(errorText);
+    let errJson: { error?: unknown; message?: string; protocol?: { error?: { code?: string; message?: string } } } | null = null;
+    try { errJson = JSON.parse(errorText); } catch { errJson = null; }
+    if (errJson && typeof errJson === 'object') {
       // identity_not_confirmed 特殊处理
       if (errJson.error === 'identity_not_confirmed' || errJson.error === 'identity required') {
         throw new Error('请先完成身份确认。使用 identity_confirm 或 identity_step 工具设置您的 AI 身份。');
@@ -412,10 +425,6 @@ export async function request<T>(
       if (errJson.error && typeof errJson.error === 'string') {
         throw new Error(errJson.error);
       }
-    } catch (parseErr) {
-      if (parseErr instanceof Error && parseErr.message !== 'Unexpected token') {
-        throw parseErr; // 已被上面 throw 的友好错误
-      }
     }
     // 友好的状态码映射
     const statusMessages: Record<number, string> = {
@@ -424,7 +433,7 @@ export async function request<T>(
       503: '系统维护中，请稍后再试。',
       504: '网关超时，请稍后重试。',
     };
-    throw new Error(errorText.slice(0, 200) || statusMessages[response.status] || `请求失败 (${response.status})`);
+    throw new Error(friendlyHttpError(response.status, errJson ? '' : errorText, statusMessages));
   }
 
   if (rawResponse) {

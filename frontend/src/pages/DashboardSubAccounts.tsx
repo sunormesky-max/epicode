@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect, useMemo } from 'react';
 import { errMsg, getStats, getSubAccounts, createSubAccount, revokeSubAccount, setSubAccountRole, setSubAccountPermissions, PERMISSIONS, SUB_ROLES, type SubAccount, type SubRole, type StatsData } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
-import { DashboardLoading } from '@/components/DashboardUI';
+import { DashboardLoading, ErrorBanner } from '@/components/DashboardUI';
 import { Users, Plus, Trash2, Shield, Brain, Crown, AlertTriangle, UserCheck, Lock, X, Check, Minus } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
 import type { TranslationKey } from '@/i18n/translations';
@@ -25,6 +25,10 @@ export default function DashboardSubAccounts() {
   const [, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // 初次加载失败与操作失败分开:加载失败给"重试",且不再同时显示误导性的空状态
+  const [loadError, setLoadError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const retryLoad = () => { setLoadError(''); setLoading(true); setReloadKey((k) => k + 1); };
   const [isSubAccount, setIsSubAccount] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [newId, setNewId] = useState('');
@@ -50,13 +54,13 @@ export default function DashboardSubAccounts() {
         setAccounts(accs);
         setTotal(accs.length);
       } catch (e: unknown) {
-        if (mounted) setError(errMsg(e));
+        if (mounted) setLoadError(errMsg(e));
       }
       if (mounted) setLoading(false);
     }
     load();
     return () => { mounted = false; };
-  }, []);
+  }, [reloadKey]);
 
   async function handleCreate() {
     if (!newId.trim() || !newPwd.trim()) return;
@@ -137,12 +141,8 @@ export default function DashboardSubAccounts() {
         <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{t('dash.sub.subtitle')}</p>
       </div>
 
-      {error && (
-        <div style={{ background: 'rgba(var(--danger-red-rgb), 0.1)', color: 'var(--danger-red)', border: '1px solid rgba(var(--danger-red-rgb), 0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          {error}
-          <button onClick={() => setError('')} style={{ color: 'var(--danger-red)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
-        </div>
-      )}
+      {loadError && <ErrorBanner message={loadError} onRetry={retryLoad} />}
+      {error && <ErrorBanner message={error} onClose={() => setError('')} />}
 
       {notice && (
         <div style={{ background: 'rgba(var(--accent-cyan-rgb), 0.08)', color: 'var(--accent-cyan)', border: '1px solid rgba(var(--accent-cyan-rgb), 0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -262,7 +262,7 @@ export default function DashboardSubAccounts() {
       )}
 
       {/* Account List */}
-      {accounts.length === 0 ? (
+      {accounts.length === 0 && loadError ? null : accounts.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-tertiary)', fontSize: 14 }}>
           <Users size={32} style={{ color: 'var(--text-tertiary)', display: 'block', margin: '0 auto 12px' }} />
           {t('dash.sub.emptyHint')}

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { errMsg, getMySkills, getPublicSkills, createSkill, updateSkill, deleteSkill, publishSkill, searchSkills, type SkillData, type CommunitySkill } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
-import { DashboardLoading } from '@/components/DashboardUI';
+import { DashboardLoading, ErrorBanner } from '@/components/DashboardUI';
 import { Brain, Wrench, Users, Clock, Tag, Plus, Search, X, Star, Filter, Trash2, Upload, Pencil, Zap, Eye } from 'lucide-react';
 import { useI18nContext } from '@/i18n/useI18n';
 
@@ -103,6 +103,10 @@ export default function DashboardSkills() {
   const [pubSkills, setPubSkills] = useState<CommunitySkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // 初次加载失败与操作失败分开:加载失败给"重试",且不再同时显示误导性的空状态
+  const [loadError, setLoadError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const retryLoad = () => { setLoadError(''); setLoading(true); setReloadKey((k) => k + 1); };
   const [notice, setNotice] = useState('');
   const [searchQ, setSearchQ] = useState('');
   const [semResults, setSemResults] = useState<SkillData[] | null>(null);
@@ -133,8 +137,8 @@ export default function DashboardSkills() {
       // allSettled: 一个接口失败不影响另一个(我的技能/公共技能独立)
       const [myRes, pubRes] = await Promise.allSettled([getMySkills(), getPublicSkills()]);
       if (!mounted) return;
-      if (myRes.status === 'fulfilled') setMySkills(myRes.value);
-      else setError(errMsg(myRes.reason) || t('dash.skills.loadFailed'));
+      if (myRes.status === 'fulfilled') { setMySkills(myRes.value); setLoadError(''); }
+      else setLoadError(errMsg(myRes.reason) || t('dash.skills.loadFailed'));
       if (pubRes.status === 'fulfilled') setPubSkills(pubRes.value);
       // 公共技能失败不报错(我的技能仍可用)
       if (mounted) setLoading(false);
@@ -143,7 +147,7 @@ export default function DashboardSkills() {
     return () => { mounted = false; };
     // 挂载一次(load每渲染重建; t来自稳定context)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reloadKey]);
 
   // S2: 语义即时搜索(防抖400ms; 失败静默回退词面过滤)
   useEffect(() => {
@@ -263,12 +267,8 @@ export default function DashboardSkills() {
         <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{tab === 'my' ? `${mySkills.length} ${t('dash.skills.privateCountSuffix')}` : `${pubSkills.length} ${t('dash.skills.publicCountSuffix')}`}</p>
       </div>
 
-      {error && (
-        <div style={{ background: 'rgba(var(--danger-red-rgb), 0.1)', color: 'var(--danger-red)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          {error}
-          <button onClick={() => setError('')} style={{ color: 'var(--danger-red)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} /></button>
-        </div>
-      )}
+      {loadError && <ErrorBanner message={loadError} onRetry={retryLoad} />}
+      {error && <ErrorBanner message={error} onClose={() => setError('')} />}
       {notice && (
         <div style={{ background: 'rgba(52,211,153,0.08)', color: 'var(--accent-cyan)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {notice}
@@ -426,7 +426,7 @@ export default function DashboardSkills() {
       )}
 
       {/* Grid */}
-      {filtered.length === 0 ? (
+      {filtered.length === 0 && loadError && tab === 'my' ? null : filtered.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-tertiary)', fontSize: 14 }}>{t('dash.skills.empty')}</div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
