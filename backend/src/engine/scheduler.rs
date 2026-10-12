@@ -142,6 +142,114 @@ fn local_exploration_summary(
 /// 模型返回后等待 cycle 门以应用决策的上限;routine tick 通常为毫秒级。
 const COMMIT_APPLY_WAIT: Duration = Duration::from_secs(30);
 
+/// 人格包核心记忆上限(导出与导入一致;导入按配额逐条预占)。
+const PERSONALITY_CORE_MEMORY_LIMIT: usize = 50;
+/// 人格包单条记忆内容上限(字符)。
+const PERSONALITY_CONTENT_MAX_CHARS: usize = 4000;
+/// 导入时视为合法的未来时间容差(秒),吸收两端时钟偏差。
+const IMPORT_CLOCK_SKEW_SECS: i64 = 300;
+
+/// 人格包里的一条核心记忆,已做校验与清洗。
+#[derive(Debug, Clone, PartialEq)]
+struct ImportedMemory {
+    content: String,
+    labels: Vec<String>,
+    timestamp: i64,
+    valid_from: i64,
+    valid_to: Option<i64>,
+    expired_at: Option<i64>,
+    invalidated_at: Option<i64>,
+    importance: Option<f64>,
+    memory_class: Option<String>,
+    source_agent: Option<String>,
+}
+
+impl ImportedMemory {
+    /// 由导出条目构建。缺失/非法的时间回落到 `now`;未来时间(超出时钟容差)视为非法。
+    fn from_export(mem: &serde_json::Value, now: i64) -> Option<Self> {
+        let raw = mem
+            .get("content")
+            .and_then(|c| c.as_str())
+            .filter(|c| !c.trim().is_empty())
+            .or_else(|| mem.get("preview").and_then(|p| p.as_str()))?;
+        let mut body = raw.trim();
+        while let Some(rest) = body.strip_prefix("[imported]") {
+            body = rest.trim_start();
+        }
+        if body.is_empty() {
+            return None;
+        }
+        let body: String = body.chars().take(PERSONALITY_CONTENT_MAX_CHARS).collect();
+        let sane = |v: i64| v > 0 && v <= now + IMPORT_CLOCK_SKEW_SECS;
+        let time = |key: &str| mem.get(key).and_then(|v| v.as_i64()).filter(|v| sane(*v));
+        let timestamp = time("timestamp")
+            .or_else(|| time("valid_from"))
+            .unwrap_or(now);
+        let valid_from = time("valid_from").unwrap_or(timestamp);
+        let after_start = |v: i64| v >= valid_from;
+        let mut labels: Vec<String> = mem
+            .get("labels")
+            .and_then(|l| l.as_array())
+            .map(|ls| {
+                ls.iter()
+                    .filter_map(|l| l.as_str())
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty() && !IMPORT_RESERVED_LABELS.contains(l))
+                    .take(10)
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        labels.push("imported".into());
+        labels.push("l0-exempt".into());
+        Some(Self {
+            content: format!("[imported] {}", body),
+            labels,
+            timestamp,
+            valid_from,
+            valid_to: time("valid_to").filter(|v| after_start(*v)),
+            expired_at: time("expired_at"),
+            invalidated_at: time("invalidated_at"),
+            importance: mem
+                .get("importance")
+                .and_then(|v| v.as_f64())
+                .filter(|v| v.is_finite())
+                .map(|v| v.clamp(0.05, 3.0)),
+            memory_class: mem
+                .get("memory_class")
+                .and_then(|v| v.as_str())
+                .filter(|c| matches!(*c, "permanent" | "session" | "bridge"))
+                .map(String::from),
+            source_agent: mem
+                .get("source_agent")
+                .and_then(|v| v.as_str())
+                .map(|s| s.chars().take(128).collect()),
+        })
+    }
+
+    /// 把原时间线与来源写回新建记忆;enforced 永不经导入授予。
+    fn apply_to(&self, data: &mut MemoryPayload) {
+        data.timestamp = self.timestamp;
+        data.valid_from = self.valid_from;
+        data.valid_to = self.valid_to;
+        data.expired_at = self.expired_at;
+        data.invalidated_at = self.invalidated_at;
+        if let Some(imp) = self.importance {
+            data.importance = imp;
+        }
+        if self.memory_class.is_some() {
+            data.memory_class = self.memory_class.clone();
+        }
+        if self.source_agent.is_some() {
+            data.source_agent = self.source_agent.clone();
+        }
+        data.enforced = false;
+    }
+}
+
+/// 导入时不从包里继承的系统标签(由系统状态决定,不随包迁移)。
+const IMPORT_RESERVED_LABELS: [&str; 4] = ["imported", "l0-exempt", "quarantine", "enforced"];
+
 #[derive(Default)]
 struct SingleFlightGate {
     in_flight: AtomicBool,
@@ -3512,6 +3620,16 @@ impl SchedulerCenter {
         &self,
         pkg: &serde_json::Value,
     ) -> Result<serde_json::Value, String> {
+        self.api_import_personality_with_quota(pkg, &mut || Ok(()), &mut || {})
+    }
+
+    /// 导入人格包;每条核心记忆写入前调用 `reserve` 预占配额,未真正新建(失败/去重)时调用 `release` 退还。
+    pub fn api_import_personality_with_quota(
+        &self,
+        pkg: &serde_json::Value,
+        reserve: &mut dyn FnMut() -> Result<(), String>,
+        release: &mut dyn FnMut(),
+    ) -> Result<serde_json::Value, String> {
         let mut restored = serde_json::json!({});
 
         // 恢复驱力权重
@@ -3561,22 +3679,50 @@ impl SchedulerCenter {
             restored["knowledge_cards_restored"] = serde_json::json!(restored_cards);
         }
 
-        // 恢复核心记忆(写入为新记忆, 标记imported)
+        // 恢复核心记忆(写入为新记忆, 标记imported) — 保留原时间线(timestamp/valid_*)、
+        // 记忆分层与来源 agent;旧格式(仅 preview)照常导入。
         if let Some(mems) = pkg.get("core_memories").and_then(|m| m.as_array()) {
             let mut restored_mems = 0;
-            for mem in mems.iter().take(20) {
-                if let Some(preview) = mem.get("preview").and_then(|p| p.as_str()) {
-                    let labels = vec!["imported".to_string(), "l0-exempt".to_string()];
-                    if self
-                        .gateway
-                        .create_memory(&format!("[imported] {}", preview), labels)
-                        .is_ok()
-                    {
+            let mut deduped = 0;
+            let mut over_quota = 0;
+            let now = chrono::Utc::now().timestamp();
+            for mem in mems.iter().take(PERSONALITY_CORE_MEMORY_LIMIT) {
+                let Some(import) = ImportedMemory::from_export(mem, now) else {
+                    continue;
+                };
+                if reserve().is_err() {
+                    over_quota += 1;
+                    continue;
+                }
+                match self.api_create_memory_with_time(
+                    &import.content,
+                    import.labels.clone(),
+                    import.timestamp,
+                ) {
+                    Ok((id, true)) => {
+                        if let Some(t) = self.space.get_tetrahedron(id) {
+                            let mut data = t.data.clone();
+                            import.apply_to(&mut data);
+                            if let Err(e) = self.space.update_payload(id, data) {
+                                tracing::warn!("[Import] update_payload {} failed: {}", id, e);
+                            }
+                            self.persist_tetra(id);
+                        }
                         restored_mems += 1;
+                    }
+                    Ok((_, false)) => {
+                        deduped += 1;
+                        release();
+                    }
+                    Err(e) => {
+                        tracing::warn!("[Import] core memory skipped: {}", e);
+                        release();
                     }
                 }
             }
             restored["core_memories_restored"] = serde_json::json!(restored_mems);
+            restored["core_memories_deduped"] = serde_json::json!(deduped);
+            restored["core_memories_over_quota"] = serde_json::json!(over_quota);
         }
 
         restored["format"] = serde_json::json!("epicode-personality/1.0-imported");
@@ -3779,16 +3925,27 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             .collect();
 
         // 核心记忆: enforced + importance>=2.0 的条目
+        // 1.1: 附带完整内容与时间线(timestamp/valid_from/valid_to/expired_at/invalidated_at)、
+        // 记忆分层与来源 agent,导入端据此保留记忆的时间性;preview 保留以兼容旧导入端。
         let all = self.gateway.list_nodes();
         let core_memories: Vec<serde_json::Value> = all
             .iter()
             .filter(|(_, p)| p.enforced || p.importance >= 2.0)
-            .take(50)
+            .take(PERSONALITY_CORE_MEMORY_LIMIT)
             .map(|(id, p)| {
                 serde_json::json!({
                     "id": id, "importance": p.importance,
                     "labels": p.labels, "enforced": p.enforced,
                     "preview": p.content.chars().take(150).collect::<String>(),
+                    "content": p.content.chars().take(PERSONALITY_CONTENT_MAX_CHARS).collect::<String>(),
+                    "timestamp": p.timestamp,
+                    "valid_from": p.valid_from,
+                    "valid_to": p.valid_to,
+                    "expired_at": p.expired_at,
+                    "invalidated_at": p.invalidated_at,
+                    "memory_class": p.memory_class,
+                    "memory_type": p.memory_type,
+                    "source_agent": p.source_agent,
                 })
             })
             .collect();
@@ -3797,7 +3954,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
         let drive_stats = self.drive_queue.stats();
 
         let pkg = serde_json::json!({
-            "format": "epicode-personality/1.0",
+            "format": "epicode-personality/1.1",
             "exported_at": chrono::Utc::now().to_rfc3339(),
             "identity": identity,
             "drive_weights": weights,
@@ -7858,6 +8015,141 @@ mod tests {
             3,
             "no model call once nothing is due"
         );
+    }
+
+    /// Reproduction: personality export/import used to drop every temporal and
+    /// provenance field — imported memories were re-dated to "now", cut to a
+    /// 150-char preview, and lost their validity window, class and source agent.
+    #[test]
+    fn personality_round_trip_preserves_memory_time_and_provenance() {
+        let base = std::env::temp_dir().join(format!("epicode-persona-{}", uuid::Uuid::new_v4()));
+        let src = crate::engine::Engine::with_data_dir(base.join("src"));
+        let body = format!(
+            "Decision record: {}",
+            "we keep sqlite for local durability because it survives power loss. ".repeat(5)
+        );
+        let ts = 1_735_689_600; // 2025-01-01T00:00:00Z
+        let (id, _) = src
+            .scheduler
+            .api_create_memory_with_time(&body, vec!["decision".into()], ts)
+            .unwrap();
+        let mut d = src.space.get_tetrahedron(id).unwrap().data.clone();
+        d.importance = 2.5;
+        d.valid_from = ts;
+        d.valid_to = Some(ts + 30 * 86_400);
+        d.invalidated_at = Some(ts + 31 * 86_400);
+        d.memory_class = Some("permanent".into());
+        d.source_agent = Some("agent-alpha".into());
+        src.space.update_payload(id, d).unwrap();
+        let pkg = src.scheduler.api_export_personality().unwrap();
+
+        let dst = crate::engine::Engine::with_data_dir(base.join("dst"));
+        let result = dst.scheduler.api_import_personality(&pkg).unwrap();
+        assert_eq!(result["core_memories_restored"], 1);
+        let (_, got) = dst
+            .space
+            .all_tetras_meta()
+            .into_iter()
+            .filter_map(|m| dst.space.get_tetrahedron(m.id).map(|t| (m.id, t.data)))
+            .find(|(_, p)| p.labels.iter().any(|l| l == "imported"))
+            .unwrap();
+        assert_eq!(got.timestamp, ts);
+        assert_eq!(got.valid_from, ts);
+        assert_eq!(got.valid_to, Some(ts + 30 * 86_400));
+        assert_eq!(got.invalidated_at, Some(ts + 31 * 86_400));
+        assert_eq!(got.memory_class.as_deref(), Some("permanent"));
+        assert_eq!(got.source_agent.as_deref(), Some("agent-alpha"));
+        assert_eq!(got.content, format!("[imported] {}", body.trim()));
+        assert!(got.labels.iter().any(|l| l == "decision"));
+        assert!(!got.enforced);
+
+        // a second hop keeps one "[imported]" prefix and the original time
+        let again = ImportedMemory::from_export(
+            &dst.scheduler.api_export_personality().unwrap()["core_memories"][0],
+            chrono::Utc::now().timestamp(),
+        )
+        .unwrap();
+        assert_eq!(again.content, got.content);
+        assert_eq!(again.timestamp, ts);
+        drop((src, dst));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn imported_memory_sanitizes_legacy_and_hostile_entries() {
+        let now = 2_000_000_000;
+        // legacy 1.0 entry: preview only, no time → dated at import time
+        let legacy = ImportedMemory::from_export(
+            &serde_json::json!({"preview": "[imported] [imported] old fact", "importance": 9.0,
+                                "labels": ["quarantine", "enforced", "topic"]}),
+            now,
+        )
+        .unwrap();
+        assert_eq!(legacy.content, "[imported] old fact");
+        assert_eq!(legacy.timestamp, now);
+        assert_eq!(legacy.valid_from, now);
+        assert_eq!(legacy.importance, Some(3.0));
+        assert_eq!(legacy.labels, vec!["topic", "imported", "l0-exempt"]);
+        // future / negative / inverted times are not trusted
+        let hostile = ImportedMemory::from_export(
+            &serde_json::json!({"content": "x fact", "timestamp": now + 86_400,
+                                "valid_from": 1_000, "valid_to": 10, "memory_class": "god",
+                                "importance": f64::NAN}),
+            now,
+        )
+        .unwrap();
+        assert_eq!(hostile.timestamp, 1_000);
+        assert_eq!(hostile.valid_from, 1_000);
+        assert_eq!(hostile.valid_to, None);
+        assert_eq!(hostile.memory_class, None);
+        assert_eq!(hostile.importance, None);
+        assert!(
+            ImportedMemory::from_export(&serde_json::json!({"content": "[imported] "}), now)
+                .is_none()
+        );
+        assert!(ImportedMemory::from_export(&serde_json::json!({"labels": []}), now).is_none());
+    }
+
+    #[test]
+    fn personality_import_reserves_quota_per_new_memory() {
+        let dir = std::env::temp_dir().join(format!("epicode-persona-q-{}", uuid::Uuid::new_v4()));
+        let engine = crate::engine::Engine::with_data_dir(dir.clone());
+        let pkg = serde_json::json!({
+            "format": "epicode-personality/1.0",
+            "core_memories": [
+                {"preview": "alpha fact about the deployment pipeline"},
+                {"preview": "beta fact about the backup schedule"},
+                {"preview": "alpha fact about the deployment pipeline"},
+                {"preview": "gamma fact about the incident runbook"},
+            ]
+        });
+        let budget = 2usize;
+        let used = std::cell::Cell::new(0usize);
+        let mut reserve = || {
+            if used.get() >= budget {
+                return Err("memory limit reached".to_string());
+            }
+            used.set(used.get() + 1);
+            Ok(())
+        };
+        let mut release = || used.set(used.get() - 1);
+        let r = engine
+            .scheduler
+            .api_import_personality_with_quota(&pkg, &mut reserve, &mut release)
+            .unwrap();
+        let restored = r["core_memories_restored"].as_u64().unwrap() as usize;
+        let deduped = r["core_memories_deduped"].as_u64().unwrap() as usize;
+        let over = r["core_memories_over_quota"].as_u64().unwrap() as usize;
+        assert_eq!(
+            restored,
+            used.get(),
+            "quota charged exactly for new memories"
+        );
+        assert!(restored <= budget);
+        assert_eq!(restored + deduped + over, 4);
+        assert!(over >= 1);
+        drop(engine);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
