@@ -1616,7 +1616,7 @@ mod tests {
         let after: u64 = kg.relations.read().iter().map(|r| r.hits as u64).sum();
         assert_eq!(before, after, "unmatched pair must not bump any edge");
     }
-    use super::*;
+
     use crate::domain::tetra::Tetrahedron;
     use crate::domain::vertex::Point3;
 
