@@ -55,6 +55,7 @@ pub mod agent_action;
 pub mod auto_pipeline;
 pub mod constitution;
 pub mod digestion;
+pub mod dispatch;
 pub mod drive;
 pub mod dynamics;
 pub mod emotion;
@@ -412,6 +413,7 @@ impl Engine {
         // L0: Restore drive queue from SQLite after scheduler init
         scheduler.restore_drive_queue();
         scheduler.restore_action_frontier();
+        scheduler.restore_worker_registry();
         scheduler.restore_tick_state();
         // 稳态恢复: 演化权重/历史跨重启存活 + ingested去重集
         scheduler.restore_drive_engine();

@@ -355,6 +355,8 @@ pub struct SchedulerCenter {
     drive_save_gate: ParkMutex<()>,
     /// Agent-facing memory action frontier (propose → claim → complete → outcome memory).
     action_frontier: Arc<super::agent_action::ActionFrontier>,
+    /// Dispatch: registered workers for capability-aware assignment.
+    worker_registry: Arc<super::dispatch::WorkerRegistry>,
 }
 
 impl SchedulerCenter {
@@ -444,6 +446,7 @@ impl SchedulerCenter {
             drive_queue: Arc::new(super::drive::DriveQueue::new()),
             drive_save_gate: ParkMutex::new(()),
             action_frontier: Arc::new(super::agent_action::ActionFrontier::new()),
+            worker_registry: Arc::new(super::dispatch::WorkerRegistry::new()),
         }
     }
 
@@ -1351,7 +1354,39 @@ impl SchedulerCenter {
         &self.action_frontier
     }
 
+    pub fn worker_registry(&self) -> &Arc<super::dispatch::WorkerRegistry> {
+        &self.worker_registry
+    }
+
+    pub fn save_worker_registry(&self) {
+        let snap = self.worker_registry.snapshot();
+        match serde_json::to_string(&snap) {
+            Ok(js) => {
+                if let Err(e) = self.storage.save_drive_kv("worker_registry", &js) {
+                    tracing::warn!("[dispatch] worker registry save failed: {}", e);
+                }
+            }
+            Err(e) => tracing::warn!("[dispatch] worker registry serialize failed: {}", e),
+        }
+    }
+
+    pub fn restore_worker_registry(&self) {
+        if let Some(js) = self.storage.load_drive_kv("worker_registry") {
+            match serde_json::from_str::<Vec<super::dispatch::WorkerRecord>>(&js) {
+                Ok(workers) => {
+                    self.worker_registry.restore(workers);
+                    tracing::info!(
+                        "[dispatch] restored {} workers",
+                        self.worker_registry.list().len()
+                    );
+                }
+                Err(e) => tracing::warn!("[dispatch] worker registry restore failed: {}", e),
+            }
+        }
+    }
+
     pub fn save_action_frontier(&self) {
+        self.save_worker_registry();
         // Keep frontier bounded across restarts: drop terminal actions older than 7 days.
         let pruned = self.action_frontier.prune_terminal_older_than(7 * 86400);
         if pruned > 0 {

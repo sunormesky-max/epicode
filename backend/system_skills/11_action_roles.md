@@ -21,3 +21,10 @@
 
 ## ActionCard 输出契约
 所有动作工具返回 `epicode.action_card`（schema_version=1）：id / summary / state / evidence_memory_ids / suggested_skills / done_when / stop_if / lineage。agent **不要自造字段名**；以 `cards` 或 `action` 对象为准。
+
+
+## 调度分派与所有权 (Dispatch)
+- `worker_register` / `worker_list` — 登记能力标签与负载上限
+- `action_assign` / `action_dispatch` — 按能力匹配 + 最低负载分配；`assignee` 一旦写入不可改
+- 仅 `assignee`（或 Admin）可 `action_complete`；外人 → 403
+- `blocked`/`exhausted`：记责任人 → 再入队（清认领、提优先级、短期拉黑）或升级；禁止静默丢弃

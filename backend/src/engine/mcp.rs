@@ -424,6 +424,7 @@ impl McpHandler {
             | "session_list"
             | "drive_inbox"
             | "action_list"
+            | "worker_list"
             | "blocks_get" => Some(P::MemoryRead),
             // These tools change memories or persistent session/drive state.
             "epicode_handshake"
@@ -447,7 +448,10 @@ impl McpHandler {
             | "memory_propose_actions"
             | "action_claim"
             | "action_complete"
-            | "drive_to_actions" => Some(P::MemoryWrite),
+            | "drive_to_actions"
+            | "worker_register"
+            | "action_assign"
+            | "action_dispatch" => Some(P::MemoryWrite),
             // Deletion, quarantine and restoration change protected memory state.
             "memory_delete" | "memory_forget" | "memory_restore" => Some(P::MemoryDelete),
             // Skill and library management.
@@ -1306,6 +1310,46 @@ impl McpHandler {
                     }
                 },
                 {
+                    "name": "worker_register",
+                    "description": "Dispatch: register or update a worker identity with capability tags and max_load. Used by action_assign / action_dispatch for least-loaded capable assignment.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "worker_id": { "type": "string", "description": "Stable worker / agent / sub-account id" },
+                            "capabilities": { "type": "array", "items": { "type": "string" }, "description": "Capability tags (e.g. ops, rust, memory)" },
+                            "max_load": { "type": "integer", "description": "Max concurrent claimed actions (default 3)", "default": 3, "minimum": 1 }
+                        },
+                        "required": ["worker_id"]
+                    }
+                },
+                {
+                    "name": "worker_list",
+                    "description": "Dispatch: list registered workers with current claimed load and blacklist status.",
+                    "inputSchema": { "type": "object", "properties": {} }
+                },
+                {
+                    "name": "action_assign",
+                    "description": "Dispatch: assign one open action to a worker. Omit worker_id to auto-pick least-loaded capable worker. Sets immutable assignee; only that assignee (or Admin) may action_complete.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "action_id": { "type": "integer" },
+                            "worker_id": { "type": "string", "description": "Optional explicit assignee; omit for auto-pick" }
+                        },
+                        "required": ["action_id"]
+                    }
+                },
+                {
+                    "name": "action_dispatch",
+                    "description": "Dispatch: batch auto-assign up to limit open actions (priority order) to least-loaded capable workers.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "limit": { "type": "integer", "default": 5, "minimum": 1, "maximum": 20 }
+                        }
+                    }
+                },
+                {
                     "name": "skill_auto_extract",
                     "description": "L3 Skill Learning: automatically extract a reusable skill document from the cognitive engine's effective decision patterns. Analyzes recent decision history for actions with >60% success rate and uses LLM to generalize them into a skill. Letta-inspired continual learning.",
                     "inputSchema": {
@@ -1405,6 +1449,7 @@ impl McpHandler {
             | "task_status"
             | "drive_inbox"
             | "action_list"
+            | "worker_list"
             | "ctx_load" => (true, false, true, false),
             // Destructive / hard-to-reverse
             "memory_delete" | "memory_forget" | "dream_cycle" | "embedding_migrate"
@@ -1417,6 +1462,9 @@ impl McpHandler {
             | "action_claim"
             | "action_complete"
             | "drive_to_actions"
+            | "worker_register"
+            | "action_assign"
+            | "action_dispatch"
             | "skill_feedback"
             | "feedback_submit"
             | "task_check" => (false, false, true, false),
@@ -1613,6 +1661,10 @@ impl McpHandler {
             "action_claim" => self.tool_action_claim(&args),
             "action_complete" => self.tool_action_complete(&args),
             "drive_to_actions" => self.tool_drive_to_actions(&args),
+            "worker_register" => self.tool_worker_register(&args),
+            "worker_list" => self.tool_worker_list(&args),
+            "action_assign" => self.tool_action_assign(&args),
+            "action_dispatch" => self.tool_action_dispatch(&args),
             "memory_forget" => self.tool_memory_forget(&args),
             "blocks_get" => self.tool_blocks_get(&args),
             "blocks_set" => self.tool_blocks_set(&args),
@@ -1907,7 +1959,14 @@ impl McpHandler {
                 "worker": ["action_claim", "action_complete", "task_start", "task_complete", "skill_execute"],
                 "skill": "skill_get('动作角色分工')",
                 "rule": "Planner proposes; Worker claims+completes with outcome write-back",
-                "action_card_schema": "epicode.action_card/v1"
+                "action_card_schema": "epicode.action_card/v2",
+                "dispatch": {
+                    "assign": true,
+                    "ownership_enforce": true,
+                    "requeue": true,
+                    "tools": ["worker_register", "worker_list", "action_assign", "action_dispatch"],
+                    "rule": "Scheduler assigns by capability+least-load; only assignee (or Admin) may complete; blocked/exhausted requeue then escalate"
+                }
             },
         });
         self.smrp_ok_nn("epicode_handshake", result)
@@ -6747,7 +6806,7 @@ impl McpHandler {
                 "memory_count": evidence.len(),
                 "evidence_memory_ids": evidence.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
                 "errors": errors,
-                "action_card_schema": "epicode.action_card/v1",
+                "action_card_schema": "epicode.action_card/v2",
                 "loop": ["memory_propose_actions", "action_claim", "execute", "action_complete"],
             }),
         )
@@ -6809,7 +6868,14 @@ impl McpHandler {
                 self.engine.scheduler.save_action_frontier();
                 self.smrp_ok("action_claim", a.to_json())
             }
-            Err(e) => self.smrp_err("action_claim", 409, &e),
+            Err(e) => {
+                let code = if e.contains("ownership") || e.contains("assigned to") {
+                    403
+                } else {
+                    409
+                };
+                self.smrp_err("action_claim", code, &e)
+            }
         }
     }
 
@@ -6912,6 +6978,154 @@ impl McpHandler {
         )
     }
 
+    fn is_admin_actor(&self) -> bool {
+        // Only explicit Admin role may override ownership. Ungated primary accounts
+        // still act as their user_id — they must be the assignee.
+        matches!(
+            self.role_gate,
+            Some(crate::engine::user_manager::UserRole::Admin)
+        )
+    }
+
+    fn tool_worker_register(&self, args: &serde_json::Value) -> serde_json::Value {
+        let worker_id = match args.get("worker_id").and_then(|v| v.as_str()) {
+            Some(s) if !s.trim().is_empty() => s.trim(),
+            _ => return self.smrp_err("worker_register", 400, "worker_id is required"),
+        };
+        let caps: Vec<String> = args
+            .get("capabilities")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.trim().to_string()))
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let max_load = args
+            .get("max_load")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32);
+        match self
+            .engine
+            .scheduler
+            .worker_registry()
+            .register(worker_id, caps, max_load)
+        {
+            Ok(rec) => {
+                self.engine.scheduler.save_worker_registry();
+                self.smrp_ok(
+                    "worker_register",
+                    serde_json::json!({
+                        "worker": {
+                            "worker_id": rec.worker_id,
+                            "capabilities": rec.capabilities,
+                            "max_load": rec.max_load,
+                            "blacklisted_until": rec.blacklisted_until,
+                            "registered_at": rec.registered_at,
+                            "updated_at": rec.updated_at,
+                        }
+                    }),
+                )
+            }
+            Err(e) => self.smrp_err("worker_register", 400, &e),
+        }
+    }
+
+    fn tool_worker_list(&self, _args: &serde_json::Value) -> serde_json::Value {
+        let frontier = self.engine.scheduler.action_frontier();
+        let workers: Vec<serde_json::Value> = self
+            .engine
+            .scheduler
+            .worker_registry()
+            .list()
+            .into_iter()
+            .map(|w| {
+                let load =
+                    crate::engine::dispatch::WorkerRegistry::load_of(frontier, &w.worker_id);
+                serde_json::json!({
+                    "worker_id": w.worker_id,
+                    "capabilities": w.capabilities,
+                    "max_load": w.max_load,
+                    "current_load": load,
+                    "blacklisted_until": w.blacklisted_until,
+                    "registered_at": w.registered_at,
+                    "updated_at": w.updated_at,
+                })
+            })
+            .collect();
+        self.smrp_ok(
+            "worker_list",
+            serde_json::json!({ "workers": workers, "count": workers.len() }),
+        )
+    }
+
+    fn tool_action_assign(&self, args: &serde_json::Value) -> serde_json::Value {
+        let action_id = match args.get("action_id").and_then(|v| v.as_u64()) {
+            Some(id) => id,
+            None => return self.smrp_err("action_assign", 400, "action_id is required"),
+        };
+        let frontier = self.engine.scheduler.action_frontier();
+        let registry = self.engine.scheduler.worker_registry();
+        let result = match args.get("worker_id").and_then(|v| v.as_str()) {
+            Some(wid) if !wid.trim().is_empty() => frontier
+                .assign(action_id, wid.trim())
+                .map(|a| (a, wid.trim().to_string())),
+            _ => crate::engine::dispatch::auto_assign(registry, frontier, action_id)
+                .map(|(a, w)| (a, w.worker_id)),
+        };
+        match result {
+            Ok((action, worker_id)) => {
+                self.engine.scheduler.save_action_frontier();
+                self.engine.scheduler.save_worker_registry();
+                self.smrp_ok(
+                    "action_assign",
+                    serde_json::json!({
+                        "action": action.to_json(),
+                        "worker_id": worker_id,
+                        "assignee": action.assignee,
+                        "assigned_at": action.assigned_at,
+                    }),
+                )
+            }
+            Err(e) => {
+                let code = if e.contains("ownership") || e.contains("assigned to") {
+                    403
+                } else if e.contains("not found") {
+                    404
+                } else {
+                    409
+                };
+                self.smrp_err("action_assign", code, &e)
+            }
+        }
+    }
+
+    fn tool_action_dispatch(&self, args: &serde_json::Value) -> serde_json::Value {
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5)
+            .clamp(1, 20) as usize;
+        let frontier = self.engine.scheduler.action_frontier();
+        let registry = self.engine.scheduler.worker_registry();
+        let results = crate::engine::dispatch::dispatch_batch(registry, frontier, limit);
+        let assigned = results
+            .iter()
+            .filter(|r| r.get("ok") == Some(&serde_json::json!(true)))
+            .count();
+        self.engine.scheduler.save_action_frontier();
+        self.engine.scheduler.save_worker_registry();
+        self.smrp_ok(
+            "action_dispatch",
+            serde_json::json!({
+                "results": results,
+                "assigned": assigned,
+                "limit": limit,
+            }),
+        )
+    }
+
     fn tool_action_complete(&self, args: &serde_json::Value) -> serde_json::Value {
         let action_id = match args.get("action_id").and_then(|v| v.as_u64()) {
             Some(id) => id,
@@ -6991,10 +7205,31 @@ impl McpHandler {
             terminal = crate::engine::agent_action::ActionState::Blocked;
         }
 
+        // Ownership gate BEFORE writing outcome memory (no leak on foreign complete).
+        {
+            let owner = action.assignee.as_deref().or(action.claimed_by.as_deref());
+            if let Some(owner) = owner {
+                if owner != self.engine.user_id.as_str() && !self.is_admin_actor() {
+                    return self.smrp_err(
+                        "action_complete",
+                        403,
+                        &format!(
+                            "action {} owned by assignee '{}'; '{}' cannot complete (ownership)",
+                            action_id, owner, self.engine.user_id
+                        ),
+                    );
+                }
+            }
+        }
+
         let mut labels = vec![
             "action-outcome".to_string(),
             format!("action:{}", action_id),
         ];
+        if let Some(a) = action.assignee.as_ref().or(action.claimed_by.as_ref()) {
+            labels.push(format!("assignee:{}", a));
+            labels.push(format!("source_agent:{}", a));
+        }
         if let Some(extra) = args.get("labels").and_then(|v| v.as_array()) {
             for v in extra {
                 if let Some(s) = v.as_str() {
@@ -7038,8 +7273,42 @@ impl McpHandler {
             }
         }
 
-        match frontier.complete(action_id, outcome_id, terminal) {
+        let actor = self.engine.user_id.as_str();
+        let is_admin = self.is_admin_actor();
+        match frontier.complete_as(action_id, outcome_id, terminal, actor, is_admin) {
             Ok(done) => {
+                let mut done = done;
+                let mut accountability = serde_json::Value::Null;
+                if matches!(
+                    done.state,
+                    crate::engine::agent_action::ActionState::Blocked
+                        | crate::engine::agent_action::ActionState::Exhausted
+                ) && !done.escalated
+                {
+                    let reason = done
+                        .last_failure_reason
+                        .clone()
+                        .unwrap_or_else(|| format!("{:?}", done.state).to_lowercase());
+                    match crate::engine::dispatch::account_failure(
+                        self.engine.scheduler.worker_registry(),
+                        frontier,
+                        action_id,
+                        &reason,
+                    ) {
+                        Ok((a, disposition)) => {
+                            done = a;
+                            accountability = serde_json::json!({
+                                "disposition": disposition,
+                                "requeue_count": done.requeue_count,
+                                "escalated": done.escalated,
+                                "last_responsible_assignee": done.last_responsible_assignee,
+                            });
+                        }
+                        Err(e) => {
+                            accountability = serde_json::json!({ "error": e });
+                        }
+                    }
+                }
                 self.engine.scheduler.save_action_frontier();
                 self.engine
                     .bus
@@ -7083,10 +7352,14 @@ impl McpHandler {
                         "drive_ack": drive_ack,
                         "done_when_debts": goal_debts.clone(),
                         "done_when_proven": goal_debts.is_empty(),
+                        "accountability": accountability,
                     }),
                 )
             }
-            Err(e) => self.smrp_err("action_complete", 409, &e),
+            Err(e) => {
+                let code = if e.contains("ownership") { 403 } else { 409 };
+                self.smrp_err("action_complete", code, &e)
+            }
         }
     }
 }
@@ -7203,6 +7476,9 @@ mod tests {
         assert!(names.contains(&"action_complete"));
         assert!(names.contains(&"action_list"));
         assert!(names.contains(&"drive_to_actions"));
+        assert!(names.contains(&"worker_register"));
+        assert!(names.contains(&"action_assign"));
+        assert!(names.contains(&"action_dispatch"));
         assert!(names.contains(&"memory_recall"));
         assert!(names.contains(&"memory_ask"));
         assert!(names.contains(&"ctx_load"));
@@ -7330,6 +7606,9 @@ mod tests {
             "action_claim",
             "action_complete",
             "drive_to_actions",
+            "worker_register",
+            "action_assign",
+            "action_dispatch",
             "future_write_tool",
         ] {
             let response = h.handle(McpRequest {
@@ -8661,12 +8940,14 @@ mod tests {
             "success": true
         }));
         assert_eq!(done["protocol"]["ok"], true, "{done}");
-        assert_eq!(done["data"]["action"]["state"], "blocked");
         assert_eq!(done["data"]["done_when_proven"], false);
         assert!(!done["data"]["done_when_debts"]
             .as_array()
             .unwrap()
             .is_empty());
+        // Accountability: blocked soft-fail requeues (no silent drop)
+        assert_eq!(done["data"]["accountability"]["disposition"], "requeued");
+        assert_eq!(done["data"]["action"]["state"], "open");
 
         // New action with full evidence → done
         let proposed2 = handler.tool_memory_propose_actions(&serde_json::json!({
@@ -8745,11 +9026,146 @@ mod tests {
         assert_eq!(proposed["protocol"]["ok"], true, "{proposed}");
         assert_eq!(
             proposed["data"]["action_card_schema"],
-            "epicode.action_card/v1"
+            "epicode.action_card/v2"
         );
         let card = &proposed["data"]["cards"][0];
         assert_eq!(card["schema"], "epicode.action_card");
-        assert_eq!(card["schema_version"], 1);
+        assert_eq!(card["schema_version"], 2);
         assert!(card["lineage"]["parents"].is_array());
+    }
+
+    #[test]
+    fn dispatch_assigns_least_loaded_and_rejects_foreign_complete() {
+        let handler = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&handler);
+
+        assert_eq!(
+            handler.tool_worker_register(&serde_json::json!({
+                "worker_id": "alice",
+                "capabilities": ["ops", "rust"],
+                "max_load": 5
+            }))["protocol"]["ok"],
+            true
+        );
+        assert_eq!(
+            handler.tool_worker_register(&serde_json::json!({
+                "worker_id": "bob",
+                "capabilities": ["ops"],
+                "max_load": 5
+            }))["protocol"]["ok"],
+            true
+        );
+
+        let _ = handler.tool_memory_create(&serde_json::json!({
+            "content": "ops runbook for cluster drain",
+            "labels": ["ops"]
+        }));
+        let p1 =
+            handler.tool_memory_propose_actions(&serde_json::json!({"query": "ops", "limit": 1}));
+        let a1 = p1["data"]["actions"][0]["id"].as_u64().unwrap();
+        handler
+            .engine
+            .scheduler
+            .action_frontier()
+            .set_required_capabilities(a1, vec!["ops".into()])
+            .unwrap();
+        let as1 = handler.tool_action_assign(&serde_json::json!({
+            "action_id": a1,
+            "worker_id": "alice"
+        }));
+        assert_eq!(as1["protocol"]["ok"], true, "{as1}");
+
+        let p2 =
+            handler.tool_memory_propose_actions(&serde_json::json!({"query": "ops", "limit": 1}));
+        let a2 = p2["data"]["actions"][0]["id"].as_u64().unwrap();
+        handler
+            .engine
+            .scheduler
+            .action_frontier()
+            .set_required_capabilities(a2, vec!["ops".into()])
+            .unwrap();
+        let as2 = handler.tool_action_assign(&serde_json::json!({ "action_id": a2 }));
+        assert_eq!(as2["protocol"]["ok"], true, "{as2}");
+        assert_eq!(as2["data"]["worker_id"], "bob", "{as2}");
+        assert_eq!(as2["data"]["action"]["assignee"], "bob");
+
+        let foreign = handler.tool_action_complete(&serde_json::json!({
+            "action_id": a2,
+            "outcome": "done by interloper",
+            "success": true,
+            "done_when_evidence": ["artifact-a", "artifact-b"]
+        }));
+        assert_eq!(foreign["protocol"]["ok"], false, "{foreign}");
+        assert_eq!(foreign["protocol"]["error"]["code"], 403);
+
+        // Outcome memory must NOT exist for foreign attempt (gate before create)
+        let listed = handler.tool_memory_list(&serde_json::json!({"labels": ["action-outcome"]}));
+        let items = listed["data"]["items"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            !items.iter().any(|i| i["content_preview"]
+                .as_str()
+                .unwrap_or("")
+                .contains("interloper")),
+            "foreign complete must not leave outcome memory: {listed}"
+        );
+    }
+
+    #[test]
+    fn outcome_memory_carries_assignee_label() {
+        let handler = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&handler);
+        let uid = handler.engine.user_id.clone();
+        handler.tool_worker_register(&serde_json::json!({
+            "worker_id": uid,
+            "capabilities": ["general"],
+            "max_load": 5
+        }));
+        let _ = handler.tool_memory_create(&serde_json::json!({
+            "content": "ownership label fixture",
+            "labels": ["ops"]
+        }));
+        let proposed = handler.tool_memory_propose_actions(&serde_json::json!({
+            "query": "ownership label",
+            "limit": 1
+        }));
+        let aid = proposed["data"]["actions"][0]["id"].as_u64().unwrap();
+        let dw = proposed["data"]["actions"][0]["done_when"]
+            .as_array()
+            .unwrap()
+            .clone();
+        handler.tool_action_assign(&serde_json::json!({
+            "action_id": aid,
+            "worker_id": uid
+        }));
+        let evid: Vec<String> = dw.iter().map(|_| "artifact ok".into()).collect();
+        let done = handler.tool_action_complete(&serde_json::json!({
+            "action_id": aid,
+            "outcome": "finished with ownership",
+            "success": true,
+            "done_when_evidence": evid
+        }));
+        assert_eq!(done["protocol"]["ok"], true, "{done}");
+        assert_eq!(done["data"]["action"]["state"], "done");
+        let oid = done["data"]["outcome_memory_id"].as_u64().unwrap();
+        let got = handler.tool_memory_get(&serde_json::json!({ "id": oid }));
+        let labels = got["data"]["labels"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let label_strs: Vec<String> = labels
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+        assert!(
+            label_strs.iter().any(|l| l == &format!("assignee:{}", uid)),
+            "missing assignee label: {label_strs:?}"
+        );
+        assert!(
+            label_strs.iter().any(|l| l.starts_with("source_agent:")),
+            "missing source_agent label: {label_strs:?}"
+        );
     }
 }

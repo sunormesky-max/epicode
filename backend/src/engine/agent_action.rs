@@ -75,6 +75,22 @@ pub struct AgentAction {
     pub state: ActionState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claimed_by: Option<String>,
+    /// Immutable owner once set (assign or first claim). Foreign complete rejected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assigned_at: Option<i64>,
+    /// Capability tags for Dispatch matching (empty = any worker).
+    #[serde(default)]
+    pub required_capabilities: Vec<String>,
+    #[serde(default)]
+    pub requeue_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_failure_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_responsible_assignee: Option<String>,
+    #[serde(default)]
+    pub escalated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome_memory_id: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -97,7 +113,7 @@ fn default_origin() -> String {
 }
 
 /// Stable agent-facing card schema (Memory Action Envelope output).
-pub const ACTION_CARD_SCHEMA_VERSION: u32 = 1;
+pub const ACTION_CARD_SCHEMA_VERSION: u32 = 2;
 
 impl AgentAction {
     /// Slim but complete ActionCard — agents must not invent their own schema.
@@ -113,6 +129,12 @@ impl AgentAction {
             "suggested_skills": self.suggested_skills,
             "done_when": self.done_when,
             "stop_if": self.stop_if,
+            "required_capabilities": self.required_capabilities,
+            "assignee": self.assignee,
+            "assigned_at": self.assigned_at,
+            "requeue_count": self.requeue_count,
+            "last_failure_reason": self.last_failure_reason,
+            "escalated": self.escalated,
             "lineage": {
                 "origin": self.origin,
                 "source_query": self.source_query,
@@ -120,6 +142,8 @@ impl AgentAction {
                 "bound_task_id": self.bound_task_id,
                 "outcome_memory_id": self.outcome_memory_id,
                 "claimed_by": self.claimed_by,
+                "assignee": self.assignee,
+                "last_responsible_assignee": self.last_responsible_assignee,
                 "parents": self.evidence_memory_ids,
             },
             "created_at": self.created_at,
@@ -221,6 +245,7 @@ impl ActionFrontier {
     }
 
     /// Compare-and-set claim: only succeeds when current state is Open.
+    /// If assignee is already set to someone else → reject (ownership).
     pub fn claim(&self, id: u64, claimed_by: &str) -> Result<AgentAction, String> {
         let mut map = self.actions.lock();
         let action = map
@@ -232,17 +257,61 @@ impl ActionFrontier {
                 id, action.state
             ));
         }
+        if let Some(a) = &action.assignee {
+            if a != claimed_by {
+                return Err(format!(
+                    "action {} assigned to '{}', not '{}' (ownership)",
+                    id, a, claimed_by
+                ));
+            }
+        }
+        let now = now_secs();
         action.state = ActionState::Claimed;
         action.claimed_by = Some(claimed_by.to_string());
-        action.updated_at = now_secs();
+        if action.assignee.is_none() {
+            action.assignee = Some(claimed_by.to_string());
+            action.assigned_at = Some(now);
+        }
+        action.updated_at = now;
         Ok(action.clone())
     }
 
-    pub fn complete(
+    /// Scheduler assign: Open → Claimed with immutable assignee.
+    pub fn assign(&self, id: u64, worker_id: &str) -> Result<AgentAction, String> {
+        let worker_id = worker_id.trim();
+        if worker_id.is_empty() {
+            return Err("worker_id is required".into());
+        }
+        let mut map = self.actions.lock();
+        let action = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("action {} not found", id))?;
+        if action.state != ActionState::Open {
+            return Err(format!(
+                "action {} is {:?}, expected open for assign",
+                id, action.state
+            ));
+        }
+        if let Some(a) = &action.assignee {
+            return Err(format!("action {} already assigned to '{}'", id, a));
+        }
+        let now = now_secs();
+        action.state = ActionState::Claimed;
+        action.assignee = Some(worker_id.to_string());
+        action.assigned_at = Some(now);
+        action.claimed_by = Some(worker_id.to_string());
+        action.updated_at = now;
+        Ok(action.clone())
+    }
+
+    /// Complete with ownership check. Admin may override.
+    pub fn complete_as(
         &self,
         id: u64,
         outcome_memory_id: u64,
         terminal: ActionState,
+        actor: &str,
+        is_admin: bool,
     ) -> Result<AgentAction, String> {
         if !matches!(
             terminal,
@@ -260,10 +329,99 @@ impl ActionFrontier {
                 id, action.state
             ));
         }
+        let owner = action.assignee.as_deref().or(action.claimed_by.as_deref());
+        if let Some(owner) = owner {
+            if owner != actor && !is_admin {
+                return Err(format!(
+                    "action {} owned by assignee '{}'; '{}' cannot complete (ownership)",
+                    id, owner, actor
+                ));
+            }
+        }
         action.state = terminal;
         action.outcome_memory_id = Some(outcome_memory_id);
         action.updated_at = now_secs();
+        if matches!(terminal, ActionState::Blocked | ActionState::Exhausted) {
+            action.last_failure_reason = Some(format!("terminal:{:?}", terminal).to_lowercase());
+            action.last_responsible_assignee = action.assignee.clone();
+        }
         Ok(action.clone())
+    }
+
+    /// Requeue: clear claim/assignee, bump priority, record failure trail.
+    pub fn requeue(&self, id: u64, reason: &str, priority_bump: u8) -> Result<AgentAction, String> {
+        let mut map = self.actions.lock();
+        let action = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("action {} not found", id))?;
+        if action.state == ActionState::Open {
+            return Err(format!("action {} is already open", id));
+        }
+        if action.state == ActionState::Done {
+            return Err(format!("action {} is done — cannot requeue", id));
+        }
+        let responsible = action
+            .assignee
+            .clone()
+            .or_else(|| action.claimed_by.clone());
+        action.last_responsible_assignee = responsible;
+        action.last_failure_reason = Some(reason.to_string());
+        action.requeue_count = action.requeue_count.saturating_add(1);
+        action.state = ActionState::Open;
+        action.claimed_by = None;
+        action.assignee = None;
+        action.assigned_at = None;
+        action.escalated = false;
+        action.priority = action.priority.saturating_add(priority_bump).min(10);
+        action.updated_at = now_secs();
+        Ok(action.clone())
+    }
+
+    /// Escalate: keep terminal / mark claimed→blocked with escalated flag.
+    pub fn escalate(&self, id: u64, reason: &str) -> Result<AgentAction, String> {
+        let mut map = self.actions.lock();
+        let action = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("action {} not found", id))?;
+        action.escalated = true;
+        action.last_failure_reason = Some(reason.to_string());
+        action.last_responsible_assignee = action
+            .assignee
+            .clone()
+            .or_else(|| action.claimed_by.clone());
+        if !action.state.is_terminal() {
+            action.state = ActionState::Blocked;
+        }
+        action.updated_at = now_secs();
+        Ok(action.clone())
+    }
+
+    pub fn set_required_capabilities(
+        &self,
+        id: u64,
+        caps: Vec<String>,
+    ) -> Result<AgentAction, String> {
+        let mut map = self.actions.lock();
+        let action = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("action {} not found", id))?;
+        action.required_capabilities = caps;
+        action.updated_at = now_secs();
+        Ok(action.clone())
+    }
+
+    /// Backward-compatible complete without actor check (prefer complete_as).
+    pub fn complete(
+        &self,
+        id: u64,
+        outcome_memory_id: u64,
+        terminal: ActionState,
+    ) -> Result<AgentAction, String> {
+        let actor = self
+            .get(id)
+            .and_then(|a| a.assignee.or(a.claimed_by))
+            .unwrap_or_else(|| "system".into());
+        self.complete_as(id, outcome_memory_id, terminal, &actor, true)
     }
 
     /// True when a non-terminal action already cites this drive (anti double-spend).
@@ -393,6 +551,7 @@ pub fn build_drive_draft(
             }
         ),
         evidence_memory_ids: evidence_ids.to_vec(),
+        required_capabilities: suggested.iter().map(|s| s.name.clone()).collect(),
         suggested_skills: suggested,
         done_when: vec![
             format!(
@@ -475,6 +634,7 @@ pub fn build_proposals(
             }
         ),
         evidence_memory_ids: top_ids,
+        required_capabilities: suggested.iter().map(|s| s.name.clone()).collect(),
         suggested_skills: suggested.clone(),
         done_when: vec![
             format!("Outcome recorded for query «{}»", query.trim()),
@@ -492,6 +652,7 @@ pub fn build_proposals(
         drafts.push(AgentActionDraft {
             summary: format!("Follow up on memory #{}: {}", id, snippet),
             evidence_memory_ids: vec![*id],
+            required_capabilities: suggested.iter().map(|s| s.name.clone()).collect(),
             suggested_skills: suggested.clone(),
             done_when: vec![format!(
                 "Follow-up for memory #{} completed with artifact",
@@ -514,6 +675,7 @@ pub struct AgentActionDraft {
     pub done_when: Vec<String>,
     pub stop_if: Vec<String>,
     pub priority: u8,
+    pub required_capabilities: Vec<String>,
 }
 
 impl AgentActionDraft {
@@ -529,6 +691,13 @@ impl AgentActionDraft {
             priority: self.priority,
             state: ActionState::Open,
             claimed_by: None,
+            assignee: None,
+            assigned_at: None,
+            required_capabilities: self.required_capabilities,
+            requeue_count: 0,
+            last_failure_reason: None,
+            last_responsible_assignee: None,
+            escalated: false,
             outcome_memory_id: None,
             source_query: Some(source_query.to_string()),
             source_drive_id: None,
