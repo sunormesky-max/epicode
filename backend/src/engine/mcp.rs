@@ -784,6 +784,7 @@ impl McpHandler {
                         "properties": {
                             "query": { "type": "string", "description": "The recall query" },
                             "depth": { "type": "integer", "description": "Association depth (default 2, max 3)" },
+                            "limit": { "type": "integer", "minimum": 1, "maximum": 60, "default": 20, "description": "Slim only: max items returned, top by score (default 20)" },
                             "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "full", "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections duplicates); retains valid + timestamp fields when present. Also enabled by EPICODE_SLIM_ENVELOPE=1." }
                         },
                         "required": ["query"]
@@ -3938,6 +3939,11 @@ impl McpHandler {
                 if super::spike_flags::slim_envelope_requested(args) {
                     data =
                         super::smrp::to_slim_envelope(&data, super::smrp::SLIM_MAX_CONTENT_CHARS);
+                    let cap = args["limit"]
+                        .as_u64()
+                        .map(|n| n.clamp(1, 60) as usize)
+                        .unwrap_or(super::smrp::SLIM_RECALL_MAX_ITEMS);
+                    super::smrp::cap_slim_items(&mut data, cap);
                 }
                 self.smrp_ok("memory_recall", data)
             }
@@ -10143,5 +10149,74 @@ mod tests {
             label_strs.iter().any(|l| l.starts_with("source_agent:")),
             "missing source_agent label: {label_strs:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod recall_self_tests {
+    fn isolated_engine() -> crate::engine::Engine {
+        crate::engine::Engine::with_data_dir(
+            std::env::temp_dir().join(format!("epicode-recall-{}", uuid::Uuid::new_v4())),
+        )
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn recall_with_own_content_returns_that_memory() {
+        let mut engine = isolated_engine();
+        engine.start();
+        let s = &engine.scheduler;
+        let topics = ["Rust 调度器", "前端主题", "记忆整合", "部署流程", "身份层"];
+        for i in 0..80 {
+            let t = topics[i % topics.len()];
+            let _ = s.api_create_memory(
+                &format!("{t} 相关笔记 第{i}条：这条记录讨论{t}的设计取舍与实现细节，编号{i}"),
+                vec![format!("topic{}", i % 5)],
+            );
+        }
+        let target = "冒烟测试目标记忆：生产环境 1.9.0 动作闭环验证 smoke-r20 唯一标记 QX7";
+        let (tid, _) = s.api_create_memory(target, vec!["topic0".into()]).unwrap();
+        for depth in [1usize, 2] {
+            let r = s.api_recall(target, depth).unwrap();
+            let mut ids = vec![];
+            let mut first = None;
+            for (_, arr) in r["results"].as_object().unwrap() {
+                for f in arr.as_array().unwrap() {
+                    let id = f["id"].as_u64().unwrap();
+                    let rel = f["relevance"].as_array().unwrap();
+                    let sc = rel[0].as_f64().unwrap().max(rel[1].as_f64().unwrap());
+                    if first.map(|(_, b)| sc > b).unwrap_or(true) {
+                        first = Some((id, sc));
+                    }
+                    ids.push(id);
+                }
+            }
+            eprintln!(
+                "depth={depth} n={} contains={} bytes={}",
+                ids.len(),
+                ids.contains(&tid),
+                serde_json::to_vec(&r).unwrap().len()
+            );
+            assert!(ids.contains(&tid), "depth {depth}: target missing");
+            assert_eq!(
+                first.map(|x| x.0),
+                Some(tid),
+                "depth {depth}: target not top-ranked"
+            );
+            let full = crate::engine::smrp::recall_data(&engine, &r, target, depth);
+            let mut slim = crate::engine::smrp::to_slim_envelope(
+                &full,
+                crate::engine::smrp::SLIM_MAX_CONTENT_CHARS,
+            );
+            let before = serde_json::to_vec(&slim).unwrap().len();
+            crate::engine::smrp::cap_slim_items(
+                &mut slim,
+                crate::engine::smrp::SLIM_RECALL_MAX_ITEMS,
+            );
+            let after = serde_json::to_vec(&slim).unwrap().len();
+            eprintln!("slim depth={depth} before={before} after={after}");
+            assert_eq!(slim["items"][0]["id"].as_u64(), Some(tid));
+            assert!(slim["items"].as_array().unwrap().len() <= 20);
+            assert!(after * 2 < before, "slim cap should at least halve payload");
+        }
     }
 }

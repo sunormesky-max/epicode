@@ -578,6 +578,35 @@ pub fn to_slim_envelope(data: &serde_json::Value, max_chars: usize) -> serde_jso
     out
 }
 
+/// Default item cap for slim `memory_recall` (recall expands up to 60 fragments).
+pub const SLIM_RECALL_MAX_ITEMS: usize = 20;
+
+/// Keep the top-`max_items` slim items by score (stable), recompute `budget_spent`,
+/// and record `items_total` / `items_truncated` so callers know more exist.
+pub fn cap_slim_items(slim: &mut serde_json::Value, max_items: usize) {
+    let Some(arr) = slim.get_mut("items").and_then(|v| v.as_array_mut()) else {
+        return;
+    };
+    let total = arr.len();
+    arr.sort_by(|a, b| {
+        let sa = a["score"].as_f64().unwrap_or(0.0);
+        let sb = b["score"].as_f64().unwrap_or(0.0);
+        sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    arr.truncate(max_items.max(1));
+    let kept = arr.len();
+    let bytes = serde_json::to_vec(&slim["items"])
+        .map(|v| v.len())
+        .unwrap_or(0);
+    slim["budget_spent"]["bytes"] = serde_json::json!(bytes);
+    slim["budget_spent"]["est_tokens"] = serde_json::json!(bytes.div_ceil(4));
+    slim["budget_spent"]["items"] = serde_json::json!(kept);
+    slim["items_total"] = serde_json::json!(total);
+    if kept < total {
+        slim["items_truncated"] = serde_json::json!(true);
+    }
+}
+
 /// Estimate JSON byte size / tokens of a data payload (for benchmarks).
 pub fn estimate_payload_size(data: &serde_json::Value) -> (usize, usize) {
     let bytes = serde_json::to_vec(data).map(|v| v.len()).unwrap_or(0);
