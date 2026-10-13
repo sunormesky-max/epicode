@@ -96,26 +96,40 @@ fn default_origin() -> String {
     "propose".into()
 }
 
+/// Stable agent-facing card schema (Memory Action Envelope output).
+pub const ACTION_CARD_SCHEMA_VERSION: u32 = 1;
+
 impl AgentAction {
-    pub fn to_json(&self) -> serde_json::Value {
+    /// Slim but complete ActionCard — agents must not invent their own schema.
+    pub fn to_action_card(&self) -> serde_json::Value {
         serde_json::json!({
+            "schema": "epicode.action_card",
+            "schema_version": ACTION_CARD_SCHEMA_VERSION,
             "id": self.id,
             "summary": self.summary,
+            "state": self.state.as_str(),
+            "priority": self.priority,
             "evidence_memory_ids": self.evidence_memory_ids,
             "suggested_skills": self.suggested_skills,
             "done_when": self.done_when,
             "stop_if": self.stop_if,
-            "priority": self.priority,
-            "state": self.state.as_str(),
-            "claimed_by": self.claimed_by,
-            "outcome_memory_id": self.outcome_memory_id,
-            "source_query": self.source_query,
-            "source_drive_id": self.source_drive_id,
-            "bound_task_id": self.bound_task_id,
-            "origin": self.origin,
+            "lineage": {
+                "origin": self.origin,
+                "source_query": self.source_query,
+                "source_drive_id": self.source_drive_id,
+                "bound_task_id": self.bound_task_id,
+                "outcome_memory_id": self.outcome_memory_id,
+                "claimed_by": self.claimed_by,
+                "parents": self.evidence_memory_ids,
+            },
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         })
+    }
+
+    /// Backward-compatible alias used by MCP tools.
+    pub fn to_json(&self) -> serde_json::Value {
+        self.to_action_card()
     }
 }
 
@@ -647,5 +661,20 @@ mod tests {
         }
         assert_eq!(f.prune_terminal_older_than(10), 1);
         assert!(f.get(a.id).is_none());
+    }
+
+    #[test]
+    fn action_card_has_stable_schema() {
+        let drafts = build_proposals("q", &[(3, "e".into())], &[("s".into(), 0.5)], 1);
+        let card = drafts[0].clone().into_action("q").to_action_card();
+        assert_eq!(card["schema"], "epicode.action_card");
+        assert_eq!(card["schema_version"], ACTION_CARD_SCHEMA_VERSION);
+        assert!(card["lineage"]["parents"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!(3)));
+        assert!(card.get("evidence_memory_ids").is_some());
+        assert!(card.get("done_when").is_some());
+        assert!(card.get("suggested_skills").is_some());
     }
 }

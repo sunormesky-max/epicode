@@ -17,3 +17,7 @@
 1. 不要在同一次回合里既大批量 propose 又假装已经完成 — 先 claim 再交付。
 2. Viewer 角色默认只能 `action_list`（只读）；propose/claim/complete 需要写权限。
 3. 同一 `source_drive_id` 在非终态时不可再次 `drive_to_actions`。
+
+
+## ActionCard 输出契约
+所有动作工具返回 `epicode.action_card`（schema_version=1）：id / summary / state / evidence_memory_ids / suggested_skills / done_when / stop_if / lineage。agent **不要自造字段名**；以 `cards` 或 `action` 对象为准。

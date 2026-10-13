@@ -1906,7 +1906,8 @@ impl McpHandler {
                 "planner": ["memory_propose_actions", "drive_to_actions", "action_list"],
                 "worker": ["action_claim", "action_complete", "task_start", "task_complete", "skill_execute"],
                 "skill": "skill_get('动作角色分工')",
-                "rule": "Planner proposes; Worker claims+completes with outcome write-back"
+                "rule": "Planner proposes; Worker claims+completes with outcome write-back",
+                "action_card_schema": "epicode.action_card/v1"
             },
         });
         self.smrp_ok_nn("epicode_handshake", result)
@@ -6742,9 +6743,11 @@ impl McpHandler {
             "memory_propose_actions",
             serde_json::json!({
                 "actions": actions,
+                "cards": actions, // ActionCard alias — same objects, stable schema
                 "memory_count": evidence.len(),
                 "evidence_memory_ids": evidence.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
                 "errors": errors,
+                "action_card_schema": "epicode.action_card/v1",
                 "loop": ["memory_propose_actions", "action_claim", "execute", "action_complete"],
             }),
         )
@@ -8725,5 +8728,28 @@ mod tests {
             restored.unwrap().state,
             crate::engine::agent_action::ActionState::Open
         );
+    }
+
+    #[test]
+    fn propose_returns_action_card_schema() {
+        let h = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&h);
+        let _ = h.tool_memory_create(&serde_json::json!({
+            "content": "card schema fixture memory",
+            "labels": ["card"]
+        }));
+        let proposed = h.tool_memory_propose_actions(&serde_json::json!({
+            "query": "card schema",
+            "limit": 1
+        }));
+        assert_eq!(proposed["protocol"]["ok"], true, "{proposed}");
+        assert_eq!(
+            proposed["data"]["action_card_schema"],
+            "epicode.action_card/v1"
+        );
+        let card = &proposed["data"]["cards"][0];
+        assert_eq!(card["schema"], "epicode.action_card");
+        assert_eq!(card["schema_version"], 1);
+        assert!(card["lineage"]["parents"].is_array());
     }
 }
