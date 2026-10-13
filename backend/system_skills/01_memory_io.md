@@ -62,3 +62,7 @@ labels: ["项目", "Epicode", "Rust", "技术架构", "服务器"]
 4. `action_complete(action_id, outcome)` — **必须**写回 outcome；系统会创建 `action-outcome` 记忆，并把每条 evidence 用 Precedes 边连到 outcome
 
 `memory_ask` 回答问题；`memory_propose_actions` 产出可执行动作。二者互补，不要互相替代。
+
+
+### Drive→Action 桥
+有 grounding evidence 的 drive 信号可用 `drive_to_actions(drive_id)` 物化为 AgentAction（拒绝同一 drive 的双重占用）。`action_complete` 成功后会自动 `drive_ack`（仅 first_ack 计学习）。

@@ -446,7 +446,8 @@ impl McpHandler {
             | "blocks_set"
             | "memory_propose_actions"
             | "action_claim"
-            | "action_complete" => Some(P::MemoryWrite),
+            | "action_complete"
+            | "drive_to_actions" => Some(P::MemoryWrite),
             // Deletion, quarantine and restoration change protected memory state.
             "memory_delete" | "memory_forget" | "memory_restore" => Some(P::MemoryDelete),
             // Skill and library management.
@@ -1291,6 +1292,18 @@ impl McpHandler {
                     }
                 },
                 {
+                    "name": "drive_to_actions",
+                    "description": "Drive→Action bridge: materialize one grounded drive signal into a claimable AgentAction. Requires persistent evidence memory ids (signal.evidence or grounding.evidence). Rejects double-spend while a non-terminal action already cites the same drive_id. Completing the action auto-acks the drive (first_ack only).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "drive_id": { "type": "integer", "description": "Drive signal id from drive_inbox" },
+                            "claim": { "type": "boolean", "description": "If true, immediately CAS-claim the new action for this user (default false)", "default": false }
+                        },
+                        "required": ["drive_id"]
+                    }
+                },
+                {
                     "name": "skill_auto_extract",
                     "description": "L3 Skill Learning: automatically extract a reusable skill document from the cognitive engine's effective decision patterns. Analyzes recent decision history for actions with >60% success rate and uses LLM to generalize them into a skill. Letta-inspired continual learning.",
                     "inputSchema": {
@@ -1401,6 +1414,7 @@ impl McpHandler {
             | "memory_propose_actions"
             | "action_claim"
             | "action_complete"
+            | "drive_to_actions"
             | "skill_feedback"
             | "feedback_submit"
             | "task_check" => (false, false, true, false),
@@ -1596,6 +1610,7 @@ impl McpHandler {
             "action_list" => self.tool_action_list(&args),
             "action_claim" => self.tool_action_claim(&args),
             "action_complete" => self.tool_action_complete(&args),
+            "drive_to_actions" => self.tool_drive_to_actions(&args),
             "memory_forget" => self.tool_memory_forget(&args),
             "blocks_get" => self.tool_blocks_get(&args),
             "blocks_set" => self.tool_blocks_set(&args),
@@ -6694,6 +6709,105 @@ impl McpHandler {
         }
     }
 
+    fn tool_drive_to_actions(&self, args: &serde_json::Value) -> serde_json::Value {
+        let drive_id = match args.get("drive_id").and_then(|v| v.as_u64()) {
+            Some(id) => id,
+            None => return self.smrp_err("drive_to_actions", 400, "drive_id is required"),
+        };
+        let claim_now = args.get("claim").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let signal = match self.engine.scheduler().drive_queue().get_signal(drive_id) {
+            Some(s) => s,
+            None => {
+                return self.smrp_err(
+                    "drive_to_actions",
+                    404,
+                    &format!("drive signal {} not found", drive_id),
+                )
+            }
+        };
+
+        let mut evidence_ids: Vec<u64> = signal.evidence.clone();
+        if evidence_ids.is_empty() {
+            if let Some(g) = &signal.grounding {
+                evidence_ids = g.evidence.iter().map(|e| e.id).collect();
+            }
+        }
+        evidence_ids.sort_unstable();
+        evidence_ids.dedup();
+        evidence_ids.retain(|id| self.engine.space.get_tetrahedron(*id).is_some());
+        if evidence_ids.is_empty() {
+            return self.smrp_err(
+                "drive_to_actions",
+                400,
+                "drive has no grounded persistent-memory evidence — cannot materialize action",
+            );
+        }
+
+        let frontier = self.engine.scheduler.action_frontier();
+        if frontier.has_live_drive(drive_id) {
+            let existing = frontier.find_by_drive(drive_id);
+            return self.smrp_err(
+                "drive_to_actions",
+                409,
+                &format!(
+                    "drive {} already has a live action {} — complete or block it first (no double-spend)",
+                    drive_id,
+                    existing.first().map(|a| a.id).unwrap_or(0)
+                ),
+            );
+        }
+
+        let skills: Vec<(String, f64)> = self
+            .engine
+            .skills
+            .match_skills_scored(&signal.description, &self.engine.user_id, 5)
+            .into_iter()
+            .map(|(sk, score)| (sk.name, score))
+            .collect();
+
+        let draft = match crate::engine::agent_action::build_drive_draft(
+            drive_id,
+            &signal.description,
+            &evidence_ids,
+            &skills,
+        ) {
+            Some(d) => d,
+            None => return self.smrp_err("drive_to_actions", 400, "failed to build drive draft"),
+        };
+
+        let mut action =
+            match frontier.enqueue(draft.into_drive_action(drive_id, &signal.description)) {
+                Ok(a) => a,
+                Err(e) => return self.smrp_err("drive_to_actions", 409, &e),
+            };
+
+        if claim_now {
+            match frontier.claim(action.id, &self.engine.user_id) {
+                Ok(a) => action = a,
+                Err(e) => {
+                    return self.smrp_err(
+                        "drive_to_actions",
+                        409,
+                        &format!("enqueued but claim failed: {e}"),
+                    )
+                }
+            }
+        }
+
+        self.engine.scheduler.save_action_frontier();
+        self.smrp_ok(
+            "drive_to_actions",
+            serde_json::json!({
+                "action": action.to_json(),
+                "drive_id": drive_id,
+                "evidence_memory_ids": evidence_ids,
+                "claimed": claim_now,
+                "loop": ["drive_inbox", "drive_to_actions", "action_claim", "execute", "action_complete→drive_ack"],
+            }),
+        )
+    }
+
     fn tool_action_complete(&self, args: &serde_json::Value) -> serde_json::Value {
         let action_id = match args.get("action_id").and_then(|v| v.as_u64()) {
             Some(id) => id,
@@ -6804,12 +6918,39 @@ impl McpHandler {
         match frontier.complete(action_id, outcome_id, terminal) {
             Ok(done) => {
                 self.engine.scheduler.save_action_frontier();
+                // Drive→Action: first successful complete acks the source drive (no double-spend of learning).
+                let mut drive_ack = serde_json::Value::Null;
+                if let Some(did) = done.source_drive_id {
+                    let feedback = crate::engine::drive::DriveFeedback {
+                        responded_at: chrono::Utc::now().timestamp(),
+                        executed: matches!(
+                            terminal,
+                            crate::engine::agent_action::ActionState::Done
+                        ),
+                        outcome: outcome.to_string(),
+                        reflection: Some(format!("via action_complete #{}", action_id)),
+                    };
+                    let (acked, first) = self
+                        .engine
+                        .scheduler()
+                        .drive_queue()
+                        .acknowledge(did, feedback);
+                    if acked {
+                        self.engine.scheduler().save_drive_queue();
+                    }
+                    drive_ack = serde_json::json!({
+                        "drive_id": did,
+                        "acknowledged": acked,
+                        "first_ack": first,
+                    });
+                }
                 self.smrp_ok(
                     "action_complete",
                     serde_json::json!({
                         "action": done.to_json(),
                         "outcome_memory_id": outcome_id,
                         "relations_created": linked,
+                        "drive_ack": drive_ack,
                     }),
                 )
             }
@@ -6929,6 +7070,7 @@ mod tests {
         assert!(names.contains(&"action_claim"));
         assert!(names.contains(&"action_complete"));
         assert!(names.contains(&"action_list"));
+        assert!(names.contains(&"drive_to_actions"));
         assert!(names.contains(&"memory_recall"));
         assert!(names.contains(&"memory_ask"));
         assert!(names.contains(&"ctx_load"));
@@ -8203,5 +8345,81 @@ mod tests {
             .cloned()
             .unwrap_or_default();
         assert!(done_actions.iter().any(|a| a["id"] == action_id));
+    }
+
+    #[tokio::test]
+    async fn drive_to_actions_rejects_double_spend_and_acks_on_complete() {
+        let mut engine = isolated_engine();
+        engine.start();
+        let handler = McpHandler::new(std::sync::Arc::new(engine));
+        confirm_test_identity(&handler);
+
+        let mem = handler.tool_memory_create(&serde_json::json!({
+            "content": "Cluster CPU saturation playbook: scale workers then drain",
+            "labels": ["ops", "sre"]
+        }));
+        assert_eq!(mem["protocol"]["ok"], true, "{mem}");
+        let mid = mem["data"]["id"].as_u64().expect("memory id");
+
+        // Re-get engine via handler internals — enqueue on scheduler
+        let drive_id = {
+            let q = handler.engine.scheduler().drive_queue();
+            q.enqueue(crate::engine::drive::DriveSignal {
+                id: 0,
+                timestamp: 1_780_000_100,
+                intent_type: crate::engine::drive::DriveIntent::Explore,
+                description: "Investigate CPU saturation using the playbook".into(),
+                evidence: vec![mid],
+                urgency: crate::engine::drive::DriveUrgency::High,
+                target_capability: None,
+                emotion: None,
+                origin_tick: 2,
+                status: crate::engine::drive::DriveStatus::Pending,
+                feedback: None,
+                retry_count: 0,
+                expires_at: None,
+                enqueued_at_ms: 1_780_000_100_000,
+                time_budget_ms: None,
+                grounding: None,
+                terminal_reason: None,
+            })
+        };
+
+        let first = handler.tool_drive_to_actions(&serde_json::json!({
+            "drive_id": drive_id,
+            "claim": true
+        }));
+        assert_eq!(first["protocol"]["ok"], true, "{first}");
+        let action_id = first["data"]["action"]["id"].as_u64().unwrap();
+        assert_eq!(first["data"]["action"]["origin"], "drive");
+        assert_eq!(first["data"]["action"]["source_drive_id"], drive_id);
+
+        let dup = handler.tool_drive_to_actions(&serde_json::json!({
+            "drive_id": drive_id
+        }));
+        assert_eq!(
+            dup["protocol"]["ok"], false,
+            "double-spend must fail: {dup}"
+        );
+        assert_eq!(dup["protocol"]["error"]["code"], 409);
+
+        let done = handler.tool_action_complete(&serde_json::json!({
+            "action_id": action_id,
+            "outcome": "Scaled workers and drained hot pods per playbook",
+            "success": true
+        }));
+        assert_eq!(done["protocol"]["ok"], true, "{done}");
+        assert_eq!(done["data"]["drive_ack"]["acknowledged"], true);
+        assert_eq!(done["data"]["drive_ack"]["first_ack"], true);
+
+        // After terminal action, materializing again is allowed (drive already acked;
+        // live-drive guard cleared). May fail if evidence policy blocks — only assert
+        // has_live_drive is false via action_list.
+        let listed = handler.tool_action_list(&serde_json::json!({"state": "done"}));
+        assert!(listed["data"]["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["id"] == action_id));
     }
 }

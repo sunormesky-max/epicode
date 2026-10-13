@@ -79,8 +79,18 @@ pub struct AgentAction {
     pub outcome_memory_id: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_query: Option<String>,
+    /// Drive signal that materialized this action (Drive→Action bridge). None for propose path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_drive_id: Option<u64>,
+    /// Origin tag: "propose" | "drive"
+    #[serde(default = "default_origin")]
+    pub origin: String,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+fn default_origin() -> String {
+    "propose".into()
 }
 
 impl AgentAction {
@@ -97,6 +107,8 @@ impl AgentAction {
             "claimed_by": self.claimed_by,
             "outcome_memory_id": self.outcome_memory_id,
             "source_query": self.source_query,
+            "source_drive_id": self.source_drive_id,
+            "origin": self.origin,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         })
@@ -235,6 +247,72 @@ impl ActionFrontier {
         action.updated_at = now_secs();
         Ok(action.clone())
     }
+
+    /// True when a non-terminal action already cites this drive (anti double-spend).
+    pub fn has_live_drive(&self, drive_id: u64) -> bool {
+        self.actions
+            .lock()
+            .values()
+            .any(|a| a.source_drive_id == Some(drive_id) && !a.state.is_terminal())
+    }
+
+    pub fn find_by_drive(&self, drive_id: u64) -> Vec<AgentAction> {
+        let mut v: Vec<AgentAction> = self
+            .actions
+            .lock()
+            .values()
+            .filter(|a| a.source_drive_id == Some(drive_id))
+            .cloned()
+            .collect();
+        v.sort_by_key(|a| std::cmp::Reverse(a.id));
+        v
+    }
+}
+
+/// Build a single draft from a grounded drive signal description + evidence ids.
+pub fn build_drive_draft(
+    drive_id: u64,
+    description: &str,
+    evidence_ids: &[u64],
+    skills: &[(String, f64)],
+) -> Option<AgentActionDraft> {
+    if evidence_ids.is_empty() {
+        return None;
+    }
+    let suggested: Vec<SuggestedSkill> = skills
+        .iter()
+        .take(5)
+        .map(|(n, s)| SuggestedSkill {
+            name: n.clone(),
+            score: (*s * 1000.0).round() / 1000.0,
+        })
+        .collect();
+    let desc = description.trim();
+    Some(AgentActionDraft {
+        summary: format!(
+            "Drive #{}: {}",
+            drive_id,
+            if desc.is_empty() {
+                "act on grounded evidence"
+            } else {
+                desc
+            }
+        ),
+        evidence_memory_ids: evidence_ids.to_vec(),
+        suggested_skills: suggested,
+        done_when: vec![
+            format!(
+                "Drive #{} intent fulfilled with artifact-level outcome",
+                drive_id
+            ),
+            "Evidence memories cited in the outcome".into(),
+        ],
+        stop_if: vec![
+            "Grounding evidence is stale or contradicted".into(),
+            "Drive signal expired before execution".into(),
+        ],
+        priority: 8,
+    })
 }
 
 /// Build deterministic action proposals from search hits + skill matches.
@@ -335,9 +413,19 @@ impl AgentActionDraft {
             claimed_by: None,
             outcome_memory_id: None,
             source_query: Some(source_query.to_string()),
+            source_drive_id: None,
+            origin: "propose".into(),
             created_at: now,
             updated_at: now,
         }
+    }
+
+    pub fn into_drive_action(self, drive_id: u64, drive_desc: &str) -> AgentAction {
+        let mut a = self.into_action(drive_desc);
+        a.source_drive_id = Some(drive_id);
+        a.origin = "drive".into();
+        a.priority = a.priority.max(8);
+        a
     }
 }
 
@@ -387,5 +475,26 @@ mod tests {
         assert_eq!(done.state, ActionState::Done);
         assert_eq!(done.outcome_memory_id, Some(99));
         assert!(f.complete(a.id, 100, ActionState::Done).is_err());
+    }
+
+    #[test]
+    fn drive_draft_requires_evidence() {
+        assert!(build_drive_draft(1, "x", &[], &[]).is_none());
+    }
+
+    #[test]
+    fn live_drive_blocks_double_spend() {
+        let f = ActionFrontier::new();
+        let draft = build_drive_draft(42, "check deploy", &[7, 8], &[]).unwrap();
+        let a = f
+            .enqueue(draft.into_drive_action(42, "check deploy"))
+            .unwrap();
+        assert_eq!(a.source_drive_id, Some(42));
+        assert_eq!(a.origin, "drive");
+        assert!(f.has_live_drive(42));
+        // Completing frees the drive for a future materialization.
+        f.claim(a.id, "w").unwrap();
+        f.complete(a.id, 1, ActionState::Done).unwrap();
+        assert!(!f.has_live_drive(42));
     }
 }
