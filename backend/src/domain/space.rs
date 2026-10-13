@@ -499,6 +499,70 @@ impl Space {
         Ok(())
     }
 
+    /// 标签补丁:按 `base`→`desired` 的增删合并到当前标签,返回合并后的当前标签。
+    pub fn patch_labels(
+        &self,
+        id: TetraId,
+        base: &[String],
+        desired: &[String],
+    ) -> Result<Vec<String>, String> {
+        let mut inner = self.inner.write();
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let changed = super::ops::merge_set(&mut tetra.data.labels, base, desired);
+        let out = tetra.data.labels.clone();
+        if changed {
+            inner.structure_version += 1;
+            inner.search_revision += 1;
+        }
+        Ok(out)
+    }
+
+    /// 别名补丁:同 `patch_labels`,返回合并后的当前别名。
+    pub fn patch_aliases(
+        &self,
+        id: TetraId,
+        base: &[String],
+        desired: &[String],
+    ) -> Result<Vec<String>, String> {
+        let mut inner = self.inner.write();
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let changed = super::ops::merge_set(&mut tetra.data.aliases, base, desired);
+        let out = tetra.data.aliases.clone();
+        if changed {
+            inner.search_revision += 1;
+        }
+        Ok(out)
+    }
+
+    /// 字段级补丁写回:`desired` 基于快照 `base` 计算,锁内只应用相对 `base` 的改动
+    /// (labels/aliases 按增删合并),保留快照之后的并发写入。替代整包 `update_payload`。
+    pub fn patch_payload(
+        &self,
+        id: TetraId,
+        base: &crate::domain::tetra::MemoryPayload,
+        desired: crate::domain::tetra::MemoryPayload,
+    ) -> Result<bool, String> {
+        let mut inner = self.inner.write();
+        let tetra = inner
+            .tetrahedrons
+            .get_mut(&id)
+            .ok_or_else(|| format!("tetrahedron {} not found", id))?;
+        let (changed, searchable, labels) = super::ops::patch(&mut tetra.data, base, desired);
+        if labels {
+            inner.structure_version += 1;
+        }
+        if searchable || labels {
+            inner.search_revision += 1;
+        }
+        Ok(changed)
+    }
+
     /// 在单次写锁内原子应用一组字段级操作,返回是否有任一操作改变了状态。
     /// 只触碰操作声明的字段,不会覆盖并发写入的其他字段(见 domain::ops)。
     pub fn apply_ops(&self, id: TetraId, ops: &[super::ops::MemoryOp]) -> Result<bool, String> {

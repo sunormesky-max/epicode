@@ -845,7 +845,7 @@ impl Engine {
                 Ok(emb) => {
                     let mut payload = t.data.clone();
                     payload.embedding = emb;
-                    self.space.update_payload(t.id, payload)?;
+                    self.space.patch_payload(t.id, &t.data, payload)?;
                     updated += 1;
                 }
                 Err(e) => {

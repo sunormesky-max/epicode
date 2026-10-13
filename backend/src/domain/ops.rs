@@ -196,6 +196,76 @@ pub fn apply_op(data: &mut MemoryPayload, mass: &mut f64, op: &MemoryOp) -> bool
     }
 }
 
+/// 三方字段合并:`desired` 是调用方基于快照 `base` 在锁外算好的新 payload。
+/// 只把 `desired` 相对 `base` 真正改动的字段写到 `cur`(当前锁内状态)上;
+/// labels / aliases 按集合差(增/删)合并,而不是整份覆盖。
+/// 未改动的字段保留 `cur` 中的并发写入。返回 (是否改变, 可检索字段是否改变, 标签是否改变)。
+pub fn patch(
+    cur: &mut MemoryPayload,
+    base: &MemoryPayload,
+    desired: MemoryPayload,
+) -> (bool, bool, bool) {
+    let mut changed = false;
+    let mut searchable = false;
+    macro_rules! field {
+        ($f:ident) => {
+            if desired.$f != base.$f && cur.$f != desired.$f {
+                cur.$f = desired.$f.clone();
+                changed = true;
+            }
+        };
+    }
+    if desired.content != base.content && cur.content != desired.content {
+        cur.content = desired.content.clone();
+        changed = true;
+        searchable = true;
+    }
+    field!(content_hash);
+    field!(timestamp);
+    field!(embedding);
+    field!(importance);
+    field!(enforced);
+    field!(rationale);
+    field!(access_count);
+    field!(memory_type);
+    field!(identity_stamp);
+    field!(source_agent);
+    field!(valid_from);
+    field!(valid_to);
+    field!(expired_at);
+    field!(invalidated_at);
+    field!(memory_class);
+    field!(last_reviewed_ts);
+    let labels_changed = merge_set(&mut cur.labels, &base.labels, &desired.labels);
+    if merge_set(&mut cur.aliases, &base.aliases, &desired.aliases) {
+        searchable = true;
+        changed = true;
+    }
+    changed |= labels_changed;
+    (changed, searchable, labels_changed)
+}
+
+pub fn merge_set(cur: &mut Vec<String>, base: &[String], desired: &[String]) -> bool {
+    // 快路径:调用方没动这个集合(最常见),O(n) 比较后直接返回
+    if base == desired {
+        return false;
+    }
+    let before = cur.len();
+    let mut changed = false;
+    let removed: Vec<&String> = base.iter().filter(|x| !desired.contains(x)).collect();
+    if !removed.is_empty() {
+        cur.retain(|x| !removed.contains(&x));
+        changed |= cur.len() != before;
+    }
+    for x in desired {
+        if !base.contains(x) && !cur.contains(x) {
+            cur.push(x.clone());
+            changed = true;
+        }
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,5 +386,31 @@ mod tests {
         q.access_count = 4;
         assert!(apply_op(&mut q, &mut m, &MemoryOp::ResetAccessCount));
         assert!(!apply_op(&mut q, &mut m, &MemoryOp::ResetAccessCount));
+    }
+
+    #[test]
+    fn patch_keeps_concurrent_fields_and_merges_label_sets() {
+        let base = MemoryPayload {
+            labels: vec!["a".into(), "quarantine".into()],
+            importance: 0.1,
+            ..Default::default()
+        };
+        // 调用方:去掉 quarantine、加 b、改 importance
+        let mut desired = base.clone();
+        desired.labels.retain(|l| l != "quarantine");
+        desired.labels.push("b".into());
+        desired.importance = 0.5;
+        // 并发:用户加了 u、改了 memory_class
+        let mut cur = base.clone();
+        cur.labels.push("u".into());
+        cur.memory_class = Some("episodic".into());
+        let (changed, _, labels) = patch(&mut cur, &base, desired);
+        assert!(changed && labels);
+        assert_eq!(cur.labels, vec!["a", "u", "b"]);
+        assert_eq!(cur.importance, 0.5);
+        assert_eq!(cur.memory_class.as_deref(), Some("episodic"));
+        // 无改动的补丁是 no-op
+        let snap = cur.clone();
+        assert_eq!(patch(&mut cur, &snap, snap.clone()), (false, false, false));
     }
 }
