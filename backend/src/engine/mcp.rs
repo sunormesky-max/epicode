@@ -1946,10 +1946,10 @@ impl McpHandler {
             ) {
                 Ok(a) => {
                     // Persist reverse lookup for task_complete.
-                    self
-                        .engine
-                        .storage
-                        .save_drive_kv(&format!("task_action:{}", task_id), &aid.to_string());
+                    let _ = self.engine.storage.save_drive_kv(
+                        &format!("task_action:{}", task_id),
+                        &aid.to_string(),
+                    );
                     // Inherit done_when/stop_if into goal when caller omitted goal.done_when.
                     let goal_empty_dw = args
                         .get("goal")
@@ -5267,7 +5267,7 @@ impl McpHandler {
 
             let _ = self.engine.space.update_mass(id, total_delta);
             if let Some(t) = self.engine.space.get_tetrahedron(id) {
-                self
+                let _ = self
                     .engine
                     .scheduler
                     .storage_handle()
@@ -5293,14 +5293,14 @@ impl McpHandler {
                 }
                 let labels_changed = payload.labels != old_labels;
                 let _ = self.engine.space.update_payload(id, payload.clone());
-                self
+                let _ = self
                     .engine
                     .scheduler
                     .storage_handle()
                     .update_importance(id, final_delta);
                 // 管道完整性：is_correction 和 is_restored 都改变标签，都需要持久化
                 if labels_changed {
-                    self
+                    let _ = self
                         .engine
                         .scheduler
                         .storage_handle()
