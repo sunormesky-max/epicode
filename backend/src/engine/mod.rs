@@ -414,6 +414,8 @@ impl Engine {
         scheduler.restore_drive_queue();
         scheduler.restore_action_frontier();
         scheduler.restore_worker_registry();
+        // Restart recovery: claims whose lease lapsed while we were down go back to Open.
+        scheduler.sweep_action_leases();
         scheduler.restore_tick_state();
         // 稳态恢复: 演化权重/历史跨重启存活 + ingested去重集
         scheduler.restore_drive_engine();

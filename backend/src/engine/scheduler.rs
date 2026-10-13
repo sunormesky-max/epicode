@@ -1385,6 +1385,18 @@ impl SchedulerCenter {
         }
     }
 
+    /// PR-I: return lapsed claims to the frontier (or escalate). Called on
+    /// restart (after registry restore) and from the Routine save cadence.
+    pub fn sweep_action_leases(&self) -> usize {
+        let swept =
+            super::dispatch::sweep_expired_leases(&self.worker_registry, &self.action_frontier);
+        if !swept.is_empty() {
+            tracing::info!("[action] lease sweep reclaimed {:?}", swept);
+            self.save_action_frontier();
+        }
+        swept.len()
+    }
+
     pub fn save_action_frontier(&self) {
         self.save_worker_registry();
         // Keep frontier bounded across restarts: drop terminal actions older than 7 days.
@@ -6476,6 +6488,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
         let Some(ct) = thought else {
             let count = self.tick_count.load(Ordering::SeqCst);
             if count.is_multiple_of(3) {
+                self.sweep_action_leases();
                 self.auto_save();
             } // P0: flush every 3 ticks
             if count.is_multiple_of(5) {

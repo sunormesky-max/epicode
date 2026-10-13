@@ -126,6 +126,8 @@ impl WorkerRegistry {
         frontier
             .list(Some(ActionState::Claimed), 1000)
             .into_iter()
+            // Expired leases are not live work: they must not pin max_load.
+            .filter(|a| frontier.holds_live_claim(a))
             .filter(|a| {
                 a.assignee.as_deref() == Some(worker_id)
                     || a.claimed_by.as_deref() == Some(worker_id)
@@ -244,6 +246,27 @@ pub fn account_failure(
     }
 }
 
+/// Failure reason recorded when a claim lease lapses without heartbeat/complete.
+pub const LEASE_EXPIRED_REASON: &str = "lease_expired";
+
+/// Routine/restart sweep: every Claimed action past its lease goes through the
+/// same accountability path as blocked/exhausted (requeue ≤ MAX_REQUEUES, else
+/// escalate). Returns (action_id, disposition).
+pub fn sweep_expired_leases(
+    registry: &WorkerRegistry,
+    frontier: &ActionFrontier,
+) -> Vec<(u64, &'static str)> {
+    frontier
+        .expired_claims()
+        .into_iter()
+        .filter_map(|id| {
+            account_failure(registry, frontier, id, LEASE_EXPIRED_REASON)
+                .ok()
+                .map(|(_, d)| (id, d))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,5 +346,51 @@ mod tests {
         let (a3, d3) = account_failure(&reg, &f, a.id, "timeout").unwrap();
         assert_eq!(d3, "escalated");
         assert!(a3.escalated);
+    }
+
+    /// PR-I: a claim restored from storage whose owner vanished long ago must not
+    /// count toward worker load (fails on #255: stale claims pin max_load forever).
+    #[test]
+    fn stale_restored_claim_does_not_pin_load() {
+        let reg = WorkerRegistry::new();
+        reg.register("ghost", vec![], Some(1)).unwrap();
+        let f = ActionFrontier::new();
+        let a = f
+            .enqueue(
+                build_proposals("job", &[(9, "x".into())], &[], 1)[0]
+                    .clone()
+                    .into_action("job"),
+            )
+            .unwrap();
+        f.claim(a.id, "ghost").unwrap();
+        let mut snap = f.snapshot();
+        for x in snap.iter_mut() {
+            x.updated_at = 1_000;
+            x.assigned_at = Some(1_000);
+            // Legacy (#255) snapshot shape: no lease fields persisted.
+            x.claimed_at = None;
+            x.lease_until = None;
+        }
+        let restored = ActionFrontier::new();
+        restored.restore(snap);
+        // Expired lease is not live load even before the sweep runs.
+        assert_eq!(WorkerRegistry::load_of(&restored, "ghost"), 0);
+        // Restart recovery: expired claim goes back to Open with accountability trail.
+        let swept = sweep_expired_leases(&reg, &restored);
+        assert_eq!(swept, vec![(a.id, "requeued")]);
+        let back = restored.get(a.id).unwrap();
+        assert_eq!(back.state, ActionState::Open);
+        assert_eq!(back.requeue_count, 1);
+        assert_eq!(
+            back.last_failure_reason.as_deref(),
+            Some(LEASE_EXPIRED_REASON)
+        );
+        assert_eq!(back.last_responsible_assignee.as_deref(), Some("ghost"));
+        assert!(back.lease_until.is_none() && back.assignee.is_none());
+        // Ghost is blacklisted; a live worker picks the reclaimed action up.
+        reg.register("spare", vec![], Some(1)).unwrap();
+        let (_, w) = auto_assign(&reg, &restored, a.id).unwrap();
+        assert_eq!(w.worker_id, "spare");
+        assert!(sweep_expired_leases(&reg, &restored).is_empty());
     }
 }

@@ -8,6 +8,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn now_secs() -> i64 {
@@ -83,6 +84,13 @@ pub struct AgentAction {
     /// Capability tags for Dispatch matching (empty = any worker).
     #[serde(default)]
     pub required_capabilities: Vec<String>,
+    /// Unix secs when the current claim started (assign or claim).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed_at: Option<i64>,
+    /// Claim lease deadline (unix secs). Past it, the scheduler sweep returns the
+    /// action to Open. Renewed by `renew_lease` (MCP `action_heartbeat`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_until: Option<i64>,
     #[serde(default)]
     pub requeue_count: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -132,6 +140,8 @@ impl AgentAction {
             "required_capabilities": self.required_capabilities,
             "assignee": self.assignee,
             "assigned_at": self.assigned_at,
+            "claimed_at": self.claimed_at,
+            "lease_until": self.lease_until,
             "requeue_count": self.requeue_count,
             "last_failure_reason": self.last_failure_reason,
             "escalated": self.escalated,
@@ -158,11 +168,18 @@ impl AgentAction {
 }
 
 /// In-process frontier of agent actions (persisted via scheduler KV).
+pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+
+/// Default claim lease (15 min). Workers renew via heartbeat.
+pub const DEFAULT_LEASE_SECS: i64 = 900;
+
 pub struct ActionFrontier {
     next_id: AtomicU64,
     actions: Mutex<HashMap<u64, AgentAction>>,
-    /// Soft cap on non-terminal actions to avoid unbounded growth.
+    /// Hard cap on non-terminal actions (checked under the same lock as insert).
     max_open: usize,
+    lease_secs: i64,
+    clock: Clock,
 }
 
 impl Default for ActionFrontier {
@@ -173,11 +190,80 @@ impl Default for ActionFrontier {
 
 impl ActionFrontier {
     pub fn new() -> Self {
+        Self::with_clock(Arc::new(now_secs), DEFAULT_LEASE_SECS)
+    }
+
+    /// Injectable clock + lease length (tests use a fake clock).
+    pub fn with_clock(clock: Clock, lease_secs: i64) -> Self {
         Self {
             next_id: AtomicU64::new(1),
             actions: Mutex::new(HashMap::new()),
             max_open: 64,
+            lease_secs: lease_secs.max(1),
+            clock,
         }
+    }
+
+    fn now(&self) -> i64 {
+        (self.clock)()
+    }
+
+    pub fn lease_secs(&self) -> i64 {
+        self.lease_secs
+    }
+
+    fn start_lease(&self, action: &mut AgentAction, now: i64) {
+        action.claimed_at = Some(now);
+        action.lease_until = Some(now.saturating_add(self.lease_secs));
+    }
+
+    /// Owner heartbeat: extend the lease of a Claimed action.
+    pub fn renew_lease(&self, id: u64, actor: &str) -> Result<AgentAction, String> {
+        let now = self.now();
+        let mut map = self.actions.lock();
+        let action = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("action {} not found", id))?;
+        if action.state != ActionState::Claimed {
+            return Err(format!(
+                "action {} is {:?}, expected claimed",
+                id, action.state
+            ));
+        }
+        let owner = action.assignee.as_deref().or(action.claimed_by.as_deref());
+        if owner != Some(actor) {
+            return Err(format!(
+                "action {} owned by '{}'; '{}' cannot renew lease (ownership)",
+                id,
+                owner.unwrap_or("-"),
+                actor
+            ));
+        }
+        action.lease_until = Some(now.saturating_add(self.lease_secs));
+        action.updated_at = now;
+        Ok(action.clone())
+    }
+
+    /// Claimed actions whose lease deadline has passed.
+    pub fn expired_claims(&self) -> Vec<u64> {
+        let now = self.now();
+        let map = self.actions.lock();
+        let mut v: Vec<u64> = map
+            .values()
+            .filter(|a| a.state == ActionState::Claimed && Self::lease_expired(a, now))
+            .map(|a| a.id)
+            .collect();
+        v.sort_unstable();
+        v
+    }
+
+    fn lease_expired(a: &AgentAction, now: i64) -> bool {
+        a.lease_until.map(|t| t < now).unwrap_or(false)
+    }
+
+    /// True when the action is Claimed and its lease is still live (counts as load).
+    pub fn holds_live_claim(&self, a: &AgentAction) -> bool {
+        a.state == ActionState::Claimed && !Self::lease_expired(a, self.now())
     }
 
     pub fn snapshot(&self) -> Vec<AgentAction> {
@@ -191,8 +277,15 @@ impl ActionFrontier {
         let mut max_id = 0u64;
         let mut map = self.actions.lock();
         map.clear();
-        for a in actions {
+        for mut a in actions {
             max_id = max_id.max(a.id);
+            // Legacy snapshots (pre-lease) carry no deadline: derive one from the
+            // claim start so stale claims become sweepable instead of stuck forever.
+            if a.state == ActionState::Claimed && a.lease_until.is_none() {
+                let start = a.claimed_at.or(a.assigned_at).unwrap_or(a.updated_at);
+                a.claimed_at = Some(start);
+                a.lease_until = Some(start.saturating_add(self.lease_secs));
+            }
             map.insert(a.id, a);
         }
         self.next_id
@@ -208,21 +301,26 @@ impl ActionFrontier {
     }
 
     pub fn enqueue(&self, mut action: AgentAction) -> Result<AgentAction, String> {
-        if self.open_count() >= self.max_open {
+        // Count + insert under ONE lock (no check-then-act window).
+        let mut map = self.actions.lock();
+        let live = map.values().filter(|a| !a.state.is_terminal()).count();
+        if live >= self.max_open {
             return Err(format!(
                 "action frontier full ({} non-terminal); complete or block existing actions first",
                 self.max_open
             ));
         }
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let now = now_secs();
+        let now = self.now();
         action.id = id;
         action.state = ActionState::Open;
         action.created_at = now;
         action.updated_at = now;
         action.claimed_by = None;
+        action.claimed_at = None;
+        action.lease_until = None;
         action.outcome_memory_id = None;
-        self.actions.lock().insert(id, action.clone());
+        map.insert(id, action.clone());
         Ok(action)
     }
 
@@ -265,8 +363,9 @@ impl ActionFrontier {
                 ));
             }
         }
-        let now = now_secs();
+        let now = self.now();
         action.state = ActionState::Claimed;
+        self.start_lease(action, now);
         action.claimed_by = Some(claimed_by.to_string());
         if action.assignee.is_none() {
             action.assignee = Some(claimed_by.to_string());
@@ -295,8 +394,9 @@ impl ActionFrontier {
         if let Some(a) = &action.assignee {
             return Err(format!("action {} already assigned to '{}'", id, a));
         }
-        let now = now_secs();
+        let now = self.now();
         action.state = ActionState::Claimed;
+        self.start_lease(action, now);
         action.assignee = Some(worker_id.to_string());
         action.assigned_at = Some(now);
         action.claimed_by = Some(worker_id.to_string());
@@ -340,7 +440,7 @@ impl ActionFrontier {
         }
         action.state = terminal;
         action.outcome_memory_id = Some(outcome_memory_id);
-        action.updated_at = now_secs();
+        action.updated_at = self.now();
         if matches!(terminal, ActionState::Blocked | ActionState::Exhausted) {
             action.last_failure_reason = Some(format!("terminal:{:?}", terminal).to_lowercase());
             action.last_responsible_assignee = action.assignee.clone();
@@ -371,9 +471,11 @@ impl ActionFrontier {
         action.claimed_by = None;
         action.assignee = None;
         action.assigned_at = None;
+        action.claimed_at = None;
+        action.lease_until = None;
         action.escalated = false;
         action.priority = action.priority.saturating_add(priority_bump).min(10);
-        action.updated_at = now_secs();
+        action.updated_at = self.now();
         Ok(action.clone())
     }
 
@@ -392,7 +494,7 @@ impl ActionFrontier {
         if !action.state.is_terminal() {
             action.state = ActionState::Blocked;
         }
-        action.updated_at = now_secs();
+        action.updated_at = self.now();
         Ok(action.clone())
     }
 
@@ -406,7 +508,7 @@ impl ActionFrontier {
             .get_mut(&id)
             .ok_or_else(|| format!("action {} not found", id))?;
         action.required_capabilities = caps;
-        action.updated_at = now_secs();
+        action.updated_at = self.now();
         Ok(action.clone())
     }
 
@@ -472,7 +574,7 @@ impl ActionFrontier {
             }
         }
         action.bound_task_id = Some(task_id.to_string());
-        action.updated_at = now_secs();
+        action.updated_at = self.now();
         Ok(action.clone())
     }
 
@@ -486,7 +588,7 @@ impl ActionFrontier {
 
     /// Drop terminal actions older than `max_age_secs` (keeps open/claimed forever).
     pub fn prune_terminal_older_than(&self, max_age_secs: i64) -> usize {
-        let cutoff = now_secs().saturating_sub(max_age_secs);
+        let cutoff = self.now().saturating_sub(max_age_secs);
         let mut map = self.actions.lock();
         let before = map.len();
         map.retain(|_, a| !(a.state.is_terminal() && a.updated_at < cutoff));
@@ -694,6 +796,8 @@ impl AgentActionDraft {
             assignee: None,
             assigned_at: None,
             required_capabilities: self.required_capabilities,
+            claimed_at: None,
+            lease_until: None,
             requeue_count: 0,
             last_failure_reason: None,
             last_responsible_assignee: None,
@@ -845,5 +949,57 @@ mod tests {
         assert!(card.get("evidence_memory_ids").is_some());
         assert!(card.get("done_when").is_some());
         assert!(card.get("suggested_skills").is_some());
+    }
+
+    /// PR-I: check+insert must be atomic (fails on #255: open_count and insert took
+    /// two separate locks, so concurrent proposers overshoot max_open).
+    #[test]
+    fn concurrent_enqueue_respects_cap() {
+        use std::sync::{Arc, Barrier};
+        for _round in 0..20 {
+            let f = Arc::new(ActionFrontier::new());
+            let draft = build_proposals("q", &[(1, "e".into())], &[], 1)[0].clone();
+            for _ in 0..63 {
+                f.enqueue(draft.clone().into_action("q")).unwrap();
+            }
+            let n = 16;
+            let bar = Arc::new(Barrier::new(n));
+            let hs: Vec<_> = (0..n)
+                .map(|_| {
+                    let (f, bar, d) = (f.clone(), bar.clone(), draft.clone());
+                    std::thread::spawn(move || {
+                        bar.wait();
+                        f.enqueue(d.into_action("q")).is_ok()
+                    })
+                })
+                .collect();
+            for h in hs {
+                let _ = h.join().unwrap();
+            }
+            assert!(f.open_count() <= 64, "overshoot: {}", f.open_count());
+        }
+    }
+
+    /// PR-I: fake clock — lease expires, sweep sees it; heartbeat renews.
+    #[test]
+    fn lease_expiry_with_fake_clock() {
+        use std::sync::atomic::AtomicI64;
+        use std::sync::Arc;
+        let t = Arc::new(AtomicI64::new(10_000));
+        let tc = t.clone();
+        let f = ActionFrontier::with_clock(Arc::new(move || tc.load(Ordering::SeqCst)), 100);
+        let draft = build_proposals("q", &[(1, "e".into())], &[], 1)[0].clone();
+        let a = f.enqueue(draft.into_action("q")).unwrap();
+        let c = f.claim(a.id, "w1").unwrap();
+        assert_eq!(c.claimed_at, Some(10_000));
+        assert_eq!(c.lease_until, Some(10_100));
+        t.store(10_090, Ordering::SeqCst);
+        assert!(f.expired_claims().is_empty());
+        f.renew_lease(a.id, "w1").unwrap();
+        assert!(f.renew_lease(a.id, "w2").is_err());
+        t.store(10_150, Ordering::SeqCst);
+        assert!(f.expired_claims().is_empty());
+        t.store(10_191, Ordering::SeqCst);
+        assert_eq!(f.expired_claims(), vec![a.id]);
     }
 }

@@ -447,6 +447,7 @@ impl McpHandler {
             | "blocks_set"
             | "memory_propose_actions"
             | "action_claim"
+            | "action_heartbeat"
             | "action_complete"
             | "drive_to_actions"
             | "worker_register"
@@ -1282,6 +1283,18 @@ impl McpHandler {
                     }
                 },
                 {
+                    "name": "action_heartbeat",
+                    "description": "Renew the claim lease of an action you own (claimed). Claims carry a lease (default 900s); if neither heartbeat nor complete arrives before lease_until, the scheduler sweep requeues the action (reason lease_expired) or escalates after max requeues.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "action_id": { "type": "integer" },
+                            "claimed_by": { "type": "string", "description": "Owner label used at claim/assign (defaults to user id)" }
+                        },
+                        "required": ["action_id"]
+                    }
+                },
+                {
                     "name": "action_complete",
                     "description": "Finish a claimed/open action: creates an outcome memory, links each evidence memory to it (Precedes), and marks the action done|blocked|exhausted. Requires non-empty outcome text. When action.done_when is non-empty, pass done_when_evidence (parallel array); unmapped items soft-fail to blocked (not done).",
                     "inputSchema": {
@@ -1461,6 +1474,7 @@ impl McpHandler {
             | "drive_ack"
             | "memory_propose_actions"
             | "action_claim"
+            | "action_heartbeat"
             | "action_complete"
             | "drive_to_actions"
             | "worker_register"
@@ -1660,6 +1674,7 @@ impl McpHandler {
             "memory_propose_actions" => self.tool_memory_propose_actions(&args),
             "action_list" => self.tool_action_list(&args),
             "action_claim" => self.tool_action_claim(&args),
+            "action_heartbeat" => self.tool_action_heartbeat(&args),
             "action_complete" => self.tool_action_complete(&args),
             "drive_to_actions" => self.tool_drive_to_actions(&args),
             "worker_register" => self.tool_worker_register(&args),
@@ -1957,7 +1972,7 @@ impl McpHandler {
             "session_context": {"knowledge_cards": card_json, "identity": {"system": "Epicode"}},
             "action_tool_surface": {
                 "planner": ["memory_propose_actions", "drive_to_actions", "action_list"],
-                "worker": ["action_claim", "action_complete", "task_start", "task_complete", "skill_execute"],
+                "worker": ["action_claim", "action_heartbeat", "action_complete", "task_start", "task_complete", "skill_execute"],
                 "skill": "skill_get('动作角色分工')",
                 "rule": "Planner proposes; Worker claims+completes with outcome write-back",
                 "action_card_schema": "epicode.action_card/v2",
@@ -6873,6 +6888,30 @@ impl McpHandler {
         )
     }
 
+    fn tool_action_heartbeat(&self, args: &serde_json::Value) -> serde_json::Value {
+        let action_id = match args.get("action_id").and_then(|v| v.as_u64()) {
+            Some(id) => id,
+            None => return self.smrp_err("action_heartbeat", 400, "action_id is required"),
+        };
+        let actor = args
+            .get("claimed_by")
+            .and_then(|v| v.as_str())
+            .unwrap_or(self.engine.user_id.as_str());
+        let frontier = self.engine.scheduler.action_frontier();
+        match frontier.renew_lease(action_id, actor) {
+            Ok(a) => {
+                self.engine.scheduler.save_action_frontier();
+                let mut js = a.to_json();
+                js["lease_secs"] = serde_json::json!(frontier.lease_secs());
+                self.smrp_ok("action_heartbeat", js)
+            }
+            Err(e) => {
+                let code = if e.contains("ownership") { 403 } else { 409 };
+                self.smrp_err("action_heartbeat", code, &e)
+            }
+        }
+    }
+
     fn tool_action_claim(&self, args: &serde_json::Value) -> serde_json::Value {
         let action_id = match args.get("action_id").and_then(|v| v.as_u64()) {
             Some(id) => id,
@@ -7640,6 +7679,7 @@ mod tests {
             "identity_finalize",
             "memory_propose_actions",
             "action_claim",
+            "action_heartbeat",
             "action_complete",
             "drive_to_actions",
             "worker_register",
@@ -9114,6 +9154,32 @@ mod tests {
         assert_eq!(card["schema"], "epicode.action_card");
         assert_eq!(card["schema_version"], 2);
         assert!(card["lineage"]["parents"].is_array());
+    }
+
+    #[test]
+    fn action_heartbeat_renews_owner_lease_and_rejects_foreign() {
+        let handler = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&handler);
+        let _ = handler.tool_memory_create(&serde_json::json!({
+            "content": "lease runbook evidence",
+            "labels": ["ops"]
+        }));
+        let p =
+            handler.tool_memory_propose_actions(&serde_json::json!({"query": "lease", "limit": 1}));
+        let id = p["data"]["actions"][0]["id"].as_u64().unwrap();
+        let c =
+            handler.tool_action_claim(&serde_json::json!({"action_id": id, "claimed_by": "w1"}));
+        assert_eq!(c["protocol"]["ok"], true, "{c}");
+        assert!(c["data"]["lease_until"].as_i64().is_some(), "{c}");
+        let hb = handler
+            .tool_action_heartbeat(&serde_json::json!({"action_id": id, "claimed_by": "w1"}));
+        assert_eq!(hb["protocol"]["ok"], true, "{hb}");
+        assert_eq!(hb["data"]["lease_secs"], 900);
+        let bad = handler
+            .tool_action_heartbeat(&serde_json::json!({"action_id": id, "claimed_by": "w2"}));
+        assert_eq!(bad["protocol"]["error"]["code"], 403, "{bad}");
+        // Live lease: sweep must not reclaim.
+        assert_eq!(handler.engine.scheduler.sweep_action_leases(), 0);
     }
 
     #[test]
