@@ -1,3 +1,4 @@
+use crate::domain::ops::MemoryOp;
 use crate::domain::space::Space;
 use crate::domain::tetra::MemoryPayload;
 use crate::engine::knowledge::KnowledgeGraph;
@@ -137,36 +138,44 @@ impl LifecycleGovernor {
                 && tetra.data.valid_to.is_none()
                 && !tetra.data.enforced
             {
-                let mut data = tetra.data.clone();
-                data.valid_to = Some(now);
-                data.importance = FORGET_IMPORTANCE; // tombstone + valid_to
-                let _ = space.update_payload(tetra.id, data);
-                mutated.push(tetra.id);
+                // 字段级墓碑:锁内复核仍是活记忆且 importance 仍 <0.15,不整包写回
+                if let Ok(true) = space.apply_ops(
+                    tetra.id,
+                    &[MemoryOp::Tombstone {
+                        at: now,
+                        importance: FORGET_IMPORTANCE,
+                        only_if_importance_below: Some(0.15),
+                    }],
+                ) {
+                    mutated.push(tetra.id);
+                }
                 continue;
             }
             // Session 类：7天后自动 supersede（设置 valid_to）
             if class == "session" && tetra.data.valid_to.is_none() && age_days > 7 {
-                let mut data = tetra.data.clone();
-                data.valid_to = Some(now);
-                data.importance = FORGET_IMPORTANCE; // tombstone + valid_to (was 0.05)
-                let _ = space.update_payload(tetra.id, data);
-                mutated.push(tetra.id); // S3
+                if Self::tombstone(space, tetra.id, now) {
+                    mutated.push(tetra.id); // S3
+                }
                 continue;
             }
             // Bridge 类：1天后自动 supersede
             if class == "bridge" && tetra.data.valid_to.is_none() && age_days > 1 {
-                let mut data = tetra.data.clone();
-                data.valid_to = Some(now);
-                data.importance = FORGET_IMPORTANCE; // tombstone + valid_to
-                let _ = space.update_payload(tetra.id, data);
-                mutated.push(tetra.id); // S3
+                if Self::tombstone(space, tetra.id, now) {
+                    mutated.push(tetra.id); // S3
+                }
                 continue;
             }
             if age_days > 14 && tetra.data.access_count == 0 {
                 if let Some(updated) = Self::apply_decay(space, tetra.id, &tetra.data, age_days) {
-                    let _ = space.update_payload(tetra.id, updated);
-                    mutated.push(tetra.id); // S3
-                    decay_applied += 1;
+                    // CAS:importance 在评估后被并发改过则跳过,只写 importance 一个字段
+                    let op = MemoryOp::CasImportance {
+                        expect: tetra.data.importance,
+                        set: updated.importance,
+                    };
+                    if let Ok(true) = space.apply_ops(tetra.id, &[op]) {
+                        mutated.push(tetra.id); // S3
+                        decay_applied += 1;
+                    }
                 }
             }
         }
@@ -275,6 +284,21 @@ impl LifecycleGovernor {
             contradictions,
             decay_applied,
         }
+    }
+
+    /// session/bridge TTL 墓碑(锁内复核仍为活记忆)
+    fn tombstone(space: &Space, id: u64, now: i64) -> bool {
+        matches!(
+            space.apply_ops(
+                id,
+                &[MemoryOp::Tombstone {
+                    at: now,
+                    importance: FORGET_IMPORTANCE,
+                    only_if_importance_below: None,
+                }],
+            ),
+            Ok(true)
+        )
     }
 
     fn effective_importance(payload: &MemoryPayload, _age_days: i64) -> f64 {
@@ -405,24 +429,25 @@ impl LifecycleGovernor {
             .unwrap_or_default()
             .as_secs() as i64;
         for candidate in candidates {
-            if let Some(tetra) = space.get_tetrahedron(candidate.keep_id) {
-                let mut data = tetra.data.clone();
-                data.labels = candidate.merged_labels.clone();
-                let _ = space.update_payload(candidate.keep_id, data);
-            }
+            // 只追加缺失标签(锁内幂等),不再用候选快照覆盖整份 labels
+            let add: Vec<MemoryOp> = candidate
+                .merged_labels
+                .iter()
+                .map(|l| MemoryOp::AddLabel(l.clone()))
+                .collect();
+            let _ = space.apply_ops(candidate.keep_id, &add);
             // SUPERSEDE (constitution §4.5 — memories are sacred, NEVER delete, no orphan rows):
             // deprioritize the absorbed duplicate in place instead of removing it.
-            if let Some(t) = space.get_tetrahedron(candidate.remove_id) {
-                let mut data = t.data.clone();
-                if !data.labels.iter().any(|l| l == "superseded") {
-                    data.labels.push("superseded".to_string());
-                }
-                data.valid_to = Some(now_ts);
-                data.importance = (data.importance * 0.15).max(FORGET_IMPORTANCE); // tombstone + valid_to
-                let _ = space.update_payload(candidate.remove_id, data);
-                let _ = space.update_mass(candidate.remove_id, 0.05);
-                let _ = space.update_validity(candidate.remove_id, Some(now_ts));
-            }
+            // 与 dream 合并相同的 Supersede 操作:锁内原子,mass 降到下限而不是 +0.05
+            let _ = space.apply_ops(
+                candidate.remove_id,
+                &[MemoryOp::Supersede {
+                    at: now_ts,
+                    importance_factor: 0.15,
+                    importance_floor: FORGET_IMPORTANCE, // tombstone + valid_to
+                    mass_cap: crate::domain::ops::MASS_MIN,
+                }],
+            );
             tracing::info!(
                 "[Governor] superseded #{} into #{} (no deletion)",
                 candidate.remove_id,
@@ -435,12 +460,8 @@ impl LifecycleGovernor {
 
     pub fn reset_access_counts(space: &Space, ids: &[u64]) {
         for &id in ids {
-            if let Some(tetra) = space.get_tetrahedron(id) {
-                let mut data = tetra.data.clone();
-                let old = data.access_count;
-                data.access_count = 0;
-                let _ = space.update_payload(id, data);
-                tracing::info!("[Governor] reset access_count for #{}: {} -> 0", id, old);
+            if let Ok(true) = space.apply_ops(id, &[MemoryOp::ResetAccessCount]) {
+                tracing::info!("[Governor] reset access_count for #{} -> 0", id);
             }
         }
     }

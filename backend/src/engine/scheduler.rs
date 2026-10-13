@@ -5866,11 +5866,16 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         6..=10 => 0.2,
                         _ => 0.3,
                     };
-                    let mut data = tetra.data.clone();
-                    let old_imp = data.importance;
-                    data.importance = (data.importance + boost).min(3.5);
-                    if let Err(e) = self.space.update_payload(rid, data) {
-                        tracing::warn!("[Scheduler] update_payload {} failed: {}", rid, e);
+                    let old_imp = tetra.data.importance;
+                    // 字段级:锁内基于当前值加成,不整包写回
+                    if let Err(e) = self.space.apply_ops(
+                        rid,
+                        &[crate::domain::ops::MemoryOp::AddImportance {
+                            delta: boost,
+                            max: 3.5,
+                        }],
+                    ) {
+                        tracing::warn!("[Scheduler] tiered boost {} failed: {}", rid, e);
                     }
                     // S3修复: 升级持久化
                     if let Some(t2) = self.space.get_tetrahedron(rid) {
