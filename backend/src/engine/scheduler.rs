@@ -357,6 +357,8 @@ pub struct SchedulerCenter {
     action_frontier: Arc<super::agent_action::ActionFrontier>,
     /// Dispatch: registered workers for capability-aware assignment.
     worker_registry: Arc<super::dispatch::WorkerRegistry>,
+    /// PR-L: deterministic planner pass (coalesced wake + heartbeat stall detection).
+    planner_pass: Arc<super::planner_pass::PlannerPass>,
 }
 
 impl SchedulerCenter {
@@ -447,6 +449,7 @@ impl SchedulerCenter {
             drive_save_gate: ParkMutex::new(()),
             action_frontier: Arc::new(super::agent_action::ActionFrontier::new()),
             worker_registry: Arc::new(super::dispatch::WorkerRegistry::new()),
+            planner_pass: Arc::new(super::planner_pass::PlannerPass::with_defaults()),
         }
     }
 
@@ -1400,6 +1403,81 @@ impl SchedulerCenter {
             self.save_action_frontier();
         }
         swept.len()
+    }
+
+    pub fn planner_pass(&self) -> &Arc<super::planner_pass::PlannerPass> {
+        &self.planner_pass
+    }
+
+    /// PR-L: run a pass if the debounce/heartbeat says so; notify new signals.
+    pub fn run_action_planner_pass_if_due(&self) {
+        if let Some(r) = self
+            .planner_pass
+            .maybe_run(&self.action_frontier, &self.worker_registry)
+        {
+            self.notify_planner_signals(&r.new_signals);
+        }
+    }
+
+    /// Force a pass now (MCP/tests).
+    pub fn run_action_planner_pass_now(&self) -> super::planner_pass::PassReport {
+        let r = self.planner_pass.run(
+            super::planner_pass::PassReason::Manual,
+            &self.action_frontier,
+            &self.worker_registry,
+        );
+        self.notify_planner_signals(&r.new_signals);
+        r
+    }
+
+    /// Immediate hook for escalation (does not wait for the next pass). Deduped
+    /// with the pass, so the human is told exactly once per escalated action.
+    pub fn notify_action_escalated(&self, action_id: u64, reason: &str) {
+        let sig = super::planner_pass::StallSignal::Escalated {
+            action_id,
+            reason: reason.to_string(),
+        };
+        if self.planner_pass.mark_notified(&sig) {
+            self.enqueue_planner_drive(&sig);
+        }
+    }
+
+    fn notify_planner_signals(&self, sigs: &[super::planner_pass::StallSignal]) {
+        for s in sigs {
+            tracing::warn!("[planner_pass] {}", s.describe());
+            self.enqueue_planner_drive(s);
+        }
+    }
+
+    fn enqueue_planner_drive(&self, sig: &super::planner_pass::StallSignal) {
+        use super::drive::{DriveIntent, DriveSignal, DriveUrgency};
+        let urgency = match sig {
+            super::planner_pass::StallSignal::Escalated { .. } => DriveUrgency::High,
+            _ => DriveUrgency::Medium,
+        };
+        let signal = DriveSignal {
+            id: 0,
+            timestamp: chrono::Utc::now().timestamp(),
+            intent_type: DriveIntent::Warn,
+            description: sig.describe(),
+            evidence: vec![],
+            urgency: urgency.clone(),
+            target_capability: Some("conversation".into()),
+            emotion: None,
+            origin_tick: self.tick_count.load(Ordering::SeqCst),
+            status: super::drive::default_status(),
+            feedback: None,
+            retry_count: 0,
+            expires_at: super::drive::default_expires_at(&urgency),
+            enqueued_at_ms: 0,
+            time_budget_ms: None,
+            grounding: None,
+            terminal_reason: None,
+        };
+        match self.drive_queue.try_enqueue(signal) {
+            Ok(_) => self.save_drive_queue(),
+            Err(e) => tracing::warn!("[planner_pass] drive enqueue failed: {:?}", e),
+        }
     }
 
     pub fn save_action_frontier(&self) {
@@ -6494,6 +6572,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             let count = self.tick_count.load(Ordering::SeqCst);
             if count.is_multiple_of(3) {
                 self.sweep_action_leases();
+                self.run_action_planner_pass_if_due();
                 self.auto_save();
             } // P0: flush every 3 ticks
             if count.is_multiple_of(5) {
@@ -6683,6 +6762,8 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                             // Wake path: outcome write-back is a stimulus for the next
                             // deliberative/dream cadence (horizon + event log).
                             self.horizon.lock().note_stimulus(0.55);
+                            // PR-L: buffer; the Routine cadence coalesces bursts into one pass.
+                            self.planner_pass.note_trigger(action_id, &state);
                             self.log_event(format!(
                                 "action_outcome(id={}, mem={}, state={})",
                                 action_id, outcome_memory_id, state

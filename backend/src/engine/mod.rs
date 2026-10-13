@@ -62,6 +62,7 @@ pub mod emotion;
 pub mod layer_pipeline;
 pub mod memcard;
 pub mod outcome;
+pub mod planner_pass;
 pub mod spike_flags;
 
 use std::sync::Arc;

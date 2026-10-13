@@ -424,6 +424,7 @@ impl McpHandler {
             | "session_list"
             | "drive_inbox"
             | "action_list"
+            | "action_planner_status"
             | "worker_list"
             | "blocks_get" => Some(P::MemoryRead),
             // These tools change memories or persistent session/drive state.
@@ -1262,6 +1263,16 @@ impl McpHandler {
                     }
                 },
                 {
+                    "name": "action_planner_status",
+                    "description": "Server-side planner pass (deterministic, no LLM): outcome wake triggers are coalesced (debounce) into one pass; a heartbeat pass runs even when idle. Reports ready/claimed/waiting counts and stall signals: no_eligible_worker (ready work, no capable/available worker), stalled (nothing ready, nothing running), escalated (needs human). New signals are also pushed to drive_inbox once. Pass run_now:true to force a pass.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "run_now": { "type": "boolean", "default": false }
+                        }
+                    }
+                },
+                {
                     "name": "action_list",
                     "description": "List actions on the memory-action frontier. Filter by state: open|claimed|done|blocked|exhausted.",
                     "inputSchema": {
@@ -1466,6 +1477,7 @@ impl McpHandler {
             | "task_status"
             | "drive_inbox"
             | "action_list"
+            | "action_planner_status"
             | "worker_list"
             | "ctx_load" => (true, false, true, false),
             // Destructive / hard-to-reverse
@@ -1676,6 +1688,7 @@ impl McpHandler {
             "drive_ack" => self.tool_drive_ack(&args),
             "memory_propose_actions" => self.tool_memory_propose_actions(&args),
             "action_list" => self.tool_action_list(&args),
+            "action_planner_status" => self.tool_action_planner_status(&args),
             "action_claim" => self.tool_action_claim(&args),
             "action_heartbeat" => self.tool_action_heartbeat(&args),
             "action_complete" => self.tool_action_complete(&args),
@@ -1974,7 +1987,7 @@ impl McpHandler {
             "system_skill": {"name": "epicode-system", "version": Self::manual_version(&system_skill), "content": system_skill},
             "session_context": {"knowledge_cards": card_json, "identity": {"system": "Epicode"}},
             "action_tool_surface": {
-                "planner": ["memory_propose_actions", "drive_to_actions", "action_list"],
+                "planner": ["memory_propose_actions", "drive_to_actions", "action_list", "action_planner_status"],
                 "worker": ["action_claim", "action_heartbeat", "action_complete", "task_start", "task_complete", "skill_execute"],
                 "skill": "skill_get('动作角色分工')",
                 "rule": "Planner proposes; Worker claims+completes with outcome write-back",
@@ -6887,6 +6900,22 @@ impl McpHandler {
         )
     }
 
+    fn tool_action_planner_status(&self, args: &serde_json::Value) -> serde_json::Value {
+        let run_now = args
+            .get("run_now")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let report = if run_now {
+            serde_json::to_value(self.engine.scheduler.run_action_planner_pass_now())
+                .unwrap_or_default()
+        } else {
+            serde_json::Value::Null
+        };
+        let mut status = self.engine.scheduler.planner_pass().status();
+        status["report"] = report;
+        self.smrp_ok("action_planner_status", status)
+    }
+
     fn tool_action_list(&self, args: &serde_json::Value) -> serde_json::Value {
         let state = args
             .get("state")
@@ -7434,6 +7463,12 @@ impl McpHandler {
                     ) {
                         Ok((a, disposition)) => {
                             done = a;
+                            if disposition == "escalated" {
+                                self.engine.scheduler.notify_action_escalated(
+                                    action_id,
+                                    done.last_failure_reason.as_deref().unwrap_or(""),
+                                );
+                            }
                             accountability = serde_json::json!({
                                 "disposition": disposition,
                                 "failure_kind": done.last_failure_kind.map(|k| k.as_str()),
@@ -9327,6 +9362,53 @@ mod tests {
         assert_eq!(card["readiness"]["state"], "ready", "{card}");
         let ok = handler.tool_action_claim(&serde_json::json!({"action_id": b, "claimed_by": "w"}));
         assert_eq!(ok["protocol"]["ok"], true, "{ok}");
+    }
+
+    /// PR-L defect: escalation promised "enqueue drive Suggest for human" (#255
+    /// design) but nothing reached the drive inbox — escalations died silently.
+    #[test]
+    fn escalation_reaches_drive_inbox_once() {
+        let handler = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&handler);
+        let _ = handler.tool_memory_create(
+            &serde_json::json!({"content": "doomed evidence", "labels": ["ops"]}),
+        );
+        let p = handler
+            .tool_memory_propose_actions(&serde_json::json!({"query": "doomed", "limit": 1}));
+        let id = p["data"]["actions"][0]["id"].as_u64().unwrap();
+        let mut last = serde_json::Value::Null;
+        for _ in 0..3 {
+            let c =
+                handler.tool_action_claim(&serde_json::json!({"action_id": id, "claimed_by": "w"}));
+            assert_eq!(c["protocol"]["ok"], true, "{c}");
+            last = handler.tool_action_complete(&serde_json::json!({
+                "action_id": id, "outcome": "broke", "success": false, "claimed_by": "w"
+            }));
+        }
+        assert_eq!(
+            last["data"]["accountability"]["disposition"], "escalated",
+            "{last}"
+        );
+        let hits = |h: &McpHandler| {
+            h.engine
+                .scheduler
+                .drive_queue()
+                .snapshot()
+                .into_iter()
+                .filter(|s| {
+                    s.description.contains("[action_escalated]")
+                        && s.description.contains(&format!("#{id}"))
+                })
+                .count()
+        };
+        assert_eq!(
+            hits(&handler),
+            1,
+            "escalation must surface to the human once"
+        );
+        // Re-running the planner pass must not duplicate the notification.
+        handler.engine.scheduler.run_action_planner_pass_now();
+        assert_eq!(hits(&handler), 1);
     }
 
     #[test]
