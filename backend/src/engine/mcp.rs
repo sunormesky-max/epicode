@@ -130,6 +130,121 @@ impl McpHandler {
         super::smrp::envelope_err(&self.engine, tool, code, msg)
     }
 
+    /// Strict param check for action/worker tools: unknown top-level keys are a
+    /// 400 (schema error) so typos like `evidence` / `worker` never silently
+    /// change semantics or consume requeue budget.
+    fn reject_unknown_args(
+        &self,
+        tool: &str,
+        args: &serde_json::Value,
+        allowed: &[&str],
+    ) -> Option<serde_json::Value> {
+        let obj = match args {
+            serde_json::Value::Null => return None,
+            serde_json::Value::Object(o) => o,
+            _ => {
+                return Some(self.smrp_err(
+                    tool,
+                    400,
+                    "invalid params: arguments must be an object",
+                ))
+            }
+        };
+        let mut unknown: Vec<&str> = obj
+            .keys()
+            .map(|k| k.as_str())
+            .filter(|k| !allowed.contains(k))
+            .collect();
+        if unknown.is_empty() {
+            return None;
+        }
+        unknown.sort_unstable();
+        Some(self.smrp_err(
+            tool,
+            400,
+            &format!(
+                "invalid params: unknown field(s) {} (allowed: {})",
+                unknown.join(", "),
+                allowed.join(", ")
+            ),
+        ))
+    }
+
+    /// Resolve the worker label: `claimed_by`, with `worker_id` accepted as an
+    /// alias. Both present and different → 400. Neither → engine user.
+    fn resolve_worker_label(
+        &self,
+        tool: &str,
+        args: &serde_json::Value,
+    ) -> Result<String, serde_json::Value> {
+        let pick = |k: &str| -> Result<Option<String>, serde_json::Value> {
+            match args.get(k) {
+                None | Some(serde_json::Value::Null) => Ok(None),
+                Some(serde_json::Value::String(s)) => {
+                    let t = s.trim();
+                    Ok(if t.is_empty() {
+                        None
+                    } else {
+                        Some(t.to_string())
+                    })
+                }
+                Some(_) => {
+                    Err(self.smrp_err(tool, 400, &format!("invalid params: {k} must be a string")))
+                }
+            }
+        };
+        let cb = pick("claimed_by")?;
+        let wid = pick("worker_id")?;
+        match (cb, wid) {
+            (Some(a), Some(b)) if a != b => Err(self.smrp_err(
+                tool,
+                400,
+                "invalid params: claimed_by and worker_id disagree (worker_id is an alias of claimed_by)",
+            )),
+            (Some(a), _) | (None, Some(a)) => Ok(a),
+            (None, None) => Ok(self.engine.user_id.clone()),
+        }
+    }
+
+    /// Parse an optional array-of-strings param. Non-array / non-string items → 400.
+    /// `allow_scalar`: a bare string is accepted as a single-item list.
+    fn parse_str_list(
+        &self,
+        tool: &str,
+        args: &serde_json::Value,
+        key: &str,
+        allow_scalar: bool,
+    ) -> Result<Vec<String>, serde_json::Value> {
+        match args.get(key) {
+            None | Some(serde_json::Value::Null) => Ok(Vec::new()),
+            Some(serde_json::Value::String(s)) if allow_scalar => {
+                let t = s.trim();
+                Ok(if t.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![t.to_string()]
+                })
+            }
+            Some(serde_json::Value::Array(a)) => a
+                .iter()
+                .map(|x| {
+                    x.as_str().map(|s| s.to_string()).ok_or_else(|| {
+                        self.smrp_err(
+                            tool,
+                            400,
+                            &format!("invalid params: {key} items must be strings"),
+                        )
+                    })
+                })
+                .collect(),
+            Some(_) => Err(self.smrp_err(
+                tool,
+                400,
+                &format!("invalid params: {key} must be an array of strings"),
+            )),
+        }
+    }
+
     /// 定位一条记忆所属簇。委托共享层。
     fn cluster_of(&self, id: crate::domain::tetra::TetraId) -> Option<(usize, usize)> {
         super::smrp::cluster_index(&self.engine).get(&id).copied()
@@ -453,6 +568,7 @@ impl McpHandler {
             | "action_complete"
             | "drive_to_actions"
             | "worker_register"
+            | "worker_unregister"
             | "action_assign"
             | "action_dispatch"
             | "action_planner_run"
@@ -1263,9 +1379,19 @@ impl McpHandler {
                             "limit": { "type": "integer", "description": "Max actions to propose (default 3, max 5)", "default": 3, "minimum": 1, "maximum": 5 },
                             "depends_on": { "type": "array", "items": { "type": "integer" }, "description": "Existing action ids every proposed action must wait on (claimable only after all are done). Unknown ids / cycles rejected." },
                             "goal_id": { "type": "integer", "description": "Attach proposed actions to an open goal (action_goal_create)." },
-                            "chain": { "type": "boolean", "description": "Serial plan: proposed step i depends on step i-1, so only the head is claimable until its predecessor lands done. Upstream escalation cascades blocked (dep_failed) downstream.", "default": false }
+                            "chain": { "type": "boolean", "description": "Serial plan: proposed step i depends on step i-1, so only the head is claimable until its predecessor lands done. Upstream escalation cascades blocked (dep_failed) downstream.", "default": false },
+                            "actions": { "type": "array", "maxItems": 5, "description": "Explicit plan (preferred). Each item: {title|summary (one required), done_when (string|array), required_capabilities (string|array; defaults to top-level), priority 0-10, evidence_memory_ids, stop_if}. When given, auto-generation is skipped; query still grounds evidence.", "items": { "type": "object", "additionalProperties": false, "properties": {
+                                "title": { "type": "string" }, "summary": { "type": "string" },
+                                "done_when": { "type": ["array", "string"], "items": { "type": "string" } },
+                                "required_capabilities": { "type": ["array", "string"], "items": { "type": "string" } },
+                                "priority": { "type": "integer", "minimum": 0, "maximum": 10 },
+                                "evidence_memory_ids": { "type": "array", "items": { "type": "integer" } },
+                                "stop_if": { "type": ["array", "string"], "items": { "type": "string" } } } } },
+                            "title": { "type": "string", "description": "Fallback mode only: summary of the primary auto-generated action" },
+                            "required_capabilities": { "type": ["array", "string"], "items": { "type": "string" }, "description": "Capability tags for dispatch matching (worker_register capabilities). Overrides the auto-derived (skill-name) tags; default for explicit actions." }
                         },
-                        "required": ["query"]
+                        "required": ["query"],
+                        "additionalProperties": false
                     }
                 },
                 {
@@ -1287,8 +1413,8 @@ impl McpHandler {
                     "description": "Create a goal that groups actions (pass goal_id to memory_propose_actions). done_when = goal-level completion criteria.",
                     "inputSchema": { "type": "object", "properties": {
                         "title": { "type": "string" },
-                        "done_when": { "type": "array", "items": { "type": "string" } }
-                    }, "required": ["title"] }
+                        "done_when": { "type": ["array", "string"], "items": { "type": "string" }, "description": "Criteria list; a bare string is one criterion" }
+                    }, "required": ["title"], "additionalProperties": false }
                 },
                 {
                     "name": "action_goal_prove",
@@ -1326,9 +1452,11 @@ impl McpHandler {
                         "type": "object",
                         "properties": {
                             "action_id": { "type": "integer", "description": "Action id from memory_propose_actions / action_list" },
-                            "claimed_by": { "type": "string", "description": "Optional agent label (defaults to user id)" }
+                            "claimed_by": { "type": "string", "description": "Optional agent label (defaults to user id)" },
+                            "worker_id": { "type": "string", "description": "Alias of claimed_by (registered worker id). If both are given they must match." }
                         },
-                        "required": ["action_id"]
+                        "required": ["action_id"],
+                        "additionalProperties": false
                     }
                 },
                 {
@@ -1338,9 +1466,11 @@ impl McpHandler {
                         "type": "object",
                         "properties": {
                             "action_id": { "type": "integer" },
-                            "claimed_by": { "type": "string", "description": "Owner label used at claim/assign (defaults to user id)" }
+                            "claimed_by": { "type": "string", "description": "Owner label used at claim/assign (defaults to user id)" },
+                            "worker_id": { "type": "string", "description": "Alias of claimed_by. If both are given they must match." }
                         },
-                        "required": ["action_id"]
+                        "required": ["action_id"],
+                        "additionalProperties": false
                     }
                 },
                 {
@@ -1351,14 +1481,16 @@ impl McpHandler {
                         "properties": {
                             "action_id": { "type": "integer" },
                             "outcome": { "type": "string", "description": "What was delivered / learned (becomes a memory)" },
-                            "done_when_evidence": { "type": "array", "items": { "type": "string" }, "description": "Parallel to action.done_when — artifact-level evidence per item" },
+                            "done_when_evidence": { "type": "array", "items": { "type": "string" }, "description": "Parallel to action.done_when — artifact-level evidence per item. Each item must cite a memory id (#123) or be a substantive description (>= 8 weight; CJK chars count 2) and must not just repeat the criterion; 'x'/'ok'/'done' do not count. Non-array / non-string items → 400 (no state change, no budget)." },
+                            "worker_id": { "type": "string", "description": "Alias of claimed_by" },
                             "claimed_by": { "type": "string", "description": "Worker label used at action_claim / action_assign (defaults to user id). Must match the assignee unless admin." },
                             "failure_kind": { "type": "string", "enum": ["transient", "exhausted", "blocked"], "description": "Classify a non-done outcome. transient = external blip (provider/network/rate-limit): retried with exponential backoff, does NOT consume requeue budget or blame the worker (max 5, then counts as blocked). exhausted = ran out of steps/time: requeue budget consumed, worker not blacklisted. blocked = real error: budget consumed + short worker blacklist." },
                             "success": { "type": "boolean", "description": "true → state=done (default); false → blocked", "default": true },
                             "labels": { "type": "array", "items": { "type": "string" }, "description": "Extra labels for the outcome memory" },
                             "state": { "type": "string", "enum": ["done", "blocked", "exhausted"], "description": "Override terminal state" }
                         },
-                        "required": ["action_id", "outcome"]
+                        "required": ["action_id", "outcome"],
+                        "additionalProperties": false
                     }
                 },
                 {
@@ -1384,6 +1516,19 @@ impl McpHandler {
                             "max_load": { "type": "integer", "description": "Max concurrent claimed actions (default 3)", "default": 3, "minimum": 1 }
                         },
                         "required": ["worker_id"]
+                    }
+                },
+                {
+                    "name": "worker_unregister",
+                    "description": "Dispatch: remove a registered worker (e.g. smoke-test workers). Write permission; only the account owner or Admin. Refused (409) while the worker holds live claims unless force=true (claims are then left to lease expiry / sweep).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "worker_id": { "type": "string" },
+                            "force": { "type": "boolean", "default": false }
+                        },
+                        "required": ["worker_id"],
+                        "additionalProperties": false
                     }
                 },
                 {
@@ -1530,6 +1675,7 @@ impl McpHandler {
             | "action_complete"
             | "drive_to_actions"
             | "worker_register"
+            | "worker_unregister"
             | "action_assign"
             | "action_dispatch"
             | "action_planner_run"
@@ -1740,6 +1886,7 @@ impl McpHandler {
             "action_complete" => self.tool_action_complete(&args),
             "drive_to_actions" => self.tool_drive_to_actions(&args),
             "worker_register" => self.tool_worker_register(&args),
+            "worker_unregister" => self.tool_worker_unregister(&args),
             "worker_list" => self.tool_worker_list(&args),
             "action_assign" => self.tool_action_assign(&args),
             "action_dispatch" => self.tool_action_dispatch(&args),
@@ -2042,7 +2189,7 @@ impl McpHandler {
                     "assign": true,
                     "ownership_enforce": true,
                     "requeue": true,
-                    "tools": ["worker_register", "worker_list", "action_assign", "action_dispatch"],
+                    "tools": ["worker_register", "worker_unregister", "worker_list", "action_assign", "action_dispatch"],
                     "rule": "Scheduler assigns by capability+least-load; only assignee (or Admin) may complete; blocked/exhausted requeue then escalate"
                 }
             },
@@ -6848,6 +6995,22 @@ impl McpHandler {
     }
 
     fn tool_memory_propose_actions(&self, args: &serde_json::Value) -> serde_json::Value {
+        if let Some(e) = self.reject_unknown_args(
+            "memory_propose_actions",
+            args,
+            &[
+                "query",
+                "limit",
+                "depends_on",
+                "goal_id",
+                "chain",
+                "actions",
+                "title",
+                "required_capabilities",
+            ],
+        ) {
+            return e;
+        }
         let query = args
             .get("query")
             .and_then(|v| v.as_str())
@@ -6913,7 +7076,182 @@ impl McpHandler {
                 );
             }
         }
-        let drafts = crate::engine::agent_action::build_proposals(query, &evidence, &skills, limit);
+        // Explicit plan from the caller wins; auto-generation is only a fallback.
+        // Previously `actions` / `title` / `required_capabilities` were ignored and
+        // required_capabilities were derived from skill NAMES, so self-registered
+        // workers (capabilities like "rust", "ops") never matched → dispatch 0.
+        let top_caps = match self.parse_str_list(
+            "memory_propose_actions",
+            args,
+            "required_capabilities",
+            true,
+        ) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let explicit_caps = args
+            .get("required_capabilities")
+            .is_some_and(|v| !v.is_null());
+        let title = match args.get("title") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(serde_json::Value::String(t)) => {
+                Some(t.trim().to_string()).filter(|t| !t.is_empty())
+            }
+            Some(_) => {
+                return self.smrp_err(
+                    "memory_propose_actions",
+                    400,
+                    "invalid params: title must be a string",
+                )
+            }
+        };
+        let top_ids: Vec<u64> = evidence.iter().take(5).map(|(id, _)| *id).collect();
+        let drafts = match args.get("actions") {
+            None | Some(serde_json::Value::Null) => {
+                let mut d =
+                    crate::engine::agent_action::build_proposals(query, &evidence, &skills, limit);
+                for (i, dr) in d.iter_mut().enumerate() {
+                    if explicit_caps {
+                        dr.required_capabilities = top_caps.clone();
+                    }
+                    if i == 0 {
+                        if let Some(t) = &title {
+                            dr.summary = t.clone();
+                        }
+                    }
+                }
+                d
+            }
+            Some(serde_json::Value::Array(items)) => {
+                if items.is_empty() || items.len() > 5 {
+                    return self.smrp_err(
+                        "memory_propose_actions",
+                        400,
+                        "invalid params: actions must have 1..=5 items",
+                    );
+                }
+                let suggested: Vec<crate::engine::agent_action::SuggestedSkill> = skills
+                    .iter()
+                    .take(5)
+                    .map(|(n, sc)| crate::engine::agent_action::SuggestedSkill {
+                        name: n.clone(),
+                        score: (*sc * 1000.0).round() / 1000.0,
+                    })
+                    .collect();
+                let mut out = Vec::new();
+                for (i, it) in items.iter().enumerate() {
+                    const T: &str = "memory_propose_actions";
+                    if !it.is_object() {
+                        return self.smrp_err(
+                            T,
+                            400,
+                            &format!("invalid params: actions[{i}] must be an object"),
+                        );
+                    }
+                    if let Some(e) = self.reject_unknown_args(
+                        T,
+                        it,
+                        &[
+                            "title",
+                            "summary",
+                            "done_when",
+                            "required_capabilities",
+                            "priority",
+                            "evidence_memory_ids",
+                            "stop_if",
+                        ],
+                    ) {
+                        return e;
+                    }
+                    let gs = |k: &str| {
+                        it.get(k)
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                    };
+                    let t = gs("title");
+                    let sm = gs("summary");
+                    let summary = match (t, sm) {
+                        (Some(t), Some(sm)) => format!("{t}: {sm}"),
+                        (Some(x), None) | (None, Some(x)) => x,
+                        (None, None) => {
+                            return self.smrp_err(
+                                T,
+                                400,
+                                &format!("invalid params: actions[{i}] needs title or summary"),
+                            )
+                        }
+                    };
+                    let done_when = match self.parse_str_list(T, it, "done_when", true) {
+                        Ok(v) => v,
+                        Err(e) => return e,
+                    };
+                    let stop_if = match self.parse_str_list(T, it, "stop_if", true) {
+                        Ok(v) => v,
+                        Err(e) => return e,
+                    };
+                    let caps = if it.get("required_capabilities").is_some() {
+                        match self.parse_str_list(T, it, "required_capabilities", true) {
+                            Ok(v) => v,
+                            Err(e) => return e,
+                        }
+                    } else {
+                        top_caps.clone()
+                    };
+                    let caps: Vec<String> = caps
+                        .into_iter()
+                        .map(|c| c.trim().to_string())
+                        .filter(|c| !c.is_empty())
+                        .collect();
+                    let priority = match it.get("priority") {
+                        None | Some(serde_json::Value::Null) => 6,
+                        Some(v) => match v.as_u64() {
+                            Some(p) if p <= 10 => p as u8,
+                            _ => {
+                                return self.smrp_err(
+                                    T,
+                                    400,
+                                    &format!(
+                                        "invalid params: actions[{i}].priority must be 0..=10"
+                                    ),
+                                )
+                            }
+                        },
+                    };
+                    let ev_ids = match it.get("evidence_memory_ids") {
+                        None | Some(serde_json::Value::Null) => top_ids.clone(),
+                        Some(serde_json::Value::Array(a)) => {
+                            let mut ids = Vec::new();
+                            for x in a {
+                                match x.as_u64() {
+                                    Some(id) if self.engine.space.get_tetrahedron(id).is_some() => ids.push(id),
+                                    _ => return self.smrp_err(T, 400, &format!("invalid params: actions[{i}].evidence_memory_ids has unknown id {x}")),
+                                }
+                            }
+                            if ids.is_empty() { top_ids.clone() } else { ids }
+                        }
+                        Some(_) => return self.smrp_err(T, 400, &format!("invalid params: actions[{i}].evidence_memory_ids must be an array of ids")),
+                    };
+                    out.push(crate::engine::agent_action::AgentActionDraft {
+                        summary,
+                        evidence_memory_ids: ev_ids,
+                        suggested_skills: suggested.clone(),
+                        done_when,
+                        stop_if,
+                        priority,
+                        required_capabilities: caps,
+                    });
+                }
+                out
+            }
+            Some(_) => {
+                return self.smrp_err(
+                    "memory_propose_actions",
+                    400,
+                    "invalid params: actions must be an array",
+                )
+            }
+        };
         let mut actions = Vec::new();
         let mut errors = Vec::new();
         let mut prev: Option<u64> = None;
@@ -6966,6 +7304,11 @@ impl McpHandler {
     }
 
     fn tool_action_control(&self, args: &serde_json::Value) -> serde_json::Value {
+        if let Some(e) =
+            self.reject_unknown_args("action_control", args, &["action_id", "op", "note"])
+        {
+            return e;
+        }
         let id = match args.get("action_id").and_then(|v| v.as_u64()) {
             Some(i) => i,
             None => return self.smrp_err("action_control", 400, "action_id is required"),
@@ -6999,16 +7342,17 @@ impl McpHandler {
     }
 
     fn tool_action_goal_create(&self, args: &serde_json::Value) -> serde_json::Value {
+        if let Some(e) =
+            self.reject_unknown_args("action_goal_create", args, &["title", "done_when"])
+        {
+            return e;
+        }
         let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("");
-        let dw: Vec<String> = args
-            .get("done_when")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|x| x.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
+        // A bare string is one criterion (was silently swallowed into []).
+        let dw = match self.parse_str_list("action_goal_create", args, "done_when", true) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
         match self
             .engine
             .scheduler
@@ -7027,6 +7371,11 @@ impl McpHandler {
     }
 
     fn tool_action_goal_prove(&self, args: &serde_json::Value) -> serde_json::Value {
+        if let Some(e) =
+            self.reject_unknown_args("action_goal_prove", args, &["goal_id", "evidence"])
+        {
+            return e;
+        }
         let gid = match args.get("goal_id").and_then(|v| v.as_u64()) {
             Some(g) => g,
             None => return self.smrp_err("action_goal_prove", 400, "goal_id is required"),
@@ -7087,6 +7436,9 @@ impl McpHandler {
     }
 
     fn tool_action_list(&self, args: &serde_json::Value) -> serde_json::Value {
+        if let Some(e) = self.reject_unknown_args("action_list", args, &["state", "limit"]) {
+            return e;
+        }
         let state = args
             .get("state")
             .and_then(|v| v.as_str())
@@ -7122,16 +7474,23 @@ impl McpHandler {
     }
 
     fn tool_action_heartbeat(&self, args: &serde_json::Value) -> serde_json::Value {
+        if let Some(e) = self.reject_unknown_args(
+            "action_heartbeat",
+            args,
+            &["action_id", "claimed_by", "worker_id"],
+        ) {
+            return e;
+        }
         let action_id = match args.get("action_id").and_then(|v| v.as_u64()) {
             Some(id) => id,
             None => return self.smrp_err("action_heartbeat", 400, "action_id is required"),
         };
-        let actor = args
-            .get("claimed_by")
-            .and_then(|v| v.as_str())
-            .unwrap_or(self.engine.user_id.as_str());
+        let actor = match self.resolve_worker_label("action_heartbeat", args) {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
         let frontier = self.engine.scheduler.action_frontier();
-        match frontier.heartbeat(action_id, actor) {
+        match frontier.heartbeat(action_id, &actor) {
             Ok((a, directives)) => {
                 self.engine.scheduler.save_action_frontier();
                 let mut js = a.to_json();
@@ -7147,19 +7506,26 @@ impl McpHandler {
     }
 
     fn tool_action_claim(&self, args: &serde_json::Value) -> serde_json::Value {
+        if let Some(e) = self.reject_unknown_args(
+            "action_claim",
+            args,
+            &["action_id", "claimed_by", "worker_id"],
+        ) {
+            return e;
+        }
         let action_id = match args.get("action_id").and_then(|v| v.as_u64()) {
             Some(id) => id,
             None => return self.smrp_err("action_claim", 400, "action_id is required"),
         };
-        let claimed_by = args
-            .get("claimed_by")
-            .and_then(|v| v.as_str())
-            .unwrap_or(self.engine.user_id.as_str());
+        let claimed_by = match self.resolve_worker_label("action_claim", args) {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
         match self
             .engine
             .scheduler
             .action_frontier()
-            .claim(action_id, claimed_by)
+            .claim(action_id, &claimed_by)
         {
             Ok(a) => {
                 self.engine.scheduler.save_action_frontier();
@@ -7285,6 +7651,13 @@ impl McpHandler {
     }
 
     fn tool_worker_register(&self, args: &serde_json::Value) -> serde_json::Value {
+        if let Some(e) = self.reject_unknown_args(
+            "worker_register",
+            args,
+            &["worker_id", "capabilities", "max_load"],
+        ) {
+            return e;
+        }
         let worker_id = match args.get("worker_id").and_then(|v| v.as_str()) {
             Some(s) if !s.trim().is_empty() => s.trim(),
             _ => return self.smrp_err("worker_register", 400, "worker_id is required"),
@@ -7329,6 +7702,50 @@ impl McpHandler {
         }
     }
 
+    fn tool_worker_unregister(&self, args: &serde_json::Value) -> serde_json::Value {
+        const T: &str = "worker_unregister";
+        if let Some(e) = self.reject_unknown_args(T, args, &["worker_id", "force"]) {
+            return e;
+        }
+        let worker_id = match args.get("worker_id").and_then(|v| v.as_str()) {
+            Some(s) if !s.trim().is_empty() => s.trim().to_string(),
+            _ => return self.smrp_err(T, 400, "worker_id is required"),
+        };
+        // Owner (ungated primary account) or explicit Admin only.
+        let allowed = self.role_gate.is_none() || self.is_admin_actor();
+        if !allowed {
+            return self.smrp_err(
+                T,
+                403,
+                "worker_unregister requires the account owner or Admin",
+            );
+        }
+        let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+        let frontier = self.engine.scheduler.action_frontier();
+        let load = crate::engine::dispatch::WorkerRegistry::load_of(frontier, &worker_id);
+        if load > 0 && !force {
+            return self.smrp_err(
+                T,
+                409,
+                &format!(
+                    "worker {worker_id} holds {load} live claim(s); finish them or pass force=true"
+                ),
+            );
+        }
+        match self
+            .engine
+            .scheduler
+            .worker_registry()
+            .unregister(&worker_id)
+        {
+            Some(_) => {
+                self.engine.scheduler.save_worker_registry();
+                self.smrp_ok(T, serde_json::json!({"worker_id": worker_id, "removed": true, "live_claims": load}))
+            }
+            None => self.smrp_err(T, 404, &format!("worker {worker_id} not found")),
+        }
+    }
+
     fn tool_worker_list(&self, _args: &serde_json::Value) -> serde_json::Value {
         let frontier = self.engine.scheduler.action_frontier();
         let workers: Vec<serde_json::Value> = self
@@ -7357,6 +7774,11 @@ impl McpHandler {
     }
 
     fn tool_action_assign(&self, args: &serde_json::Value) -> serde_json::Value {
+        if let Some(e) =
+            self.reject_unknown_args("action_assign", args, &["action_id", "worker_id"])
+        {
+            return e;
+        }
         let action_id = match args.get("action_id").and_then(|v| v.as_u64()) {
             Some(id) => id,
             None => return self.smrp_err("action_assign", 400, "action_id is required"),
@@ -7398,6 +7820,9 @@ impl McpHandler {
     }
 
     fn tool_action_dispatch(&self, args: &serde_json::Value) -> serde_json::Value {
+        if let Some(e) = self.reject_unknown_args("action_dispatch", args, &["limit"]) {
+            return e;
+        }
         let limit = args
             .get("limit")
             .and_then(|v| v.as_u64())
@@ -7423,6 +7848,23 @@ impl McpHandler {
     }
 
     fn tool_action_complete(&self, args: &serde_json::Value) -> serde_json::Value {
+        if let Some(e) = self.reject_unknown_args(
+            "action_complete",
+            args,
+            &[
+                "action_id",
+                "outcome",
+                "done_when_evidence",
+                "claimed_by",
+                "worker_id",
+                "failure_kind",
+                "success",
+                "labels",
+                "state",
+            ],
+        ) {
+            return e;
+        }
         let action_id = match args.get("action_id").and_then(|v| v.as_u64()) {
             Some(id) => id,
             None => return self.smrp_err("action_complete", 400, "action_id is required"),
@@ -7439,6 +7881,39 @@ impl McpHandler {
                 "outcome is required — structured write-back cannot be empty",
             );
         }
+        // Schema errors are 400 and never touch state / requeue budget.
+        let dw_evidence =
+            match self.parse_str_list("action_complete", args, "done_when_evidence", false) {
+                Ok(v) => v,
+                Err(e) => return e,
+            };
+        if let Err(e) = self.parse_str_list("action_complete", args, "labels", false) {
+            return e;
+        }
+        if let Some(v) = args.get("success") {
+            if !v.is_null() && !v.is_boolean() {
+                return self.smrp_err(
+                    "action_complete",
+                    400,
+                    "invalid params: success must be a boolean",
+                );
+            }
+        }
+        for k in ["state", "failure_kind"] {
+            if let Some(v) = args.get(k) {
+                if !v.is_null() && !v.is_string() {
+                    return self.smrp_err(
+                        "action_complete",
+                        400,
+                        &format!("invalid params: {k} must be a string"),
+                    );
+                }
+            }
+        }
+        let actor = match self.resolve_worker_label("action_complete", args) {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
         let frontier = self.engine.scheduler.action_frontier();
         let action = match frontier.get(action_id) {
             Some(a) => a,
@@ -7518,15 +7993,6 @@ impl McpHandler {
             }
             None => terminal,
         };
-        let dw_evidence: Vec<String> = args
-            .get("done_when_evidence")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
         let goal_debts =
             crate::engine::agent_action::prove_done_when(&action.done_when, &dw_evidence);
         let mut terminal = terminal;
@@ -7537,16 +8003,6 @@ impl McpHandler {
             terminal = crate::engine::agent_action::ActionState::Blocked;
         }
 
-        // Actor = the same worker label used at claim/assign/heartbeat (defaults to
-        // the engine user). Previously this always used engine.user_id, so any
-        // action claimed/assigned under a worker label could never be completed.
-        let actor: String = args
-            .get("claimed_by")
-            .and_then(|v| v.as_str())
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .unwrap_or(self.engine.user_id.as_str())
-            .to_string();
         // Ownership gate BEFORE writing outcome memory (no leak on foreign complete).
         {
             let owner = action.assignee.as_deref().or(action.claimed_by.as_deref());
@@ -7792,7 +8248,7 @@ mod tests {
             .is_none());
     }
 
-    fn isolated_engine() -> Engine {
+    pub(super) fn isolated_engine() -> Engine {
         let dir = std::env::temp_dir().join(format!(
             "epicode-mcp-test-{}-{}",
             std::process::id(),
@@ -7803,7 +8259,7 @@ mod tests {
 
     /// 测试专用:通过 MCP 的 identity_step / identity_finalize 在当前(隔离的)
     /// 引擎中确认身份,使测试不再依赖其他测试遗留在 `./data` 里的 identity.json。
-    fn confirm_test_identity(h: &McpHandler) {
+    pub(super) fn confirm_test_identity(h: &McpHandler) {
         for step in 1..=5 {
             let val = if step == 1 { "TestAgent" } else { "test" };
             let raw = format!(
@@ -8008,6 +8464,7 @@ mod tests {
             "action_complete",
             "drive_to_actions",
             "worker_register",
+            "worker_unregister",
             "action_assign",
             "action_dispatch",
             "action_planner_run",
@@ -10078,5 +10535,183 @@ mod tests {
             label_strs.iter().any(|l| l.starts_with("source_agent:")),
             "missing source_agent label: {label_strs:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod input_validation_tests {
+    use super::tests::{confirm_test_identity, isolated_engine};
+    use super::*;
+    use std::sync::Arc;
+
+    fn setup() -> McpHandler {
+        let h = McpHandler::new(Arc::new(isolated_engine()));
+        confirm_test_identity(&h);
+        let m = h.tool_memory_create(&serde_json::json!({
+            "content": "Rust release pipeline needs changelog and smoke tests",
+            "labels": ["release"]
+        }));
+        assert_eq!(m["protocol"]["ok"], true, "{m}");
+        h
+    }
+
+    fn propose_one(h: &McpHandler) -> (u64, Vec<serde_json::Value>) {
+        let p = h.tool_memory_propose_actions(&serde_json::json!({
+            "query": "release pipeline", "limit": 1,
+            "actions": [{"title": "Ship release", "done_when": ["changelog updated"], "required_capabilities": ["rust"]}]
+        }));
+        assert_eq!(p["protocol"]["ok"], true, "{p}");
+        let a = p["data"]["actions"][0].clone();
+        (
+            a["id"].as_u64().unwrap(),
+            a["done_when"].as_array().cloned().unwrap_or_default(),
+        )
+    }
+
+    #[test]
+    fn propose_actions_honours_explicit_plan_and_dispatch_matches() {
+        let h = setup();
+        let p = h.tool_memory_propose_actions(&serde_json::json!({
+            "query": "release pipeline",
+            "actions": [
+                {"title": "Build", "summary": "cargo build --release", "done_when": "binary built", "required_capabilities": ["rust"]},
+                {"title": "Smoke", "done_when": ["smoke green"], "required_capabilities": "ops"}
+            ]
+        }));
+        assert_eq!(p["protocol"]["ok"], true, "{p}");
+        let acts = p["data"]["actions"].as_array().unwrap();
+        assert_eq!(acts.len(), 2);
+        assert_eq!(acts[0]["summary"], "Build: cargo build --release");
+        assert_eq!(acts[0]["done_when"], serde_json::json!(["binary built"]));
+        assert_eq!(
+            acts[0]["required_capabilities"],
+            serde_json::json!(["rust"])
+        );
+        assert_eq!(acts[1]["required_capabilities"], serde_json::json!(["ops"]));
+        for (w, c) in [("w-rust", "rust"), ("w-ops", "ops")] {
+            let r =
+                h.tool_worker_register(&serde_json::json!({"worker_id": w, "capabilities": [c]}));
+            assert_eq!(r["protocol"]["ok"], true, "{r}");
+        }
+        let d = h.tool_action_dispatch(&serde_json::json!({"limit": 5}));
+        assert_eq!(d["data"]["assigned"], 2, "{d}");
+        // Top-level caps override auto-derived skill-name caps in fallback mode.
+        let f = h.tool_memory_propose_actions(&serde_json::json!({
+            "query": "release pipeline", "limit": 1, "title": "Custom title", "required_capabilities": ["rust"]
+        }));
+        assert_eq!(f["data"]["actions"][0]["summary"], "Custom title", "{f}");
+        assert_eq!(
+            f["data"]["actions"][0]["required_capabilities"],
+            serde_json::json!(["rust"])
+        );
+        let bad = h.tool_memory_propose_actions(
+            &serde_json::json!({"query": "release pipeline", "actions": [{"bogus": 1}]}),
+        );
+        assert_eq!(bad["protocol"]["error"]["code"], 400, "{bad}");
+    }
+
+    #[test]
+    fn complete_schema_errors_are_400_and_keep_budget() {
+        let h = setup();
+        let (id, _) = propose_one(&h);
+        let c = h.tool_action_claim(&serde_json::json!({"action_id": id, "claimed_by": "w1"}));
+        assert_eq!(c["protocol"]["ok"], true, "{c}");
+        for bad in [
+            serde_json::json!({"action_id": id, "outcome": "done it", "claimed_by": "w1", "evidence": ["#1"]}),
+            serde_json::json!({"action_id": id, "outcome": "done it", "claimed_by": "w1", "done_when_evidence": "changelog updated in repo"}),
+            serde_json::json!({"action_id": id, "outcome": "done it", "claimed_by": "w1", "done_when_evidence": [1]}),
+            serde_json::json!({"action_id": id, "outcome": "done it", "claimed_by": "w1", "success": "yes"}),
+        ] {
+            let r = h.tool_action_complete(&bad);
+            assert_eq!(r["protocol"]["error"]["code"], 400, "{r}");
+        }
+        let a = h.engine.scheduler.action_frontier().get(id).unwrap();
+        assert_eq!(a.state.as_str(), "claimed");
+        assert_eq!(a.requeue_count, 0);
+    }
+
+    #[test]
+    fn trivial_evidence_does_not_prove_done() {
+        let h = setup();
+        let (id, _) = propose_one(&h);
+        h.tool_action_claim(&serde_json::json!({"action_id": id, "claimed_by": "w1"}));
+        let r = h.tool_action_complete(&serde_json::json!({
+            "action_id": id, "outcome": "shipped", "claimed_by": "w1", "done_when_evidence": ["x"]
+        }));
+        let a = h.engine.scheduler.action_frontier().get(id).unwrap();
+        assert_ne!(a.state.as_str(), "done", "{r}");
+    }
+
+    #[test]
+    fn worker_id_is_alias_and_unknown_params_rejected() {
+        let h = setup();
+        let (id, _) = propose_one(&h);
+        let c = h.tool_action_claim(&serde_json::json!({"action_id": id, "worker_id": "w-alias"}));
+        assert_eq!(c["protocol"]["ok"], true, "{c}");
+        assert_eq!(
+            h.engine
+                .scheduler
+                .action_frontier()
+                .get(id)
+                .unwrap()
+                .claimed_by
+                .as_deref(),
+            Some("w-alias")
+        );
+        let hb =
+            h.tool_action_heartbeat(&serde_json::json!({"action_id": id, "worker_id": "w-alias"}));
+        assert_eq!(hb["protocol"]["ok"], true, "{hb}");
+        let mismatch = h.tool_action_heartbeat(
+            &serde_json::json!({"action_id": id, "worker_id": "a", "claimed_by": "b"}),
+        );
+        assert_eq!(mismatch["protocol"]["error"]["code"], 400);
+        let unk = h.tool_action_claim(&serde_json::json!({"action_id": id, "worker": "w"}));
+        assert_eq!(unk["protocol"]["error"]["code"], 400, "{unk}");
+    }
+
+    #[test]
+    fn goal_done_when_string_is_single_item() {
+        let h = setup();
+        let g = h.tool_action_goal_create(
+            &serde_json::json!({"title": "ship", "done_when": "release tagged"}),
+        );
+        assert_eq!(
+            g["data"]["goal"]["done_when"],
+            serde_json::json!(["release tagged"]),
+            "{g}"
+        );
+        let bad = h.tool_action_goal_create(&serde_json::json!({"title": "ship", "done_when": 3}));
+        assert_eq!(bad["protocol"]["error"]["code"], 400);
+    }
+
+    #[test]
+    fn worker_unregister_owner_admin_only() {
+        let h = setup();
+        h.tool_worker_register(
+            &serde_json::json!({"worker_id": "smoke-w", "capabilities": ["ops"]}),
+        );
+        let r = h.tool_worker_unregister(&serde_json::json!({"worker_id": "smoke-w"}));
+        assert_eq!(r["protocol"]["ok"], true, "{r}");
+        assert!(h
+            .engine
+            .scheduler
+            .worker_registry()
+            .get("smoke-w")
+            .is_none());
+        let again = h.tool_worker_unregister(&serde_json::json!({"worker_id": "smoke-w"}));
+        assert_eq!(again["protocol"]["error"]["code"], 404);
+        let dev = McpHandler::new(h.engine.clone())
+            .with_role_gate(crate::engine::user_manager::UserRole::Developer);
+        h.tool_worker_register(&serde_json::json!({"worker_id": "w2"}));
+        let denied = dev.tool_worker_unregister(&serde_json::json!({"worker_id": "w2"}));
+        assert_eq!(denied["protocol"]["error"]["code"], 403);
+        // Live claim blocks unless force.
+        let (id, _) = propose_one(&h);
+        h.tool_action_claim(&serde_json::json!({"action_id": id, "claimed_by": "w2"}));
+        let busy = h.tool_worker_unregister(&serde_json::json!({"worker_id": "w2"}));
+        assert_eq!(busy["protocol"]["error"]["code"], 409, "{busy}");
+        let forced =
+            h.tool_worker_unregister(&serde_json::json!({"worker_id": "w2", "force": true}));
+        assert_eq!(forced["protocol"]["ok"], true);
     }
 }
