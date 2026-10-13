@@ -955,7 +955,7 @@ impl GatewayCenter {
                 }
                 visited.insert(target_id);
                 if let Some(payload) = self.get_node(target_id) {
-                    let assoc = inherited_sim.max(strength);
+                    let assoc = inherited_sim * strength.clamp(0.0, 1.0);
                     collected.insert(
                         target_id,
                         (0.0, payload.labels, payload.content, payload.timestamp),
@@ -1015,7 +1015,7 @@ impl GatewayCenter {
             for (target_id, _rel_type, strength) in self.get_relations(current_id) {
                 if visited.contains(&target_id) {
                     if let Some(entry) = collected.get_mut(&target_id) {
-                        let new_assoc = inherited_sim.max(strength);
+                        let new_assoc = inherited_sim * strength.clamp(0.0, 1.0);
                         if new_assoc > entry.4 {
                             entry.4 = new_assoc;
                         }
@@ -1024,7 +1024,7 @@ impl GatewayCenter {
                 }
                 visited.insert(target_id);
                 if let Some(payload) = self.get_node(target_id) {
-                    let assoc = inherited_sim.max(strength);
+                    let assoc = inherited_sim * strength.clamp(0.0, 1.0);
                     collected.insert(
                         target_id,
                         (
