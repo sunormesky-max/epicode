@@ -1279,12 +1279,13 @@ impl McpHandler {
                 },
                 {
                     "name": "action_complete",
-                    "description": "Finish a claimed/open action: creates an outcome memory, links each evidence memory to it (Precedes), and marks the action done|blocked|exhausted. Requires non-empty outcome text — this is the structured memory write-back that closes the loop.",
+                    "description": "Finish a claimed/open action: creates an outcome memory, links each evidence memory to it (Precedes), and marks the action done|blocked|exhausted. Requires non-empty outcome text. When action.done_when is non-empty, pass done_when_evidence (parallel array); unmapped items soft-fail to blocked (not done).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "action_id": { "type": "integer" },
                             "outcome": { "type": "string", "description": "What was delivered / learned (becomes a memory)" },
+                            "done_when_evidence": { "type": "array", "items": { "type": "string" }, "description": "Parallel to action.done_when — artifact-level evidence per item" },
                             "success": { "type": "boolean", "description": "true → state=done (default); false → blocked", "default": true },
                             "labels": { "type": "array", "items": { "type": "string" }, "description": "Extra labels for the outcome memory" },
                             "state": { "type": "string", "enum": ["done", "blocked", "exhausted"], "description": "Override terminal state" }
@@ -6967,6 +6968,25 @@ impl McpHandler {
             }
         };
 
+        let dw_evidence: Vec<String> = args
+            .get("done_when_evidence")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let goal_debts =
+            crate::engine::agent_action::prove_done_when(&action.done_when, &dw_evidence);
+        let mut terminal = terminal;
+        // Soft-fail: requesting done without full done_when proof → blocked.
+        if !goal_debts.is_empty()
+            && matches!(terminal, crate::engine::agent_action::ActionState::Done)
+        {
+            terminal = crate::engine::agent_action::ActionState::Blocked;
+        }
+
         let mut labels = vec![
             "action-outcome".to_string(),
             format!("action:{}", action_id),
@@ -7050,6 +7070,8 @@ impl McpHandler {
                         "outcome_memory_id": outcome_id,
                         "relations_created": linked,
                         "drive_ack": drive_ack,
+                        "done_when_debts": goal_debts.clone(),
+                        "done_when_proven": goal_debts.is_empty(),
                     }),
                 )
             }
@@ -8602,5 +8624,65 @@ mod tests {
             .unwrap()
             .iter()
             .any(|x| x == "action_claim"));
+    }
+
+    #[test]
+    fn action_complete_soft_fails_unproven_done_when() {
+        let handler = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&handler);
+        let _ = handler.tool_memory_create(&serde_json::json!({
+            "content": "Need both docs and tests before release",
+            "labels": ["release"]
+        }));
+        let proposed = handler.tool_memory_propose_actions(&serde_json::json!({
+            "query": "release",
+            "limit": 1
+        }));
+        let action_id = proposed["data"]["actions"][0]["id"].as_u64().unwrap();
+        handler.tool_action_claim(&serde_json::json!({
+            "action_id": action_id,
+            "claimed_by": handler.engine.user_id
+        }));
+        // Propose always sets non-empty done_when — complete without evidence → blocked
+        let done = handler.tool_action_complete(&serde_json::json!({
+            "action_id": action_id,
+            "outcome": "shipped somehow",
+            "success": true
+        }));
+        assert_eq!(done["protocol"]["ok"], true, "{done}");
+        assert_eq!(done["data"]["action"]["state"], "blocked");
+        assert_eq!(done["data"]["done_when_proven"], false);
+        assert!(!done["data"]["done_when_debts"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+
+        // New action with full evidence → done
+        let proposed2 = handler.tool_memory_propose_actions(&serde_json::json!({
+            "query": "release",
+            "limit": 1
+        }));
+        let aid2 = proposed2["data"]["actions"][0]["id"].as_u64().unwrap();
+        let dw = proposed2["data"]["actions"][0]["done_when"]
+            .as_array()
+            .unwrap()
+            .clone();
+        handler.tool_action_claim(&serde_json::json!({
+            "action_id": aid2,
+            "claimed_by": handler.engine.user_id
+        }));
+        let evid: Vec<String> = dw
+            .iter()
+            .map(|_| "artifact: CI green + CHANGELOG".into())
+            .collect();
+        let ok = handler.tool_action_complete(&serde_json::json!({
+            "action_id": aid2,
+            "outcome": "release cut",
+            "success": true,
+            "done_when_evidence": evid
+        }));
+        assert_eq!(ok["protocol"]["ok"], true, "{ok}");
+        assert_eq!(ok["data"]["action"]["state"], "done");
+        assert_eq!(ok["data"]["done_when_proven"], true);
     }
 }

@@ -359,6 +359,30 @@ pub fn build_drive_draft(
     })
 }
 
+/// P35-style goal proof for actions: each done_when item needs non-empty evidence.
+/// Returns Ok(debts) where debts empty means fully mapped; Err never — use debts.
+pub fn prove_done_when(done_when: &[String], evidence: &[String]) -> Vec<String> {
+    let mut debts = Vec::new();
+    for (i, item) in done_when.iter().enumerate() {
+        let item = item.trim();
+        if item.is_empty() {
+            continue;
+        }
+        let mapped = evidence
+            .get(i)
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+        if !mapped {
+            debts.push(format!(
+                "done_when[{}] «{}» has no artifact evidence",
+                i,
+                item.chars().take(48).collect::<String>()
+            ));
+        }
+    }
+    debts
+}
+
 /// Build deterministic action proposals from search hits + skill matches.
 /// Pure function — no I/O — so unit tests can pin behavior.
 pub fn build_proposals(
@@ -560,5 +584,16 @@ mod tests {
         let bound = f.bind_task(a.id, "ts_1", "alice").unwrap();
         assert_eq!(bound.bound_task_id.as_deref(), Some("ts_1"));
         assert_eq!(f.find_by_task("ts_1").unwrap().id, a.id);
+    }
+
+    #[test]
+    fn prove_done_when_blocks_false_complete() {
+        let debts = prove_done_when(
+            &["Ship changelog".into(), "Smoke green".into()],
+            &["CHANGELOG.md updated".into(), "   ".into()],
+        );
+        assert_eq!(debts.len(), 1);
+        assert!(debts[0].contains("done_when[1]"));
+        assert!(prove_done_when(&["A".into()], &["artifact".into()]).is_empty());
     }
 }
