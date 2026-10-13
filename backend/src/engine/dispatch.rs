@@ -104,6 +104,11 @@ impl WorkerRegistry {
         v
     }
 
+    /// Remove a worker record. Returns the removed record, None if unknown.
+    pub fn unregister(&self, worker_id: &str) -> Option<WorkerRecord> {
+        self.workers.lock().remove(worker_id.trim())
+    }
+
     pub fn blacklist(&self, worker_id: &str, secs: i64) {
         let until = now_secs().saturating_add(secs.max(0));
         if let Some(w) = self.workers.lock().get_mut(worker_id) {

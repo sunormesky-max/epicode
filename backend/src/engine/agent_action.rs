@@ -1378,7 +1378,7 @@ pub fn prove_done_when(done_when: &[String], evidence: &[String]) -> Vec<String>
         }
         let mapped = evidence
             .get(i)
-            .map(|s| !s.trim().is_empty())
+            .map(|s| evidence_is_substantive(item, s))
             .unwrap_or(false);
         if !mapped {
             debts.push(format!(
@@ -1389,6 +1389,30 @@ pub fn prove_done_when(done_when: &[String], evidence: &[String]) -> Vec<String>
         }
     }
     debts
+}
+
+/// Minimal sanity for one done_when evidence string (conservative, documented in
+/// the action_complete schema):
+/// - trimmed, and not just an echo of the criterion itself;
+/// - references a memory id (`#123`) — accepted at any length; or
+/// - is at least `MIN_EVIDENCE_WEIGHT` long, where ASCII chars weigh 1 and
+///   non-ASCII (e.g. CJK) weigh 2, so "x" / "ok" / "done" do not pass.
+pub const MIN_EVIDENCE_WEIGHT: usize = 8;
+
+pub fn evidence_is_substantive(criterion: &str, evidence: &str) -> bool {
+    let e = evidence.trim();
+    if e.is_empty() || e.eq_ignore_ascii_case(criterion.trim()) {
+        return false;
+    }
+    let bytes = e.as_bytes();
+    let has_mem_ref = bytes
+        .windows(2)
+        .any(|w| w[0] == b'#' && w[1].is_ascii_digit());
+    if has_mem_ref {
+        return true;
+    }
+    let weight: usize = e.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum();
+    weight >= MIN_EVIDENCE_WEIGHT
 }
 
 /// Build deterministic action proposals from search hits + skill matches.
@@ -1626,6 +1650,18 @@ mod tests {
     }
 
     #[test]
+    fn evidence_sanity_rejects_trivial_strings() {
+        for bad in ["x", "  ok ", "done", "", "Ship changelog"] {
+            assert!(!evidence_is_substantive("Ship changelog", bad), "{bad:?}");
+        }
+        assert!(evidence_is_substantive("c", "see #42"));
+        assert!(evidence_is_substantive("c", "#7"));
+        assert!(evidence_is_substantive("c", "CHANGELOG.md updated"));
+        assert!(evidence_is_substantive("c", "已发布版本"));
+        assert_eq!(prove_done_when(&["A".into()], &["x".into()]).len(), 1);
+    }
+
+    #[test]
     fn prune_keeps_live_drops_old_terminal() {
         let f = ActionFrontier::new();
         let drafts = build_proposals("q", &[(1, "e".into())], &[], 1);
@@ -1809,7 +1845,7 @@ mod tests {
         let a = f.enqueue(a).unwrap();
         f.claim(a.id, "w").unwrap();
         assert!(f.prove_goal(g.id, vec![]).is_err(), "unproven");
-        let (g2, cancelled) = f.prove_goal(g.id, vec!["proof".into()]).unwrap();
+        let (g2, cancelled) = f.prove_goal(g.id, vec!["proof: see #1".into()]).unwrap();
         assert_eq!(g2.state, GoalState::Achieved);
         assert_eq!(cancelled, vec![a.id]);
         assert!(f.requeue(a.id, "x", 1).is_err());
