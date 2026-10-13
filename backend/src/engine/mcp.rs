@@ -1254,7 +1254,9 @@ impl McpHandler {
                         "type": "object",
                         "properties": {
                             "query": { "type": "string", "description": "What you want to act on (natural language)" },
-                            "limit": { "type": "integer", "description": "Max actions to propose (default 3, max 5)", "default": 3, "minimum": 1, "maximum": 5 }
+                            "limit": { "type": "integer", "description": "Max actions to propose (default 3, max 5)", "default": 3, "minimum": 1, "maximum": 5 },
+                            "depends_on": { "type": "array", "items": { "type": "integer" }, "description": "Existing action ids every proposed action must wait on (claimable only after all are done). Unknown ids / cycles rejected." },
+                            "chain": { "type": "boolean", "description": "Serial plan: proposed step i depends on step i-1, so only the head is claimable until its predecessor lands done. Upstream escalation cascades blocked (dep_failed) downstream.", "default": false }
                         },
                         "required": ["query"]
                     }
@@ -6827,14 +6829,47 @@ impl McpHandler {
             .map(|(sk, score)| (sk.name, score))
             .collect();
 
-        let drafts = crate::engine::agent_action::build_proposals(query, &evidence, &skills, limit);
+        // PR-K: explicit upstream deps for every proposed action, and/or `chain`
+        // to make the batch a serial plan (step i depends on step i-1).
+        let base_deps: Vec<u64> = args
+            .get("depends_on")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_u64()).collect())
+            .unwrap_or_default();
+        let chain = args.get("chain").and_then(|v| v.as_bool()).unwrap_or(false);
         let frontier = self.engine.scheduler.action_frontier();
+        for d in &base_deps {
+            if frontier.get(*d).is_none() {
+                return self.smrp_err(
+                    "memory_propose_actions",
+                    400,
+                    &format!("depends_on: action {} not found", d),
+                );
+            }
+        }
+        let drafts = crate::engine::agent_action::build_proposals(query, &evidence, &skills, limit);
         let mut actions = Vec::new();
         let mut errors = Vec::new();
+        let mut prev: Option<u64> = None;
         for draft in drafts {
-            match frontier.enqueue(draft.into_action(query)) {
-                Ok(a) => actions.push(a.to_json()),
-                Err(e) => errors.push(e),
+            let mut action = draft.into_action(query);
+            action.depends_on = base_deps.clone();
+            if chain {
+                if let Some(p) = prev {
+                    action.depends_on.push(p);
+                }
+            }
+            match frontier.enqueue(action) {
+                Ok(a) => {
+                    prev = Some(a.id);
+                    actions.push(frontier.card(&a));
+                }
+                Err(e) => {
+                    errors.push(e);
+                    if chain {
+                        break; // a broken chain must not leave later steps unanchored
+                    }
+                }
             }
         }
         self.engine.scheduler.save_action_frontier();
@@ -6871,13 +6906,11 @@ impl McpHandler {
             .and_then(|v| v.as_u64())
             .unwrap_or(20)
             .clamp(1, 100) as usize;
-        let actions: Vec<serde_json::Value> = self
-            .engine
-            .scheduler
-            .action_frontier()
+        let frontier = self.engine.scheduler.action_frontier();
+        let actions: Vec<serde_json::Value> = frontier
             .list(state, limit)
             .into_iter()
-            .map(|a| a.to_json())
+            .map(|a| frontier.card(&a))
             .collect();
         self.smrp_ok(
             "action_list",
@@ -9244,6 +9277,56 @@ mod tests {
         let early =
             handler.tool_action_claim(&serde_json::json!({"action_id": id, "claimed_by": "w1"}));
         assert_eq!(early["protocol"]["ok"], false, "{early}");
+    }
+
+    /// PR-K: a chained proposal is a serial plan — only the head is claimable
+    /// until its predecessor lands Done. Fails on #259: every step is claimable.
+    #[test]
+    fn chained_proposals_only_head_is_claimable() {
+        let handler = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&handler);
+        for c in ["chain step evidence one", "chain step evidence two"] {
+            let _ =
+                handler.tool_memory_create(&serde_json::json!({"content": c, "labels": ["ops"]}));
+        }
+        let p = handler.tool_memory_propose_actions(
+            &serde_json::json!({"query": "chain step evidence", "limit": 2, "chain": true}),
+        );
+        let acts = p["data"]["actions"].as_array().cloned().unwrap_or_default();
+        assert_eq!(acts.len(), 2, "{p}");
+        let (a, b) = (
+            acts[0]["id"].as_u64().unwrap(),
+            acts[1]["id"].as_u64().unwrap(),
+        );
+        let early =
+            handler.tool_action_claim(&serde_json::json!({"action_id": b, "claimed_by": "w"}));
+        assert_eq!(
+            early["protocol"]["ok"], false,
+            "downstream claim must wait: {early}"
+        );
+        let c = handler.tool_action_claim(&serde_json::json!({"action_id": a, "claimed_by": "w"}));
+        assert_eq!(c["protocol"]["ok"], true, "{c}");
+        let dw = acts[0]["done_when"]
+            .as_array()
+            .map(|x| x.len())
+            .unwrap_or(0);
+        let evid: Vec<String> = (0..dw).map(|i| format!("artifact-{i}")).collect();
+        let d = handler.tool_action_complete(&serde_json::json!({
+            "action_id": a, "outcome": "step one shipped", "claimed_by": "w", "done_when_evidence": evid
+        }));
+        assert_eq!(d["data"]["action"]["state"], "done", "{d}");
+        let listed = handler.tool_action_list(&serde_json::json!({"state": "open"}));
+        let card = listed["data"]["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["id"] == b)
+            .cloned()
+            .unwrap();
+        assert_eq!(card["depends_on"], serde_json::json!([a]), "{card}");
+        assert_eq!(card["readiness"]["state"], "ready", "{card}");
+        let ok = handler.tool_action_claim(&serde_json::json!({"action_id": b, "claimed_by": "w"}));
+        assert_eq!(ok["protocol"]["ok"], true, "{ok}");
     }
 
     #[test]

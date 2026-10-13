@@ -1390,7 +1390,12 @@ impl SchedulerCenter {
     pub fn sweep_action_leases(&self) -> usize {
         let swept =
             super::dispatch::sweep_expired_leases(&self.worker_registry, &self.action_frontier);
-        if !swept.is_empty() {
+        // PR-K: also settle dependents of failed/pruned upstreams (e.g. after restart).
+        let cascaded = self.action_frontier.cascade_dep_failures();
+        if !cascaded.is_empty() {
+            tracing::info!("[action] dep_failed cascade blocked {:?}", cascaded);
+        }
+        if !swept.is_empty() || !cascaded.is_empty() {
             tracing::info!("[action] lease sweep reclaimed {:?}", swept);
             self.save_action_frontier();
         }

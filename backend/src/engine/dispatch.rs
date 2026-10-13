@@ -276,6 +276,10 @@ pub fn account_failure_kind(
             .map(|a| (a, "escalated"))
     }?;
     frontier.set_failure_kind(action_id, kind);
+    // PR-K: an escalated upstream blocks its dependents (no silent waiting forever).
+    if res.1 == "escalated" {
+        frontier.cascade_dep_failures();
+    }
     let a = frontier.get(action_id).unwrap_or(res.0);
     Ok((a, res.1))
 }

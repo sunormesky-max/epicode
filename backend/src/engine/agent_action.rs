@@ -99,6 +99,30 @@ impl FailureKind {
     }
 }
 
+/// Deterministic dependency readiness (PR-K).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Readiness {
+    Ready,
+    /// Upstream not yet Done (open/claimed, or requeued for another try).
+    Waiting(Vec<u64>),
+    /// Upstream escalated / terminally failed / missing — this action cannot proceed.
+    DepFailed(Vec<u64>),
+}
+
+impl Readiness {
+    pub fn to_json(&self) -> serde_json::Value {
+        match self {
+            Readiness::Ready => serde_json::json!({"state": "ready"}),
+            Readiness::Waiting(w) => serde_json::json!({"state": "waiting", "waiting_on": w}),
+            Readiness::DepFailed(f) => {
+                serde_json::json!({"state": "dep_failed", "failed_deps": f})
+            }
+        }
+    }
+}
+
+pub const DEP_FAILED_REASON_PREFIX: &str = "dep_failed:";
+
 /// Transient retries before a transient failure is treated as a real one.
 pub const MAX_TRANSIENT_RETRIES: u32 = 5;
 pub const TRANSIENT_BACKOFF_BASE_SECS: i64 = 30;
@@ -146,6 +170,9 @@ pub struct AgentAction {
     #[serde(default)]
     pub requeue_count: u32,
     /// Transient retries so far (separate from requeue budget).
+    /// Upstream action ids that must be Done before this one is claimable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<u64>,
     #[serde(default)]
     pub transient_retries: u32,
     /// Backoff gate: not claimable/assignable before this unix sec.
@@ -203,6 +230,7 @@ impl AgentAction {
             "claimed_at": self.claimed_at,
             "lease_until": self.lease_until,
             "requeue_count": self.requeue_count,
+            "depends_on": self.depends_on,
             "transient_retries": self.transient_retries,
             "not_before": self.not_before,
             "last_failure_kind": self.last_failure_kind.map(|k| k.as_str()),
@@ -307,6 +335,148 @@ impl ActionFrontier {
         Ok(action.clone())
     }
 
+    fn readiness_in(map: &HashMap<u64, AgentAction>, a: &AgentAction) -> Readiness {
+        let mut waiting = Vec::new();
+        let mut failed = Vec::new();
+        for d in &a.depends_on {
+            match map.get(d) {
+                Some(u) if u.state == ActionState::Done => {}
+                Some(u) if u.escalated || u.state.is_terminal() => failed.push(*d),
+                Some(_) => waiting.push(*d),
+                // Pruned upstream: only terminal actions are pruned; Done ones too, but
+                // a pruned dep cannot be proven Done → treat as failed (explicit).
+                None => failed.push(*d),
+            }
+        }
+        if !failed.is_empty() {
+            Readiness::DepFailed(failed)
+        } else if !waiting.is_empty() {
+            Readiness::Waiting(waiting)
+        } else {
+            Readiness::Ready
+        }
+    }
+
+    pub fn readiness(&self, a: &AgentAction) -> Readiness {
+        Self::readiness_in(&self.actions.lock(), a)
+    }
+
+    /// ActionCard + computed readiness.
+    pub fn card(&self, a: &AgentAction) -> serde_json::Value {
+        let mut c = a.to_action_card();
+        c["readiness"] = self.readiness(a).to_json();
+        c
+    }
+
+    fn check_deps(map: &HashMap<u64, AgentAction>, a: &AgentAction) -> Result<(), String> {
+        match Self::readiness_in(map, a) {
+            Readiness::Ready => Ok(()),
+            Readiness::Waiting(w) => Err(format!(
+                "action {} waiting on dependencies {:?} (not done yet)",
+                a.id, w
+            )),
+            Readiness::DepFailed(f) => Err(format!(
+                "action {} cannot run: dependencies failed {:?}",
+                a.id, f
+            )),
+        }
+    }
+
+    /// Validate deps for a new action: all exist, no self-reference, no cycle.
+    fn validate_deps(map: &HashMap<u64, AgentAction>, id: u64, deps: &[u64]) -> Result<(), String> {
+        for d in deps {
+            if *d == id {
+                return Err(format!("action {} cannot depend on itself", id));
+            }
+            if !map.contains_key(d) {
+                return Err(format!("depends_on: action {} not found", d));
+            }
+        }
+        // DFS from each dep through existing edges; reaching `id` = cycle.
+        let mut stack: Vec<u64> = deps.to_vec();
+        let mut seen = std::collections::HashSet::new();
+        while let Some(n) = stack.pop() {
+            if n == id {
+                return Err(format!("depends_on would create a cycle through {}", id));
+            }
+            if !seen.insert(n) {
+                continue;
+            }
+            if let Some(a) = map.get(&n) {
+                stack.extend(a.depends_on.iter().copied());
+            }
+        }
+        Ok(())
+    }
+
+    /// Replace an Open action's deps (cycle-checked).
+    pub fn set_depends_on(&self, id: u64, deps: Vec<u64>) -> Result<AgentAction, String> {
+        let mut deps = deps;
+        deps.sort_unstable();
+        deps.dedup();
+        let mut map = self.actions.lock();
+        match map.get(&id) {
+            None => return Err(format!("action {} not found", id)),
+            Some(a) if a.state != ActionState::Open => {
+                return Err(format!(
+                    "action {} is {:?}, deps editable only while open",
+                    id, a.state
+                ))
+            }
+            _ => {}
+        }
+        Self::validate_deps(&map, id, &deps)?;
+        let now = self.now();
+        let a = map.get_mut(&id).expect("checked");
+        a.depends_on = deps;
+        a.updated_at = now;
+        Ok(a.clone())
+    }
+
+    /// Cascade: every non-terminal action whose deps failed becomes Blocked with a
+    /// `dep_failed:<ids>` reason (transitively, to a fixpoint). Returns ids blocked.
+    pub fn cascade_dep_failures(&self) -> Vec<u64> {
+        let now = self.now();
+        let mut map = self.actions.lock();
+        let mut blocked = Vec::new();
+        loop {
+            let victims: Vec<(u64, Vec<u64>)> = map
+                .values()
+                .filter(|a| !a.state.is_terminal() && !a.depends_on.is_empty())
+                .filter_map(|a| match Self::readiness_in(&map, a) {
+                    Readiness::DepFailed(f) => Some((a.id, f)),
+                    _ => None,
+                })
+                .collect();
+            if victims.is_empty() {
+                break;
+            }
+            for (id, f) in victims {
+                if let Some(a) = map.get_mut(&id) {
+                    a.state = ActionState::Blocked;
+                    a.last_failure_kind = Some(FailureKind::Blocked);
+                    a.last_failure_reason = Some(format!(
+                        "{}{}",
+                        DEP_FAILED_REASON_PREFIX,
+                        f.iter()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    ));
+                    a.last_responsible_assignee = a.assignee.clone().or(a.claimed_by.clone());
+                    a.claimed_by = None;
+                    a.assignee = None;
+                    a.claimed_at = None;
+                    a.lease_until = None;
+                    a.updated_at = now;
+                    blocked.push(id);
+                }
+            }
+        }
+        blocked.sort_unstable();
+        blocked
+    }
+
     fn check_backoff(action: &AgentAction, now: i64) -> Result<(), String> {
         match action.not_before {
             Some(t) if now < t => Err(format!(
@@ -321,7 +491,9 @@ impl ActionFrontier {
 
     /// True when an Open action is past any backoff window (dispatchable now).
     pub fn is_ready(&self, a: &AgentAction) -> bool {
-        a.state == ActionState::Open && a.not_before.is_none_or(|t| self.now() >= t)
+        a.state == ActionState::Open
+            && a.not_before.is_none_or(|t| self.now() >= t)
+            && self.readiness(a) == Readiness::Ready
     }
 
     /// Transient failure: back to Open behind an exponential backoff gate.
@@ -434,6 +606,10 @@ impl ActionFrontier {
                 self.max_open
             ));
         }
+        let id = self.next_id.load(Ordering::SeqCst);
+        action.depends_on.sort_unstable();
+        action.depends_on.dedup();
+        Self::validate_deps(&map, id, &action.depends_on)?;
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let now = self.now();
         action.id = id;
@@ -480,6 +656,9 @@ impl ActionFrontier {
             ));
         }
         Self::check_backoff(action, self.now())?;
+        let snapshot = action.clone();
+        Self::check_deps(&map, &snapshot)?;
+        let action = map.get_mut(&id).expect("checked");
         if let Some(a) = &action.assignee {
             if a != claimed_by {
                 return Err(format!(
@@ -517,6 +696,9 @@ impl ActionFrontier {
             ));
         }
         Self::check_backoff(action, self.now())?;
+        let snapshot = action.clone();
+        Self::check_deps(&map, &snapshot)?;
+        let action = map.get_mut(&id).expect("checked");
         if let Some(a) = &action.assignee {
             return Err(format!("action {} already assigned to '{}'", id, a));
         }
@@ -717,7 +899,16 @@ impl ActionFrontier {
         let cutoff = self.now().saturating_sub(max_age_secs);
         let mut map = self.actions.lock();
         let before = map.len();
-        map.retain(|_, a| !(a.state.is_terminal() && a.updated_at < cutoff));
+        // Keep upstreams still referenced by a live dependent: pruning a Done dep
+        // would make the dependent look dep_failed (missing) and wrongly cascade.
+        let referenced: std::collections::HashSet<u64> = map
+            .values()
+            .filter(|a| !a.state.is_terminal())
+            .flat_map(|a| a.depends_on.iter().copied())
+            .collect();
+        map.retain(|id, a| {
+            !(a.state.is_terminal() && a.updated_at < cutoff) || referenced.contains(id)
+        });
         before.saturating_sub(map.len())
     }
 
@@ -925,6 +1116,7 @@ impl AgentActionDraft {
             claimed_at: None,
             lease_until: None,
             requeue_count: 0,
+            depends_on: Vec::new(),
             transient_retries: 0,
             not_before: None,
             last_failure_kind: None,
@@ -1130,5 +1322,96 @@ mod tests {
         assert!(f.expired_claims().is_empty());
         t.store(10_191, Ordering::SeqCst);
         assert_eq!(f.expired_claims(), vec![a.id]);
+    }
+
+    fn draft_action() -> AgentAction {
+        build_proposals("q", &[(1, "e".into())], &[], 1)[0]
+            .clone()
+            .into_action("q")
+    }
+
+    /// PR-K: deps validated at enqueue; cycles rejected on edit.
+    #[test]
+    fn depends_on_validation_and_cycle_rejection() {
+        let f = ActionFrontier::new();
+        let mut bad = draft_action();
+        bad.depends_on = vec![999];
+        assert!(f.enqueue(bad).unwrap_err().contains("not found"));
+        let a = f.enqueue(draft_action()).unwrap();
+        let mut b = draft_action();
+        b.depends_on = vec![a.id, a.id];
+        let b = f.enqueue(b).unwrap();
+        assert_eq!(b.depends_on, vec![a.id], "deduped");
+        // a → b would close the loop a→b→a.
+        assert!(f
+            .set_depends_on(a.id, vec![b.id])
+            .unwrap_err()
+            .contains("cycle"));
+        assert!(f
+            .set_depends_on(a.id, vec![a.id])
+            .unwrap_err()
+            .contains("itself"));
+        // Readiness: b waits on a.
+        assert_eq!(
+            f.readiness(&f.get(b.id).unwrap()),
+            Readiness::Waiting(vec![a.id])
+        );
+        assert!(f.claim(b.id, "w").unwrap_err().contains("waiting"));
+        assert!(f.assign(b.id, "w").unwrap_err().contains("waiting"));
+        assert!(!f.is_ready(&f.get(b.id).unwrap()));
+    }
+
+    /// PR-K: escalated upstream cascades Blocked(dep_failed) transitively.
+    #[test]
+    fn dep_failure_cascades_transitively() {
+        let f = ActionFrontier::new();
+        let a = f.enqueue(draft_action()).unwrap();
+        let mut b = draft_action();
+        b.depends_on = vec![a.id];
+        let b = f.enqueue(b).unwrap();
+        let mut c = draft_action();
+        c.depends_on = vec![b.id];
+        let c = f.enqueue(c).unwrap();
+        let mut free = draft_action();
+        free.depends_on = vec![];
+        let free = f.enqueue(free).unwrap();
+        // Requeued (not escalated) upstream is still "waiting", not failed.
+        f.claim(a.id, "w").unwrap();
+        f.requeue(a.id, "retry", 1).unwrap();
+        assert!(f.cascade_dep_failures().is_empty());
+        f.escalate(a.id, "gave up").unwrap();
+        assert_eq!(f.cascade_dep_failures(), vec![b.id, c.id]);
+        let cb = f.get(c.id).unwrap();
+        assert_eq!(cb.state, ActionState::Blocked);
+        assert_eq!(
+            cb.last_failure_reason.as_deref(),
+            Some(&*format!("{}{}", DEP_FAILED_REASON_PREFIX, b.id))
+        );
+        assert_eq!(f.get(free.id).unwrap().state, ActionState::Open);
+        let card = f.card(&f.get(b.id).unwrap());
+        assert_eq!(card["readiness"]["state"], "dep_failed");
+        assert_eq!(card["depends_on"], serde_json::json!([a.id]));
+    }
+
+    /// PR-K: prune must not drop a Done upstream that a live action still needs.
+    #[test]
+    fn prune_keeps_referenced_upstream() {
+        let f = ActionFrontier::new();
+        let a = f.enqueue(draft_action()).unwrap();
+        f.claim(a.id, "w").unwrap();
+        f.complete_as(a.id, 7, ActionState::Done, "w", false)
+            .unwrap();
+        let mut b = draft_action();
+        b.depends_on = vec![a.id];
+        let b = f.enqueue(b).unwrap();
+        // Age everything past the cutoff.
+        let mut snap = f.snapshot();
+        for x in snap.iter_mut() {
+            x.updated_at = 0;
+        }
+        f.restore(snap);
+        assert_eq!(f.prune_terminal_older_than(10), 0);
+        assert_eq!(f.readiness(&f.get(b.id).unwrap()), Readiness::Ready);
+        assert!(f.cascade_dep_failures().is_empty());
     }
 }
