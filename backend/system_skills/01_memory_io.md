@@ -66,3 +66,7 @@ labels: ["项目", "Epicode", "Rust", "技术架构", "服务器"]
 
 ### Drive→Action 桥
 有 grounding evidence 的 drive 信号可用 `drive_to_actions(drive_id)` 物化为 AgentAction（拒绝同一 drive 的双重占用）。`action_complete` 成功后会自动 `drive_ack`（仅 first_ack 计学习）。
+
+
+### 任务绑定
+`task_start` 可带 `action_id`：动作必须已被当前用户 `action_claim`。`task_complete` 成功时会把结果喂给 `action_complete`（写出 outcome 记忆）。

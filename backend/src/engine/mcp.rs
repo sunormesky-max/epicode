@@ -644,12 +644,13 @@ impl McpHandler {
                 },
                 {
                     "name": "task_start",
-                    "description": "Start a time-budgeted task. Pass parent_task_id to create a sub-task of a long-running master task (time tree: each sub-task runs its own phase machine). Returns time_sense (quality-gated historical median), knowledge cards, and similar experiences. P35: pass goal{objective, done_when[], stop_if[]} to activate the goal contract — completion = every done_when item has artifact-level evidence; vague goals without done_when get linted. S2: recommended_skills are SEMANTIC auto-matches for your task — read each description (when-to-use); if relevant fetch full content via skill_get, ignore otherwise.",
+                    "description": "Start a time-budgeted task. Optional action_id binds the task to a claimed Memory Action (task_complete feeds action_complete). Pass parent_task_id to create a sub-task of a long-running master task (time tree: each sub-task runs its own phase machine). Returns time_sense (quality-gated historical median), knowledge cards, and similar experiences. P35: pass goal{objective, done_when[], stop_if[]} to activate the goal contract — completion = every done_when item has artifact-level evidence; vague goals without done_when get linted. S2: recommended_skills are SEMANTIC auto-matches for your task — read each description (when-to-use); if relevant fetch full content via skill_get, ignore otherwise.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "description": { "type": "string", "description": "Task description (used to retrieve relevant history)" },
                             "budget_minutes": { "type": "integer", "description": "Time budget in minutes" },
+                            "action_id": { "type": "integer", "description": "Bind to a Claimed AgentAction (from action_claim / drive_to_actions). Rejects open/foreign/already-bound actions. Inherits done_when/stop_if into goal when goal omitted." },
                             "parent_task_id": { "type": "string", "description": "Master task id — pass this to create a sub-task (time tree). Sub-tasks run their own phase machine under the master budget." },
                             "client_time_ms": { "type": "integer", "description": "Your runtime host's current epoch-milliseconds — server detects clock drift (>2s warns) and anchors all time references to server_now" },
                             "est_minutes": { "type": "integer", "description": "YOUR OWN estimate (independent of budget) — replace human priors with your calibrated self-fingerprint (see time_sense.self_correction)" },
@@ -1934,6 +1935,60 @@ impl McpHandler {
                 .attach_task_parent(&task_id, &parent_task_id);
         }
 
+        // Memory Action Envelope: optional bind to a claimed action.
+        let mut bound_action: Option<serde_json::Value> = None;
+        let action_id_arg = args.get("action_id").and_then(|v| v.as_u64());
+        if let Some(aid) = action_id_arg {
+            match self.engine.scheduler.action_frontier().bind_task(
+                aid,
+                &task_id,
+                &self.engine.user_id,
+            ) {
+                Ok(a) => {
+                    // Persist reverse lookup for task_complete.
+                    let _ = self
+                        .engine
+                        .storage
+                        .save_drive_kv(&format!("task_action:{}", task_id), &aid.to_string());
+                    // Inherit done_when/stop_if into goal when caller omitted goal.done_when.
+                    let goal_empty_dw = args
+                        .get("goal")
+                        .and_then(|g| g.get("done_when"))
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.is_empty())
+                        .unwrap_or(true);
+                    if goal_empty_dw && !a.done_when.is_empty() {
+                        let mut g = args.get("goal").cloned().unwrap_or(serde_json::json!({}));
+                        if !g.is_object() {
+                            g = serde_json::json!({});
+                        }
+                        let obj = g.as_object_mut().unwrap();
+                        obj.insert("done_when".into(), serde_json::json!(a.done_when));
+                        if !obj.contains_key("stop_if") && !a.stop_if.is_empty() {
+                            obj.insert("stop_if".into(), serde_json::json!(a.stop_if));
+                        }
+                        if !obj.contains_key("objective") {
+                            obj.insert("objective".into(), serde_json::json!(a.summary));
+                        }
+                        // Stash for later goal persistence by rewriting args is impossible;
+                        // write goal json directly after session exists.
+                        let _ = self
+                            .engine
+                            .storage
+                            .set_task_goal_json(&task_id, &g.to_string());
+                    }
+                    self.engine.scheduler.save_action_frontier();
+                    bound_action = Some(a.to_json());
+                }
+                Err(e) => {
+                    // Roll back the just-created empty session? Keep session but fail start —
+                    // cleaner to fail before heavy work; session already created. Delete not available;
+                    // return 409 and leave orphan session (same as other early fails after create).
+                    return self.smrp_err("task_start", 409, &e);
+                }
+            }
+        }
+
         let kw: String = description
             .split_whitespace()
             .take(3)
@@ -2219,6 +2274,7 @@ impl McpHandler {
             "goal_contract": goal_contract,
             "goal_lint": goal_lint,
             "pulse_hint": pulse_hint,
+            "bound_action": bound_action,
             "skills_version": self.engine.skills.content_version(),
         });
         self.smrp_ok_nn("task_start", result)
@@ -2453,6 +2509,37 @@ impl McpHandler {
             }
             None => self.smrp_err("task_check", 404, "task not found"),
         }
+    }
+
+    /// If this task is bound to an AgentAction, complete it with the task outcome.
+    fn feed_bound_action_from_task(
+        &self,
+        task_id: &str,
+        outcome: &str,
+        success: bool,
+    ) -> Option<serde_json::Value> {
+        let aid = self
+            .engine
+            .storage
+            .load_drive_kv(&format!("task_action:{}", task_id))
+            .and_then(|s| s.parse::<u64>().ok())
+            .or_else(|| {
+                self.engine
+                    .scheduler
+                    .action_frontier()
+                    .find_by_task(task_id)
+                    .map(|a| a.id)
+            })?;
+        let complete_args = serde_json::json!({
+            "action_id": aid,
+            "outcome": if outcome.trim().is_empty() {
+                format!("task {} completed", task_id)
+            } else {
+                outcome.to_string()
+            },
+            "success": success,
+        });
+        Some(self.tool_action_complete(&complete_args))
     }
 
     fn tool_task_complete(&self, args: &serde_json::Value) -> serde_json::Value {
@@ -3078,7 +3165,7 @@ impl McpHandler {
                 } else {
                     serde_json::Value::Null
                 };
-                let result = serde_json::json!({
+                let mut result = serde_json::json!({
                     "task_id": task_id, "actual_ms": actual,
                     "clocks": {"wall_ms": actual, "active_ms": active_ms},
                     "server_now": Self::server_now_json(),
@@ -3101,6 +3188,13 @@ impl McpHandler {
                     "drive_evolution": format!("efficiency {}{} (stop={})", if reward > 0.0 { "+" } else { "" }, reward, stop_reason),
                     "proof": "最终交付物必须包含本 task_id — 用户可凭它 task_status 核验预算/相位/检查点全程",
                 });
+                if let Some(action_feed) =
+                    self.feed_bound_action_from_task(task_id, result_text, true)
+                {
+                    if let Some(obj) = result.as_object_mut() {
+                        obj.insert("bound_action_complete".into(), action_feed);
+                    }
+                }
                 self.smrp_ok_nn("task_complete", result)
             }
             None => self.smrp_err("task_complete", 404, "task not found"),
@@ -8421,5 +8515,64 @@ mod tests {
             .unwrap()
             .iter()
             .any(|a| a["id"] == action_id));
+    }
+
+    #[test]
+    fn task_start_action_id_requires_claim_and_feeds_complete() {
+        let handler = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&handler);
+
+        let mem = handler.tool_memory_create(&serde_json::json!({
+            "content": "Ship checklist requires changelog and smoke tests",
+            "labels": ["release"]
+        }));
+        assert_eq!(mem["protocol"]["ok"], true, "{mem}");
+
+        let proposed = handler.tool_memory_propose_actions(&serde_json::json!({
+            "query": "release checklist",
+            "limit": 1
+        }));
+        assert_eq!(proposed["protocol"]["ok"], true, "{proposed}");
+        let action_id = proposed["data"]["actions"][0]["id"].as_u64().unwrap();
+
+        // Reject unclaimed
+        let bad = handler.tool_task_start(&serde_json::json!({
+            "description": "do release",
+            "budget_minutes": 15,
+            "action_id": action_id
+        }));
+        assert_eq!(bad["protocol"]["ok"], false, "{bad}");
+        assert_eq!(bad["protocol"]["error"]["code"], 409);
+
+        handler.tool_action_claim(&serde_json::json!({
+            "action_id": action_id,
+            "claimed_by": handler.engine.user_id
+        }));
+
+        let start = handler.tool_task_start(&serde_json::json!({
+            "description": "do release",
+            "budget_minutes": 15,
+            "action_id": action_id
+        }));
+        // task_start uses smrp_ok_nn — still protocol.ok
+        assert_eq!(start["protocol"]["ok"], true, "{start}");
+        let task_id = start["data"]["task_id"].as_str().unwrap().to_string();
+        assert_eq!(start["data"]["bound_action"]["id"], action_id);
+
+        // Foreign claimer cannot bind — already bound to this task; second start with same action fails
+        let again = handler.tool_task_start(&serde_json::json!({
+            "description": "other",
+            "budget_minutes": 10,
+            "action_id": action_id
+        }));
+        assert_eq!(again["protocol"]["ok"], false, "{again}");
+
+        // Force-complete path: call feed via tool_action_complete through task_complete is heavy
+        // (stop negotiation). Directly verify bind + complete helper.
+        let fed = handler.feed_bound_action_from_task(&task_id, "changelog+smoke done", true);
+        let fed = fed.expect("feed");
+        assert_eq!(fed["protocol"]["ok"], true, "{fed}");
+        assert_eq!(fed["data"]["action"]["state"], "done");
+        assert_eq!(fed["data"]["action"]["bound_task_id"], task_id);
     }
 }

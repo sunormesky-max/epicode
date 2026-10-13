@@ -82,6 +82,9 @@ pub struct AgentAction {
     /// Drive signal that materialized this action (Drive→Action bridge). None for propose path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_drive_id: Option<u64>,
+    /// Task session bound via task_start(action_id). Cleared never — audit trail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_task_id: Option<String>,
     /// Origin tag: "propose" | "drive"
     #[serde(default = "default_origin")]
     pub origin: String,
@@ -108,6 +111,7 @@ impl AgentAction {
             "outcome_memory_id": self.outcome_memory_id,
             "source_query": self.source_query,
             "source_drive_id": self.source_drive_id,
+            "bound_task_id": self.bound_task_id,
             "origin": self.origin,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -267,6 +271,46 @@ impl ActionFrontier {
         v.sort_by_key(|a| std::cmp::Reverse(a.id));
         v
     }
+
+    /// Bind a claimed action to a task. Fails if not claimed by `claimer` or already bound.
+    pub fn bind_task(&self, id: u64, task_id: &str, claimer: &str) -> Result<AgentAction, String> {
+        let mut map = self.actions.lock();
+        let action = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("action {} not found", id))?;
+        if action.state != ActionState::Claimed {
+            return Err(format!(
+                "action {} must be claimed before task_start (state={:?})",
+                id, action.state
+            ));
+        }
+        match &action.claimed_by {
+            Some(who) if who == claimer => {}
+            Some(who) => {
+                return Err(format!(
+                    "action {} claimed by '{}', not '{}'",
+                    id, who, claimer
+                ))
+            }
+            None => return Err(format!("action {} has no claimed_by", id)),
+        }
+        if let Some(existing) = &action.bound_task_id {
+            if existing != task_id {
+                return Err(format!("action {} already bound to task {}", id, existing));
+            }
+        }
+        action.bound_task_id = Some(task_id.to_string());
+        action.updated_at = now_secs();
+        Ok(action.clone())
+    }
+
+    pub fn find_by_task(&self, task_id: &str) -> Option<AgentAction> {
+        self.actions
+            .lock()
+            .values()
+            .find(|a| a.bound_task_id.as_deref() == Some(task_id))
+            .cloned()
+    }
 }
 
 /// Build a single draft from a grounded drive signal description + evidence ids.
@@ -414,6 +458,7 @@ impl AgentActionDraft {
             outcome_memory_id: None,
             source_query: Some(source_query.to_string()),
             source_drive_id: None,
+            bound_task_id: None,
             origin: "propose".into(),
             created_at: now,
             updated_at: now,
@@ -496,5 +541,24 @@ mod tests {
         f.claim(a.id, "w").unwrap();
         f.complete(a.id, 1, ActionState::Done).unwrap();
         assert!(!f.has_live_drive(42));
+    }
+
+    #[test]
+    fn bind_task_rejects_unclaimed_and_foreign() {
+        let f = ActionFrontier::new();
+        let drafts = build_proposals("q", &[(1, "e".into())], &[], 1);
+        let a = f.enqueue(drafts[0].clone().into_action("q")).unwrap();
+        assert!(f
+            .bind_task(a.id, "ts_1", "alice")
+            .unwrap_err()
+            .contains("must be claimed"));
+        f.claim(a.id, "alice").unwrap();
+        assert!(f
+            .bind_task(a.id, "ts_1", "bob")
+            .unwrap_err()
+            .contains("claimed by"));
+        let bound = f.bind_task(a.id, "ts_1", "alice").unwrap();
+        assert_eq!(bound.bound_task_id.as_deref(), Some("ts_1"));
+        assert_eq!(f.find_by_task("ts_1").unwrap().id, a.id);
     }
 }
