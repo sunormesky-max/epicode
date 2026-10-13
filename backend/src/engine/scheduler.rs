@@ -1352,6 +1352,11 @@ impl SchedulerCenter {
     }
 
     pub fn save_action_frontier(&self) {
+        // Keep frontier bounded across restarts: drop terminal actions older than 7 days.
+        let pruned = self.action_frontier.prune_terminal_older_than(7 * 86400);
+        if pruned > 0 {
+            tracing::info!("[action] pruned {} stale terminal actions", pruned);
+        }
         let snap = self.action_frontier.snapshot();
         match serde_json::to_string(&snap) {
             Ok(js) => {
@@ -6616,6 +6621,25 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         }
                         Ok(EngineEvent::EnergyLow { remaining }) => {
                             tracing::warn!("[Scheduler] energy low: {:.1}", remaining);
+                        }
+                        Ok(EngineEvent::ActionOutcomeLanded {
+                            action_id,
+                            outcome_memory_id,
+                            state,
+                        }) => {
+                            // Wake path: outcome write-back is a stimulus for the next
+                            // deliberative/dream cadence (horizon + event log).
+                            self.horizon.lock().note_stimulus(0.55);
+                            self.log_event(format!(
+                                "action_outcome(id={}, mem={}, state={})",
+                                action_id, outcome_memory_id, state
+                            ));
+                            tracing::info!(
+                                "[action] outcome landed action={} memory={} state={}",
+                                action_id,
+                                outcome_memory_id,
+                                state
+                            );
                         }
                         Err(broadcast::error::RecvError::Closed) => {
                             tracing::info!("[Scheduler] event bus closed, persisting state");

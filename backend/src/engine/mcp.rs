@@ -6782,6 +6782,7 @@ impl McpHandler {
             serde_json::json!({
                 "actions": actions,
                 "open_count": self.engine.scheduler.action_frontier().open_count(),
+                "stats": self.engine.scheduler.action_frontier().stats(),
             }),
         )
     }
@@ -7037,6 +7038,13 @@ impl McpHandler {
         match frontier.complete(action_id, outcome_id, terminal) {
             Ok(done) => {
                 self.engine.scheduler.save_action_frontier();
+                self.engine
+                    .bus
+                    .publish(crate::engine::bus::EngineEvent::ActionOutcomeLanded {
+                        action_id,
+                        outcome_memory_id: outcome_id,
+                        state: done.state.as_str().to_string(),
+                    });
                 // Drive→Action: first successful complete acks the source drive (no double-spend of learning).
                 let mut drive_ack = serde_json::Value::Null;
                 if let Some(did) = done.source_drive_id {
@@ -8684,5 +8692,38 @@ mod tests {
         assert_eq!(ok["protocol"]["ok"], true, "{ok}");
         assert_eq!(ok["data"]["action"]["state"], "done");
         assert_eq!(ok["data"]["done_when_proven"], true);
+    }
+
+    #[test]
+    fn action_frontier_persists_across_restore() {
+        let dir = std::env::temp_dir().join(format!(
+            "epicode-action-persist-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let eng = Engine::with_data_dir(dir.clone());
+        let h = McpHandler::new(std::sync::Arc::new(eng));
+        confirm_test_identity(&h);
+        let _ = h.tool_memory_create(&serde_json::json!({
+            "content": "persist me for action frontier",
+            "labels": ["persist"]
+        }));
+        let proposed = h.tool_memory_propose_actions(&serde_json::json!({
+            "query": "persist",
+            "limit": 1
+        }));
+        assert_eq!(proposed["protocol"]["ok"], true, "{proposed}");
+        let aid = proposed["data"]["actions"][0]["id"].as_u64().unwrap();
+        h.engine.scheduler.save_action_frontier();
+        drop(h);
+
+        let eng2 = Engine::with_data_dir(dir);
+        eng2.scheduler.restore_action_frontier();
+        let restored = eng2.scheduler.action_frontier().get(aid);
+        assert!(restored.is_some(), "action {} should survive restart", aid);
+        assert_eq!(
+            restored.unwrap().state,
+            crate::engine::agent_action::ActionState::Open
+        );
     }
 }

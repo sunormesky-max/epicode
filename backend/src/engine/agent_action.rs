@@ -311,6 +311,42 @@ impl ActionFrontier {
             .find(|a| a.bound_task_id.as_deref() == Some(task_id))
             .cloned()
     }
+
+    /// Drop terminal actions older than `max_age_secs` (keeps open/claimed forever).
+    pub fn prune_terminal_older_than(&self, max_age_secs: i64) -> usize {
+        let cutoff = now_secs().saturating_sub(max_age_secs);
+        let mut map = self.actions.lock();
+        let before = map.len();
+        map.retain(|_, a| !(a.state.is_terminal() && a.updated_at < cutoff));
+        before.saturating_sub(map.len())
+    }
+
+    pub fn stats(&self) -> serde_json::Value {
+        let map = self.actions.lock();
+        let mut open = 0u64;
+        let mut claimed = 0u64;
+        let mut done = 0u64;
+        let mut blocked = 0u64;
+        let mut exhausted = 0u64;
+        for a in map.values() {
+            match a.state {
+                ActionState::Open => open += 1,
+                ActionState::Claimed => claimed += 1,
+                ActionState::Done => done += 1,
+                ActionState::Blocked => blocked += 1,
+                ActionState::Exhausted => exhausted += 1,
+            }
+        }
+        serde_json::json!({
+            "total": map.len(),
+            "open": open,
+            "claimed": claimed,
+            "done": done,
+            "blocked": blocked,
+            "exhausted": exhausted,
+            "non_terminal": open + claimed,
+        })
+    }
 }
 
 /// Build a single draft from a grounded drive signal description + evidence ids.
@@ -595,5 +631,21 @@ mod tests {
         assert_eq!(debts.len(), 1);
         assert!(debts[0].contains("done_when[1]"));
         assert!(prove_done_when(&["A".into()], &["artifact".into()]).is_empty());
+    }
+
+    #[test]
+    fn prune_keeps_live_drops_old_terminal() {
+        let f = ActionFrontier::new();
+        let drafts = build_proposals("q", &[(1, "e".into())], &[], 1);
+        let a = f.enqueue(drafts[0].clone().into_action("q")).unwrap();
+        f.claim(a.id, "w").unwrap();
+        f.complete(a.id, 9, ActionState::Done).unwrap();
+        // Force old updated_at
+        {
+            let mut map = f.actions.lock();
+            map.get_mut(&a.id).unwrap().updated_at = 1;
+        }
+        assert_eq!(f.prune_terminal_older_than(10), 1);
+        assert!(f.get(a.id).is_none());
     }
 }
