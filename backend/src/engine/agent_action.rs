@@ -58,6 +58,58 @@ impl ActionState {
     }
 }
 
+/// Why a claimed action stopped short of Done (PR-J failure taxonomy).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureKind {
+    /// External blip (provider 5xx, rate limit, network). Retry with backoff;
+    /// does NOT consume requeue budget and does not blame the worker.
+    Transient,
+    /// Ran out of steps/time — tried but unfinished. Consumes budget; no blacklist.
+    Exhausted,
+    /// Owner vanished (no heartbeat before lease_until). Consumes budget + blacklist.
+    LeaseExpired,
+    /// Real error / unproven done_when. Consumes budget + blacklist.
+    Blocked,
+}
+
+impl FailureKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FailureKind::Transient => "transient",
+            FailureKind::Exhausted => "exhausted",
+            FailureKind::LeaseExpired => "lease_expired",
+            FailureKind::Blocked => "blocked",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "transient" => Some(Self::Transient),
+            "exhausted" => Some(Self::Exhausted),
+            "lease_expired" => Some(Self::LeaseExpired),
+            "blocked" | "error" => Some(Self::Blocked),
+            _ => None,
+        }
+    }
+
+    /// Whether the responsible worker is put on the short blacklist.
+    pub fn blames_worker(self) -> bool {
+        matches!(self, FailureKind::Blocked | FailureKind::LeaseExpired)
+    }
+}
+
+/// Transient retries before a transient failure is treated as a real one.
+pub const MAX_TRANSIENT_RETRIES: u32 = 5;
+pub const TRANSIENT_BACKOFF_BASE_SECS: i64 = 30;
+pub const TRANSIENT_BACKOFF_MAX_SECS: i64 = 900;
+
+/// Exponential backoff: 30s, 60s, 120s, … capped at 15 min.
+pub fn transient_backoff_secs(attempt: u32) -> i64 {
+    let shift = attempt.saturating_sub(1).min(16);
+    (TRANSIENT_BACKOFF_BASE_SECS << shift).min(TRANSIENT_BACKOFF_MAX_SECS)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuggestedSkill {
     pub name: String,
@@ -93,6 +145,14 @@ pub struct AgentAction {
     pub lease_until: Option<i64>,
     #[serde(default)]
     pub requeue_count: u32,
+    /// Transient retries so far (separate from requeue budget).
+    #[serde(default)]
+    pub transient_retries: u32,
+    /// Backoff gate: not claimable/assignable before this unix sec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_before: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_failure_kind: Option<FailureKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_failure_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -143,6 +203,9 @@ impl AgentAction {
             "claimed_at": self.claimed_at,
             "lease_until": self.lease_until,
             "requeue_count": self.requeue_count,
+            "transient_retries": self.transient_retries,
+            "not_before": self.not_before,
+            "last_failure_kind": self.last_failure_kind.map(|k| k.as_str()),
             "last_failure_reason": self.last_failure_reason,
             "escalated": self.escalated,
             "lineage": {
@@ -242,6 +305,67 @@ impl ActionFrontier {
         action.lease_until = Some(now.saturating_add(self.lease_secs));
         action.updated_at = now;
         Ok(action.clone())
+    }
+
+    fn check_backoff(action: &AgentAction, now: i64) -> Result<(), String> {
+        match action.not_before {
+            Some(t) if now < t => Err(format!(
+                "action {} in transient backoff until {} ({}s left)",
+                action.id,
+                t,
+                t - now
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    /// True when an Open action is past any backoff window (dispatchable now).
+    pub fn is_ready(&self, a: &AgentAction) -> bool {
+        a.state == ActionState::Open && a.not_before.is_none_or(|t| self.now() >= t)
+    }
+
+    /// Transient failure: back to Open behind an exponential backoff gate.
+    /// Keeps requeue_count (budget) untouched and clears ownership so any capable
+    /// worker may retry after the window.
+    pub fn retry_transient(&self, id: u64, reason: &str) -> Result<AgentAction, String> {
+        let now = self.now();
+        let mut map = self.actions.lock();
+        let action = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("action {} not found", id))?;
+        if action.state == ActionState::Done {
+            return Err(format!("action {} is done — cannot retry", id));
+        }
+        action.transient_retries = action.transient_retries.saturating_add(1);
+        action.not_before =
+            Some(now.saturating_add(transient_backoff_secs(action.transient_retries)));
+        action.last_failure_kind = Some(FailureKind::Transient);
+        action.last_failure_reason = Some(reason.to_string());
+        action.last_responsible_assignee = action
+            .assignee
+            .clone()
+            .or_else(|| action.claimed_by.clone());
+        action.state = ActionState::Open;
+        action.claimed_by = None;
+        action.assignee = None;
+        action.assigned_at = None;
+        action.claimed_at = None;
+        action.lease_until = None;
+        action.updated_at = now;
+        Ok(action.clone())
+    }
+
+    pub fn set_failure_kind(&self, id: u64, kind: FailureKind) {
+        if let Some(a) = self.actions.lock().get_mut(&id) {
+            a.last_failure_kind = Some(kind);
+        }
+    }
+
+    #[cfg(test)]
+    pub fn clear_backoff_for_test(&self, id: u64) {
+        if let Some(a) = self.actions.lock().get_mut(&id) {
+            a.not_before = None;
+        }
     }
 
     /// Claimed actions whose lease deadline has passed.
@@ -355,6 +479,7 @@ impl ActionFrontier {
                 id, action.state
             ));
         }
+        Self::check_backoff(action, self.now())?;
         if let Some(a) = &action.assignee {
             if a != claimed_by {
                 return Err(format!(
@@ -391,6 +516,7 @@ impl ActionFrontier {
                 id, action.state
             ));
         }
+        Self::check_backoff(action, self.now())?;
         if let Some(a) = &action.assignee {
             return Err(format!("action {} already assigned to '{}'", id, a));
         }
@@ -799,6 +925,9 @@ impl AgentActionDraft {
             claimed_at: None,
             lease_until: None,
             requeue_count: 0,
+            transient_retries: 0,
+            not_before: None,
+            last_failure_kind: None,
             last_failure_reason: None,
             last_responsible_assignee: None,
             escalated: false,

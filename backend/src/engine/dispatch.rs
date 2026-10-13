@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::agent_action::{ActionFrontier, ActionState, AgentAction};
+use super::agent_action::{
+    ActionFrontier, ActionState, AgentAction, FailureKind, MAX_TRANSIENT_RETRIES,
+};
 
 fn now_secs() -> i64 {
     SystemTime::now()
@@ -196,7 +198,8 @@ pub fn dispatch_batch(
     let limit = limit.clamp(1, 20);
     let open = frontier.list(Some(ActionState::Open), 100);
     let mut out = Vec::new();
-    for action in open {
+    // Skip actions still inside a transient backoff window.
+    for action in open.into_iter().filter(|a| frontier.is_ready(a)) {
         if out.len() >= limit {
             break;
         }
@@ -221,29 +224,60 @@ pub const MAX_REQUEUES: u32 = 2;
 pub const DEFAULT_BLACKLIST_SECS: i64 = 60;
 
 /// On blocked/exhausted: requeue (clear ownership) or escalate. Returns action + disposition.
+/// Back-compat wrapper: classifies the failure as Blocked.
 pub fn account_failure(
     registry: &WorkerRegistry,
     frontier: &ActionFrontier,
     action_id: u64,
     reason: &str,
 ) -> Result<(AgentAction, &'static str), String> {
+    account_failure_kind(registry, frontier, action_id, FailureKind::Blocked, reason)
+}
+
+/// PR-I/PR-J accountability by failure kind:
+/// - Transient → `retry_backoff` (no budget, no blacklist) until MAX_TRANSIENT_RETRIES,
+///   then treated as Blocked.
+/// - Exhausted → requeue/escalate, budget consumed, worker NOT blacklisted.
+/// - LeaseExpired / Blocked → requeue/escalate, budget consumed, worker blacklisted.
+pub fn account_failure_kind(
+    registry: &WorkerRegistry,
+    frontier: &ActionFrontier,
+    action_id: u64,
+    kind: FailureKind,
+    reason: &str,
+) -> Result<(AgentAction, &'static str), String> {
     let action = frontier
         .get(action_id)
         .ok_or_else(|| format!("action {} not found", action_id))?;
+    let mut kind = kind;
+    if kind == FailureKind::Transient {
+        if action.transient_retries < MAX_TRANSIENT_RETRIES {
+            let a = frontier.retry_transient(action_id, reason)?;
+            return Ok((a, "retry_backoff"));
+        }
+        kind = FailureKind::Blocked;
+    }
     let responsible = action
         .assignee
         .clone()
         .or_else(|| action.claimed_by.clone());
-    if let Some(ref wid) = responsible {
-        registry.blacklist(wid, DEFAULT_BLACKLIST_SECS);
+    if kind.blames_worker() {
+        if let Some(ref wid) = responsible {
+            registry.blacklist(wid, DEFAULT_BLACKLIST_SECS);
+        }
     }
-    if action.requeue_count < MAX_REQUEUES {
-        let a = frontier.requeue(action_id, reason, 1)?;
-        Ok((a, "requeued"))
+    let res = if action.requeue_count < MAX_REQUEUES {
+        frontier
+            .requeue(action_id, reason, 1)
+            .map(|a| (a, "requeued"))
     } else {
-        let a = frontier.escalate(action_id, reason)?;
-        Ok((a, "escalated"))
-    }
+        frontier
+            .escalate(action_id, reason)
+            .map(|a| (a, "escalated"))
+    }?;
+    frontier.set_failure_kind(action_id, kind);
+    let a = frontier.get(action_id).unwrap_or(res.0);
+    Ok((a, res.1))
 }
 
 /// Failure reason recorded when a claim lease lapses without heartbeat/complete.
@@ -260,9 +294,15 @@ pub fn sweep_expired_leases(
         .expired_claims()
         .into_iter()
         .filter_map(|id| {
-            account_failure(registry, frontier, id, LEASE_EXPIRED_REASON)
-                .ok()
-                .map(|(_, d)| (id, d))
+            account_failure_kind(
+                registry,
+                frontier,
+                id,
+                FailureKind::LeaseExpired,
+                LEASE_EXPIRED_REASON,
+            )
+            .ok()
+            .map(|(_, d)| (id, d))
         })
         .collect()
 }
@@ -392,5 +432,77 @@ mod tests {
         let (_, w) = auto_assign(&reg, &restored, a.id).unwrap();
         assert_eq!(w.worker_id, "spare");
         assert!(sweep_expired_leases(&reg, &restored).is_empty());
+    }
+
+    fn one_action(f: &ActionFrontier) -> AgentAction {
+        f.enqueue(
+            build_proposals("job", &[(9, "x".into())], &[], 1)[0]
+                .clone()
+                .into_action("job"),
+        )
+        .unwrap()
+    }
+
+    /// PR-J: failure kinds have distinct budget/blame semantics.
+    #[test]
+    fn failure_kinds_budget_and_blame() {
+        use crate::engine::agent_action::{transient_backoff_secs, FailureKind};
+        use std::sync::atomic::{AtomicI64, Ordering};
+        use std::sync::Arc;
+        let t = Arc::new(AtomicI64::new(50_000));
+        let tc = t.clone();
+        let reg = WorkerRegistry::new();
+        reg.register("w", vec![], Some(5)).unwrap();
+        let f = ActionFrontier::with_clock(Arc::new(move || tc.load(Ordering::SeqCst)), 900);
+
+        // Transient: backoff gate, no budget, no blacklist; capped then real.
+        let a = one_action(&f);
+        for n in 1..=MAX_TRANSIENT_RETRIES {
+            f.claim(a.id, "w").unwrap();
+            let (x, d) =
+                account_failure_kind(&reg, &f, a.id, FailureKind::Transient, "503").unwrap();
+            assert_eq!(d, "retry_backoff");
+            assert_eq!(x.requeue_count, 0);
+            let now = t.load(Ordering::SeqCst);
+            assert_eq!(x.not_before, Some(now + transient_backoff_secs(n)));
+            assert!(
+                f.claim(a.id, "w").is_err(),
+                "claim inside backoff must fail"
+            );
+            assert!(
+                dispatch_batch(&reg, &f, 5).is_empty(),
+                "dispatch skips backoff"
+            );
+            t.store(x.not_before.unwrap(), Ordering::SeqCst);
+        }
+        assert!(reg.get("w").unwrap().blacklisted_until.is_none());
+        f.claim(a.id, "w").unwrap();
+        let (x, d) = account_failure_kind(&reg, &f, a.id, FailureKind::Transient, "503").unwrap();
+        assert_eq!(d, "requeued", "transient past cap counts as real failure");
+        assert_eq!(x.requeue_count, 1);
+        assert_eq!(x.last_failure_kind, Some(FailureKind::Blocked));
+        assert!(reg.get("w").unwrap().blacklisted_until.is_some());
+
+        // Exhausted: consumes budget, does not blacklist.
+        let reg2 = WorkerRegistry::new();
+        reg2.register("e", vec![], Some(5)).unwrap();
+        let b = one_action(&f);
+        f.claim(b.id, "e").unwrap();
+        let (y, d) =
+            account_failure_kind(&reg2, &f, b.id, FailureKind::Exhausted, "max_steps").unwrap();
+        assert_eq!(d, "requeued");
+        assert_eq!(y.requeue_count, 1);
+        assert_eq!(y.last_failure_kind, Some(FailureKind::Exhausted));
+        assert!(reg2.get("e").unwrap().blacklisted_until.is_none());
+    }
+
+    #[test]
+    fn transient_backoff_is_exponential_and_capped() {
+        use crate::engine::agent_action::transient_backoff_secs;
+        assert_eq!(transient_backoff_secs(1), 30);
+        assert_eq!(transient_backoff_secs(2), 60);
+        assert_eq!(transient_backoff_secs(3), 120);
+        assert_eq!(transient_backoff_secs(10), 900);
+        assert_eq!(transient_backoff_secs(40), 900);
     }
 }

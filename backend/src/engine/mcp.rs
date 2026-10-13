@@ -1304,6 +1304,7 @@ impl McpHandler {
                             "outcome": { "type": "string", "description": "What was delivered / learned (becomes a memory)" },
                             "done_when_evidence": { "type": "array", "items": { "type": "string" }, "description": "Parallel to action.done_when — artifact-level evidence per item" },
                             "claimed_by": { "type": "string", "description": "Worker label used at action_claim / action_assign (defaults to user id). Must match the assignee unless admin." },
+                            "failure_kind": { "type": "string", "enum": ["transient", "exhausted", "blocked"], "description": "Classify a non-done outcome. transient = external blip (provider/network/rate-limit): retried with exponential backoff, does NOT consume requeue budget or blame the worker (max 5, then counts as blocked). exhausted = ran out of steps/time: requeue budget consumed, worker not blacklisted. blocked = real error: budget consumed + short worker blacklist." },
                             "success": { "type": "boolean", "description": "true → state=done (default); false → blocked", "default": true },
                             "labels": { "type": "array", "items": { "type": "string" }, "description": "Extra labels for the outcome memory" },
                             "state": { "type": "string", "enum": ["done", "blocked", "exhausted"], "description": "Override terminal state" }
@@ -7248,6 +7249,31 @@ impl McpHandler {
             }
         };
 
+        // PR-J: optional failure classification for non-done outcomes.
+        let failure_kind = match args.get("failure_kind").and_then(|v| v.as_str()) {
+            Some(k) => match crate::engine::agent_action::FailureKind::parse(k) {
+                Some(fk) => Some(fk),
+                None => {
+                    return self.smrp_err(
+                        "action_complete",
+                        400,
+                        "failure_kind must be transient|exhausted|blocked",
+                    )
+                }
+            },
+            None => None,
+        };
+        let terminal = match failure_kind {
+            Some(crate::engine::agent_action::FailureKind::Transient)
+            | Some(crate::engine::agent_action::FailureKind::Blocked)
+            | Some(crate::engine::agent_action::FailureKind::LeaseExpired) => {
+                crate::engine::agent_action::ActionState::Blocked
+            }
+            Some(crate::engine::agent_action::FailureKind::Exhausted) => {
+                crate::engine::agent_action::ActionState::Exhausted
+            }
+            None => terminal,
+        };
         let dw_evidence: Vec<String> = args
             .get("done_when_evidence")
             .and_then(|v| v.as_array())
@@ -7360,16 +7386,26 @@ impl McpHandler {
                         .last_failure_reason
                         .clone()
                         .unwrap_or_else(|| format!("{:?}", done.state).to_lowercase());
-                    match crate::engine::dispatch::account_failure(
+                    let kind = failure_kind.unwrap_or(match done.state {
+                        crate::engine::agent_action::ActionState::Exhausted => {
+                            crate::engine::agent_action::FailureKind::Exhausted
+                        }
+                        _ => crate::engine::agent_action::FailureKind::Blocked,
+                    });
+                    match crate::engine::dispatch::account_failure_kind(
                         self.engine.scheduler.worker_registry(),
                         frontier,
                         action_id,
+                        kind,
                         &reason,
                     ) {
                         Ok((a, disposition)) => {
                             done = a;
                             accountability = serde_json::json!({
                                 "disposition": disposition,
+                                "failure_kind": done.last_failure_kind.map(|k| k.as_str()),
+                                "transient_retries": done.transient_retries,
+                                "not_before": done.not_before,
                                 "requeue_count": done.requeue_count,
                                 "escalated": done.escalated,
                                 "last_responsible_assignee": done.last_responsible_assignee,
@@ -9154,6 +9190,60 @@ mod tests {
         assert_eq!(card["schema"], "epicode.action_card");
         assert_eq!(card["schema_version"], 2);
         assert!(card["lineage"]["parents"].is_array());
+    }
+
+    /// PR-J: transient failures (provider/network) must not burn the requeue
+    /// budget nor blacklist the worker; they back off instead. Fails on #258:
+    /// three transient blips escalate the action to a human.
+    #[test]
+    fn transient_failures_back_off_without_consuming_requeue_budget() {
+        let handler = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&handler);
+        let _ = handler.tool_memory_create(&serde_json::json!({
+            "content": "flaky upstream evidence",
+            "labels": ["ops"]
+        }));
+        let p =
+            handler.tool_memory_propose_actions(&serde_json::json!({"query": "flaky", "limit": 1}));
+        let id = p["data"]["actions"][0]["id"].as_u64().unwrap();
+        for round in 0..3 {
+            let frontier = handler.engine.scheduler.action_frontier();
+            // Skip any backoff window so the same worker can retry immediately in-test.
+            frontier.clear_backoff_for_test(id);
+            let c = handler
+                .tool_action_claim(&serde_json::json!({"action_id": id, "claimed_by": "w1"}));
+            assert_eq!(c["protocol"]["ok"], true, "round {round}: {c}");
+            let r = handler.tool_action_complete(&serde_json::json!({
+                "action_id": id,
+                "outcome": "upstream 503",
+                "success": false,
+                "failure_kind": "transient",
+                "claimed_by": "w1"
+            }));
+            assert_eq!(r["protocol"]["ok"], true, "{r}");
+            assert_eq!(
+                r["data"]["accountability"]["disposition"], "retry_backoff",
+                "{r}"
+            );
+        }
+        let a = handler.engine.scheduler.action_frontier().get(id).unwrap();
+        assert_eq!(a.state.as_str(), "open");
+        assert_eq!(a.requeue_count, 0);
+        assert!(!a.escalated);
+        assert_eq!(a.transient_retries, 3);
+        assert!(a.not_before.is_some());
+        // Worker was not blacklisted for transient blips.
+        assert!(handler
+            .engine
+            .scheduler
+            .worker_registry()
+            .get("w1")
+            .map(|w| w.blacklisted_until.is_none())
+            .unwrap_or(true));
+        // Backoff window: claim before not_before is refused.
+        let early =
+            handler.tool_action_claim(&serde_json::json!({"action_id": id, "claimed_by": "w1"}));
+        assert_eq!(early["protocol"]["ok"], false, "{early}");
     }
 
     #[test]
