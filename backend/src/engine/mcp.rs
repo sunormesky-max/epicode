@@ -453,7 +453,8 @@ impl McpHandler {
             | "drive_to_actions"
             | "worker_register"
             | "action_assign"
-            | "action_dispatch" => Some(P::MemoryWrite),
+            | "action_dispatch"
+            | "action_planner_run" => Some(P::MemoryWrite),
             // Deletion, quarantine and restoration change protected memory state.
             "memory_delete" | "memory_forget" | "memory_restore" => Some(P::MemoryDelete),
             // Skill and library management.
@@ -1264,13 +1265,13 @@ impl McpHandler {
                 },
                 {
                     "name": "action_planner_status",
-                    "description": "Server-side planner pass (deterministic, no LLM): outcome wake triggers are coalesced (debounce) into one pass; a heartbeat pass runs even when idle. Reports ready/claimed/waiting counts and stall signals: no_eligible_worker (ready work, no capable/available worker), stalled (nothing ready, nothing running), escalated (needs human). New signals are also pushed to drive_inbox once. Pass run_now:true to force a pass.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "run_now": { "type": "boolean", "default": false }
-                        }
-                    }
+                    "description": "Server-side planner pass (deterministic, no LLM): outcome wake triggers are coalesced (debounce) into one pass; a heartbeat pass runs even when idle. Reports ready/claimed/waiting counts and stall signals: no_eligible_worker (ready work, no capable/available worker), stalled (nothing ready, nothing running), escalated (needs human). New signals are also pushed to drive_inbox once. Read-only: to force a pass use action_planner_run (write permission).",
+                    "inputSchema": { "type": "object", "properties": {} }
+                },
+                {
+                    "name": "action_planner_run",
+                    "description": "Force one planner pass now (write: may push new stall/escalation signals to drive_inbox, deduped). Returns the pass report.",
+                    "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
                     "name": "action_list",
@@ -1495,6 +1496,7 @@ impl McpHandler {
             | "worker_register"
             | "action_assign"
             | "action_dispatch"
+            | "action_planner_run"
             | "skill_feedback"
             | "feedback_submit"
             | "task_check" => (false, false, true, false),
@@ -1689,6 +1691,7 @@ impl McpHandler {
             "memory_propose_actions" => self.tool_memory_propose_actions(&args),
             "action_list" => self.tool_action_list(&args),
             "action_planner_status" => self.tool_action_planner_status(&args),
+            "action_planner_run" => self.tool_action_planner_run(&args),
             "action_claim" => self.tool_action_claim(&args),
             "action_heartbeat" => self.tool_action_heartbeat(&args),
             "action_complete" => self.tool_action_complete(&args),
@@ -1987,7 +1990,7 @@ impl McpHandler {
             "system_skill": {"name": "epicode-system", "version": Self::manual_version(&system_skill), "content": system_skill},
             "session_context": {"knowledge_cards": card_json, "identity": {"system": "Epicode"}},
             "action_tool_surface": {
-                "planner": ["memory_propose_actions", "drive_to_actions", "action_list", "action_planner_status"],
+                "planner": ["memory_propose_actions", "drive_to_actions", "action_list", "action_planner_status", "action_planner_run"],
                 "worker": ["action_claim", "action_heartbeat", "action_complete", "task_start", "task_complete", "skill_execute"],
                 "skill": "skill_get('动作角色分工')",
                 "rule": "Planner proposes; Worker claims+completes with outcome write-back",
@@ -6900,20 +6903,22 @@ impl McpHandler {
         )
     }
 
+    /// Read-only: never runs a pass (no drive side effects). `run_now` is ignored
+    /// for compatibility; use `action_planner_run` (write permission) instead.
     fn tool_action_planner_status(&self, args: &serde_json::Value) -> serde_json::Value {
-        let run_now = args
-            .get("run_now")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let report = if run_now {
-            serde_json::to_value(self.engine.scheduler.run_action_planner_pass_now())
-                .unwrap_or_default()
-        } else {
-            serde_json::Value::Null
-        };
         let mut status = self.engine.scheduler.planner_pass().status();
-        status["report"] = report;
+        if args.get("run_now").and_then(|v| v.as_bool()) == Some(true) {
+            status["note"] =
+                serde_json::json!("run_now moved to action_planner_run (write permission)");
+        }
         self.smrp_ok("action_planner_status", status)
+    }
+
+    fn tool_action_planner_run(&self, _args: &serde_json::Value) -> serde_json::Value {
+        let report = self.engine.scheduler.run_action_planner_pass_now();
+        let mut status = self.engine.scheduler.planner_pass().status();
+        status["report"] = serde_json::to_value(report).unwrap_or_default();
+        self.smrp_ok("action_planner_run", status)
     }
 
     fn tool_action_list(&self, args: &serde_json::Value) -> serde_json::Value {
@@ -7789,6 +7794,7 @@ mod tests {
             "worker_register",
             "action_assign",
             "action_dispatch",
+            "action_planner_run",
             "future_write_tool",
         ] {
             let response = h.handle(McpRequest {
@@ -7803,6 +7809,39 @@ mod tests {
                 "viewer must not call {name}"
             );
         }
+    }
+
+    /// #261 follow-up: a read-only caller must not be able to force a planner
+    /// pass (which can enqueue drive notifications). Fails on #261 150fe9d.
+    #[test]
+    fn viewer_planner_status_is_side_effect_free() {
+        use crate::engine::user_manager::UserRole;
+        let engine = Arc::new(isolated_engine());
+        confirm_test_identity(&McpHandler::new(Arc::clone(&engine)));
+        let h = McpHandler::new(engine).with_role_gate(UserRole::Viewer);
+        let call = |name: &str, args: serde_json::Value| {
+            h.handle(McpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(serde_json::json!(1)),
+                method: "tools/call".into(),
+                params: Some(serde_json::json!({"name": name, "arguments": args})),
+            })
+            .result
+            .unwrap()["structuredContent"]
+                .clone()
+        };
+        let st = call(
+            "action_planner_status",
+            serde_json::json!({"run_now": true}),
+        );
+        assert_eq!(st["protocol"]["ok"], true, "{st}");
+        assert_eq!(
+            h.engine.scheduler.planner_pass().status()["passes"],
+            0,
+            "{st}"
+        );
+        let run = call("action_planner_run", serde_json::json!({}));
+        assert_eq!(run["protocol"]["error"]["code"], 403, "{run}");
     }
 
     #[test]
