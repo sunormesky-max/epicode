@@ -56,6 +56,25 @@ pub enum MemoryOp {
         importance_floor: f64,
         mass_cap: f64,
     },
+    /// TTL/僵尸墓碑:仅当仍为活记忆(无 valid_to、非 enforced)且(可选)importance
+    /// 仍低于阈值时,设置 valid_to/invalidated_at 与墓碑 importance。
+    Tombstone {
+        at: i64,
+        importance: f64,
+        only_if_importance_below: Option<f64>,
+    },
+    /// 比较后设置:仅当 importance 仍等于评估时看到的值才写入(衰减不覆盖并发调整)。
+    CasImportance {
+        expect: f64,
+        set: f64,
+    },
+    /// importance = min(importance + delta, max)
+    AddImportance {
+        delta: f64,
+        max: f64,
+    },
+    /// access_count = 0
+    ResetAccessCount,
 }
 
 /// 在可变引用上应用一个操作,返回是否改变了状态。
@@ -128,6 +147,50 @@ pub fn apply_op(data: &mut MemoryPayload, mass: &mut f64, op: &MemoryOp) -> bool
             }
             data.importance = (data.importance * importance_factor).max(*importance_floor);
             apply_op(data, mass, &MemoryOp::CapMass(*mass_cap));
+            true
+        }
+        MemoryOp::Tombstone {
+            at,
+            importance,
+            only_if_importance_below,
+        } => {
+            if data.enforced || data.valid_to.is_some() {
+                return false;
+            }
+            if let Some(th) = only_if_importance_below {
+                if data.importance >= *th {
+                    return false;
+                }
+            }
+            data.valid_to = Some(*at);
+            if data.invalidated_at.is_none() {
+                data.invalidated_at = Some(*at);
+            }
+            data.importance = *importance;
+            true
+        }
+        MemoryOp::CasImportance { expect, set } => {
+            if (data.importance - expect).abs() > f64::EPSILON
+                || (data.importance - set).abs() <= f64::EPSILON
+            {
+                return false;
+            }
+            data.importance = *set;
+            true
+        }
+        MemoryOp::AddImportance { delta, max } => {
+            let n = (data.importance + delta).min(*max);
+            if (n - data.importance).abs() <= f64::EPSILON {
+                return false;
+            }
+            data.importance = n;
+            true
+        }
+        MemoryOp::ResetAccessCount => {
+            if data.access_count == 0 {
+                return false;
+            }
+            data.access_count = 0;
             true
         }
     }
@@ -205,5 +268,53 @@ mod tests {
             ),
             before
         );
+    }
+
+    #[test]
+    fn tombstone_and_cas_respect_current_state() {
+        let mut p = MemoryPayload {
+            importance: 0.1,
+            ..Default::default()
+        };
+        let mut m = 1.0;
+        let t = MemoryOp::Tombstone {
+            at: 7,
+            importance: 0.01,
+            only_if_importance_below: Some(0.15),
+        };
+        // 并发提升过 importance → 不再是僵尸,不墓碑
+        p.importance = 0.5;
+        assert!(!apply_op(&mut p, &mut m, &t));
+        p.importance = 0.1;
+        assert!(apply_op(&mut p, &mut m, &t));
+        assert_eq!(p.valid_to, Some(7));
+        assert_eq!(p.invalidated_at, Some(7));
+        assert!(!apply_op(&mut p, &mut m, &t), "idempotent");
+
+        let mut q = MemoryPayload {
+            importance: 0.9,
+            ..Default::default()
+        };
+        let cas = MemoryOp::CasImportance {
+            expect: 1.0,
+            set: 0.4,
+        };
+        assert!(!apply_op(&mut q, &mut m, &cas), "stale expectation skipped");
+        q.importance = 1.0;
+        assert!(apply_op(&mut q, &mut m, &cas));
+        assert_eq!(q.importance, 0.4);
+
+        assert!(apply_op(
+            &mut q,
+            &mut m,
+            &MemoryOp::AddImportance {
+                delta: 5.0,
+                max: 3.5
+            }
+        ));
+        assert_eq!(q.importance, 3.5);
+        q.access_count = 4;
+        assert!(apply_op(&mut q, &mut m, &MemoryOp::ResetAccessCount));
+        assert!(!apply_op(&mut q, &mut m, &MemoryOp::ResetAccessCount));
     }
 }
