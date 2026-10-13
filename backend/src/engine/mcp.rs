@@ -457,7 +457,8 @@ impl McpHandler {
             | "action_dispatch"
             | "action_planner_run"
             | "action_goal_create"
-            | "action_goal_prove" => Some(P::MemoryWrite),
+            | "action_goal_prove"
+            | "action_control" => Some(P::MemoryWrite),
             // Deletion, quarantine and restoration change protected memory state.
             "memory_delete" | "memory_forget" | "memory_restore" => Some(P::MemoryDelete),
             // Skill and library management.
@@ -1273,6 +1274,15 @@ impl McpHandler {
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
+                    "name": "action_control",
+                    "description": "Planner control of a running action. op=steer (queue a course-correction note; worker receives it once in action_heartbeat.directives.steer), pause (claimed action holds: lease does not expire, not counted as active load, complete refused), resume (fresh lease), stop (terminal 'stopped' — NOT a failure: no requeue/blacklist/escalation; worker sees directives.stop=true on heartbeat; late outcomes rejected and write no memory).",
+                    "inputSchema": { "type": "object", "properties": {
+                        "action_id": { "type": "integer" },
+                        "op": { "type": "string", "enum": ["steer", "pause", "resume", "stop"] },
+                        "note": { "type": "string", "description": "Steer text (required for steer) / stop reason" }
+                    }, "required": ["action_id", "op"] }
+                },
+                {
                     "name": "action_goal_create",
                     "description": "Create a goal that groups actions (pass goal_id to memory_propose_actions). done_when = goal-level completion criteria.",
                     "inputSchema": { "type": "object", "properties": {
@@ -1525,6 +1535,7 @@ impl McpHandler {
             | "action_planner_run"
             | "action_goal_create"
             | "action_goal_prove"
+            | "action_control"
             | "skill_feedback"
             | "feedback_submit"
             | "task_check" => (false, false, true, false),
@@ -1723,6 +1734,7 @@ impl McpHandler {
             "action_goal_create" => self.tool_action_goal_create(&args),
             "action_goal_prove" => self.tool_action_goal_prove(&args),
             "action_goal_list" => self.tool_action_goal_list(&args),
+            "action_control" => self.tool_action_control(&args),
             "action_claim" => self.tool_action_claim(&args),
             "action_heartbeat" => self.tool_action_heartbeat(&args),
             "action_complete" => self.tool_action_complete(&args),
@@ -2021,7 +2033,7 @@ impl McpHandler {
             "system_skill": {"name": "epicode-system", "version": Self::manual_version(&system_skill), "content": system_skill},
             "session_context": {"knowledge_cards": card_json, "identity": {"system": "Epicode"}},
             "action_tool_surface": {
-                "planner": ["memory_propose_actions", "drive_to_actions", "action_list", "action_planner_status", "action_planner_run", "action_goal_create", "action_goal_prove", "action_goal_list"],
+                "planner": ["memory_propose_actions", "drive_to_actions", "action_list", "action_planner_status", "action_planner_run", "action_goal_create", "action_goal_prove", "action_goal_list", "action_control"],
                 "worker": ["action_claim", "action_heartbeat", "action_complete", "task_start", "task_complete", "skill_execute"],
                 "skill": "skill_get('动作角色分工')",
                 "rule": "Planner proposes; Worker claims+completes with outcome write-back",
@@ -6952,6 +6964,39 @@ impl McpHandler {
         self.smrp_ok("action_planner_status", status)
     }
 
+    fn tool_action_control(&self, args: &serde_json::Value) -> serde_json::Value {
+        let id = match args.get("action_id").and_then(|v| v.as_u64()) {
+            Some(i) => i,
+            None => return self.smrp_err("action_control", 400, "action_id is required"),
+        };
+        let op = args.get("op").and_then(|v| v.as_str()).unwrap_or("");
+        let note = args.get("note").and_then(|v| v.as_str()).unwrap_or("");
+        let frontier = self.engine.scheduler.action_frontier();
+        let res = match op {
+            "steer" => frontier.steer(id, note),
+            "pause" => frontier.set_paused(id, true),
+            "resume" => frontier.set_paused(id, false),
+            "stop" => frontier.stop(id, note).inspect(|_| {
+                // Dependents of stopped work cannot proceed.
+                frontier.cascade_dep_failures();
+            }),
+            _ => return self.smrp_err("action_control", 400, "op must be steer|pause|resume|stop"),
+        };
+        match res {
+            Ok(a) => {
+                self.engine.scheduler.save_action_frontier();
+                self.smrp_ok(
+                    "action_control",
+                    serde_json::json!({"op": op, "action": frontier.card(&a)}),
+                )
+            }
+            Err(e) => {
+                let code = if e.contains("not found") { 404 } else { 409 };
+                self.smrp_err("action_control", code, &e)
+            }
+        }
+    }
+
     fn tool_action_goal_create(&self, args: &serde_json::Value) -> serde_json::Value {
         let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("");
         let dw: Vec<String> = args
@@ -7085,11 +7130,12 @@ impl McpHandler {
             .and_then(|v| v.as_str())
             .unwrap_or(self.engine.user_id.as_str());
         let frontier = self.engine.scheduler.action_frontier();
-        match frontier.renew_lease(action_id, actor) {
-            Ok(a) => {
+        match frontier.heartbeat(action_id, actor) {
+            Ok((a, directives)) => {
                 self.engine.scheduler.save_action_frontier();
                 let mut js = a.to_json();
                 js["lease_secs"] = serde_json::json!(frontier.lease_secs());
+                js["directives"] = directives;
                 self.smrp_ok("action_heartbeat", js)
             }
             Err(e) => {
@@ -7407,7 +7453,18 @@ impl McpHandler {
             return self.smrp_err(
                 "action_complete",
                 409,
-                &format!("action {} already terminal", action_id),
+                &format!(
+                    "action {} already terminal ({})",
+                    action_id,
+                    action.state.as_str()
+                ),
+            );
+        }
+        if action.paused {
+            return self.smrp_err(
+                "action_complete",
+                409,
+                &format!("action {} is paused — resume before completing", action_id),
             );
         }
 
@@ -7558,6 +7615,8 @@ impl McpHandler {
         }
 
         let is_admin = self.is_admin_actor();
+        #[cfg(test)]
+        run_before_complete_transition_hook();
         match frontier.complete_as(action_id, outcome_id, terminal, &actor, is_admin) {
             Ok(done) => {
                 let mut done = done;
@@ -7670,12 +7729,38 @@ impl McpHandler {
                 // The outcome memory was written before the frontier transition;
                 // if the transition lost (cancelled/terminal in between), remove it
                 // so a late/raced outcome never pollutes memory.
-                let _ = self.engine.scheduler.api_delete_memory(outcome_id);
+                // Hard purge (not soft forget): a forgotten tombstone is still a memory.
+                let _ = self.engine.scheduler.api_purge_memory(outcome_id);
                 let code = if e.contains("ownership") { 403 } else { 409 };
                 self.smrp_err("action_complete", code, &e)
             }
         }
     }
+}
+
+#[cfg(test)]
+type TransitionHook = Box<dyn Fn()>;
+
+#[cfg(test)]
+thread_local! {
+    /// Test seam: runs between outcome-memory write and frontier transition in
+    /// action_complete, to make the cancel/stop race deterministic.
+    static BEFORE_COMPLETE_TRANSITION: std::cell::RefCell<Option<TransitionHook>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_before_complete_transition_hook(h: Option<TransitionHook>) {
+    BEFORE_COMPLETE_TRANSITION.with(|c| *c.borrow_mut() = h);
+}
+
+#[cfg(test)]
+fn run_before_complete_transition_hook() {
+    BEFORE_COMPLETE_TRANSITION.with(|c| {
+        if let Some(f) = c.borrow().as_ref() {
+            f();
+        }
+    });
 }
 
 #[cfg(test)]
@@ -7925,6 +8010,7 @@ mod tests {
             "action_assign",
             "action_dispatch",
             "action_planner_run",
+            "action_control",
             "future_write_tool",
         ] {
             let response = h.handle(McpRequest {
@@ -9688,6 +9774,148 @@ mod tests {
             .cloned()
             .unwrap();
         assert_eq!(g2s["state"], "closed", "{gl}");
+    }
+
+    /// PR-N: planner steers/pauses/stops a running action; the worker learns via
+    /// heartbeat. Fails on #262: no action_control tool, heartbeat has no directives.
+    #[test]
+    fn planner_controls_running_action_via_heartbeat() {
+        let h = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&h);
+        let _ = h.tool_memory_create(
+            &serde_json::json!({"content": "control evidence", "labels": ["ops"]}),
+        );
+        h.tool_worker_register(&serde_json::json!({"worker_id": "w", "max_load": 1}));
+        let p = h.tool_memory_propose_actions(
+            &serde_json::json!({"query": "control evidence", "limit": 1}),
+        );
+        let id = p["data"]["actions"][0]["id"].as_u64().unwrap();
+        assert_eq!(
+            h.tool_action_claim(&serde_json::json!({"action_id": id, "claimed_by": "w"}))
+                ["protocol"]["ok"],
+            true
+        );
+
+        let st = call_tool(
+            &h,
+            "action_control",
+            serde_json::json!({"action_id": id, "op": "steer", "note": "focus on rollback path"}),
+        );
+        assert_eq!(st["protocol"]["ok"], true, "{st}");
+        let hb = h.tool_action_heartbeat(&serde_json::json!({"action_id": id, "claimed_by": "w"}));
+        assert_eq!(
+            hb["data"]["directives"]["steer"][0], "focus on rollback path",
+            "{hb}"
+        );
+        let hb2 = h.tool_action_heartbeat(&serde_json::json!({"action_id": id, "claimed_by": "w"}));
+        assert_eq!(
+            hb2["data"]["directives"]["steer"],
+            serde_json::json!([]),
+            "steer delivered once: {hb2}"
+        );
+
+        // Pause: not active load, lease does not expire, complete refused.
+        let pa = call_tool(
+            &h,
+            "action_control",
+            serde_json::json!({"action_id": id, "op": "pause"}),
+        );
+        assert_eq!(pa["protocol"]["ok"], true, "{pa}");
+        let reg = h.engine.scheduler.worker_registry();
+        assert_eq!(
+            crate::engine::dispatch::WorkerRegistry::load_of(
+                h.engine.scheduler.action_frontier(),
+                "w"
+            ),
+            0
+        );
+        let _ = reg;
+        let hb3 = h.tool_action_heartbeat(&serde_json::json!({"action_id": id, "claimed_by": "w"}));
+        assert_eq!(hb3["data"]["directives"]["paused"], true, "{hb3}");
+        let early = h.tool_action_complete(
+            &serde_json::json!({"action_id": id, "outcome": "x", "claimed_by": "w"}),
+        );
+        assert_eq!(
+            early["protocol"]["ok"], false,
+            "paused cannot complete: {early}"
+        );
+        let rs = call_tool(
+            &h,
+            "action_control",
+            serde_json::json!({"action_id": id, "op": "resume"}),
+        );
+        assert_eq!(rs["protocol"]["ok"], true, "{rs}");
+
+        // Stop: terminal non-failure, worker told via heartbeat, late outcome rejected w/o memory.
+        let sp = call_tool(
+            &h,
+            "action_control",
+            serde_json::json!({"action_id": id, "op": "stop", "note": "direction obsolete"}),
+        );
+        assert_eq!(sp["protocol"]["ok"], true, "{sp}");
+        let a = h.engine.scheduler.action_frontier().get(id).unwrap();
+        assert_eq!(a.state.as_str(), "stopped");
+        assert_eq!(a.requeue_count, 0);
+        assert!(!a.escalated);
+        let hb4 = h.tool_action_heartbeat(&serde_json::json!({"action_id": id, "claimed_by": "w"}));
+        assert_eq!(hb4["protocol"]["ok"], true, "{hb4}");
+        assert_eq!(hb4["data"]["directives"]["stop"], true, "{hb4}");
+        let before = h.engine.space.tetra_count();
+        let late = h.tool_action_complete(
+            &serde_json::json!({"action_id": id, "outcome": "late", "claimed_by": "w"}),
+        );
+        assert_eq!(late["protocol"]["ok"], false, "{late}");
+        assert_eq!(h.engine.space.tetra_count(), before);
+        // Viewer cannot control.
+        let v = McpHandler::new(Arc::clone(&h.engine))
+            .with_role_gate(crate::engine::user_manager::UserRole::Viewer);
+        let denied = call_tool(
+            &v,
+            "action_control",
+            serde_json::json!({"action_id": id, "op": "stop"}),
+        );
+        assert_eq!(denied["protocol"]["error"]["code"], 403, "{denied}");
+    }
+
+    /// #262 race, made deterministic: the action is cancelled AFTER the outcome
+    /// memory is written but BEFORE the frontier transition. The raced outcome
+    /// must not survive as an orphan memory.
+    #[test]
+    fn raced_cancel_leaves_no_orphan_outcome_memory() {
+        let h = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&h);
+        let _ = h.tool_memory_create(
+            &serde_json::json!({"content": "race evidence", "labels": ["ops"]}),
+        );
+        let g = call_tool(
+            &h,
+            "action_goal_create",
+            serde_json::json!({"title": "race", "done_when": ["x"]}),
+        );
+        let gid = g["data"]["goal"]["id"].as_u64().unwrap();
+        let p = h.tool_memory_propose_actions(
+            &serde_json::json!({"query": "race evidence", "limit": 1, "goal_id": gid}),
+        );
+        let card = p["data"]["actions"][0].clone();
+        let id = card["id"].as_u64().unwrap();
+        h.tool_action_claim(&serde_json::json!({"action_id": id, "claimed_by": "w"}));
+        let before = h.engine.space.tetra_count();
+        let frontier = std::sync::Arc::clone(h.engine.scheduler.action_frontier());
+        set_before_complete_transition_hook(Some(Box::new(move || {
+            frontier
+                .prove_goal(gid, vec!["done elsewhere".into()])
+                .unwrap();
+        })));
+        let r = h.tool_action_complete(&serde_json::json!({
+            "action_id": id, "outcome": "raced", "claimed_by": "w", "done_when_evidence": evid_for(&card)
+        }));
+        set_before_complete_transition_hook(None);
+        assert_eq!(r["protocol"]["ok"], false, "{r}");
+        assert_eq!(
+            h.engine.space.tetra_count(),
+            before,
+            "orphan outcome memory leaked"
+        );
     }
 
     #[test]

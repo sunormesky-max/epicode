@@ -208,6 +208,8 @@ impl PlannerPass {
             match a.state {
                 ActionState::Open if frontier.is_ready(a) => ready_ids.push(a.id),
                 ActionState::Open => waiting_ids.push(a.id),
+                // Deliberately paused by the planner: neither running nor stuck.
+                ActionState::Claimed if a.paused => {}
                 ActionState::Claimed if frontier.holds_live_claim(a) => claimed += 1,
                 ActionState::Claimed => waiting_ids.push(a.id), // expired, awaiting sweep
                 _ => {}
@@ -410,5 +412,17 @@ mod tests {
                 action_ids: vec![a, b]
             }]
         );
+    }
+
+    #[test]
+    fn paused_only_frontier_is_not_stalled() {
+        let (_t, c) = clock();
+        let pp = PlannerPass::new(c.clone(), 0, 1);
+        let f = ActionFrontier::with_clock(c, 900);
+        let reg = WorkerRegistry::new();
+        let a = act(&f);
+        f.claim(a, "w").unwrap();
+        f.set_paused(a, true).unwrap();
+        assert!(pp.run(PassReason::Manual, &f, &reg).signals.is_empty());
     }
 }

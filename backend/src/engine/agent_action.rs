@@ -28,6 +28,8 @@ pub enum ActionState {
     Exhausted,
     /// Goal achieved before this action finished — terminal, NOT a failure.
     Cancelled,
+    /// Planner stopped it mid-flight — terminal, NOT a failure.
+    Stopped,
 }
 
 impl ActionState {
@@ -39,6 +41,7 @@ impl ActionState {
             ActionState::Blocked => "blocked",
             ActionState::Exhausted => "exhausted",
             ActionState::Cancelled => "cancelled",
+            ActionState::Stopped => "stopped",
         }
     }
 
@@ -50,6 +53,7 @@ impl ActionState {
             "blocked" => Some(Self::Blocked),
             "exhausted" => Some(Self::Exhausted),
             "cancelled" => Some(Self::Cancelled),
+            "stopped" => Some(Self::Stopped),
             _ => None,
         }
     }
@@ -61,7 +65,13 @@ impl ActionState {
                 | ActionState::Blocked
                 | ActionState::Exhausted
                 | ActionState::Cancelled
+                | ActionState::Stopped
         )
+    }
+
+    /// Terminal without being a failure (no budget/blame/escalation).
+    pub fn is_non_failure_stop(self) -> bool {
+        matches!(self, ActionState::Cancelled | ActionState::Stopped)
     }
 }
 
@@ -230,6 +240,15 @@ pub struct AgentAction {
     /// Upstream action ids that must be Done before this one is claimable.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<u64>,
+    /// Planner paused this claimed action (PR-N): no lease expiry, not active load,
+    /// complete refused until resume.
+    #[serde(default)]
+    pub paused: bool,
+    /// Steer notes queued by the planner, delivered once via heartbeat.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steer_pending: Vec<String>,
+    #[serde(default)]
+    pub steer_delivered: u32,
     /// Goal this action serves (PR-M).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal_id: Option<u64>,
@@ -292,6 +311,8 @@ impl AgentAction {
             "requeue_count": self.requeue_count,
             "depends_on": self.depends_on,
             "goal_id": self.goal_id,
+            "paused": self.paused,
+            "steer_pending": self.steer_pending.len(),
             "transient_retries": self.transient_retries,
             "not_before": self.not_before,
             "last_failure_kind": self.last_failure_kind.map(|k| k.as_str()),
@@ -371,6 +392,128 @@ impl ActionFrontier {
     fn start_lease(&self, action: &mut AgentAction, now: i64) {
         action.claimed_at = Some(now);
         action.lease_until = Some(now.saturating_add(self.lease_secs));
+    }
+
+    // ---- Planner control (PR-N) -------------------------------------------
+
+    /// Queue a steer note for a running (claimed) action.
+    pub fn steer(&self, id: u64, note: &str) -> Result<AgentAction, String> {
+        let note = note.trim();
+        if note.is_empty() {
+            return Err("steer note is required".into());
+        }
+        let now = self.now();
+        let mut map = self.actions.lock();
+        let a = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("action {} not found", id))?;
+        if a.state != ActionState::Claimed {
+            return Err(format!(
+                "action {} is {}, expected claimed",
+                id,
+                a.state.as_str()
+            ));
+        }
+        if a.steer_pending.len() >= 16 {
+            return Err(format!("action {} has 16 undelivered steer notes", id));
+        }
+        a.steer_pending.push(note.chars().take(2000).collect());
+        a.updated_at = now;
+        Ok(a.clone())
+    }
+
+    pub fn set_paused(&self, id: u64, paused: bool) -> Result<AgentAction, String> {
+        let now = self.now();
+        let mut map = self.actions.lock();
+        let a = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("action {} not found", id))?;
+        if a.state != ActionState::Claimed {
+            return Err(format!(
+                "action {} is {}, expected claimed",
+                id,
+                a.state.as_str()
+            ));
+        }
+        if a.paused == paused {
+            return Err(format!(
+                "action {} already {}",
+                id,
+                if paused { "paused" } else { "running" }
+            ));
+        }
+        a.paused = paused;
+        if !paused {
+            // Fresh lease on resume: paused time never counts against the worker.
+            a.lease_until = Some(now.saturating_add(self.lease_secs));
+        }
+        a.updated_at = now;
+        Ok(a.clone())
+    }
+
+    /// Stop a live action: terminal `stopped`, not a failure. Keeps assignee for audit.
+    pub fn stop(&self, id: u64, note: &str) -> Result<AgentAction, String> {
+        let now = self.now();
+        let mut map = self.actions.lock();
+        let a = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("action {} not found", id))?;
+        if a.state.is_terminal() {
+            return Err(format!("action {} already {}", id, a.state.as_str()));
+        }
+        a.state = ActionState::Stopped;
+        a.paused = false;
+        a.last_failure_reason = Some(format!("stopped:{}", note.trim()));
+        a.lease_until = None;
+        a.not_before = None;
+        a.updated_at = now;
+        Ok(a.clone())
+    }
+
+    /// Worker heartbeat with directives. Owner only. For a live claim it renews the
+    /// lease (unless paused) and drains steer notes; for a stopped/cancelled action
+    /// the owner still gets an OK reply carrying `stop:true` so it can halt.
+    pub fn heartbeat(
+        &self,
+        id: u64,
+        actor: &str,
+    ) -> Result<(AgentAction, serde_json::Value), String> {
+        let now = self.now();
+        let mut map = self.actions.lock();
+        let a = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("action {} not found", id))?;
+        let owner = a.assignee.as_deref().or(a.claimed_by.as_deref());
+        if owner != Some(actor) {
+            return Err(format!(
+                "action {} owned by '{}'; '{}' cannot heartbeat (ownership)",
+                id,
+                owner.unwrap_or("-"),
+                actor
+            ));
+        }
+        let stop = a.state.is_non_failure_stop();
+        if !stop && a.state != ActionState::Claimed {
+            return Err(format!(
+                "action {} is {}, expected claimed",
+                id,
+                a.state.as_str()
+            ));
+        }
+        let steer: Vec<String> = std::mem::take(&mut a.steer_pending);
+        a.steer_delivered = a.steer_delivered.saturating_add(steer.len() as u32);
+        if !stop && !a.paused {
+            a.lease_until = Some(now.saturating_add(self.lease_secs));
+        }
+        a.updated_at = now;
+        let directives = serde_json::json!({
+            "stop": stop,
+            "stop_reason": if stop { a.last_failure_reason.clone() } else { None },
+            "paused": a.paused,
+            "steer": steer,
+            "honor": "stop → halt and do not complete; paused → hold work and keep heartbeating; steer → apply before next step",
+        });
+        Ok((a.clone(), directives))
     }
 
     /// Owner heartbeat: extend the lease of a Claimed action.
@@ -717,7 +860,7 @@ impl ActionFrontier {
         let action = map
             .get_mut(&id)
             .ok_or_else(|| format!("action {} not found", id))?;
-        if matches!(action.state, ActionState::Done | ActionState::Cancelled) {
+        if action.state == ActionState::Done || action.state.is_non_failure_stop() {
             return Err(format!(
                 "action {} is {} — cannot retry",
                 id,
@@ -770,12 +913,12 @@ impl ActionFrontier {
     }
 
     fn lease_expired(a: &AgentAction, now: i64) -> bool {
-        a.lease_until.map(|t| t < now).unwrap_or(false)
+        !a.paused && a.lease_until.map(|t| t < now).unwrap_or(false)
     }
 
     /// True when the action is Claimed and its lease is still live (counts as load).
     pub fn holds_live_claim(&self, a: &AgentAction) -> bool {
-        a.state == ActionState::Claimed && !Self::lease_expired(a, self.now())
+        a.state == ActionState::Claimed && !a.paused && !Self::lease_expired(a, self.now())
     }
 
     pub fn snapshot(&self) -> Vec<AgentAction> {
@@ -953,6 +1096,12 @@ impl ActionFrontier {
                 id, action.state
             ));
         }
+        if action.paused {
+            return Err(format!(
+                "action {} is paused — resume before completing",
+                id
+            ));
+        }
         let owner = action.assignee.as_deref().or(action.claimed_by.as_deref());
         if let Some(owner) = owner {
             if owner != actor && !is_admin {
@@ -981,7 +1130,7 @@ impl ActionFrontier {
         if action.state == ActionState::Open {
             return Err(format!("action {} is already open", id));
         }
-        if matches!(action.state, ActionState::Done | ActionState::Cancelled) {
+        if action.state == ActionState::Done || action.state.is_non_failure_stop() {
             return Err(format!(
                 "action {} is {} — cannot requeue",
                 id,
@@ -1140,7 +1289,12 @@ impl ActionFrontier {
         let mut blocked = 0u64;
         let mut exhausted = 0u64;
         let mut cancelled = 0u64;
+        let mut stopped = 0u64;
+        let mut paused = 0u64;
         for a in map.values() {
+            if a.paused {
+                paused += 1;
+            }
             match a.state {
                 ActionState::Open => open += 1,
                 ActionState::Claimed => claimed += 1,
@@ -1148,6 +1302,7 @@ impl ActionFrontier {
                 ActionState::Blocked => blocked += 1,
                 ActionState::Exhausted => exhausted += 1,
                 ActionState::Cancelled => cancelled += 1,
+                ActionState::Stopped => stopped += 1,
             }
         }
         serde_json::json!({
@@ -1158,6 +1313,8 @@ impl ActionFrontier {
             "blocked": blocked,
             "exhausted": exhausted,
             "cancelled": cancelled,
+            "stopped": stopped,
+            "paused": paused,
             "non_terminal": open + claimed,
         })
     }
@@ -1341,6 +1498,9 @@ impl AgentActionDraft {
             requeue_count: 0,
             depends_on: Vec::new(),
             goal_id: None,
+            paused: false,
+            steer_pending: Vec::new(),
+            steer_delivered: 0,
             transient_retries: 0,
             not_before: None,
             last_failure_kind: None,
@@ -1692,5 +1852,32 @@ mod tests {
         assert!(f.maybe_close_goal(g.id));
         assert_eq!(f.goal(g.id).unwrap().state, GoalState::Closed);
         assert!(!f.maybe_close_goal(g.id), "idempotent");
+    }
+
+    /// PR-N: paused claims never expire nor count as live load; resume re-leases.
+    #[test]
+    fn paused_claim_skips_lease_and_load() {
+        use std::sync::atomic::AtomicI64;
+        let t = Arc::new(AtomicI64::new(100));
+        let tc = t.clone();
+        let f = ActionFrontier::with_clock(Arc::new(move || tc.load(Ordering::SeqCst)), 50);
+        let a = f.enqueue(draft_action()).unwrap();
+        f.claim(a.id, "w").unwrap();
+        f.set_paused(a.id, true).unwrap();
+        assert!(!f.holds_live_claim(&f.get(a.id).unwrap()));
+        t.store(10_000, Ordering::SeqCst);
+        assert!(f.expired_claims().is_empty(), "paused never expires");
+        assert!(f
+            .complete_as(a.id, 1, ActionState::Done, "w", false)
+            .is_err());
+        let r = f.set_paused(a.id, false).unwrap();
+        assert_eq!(r.lease_until, Some(10_050));
+        assert!(f.holds_live_claim(&r));
+        let s = f.stop(a.id, "obsolete").unwrap();
+        assert_eq!(s.state, ActionState::Stopped);
+        assert!(f.requeue(a.id, "x", 1).is_err());
+        let (_, d) = f.heartbeat(a.id, "w").unwrap();
+        assert_eq!(d["stop"], true);
+        assert!(f.heartbeat(a.id, "other").is_err());
     }
 }
