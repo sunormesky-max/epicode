@@ -208,6 +208,16 @@ impl DigestionEngine {
                     if !final_labels.iter().any(|l| l == "digested") {
                         final_labels.push("digested".to_string());
                     }
+                    // 修复: 之前只写 DB 不写内存,下一次 persist 会用内存版本把 "digested" 冲掉。
+                    // 现在锁内追加到内存,再持久化合并后的实际标签。
+                    let ops: Vec<crate::domain::ops::MemoryOp> = final_labels
+                        .iter()
+                        .map(|l| crate::domain::ops::MemoryOp::AddLabel(l.clone()))
+                        .collect();
+                    let _ = self.scheduler.space_handle().apply_ops(id, &ops);
+                    if let Some(t) = self.scheduler.space_handle().get_tetrahedron(id) {
+                        final_labels = t.data.labels;
+                    }
                     if let Err(e) = self
                         .scheduler
                         .storage_handle()

@@ -56,6 +56,25 @@ pub enum MemoryOp {
         importance_floor: f64,
         mass_cap: f64,
     },
+    /// TTL/僵尸墓碑:仅当仍为活记忆(无 valid_to、非 enforced)且(可选)importance
+    /// 仍低于阈值时,设置 valid_to/invalidated_at 与墓碑 importance。
+    Tombstone {
+        at: i64,
+        importance: f64,
+        only_if_importance_below: Option<f64>,
+    },
+    /// 比较后设置:仅当 importance 仍等于评估时看到的值才写入(衰减不覆盖并发调整)。
+    CasImportance {
+        expect: f64,
+        set: f64,
+    },
+    /// importance = min(importance + delta, max)
+    AddImportance {
+        delta: f64,
+        max: f64,
+    },
+    /// access_count = 0
+    ResetAccessCount,
 }
 
 /// 在可变引用上应用一个操作,返回是否改变了状态。
@@ -130,7 +149,121 @@ pub fn apply_op(data: &mut MemoryPayload, mass: &mut f64, op: &MemoryOp) -> bool
             apply_op(data, mass, &MemoryOp::CapMass(*mass_cap));
             true
         }
+        MemoryOp::Tombstone {
+            at,
+            importance,
+            only_if_importance_below,
+        } => {
+            if data.enforced || data.valid_to.is_some() {
+                return false;
+            }
+            if let Some(th) = only_if_importance_below {
+                if data.importance >= *th {
+                    return false;
+                }
+            }
+            data.valid_to = Some(*at);
+            if data.invalidated_at.is_none() {
+                data.invalidated_at = Some(*at);
+            }
+            data.importance = *importance;
+            true
+        }
+        MemoryOp::CasImportance { expect, set } => {
+            if (data.importance - expect).abs() > f64::EPSILON
+                || (data.importance - set).abs() <= f64::EPSILON
+            {
+                return false;
+            }
+            data.importance = *set;
+            true
+        }
+        MemoryOp::AddImportance { delta, max } => {
+            let n = (data.importance + delta).min(*max);
+            if (n - data.importance).abs() <= f64::EPSILON {
+                return false;
+            }
+            data.importance = n;
+            true
+        }
+        MemoryOp::ResetAccessCount => {
+            if data.access_count == 0 {
+                return false;
+            }
+            data.access_count = 0;
+            true
+        }
     }
+}
+
+/// 三方字段合并:`desired` 是调用方基于快照 `base` 在锁外算好的新 payload。
+/// 只把 `desired` 相对 `base` 真正改动的字段写到 `cur`(当前锁内状态)上;
+/// labels / aliases 按集合差(增/删)合并,而不是整份覆盖。
+/// 未改动的字段保留 `cur` 中的并发写入。返回 (是否改变, 可检索字段是否改变, 标签是否改变)。
+pub fn patch(
+    cur: &mut MemoryPayload,
+    base: &MemoryPayload,
+    desired: MemoryPayload,
+) -> (bool, bool, bool) {
+    let mut changed = false;
+    let mut searchable = false;
+    macro_rules! field {
+        ($f:ident) => {
+            if desired.$f != base.$f && cur.$f != desired.$f {
+                cur.$f = desired.$f.clone();
+                changed = true;
+            }
+        };
+    }
+    if desired.content != base.content && cur.content != desired.content {
+        cur.content = desired.content.clone();
+        changed = true;
+        searchable = true;
+    }
+    field!(content_hash);
+    field!(timestamp);
+    field!(embedding);
+    field!(importance);
+    field!(enforced);
+    field!(rationale);
+    field!(access_count);
+    field!(memory_type);
+    field!(identity_stamp);
+    field!(source_agent);
+    field!(valid_from);
+    field!(valid_to);
+    field!(expired_at);
+    field!(invalidated_at);
+    field!(memory_class);
+    field!(last_reviewed_ts);
+    let labels_changed = merge_set(&mut cur.labels, &base.labels, &desired.labels);
+    if merge_set(&mut cur.aliases, &base.aliases, &desired.aliases) {
+        searchable = true;
+        changed = true;
+    }
+    changed |= labels_changed;
+    (changed, searchable, labels_changed)
+}
+
+pub fn merge_set(cur: &mut Vec<String>, base: &[String], desired: &[String]) -> bool {
+    // 快路径:调用方没动这个集合(最常见),O(n) 比较后直接返回
+    if base == desired {
+        return false;
+    }
+    let before = cur.len();
+    let mut changed = false;
+    let removed: Vec<&String> = base.iter().filter(|x| !desired.contains(x)).collect();
+    if !removed.is_empty() {
+        cur.retain(|x| !removed.contains(&x));
+        changed |= cur.len() != before;
+    }
+    for x in desired {
+        if !base.contains(x) && !cur.contains(x) {
+            cur.push(x.clone());
+            changed = true;
+        }
+    }
+    changed
 }
 
 #[cfg(test)]
@@ -205,5 +338,79 @@ mod tests {
             ),
             before
         );
+    }
+
+    #[test]
+    fn tombstone_and_cas_respect_current_state() {
+        let mut p = MemoryPayload {
+            importance: 0.1,
+            ..Default::default()
+        };
+        let mut m = 1.0;
+        let t = MemoryOp::Tombstone {
+            at: 7,
+            importance: 0.01,
+            only_if_importance_below: Some(0.15),
+        };
+        // 并发提升过 importance → 不再是僵尸,不墓碑
+        p.importance = 0.5;
+        assert!(!apply_op(&mut p, &mut m, &t));
+        p.importance = 0.1;
+        assert!(apply_op(&mut p, &mut m, &t));
+        assert_eq!(p.valid_to, Some(7));
+        assert_eq!(p.invalidated_at, Some(7));
+        assert!(!apply_op(&mut p, &mut m, &t), "idempotent");
+
+        let mut q = MemoryPayload {
+            importance: 0.9,
+            ..Default::default()
+        };
+        let cas = MemoryOp::CasImportance {
+            expect: 1.0,
+            set: 0.4,
+        };
+        assert!(!apply_op(&mut q, &mut m, &cas), "stale expectation skipped");
+        q.importance = 1.0;
+        assert!(apply_op(&mut q, &mut m, &cas));
+        assert_eq!(q.importance, 0.4);
+
+        assert!(apply_op(
+            &mut q,
+            &mut m,
+            &MemoryOp::AddImportance {
+                delta: 5.0,
+                max: 3.5
+            }
+        ));
+        assert_eq!(q.importance, 3.5);
+        q.access_count = 4;
+        assert!(apply_op(&mut q, &mut m, &MemoryOp::ResetAccessCount));
+        assert!(!apply_op(&mut q, &mut m, &MemoryOp::ResetAccessCount));
+    }
+
+    #[test]
+    fn patch_keeps_concurrent_fields_and_merges_label_sets() {
+        let base = MemoryPayload {
+            labels: vec!["a".into(), "quarantine".into()],
+            importance: 0.1,
+            ..Default::default()
+        };
+        // 调用方:去掉 quarantine、加 b、改 importance
+        let mut desired = base.clone();
+        desired.labels.retain(|l| l != "quarantine");
+        desired.labels.push("b".into());
+        desired.importance = 0.5;
+        // 并发:用户加了 u、改了 memory_class
+        let mut cur = base.clone();
+        cur.labels.push("u".into());
+        cur.memory_class = Some("episodic".into());
+        let (changed, _, labels) = patch(&mut cur, &base, desired);
+        assert!(changed && labels);
+        assert_eq!(cur.labels, vec!["a", "u", "b"]);
+        assert_eq!(cur.importance, 0.5);
+        assert_eq!(cur.memory_class.as_deref(), Some("episodic"));
+        // 无改动的补丁是 no-op
+        let snap = cur.clone();
+        assert_eq!(patch(&mut cur, &snap, snap.clone()), (false, false, false));
     }
 }

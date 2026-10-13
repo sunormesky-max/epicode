@@ -5442,10 +5442,11 @@ impl McpHandler {
             }
 
             {
-                let mut payload = match self.engine.space.get_tetrahedron(id) {
-                    Some(t) => t.data.clone(),
+                let base = match self.engine.space.get_tetrahedron(id) {
+                    Some(t) => t.data,
                     None => continue,
                 };
+                let mut payload = base.clone();
                 let old_importance = payload.importance;
                 let final_delta = importance_delta + correction_importance;
                 payload.importance =
@@ -5459,7 +5460,7 @@ impl McpHandler {
                         .retain(|l| l != "outdated" && l != "superseded");
                 }
                 let labels_changed = payload.labels != old_labels;
-                let _ = self.engine.space.update_payload(id, payload.clone());
+                let _ = self.engine.space.patch_payload(id, &base, payload.clone());
                 let _ = self
                     .engine
                     .scheduler
@@ -6707,7 +6708,7 @@ impl McpHandler {
                 data.valid_to = None;
                 data.importance = (data.importance.max(0.5) + 0.5).min(3.0);
                 data.invalidated_at = None;
-                let _ = self.engine.space().update_payload(id, data);
+                let _ = self.engine.space().patch_payload(id, &tetra.data, data);
                 self.engine.scheduler().gateway_handle().mark_dirty(id);
                 self.smrp_ok("memory_restore", serde_json::json!({
                     "id": id, "status": "restored", "message": "Memory restored: valid_to cleared, importance boosted"

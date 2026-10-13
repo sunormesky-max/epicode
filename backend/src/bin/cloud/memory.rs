@@ -1981,7 +1981,7 @@ pub async fn bulk_quarantine(
                     // 加 quarantine 标签 + 降属性
                     payload.labels.push("quarantine".to_string());
                     payload.importance = payload.importance.min(0.1);
-                    match engine_inner.space().update_payload(id, payload) {
+                    match engine_inner.space().patch_payload(id, &tetra.data, payload) {
                         Ok(_) => {
                             if let Some(t) = engine_inner.space().get_tetrahedron(id) {
                                 if let Err(e) = engine_inner.storage.upsert_tetra(&t) {
@@ -2131,7 +2131,7 @@ pub async fn bulk_restore(
                     if payload.importance < 0.3 {
                         payload.importance = 0.5;
                     }
-                    match engine_inner.space().update_payload(id, payload) {
+                    match engine_inner.space().patch_payload(id, &tetra.data, payload) {
                         Ok(_) => {
                             if let Some(t) = engine_inner.space().get_tetrahedron(id) {
                                 if let Err(e) = engine_inner.storage.upsert_tetra(&t) {
@@ -3944,7 +3944,7 @@ pub async fn operations_confirm(
                         if !payload.labels.iter().any(|l| l == "quarantine") {
                             payload.labels.push("quarantine".to_string());
                             payload.importance = payload.importance.min(0.1);
-                            if space.update_payload(id, payload).is_ok() {
+                            if space.patch_payload(id, &tetra.data, payload).is_ok() {
                                 if let Some(t) = engine_inner.space().get_tetrahedron(id) {
                                     let _ = engine_inner.storage.upsert_tetra(&t);
                                 }
@@ -3963,7 +3963,7 @@ pub async fn operations_confirm(
                         let mut payload = tetra.data.clone();
                         payload.labels.retain(|l| l != "quarantine");
                         if payload.importance < 0.3 { payload.importance = 0.5; }
-                        if space.update_payload(id, payload).is_ok() {
+                        if space.patch_payload(id, &tetra.data, payload).is_ok() {
                             if let Some(t) = engine_inner.space().get_tetrahedron(id) {
                                 let _ = engine_inner.storage.upsert_tetra(&t);
                             }

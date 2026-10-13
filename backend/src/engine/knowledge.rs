@@ -576,7 +576,7 @@ impl KnowledgeGraph {
                         let to_add: Vec<String> = new_labels_to_add.into_iter().take(3).collect();
                         let mut updated_labels = t.data.labels.clone();
                         updated_labels.extend(to_add);
-                        let _ = space.update_labels(t.id, updated_labels);
+                        let _ = space.patch_labels(t.id, &t.data.labels, &updated_labels);
                         tracing::debug!(
                             "[A-MEM] evolved tetra #{}: added labels from new tetra #{} (sim={:.3})",
                             t.id, new_id, sim

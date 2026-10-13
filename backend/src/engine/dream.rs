@@ -79,7 +79,13 @@ impl DreamEngine {
             if (new_importance - t.data.importance).abs() > 0.01 {
                 // op-log: 只写 importance 字段,不再整份 payload 写回(避免覆盖并发编辑)
                 if space
-                    .apply_ops(t.id, &[MemoryOp::SetImportance(new_importance)])
+                    .apply_ops(
+                        t.id,
+                        &[MemoryOp::CasImportance {
+                            expect: t.data.importance,
+                            set: new_importance,
+                        }],
+                    )
                     .unwrap_or(false)
                 {
                     updated += 1;
