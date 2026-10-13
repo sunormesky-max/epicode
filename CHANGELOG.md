@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1](https://github.com/sunormesky-max/epicode/compare/v1.9.0...v1.9.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **mcp:** Action 工具入参校验 + 显式计划 + worker_unregister / harden action tool inputs ([#266](https://github.com/sunormesky-max/epicode/issues/266)) ([71d5e9f](https://github.com/sunormesky-max/epicode/commit/71d5e9fcc21cdf838aaf4e14a16b38df58476133))
+* **mcp:** memory_delete 真正永久删除(purge) / memory_delete purges instead of soft-forget ([#265](https://github.com/sunormesky-max/epicode/issues/265)) ([243f88b](https://github.com/sunormesky-max/epicode/commit/243f88b5113eeff8edfd87e479c059865b093984))
+* **recall:** associated score bounded by parent (seed no longer pushed out) + slim recall item cap ([#267](https://github.com/sunormesky-max/epicode/issues/267)) ([fbbe089](https://github.com/sunormesky-max/epicode/commit/fbbe089d5d36360740bb9e500a3d340b150102b1))
+
 ## [1.9.0](https://github.com/sunormesky-max/epicode/compare/v1.8.3...v1.9.0) (2026-10-13)
 
 
