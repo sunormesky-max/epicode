@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0](https://github.com/sunormesky-max/epicode/compare/v1.8.3...v1.9.0) (2026-10-13)
+
+
+### Features
+
+* **mcp:** memory_search暴露as_of时点查询 (P1-6) ([#244](https://github.com/sunormesky-max/epicode/issues/244)) ([b46d374](https://github.com/sunormesky-max/epicode/commit/b46d374b0e2bc1849fb24a738c1e8442b001dc72))
+* **persona:** 人格导出/导入保留记忆时间线与来源,导入计入配额 ([#239](https://github.com/sunormesky-max/epicode/issues/239)) ([8d961e7](https://github.com/sunormesky-max/epicode/commit/8d961e71cc1b1312629fdabd0087398ea2833cad))
+* **scheduler:** Action系统完整链 r19 — Memory Action Envelope→Dispatch所有权→租约→失败分类→依赖→确定性Planner→目标→控制 ([#247](https://github.com/sunormesky-max/epicode/issues/247)-[#263](https://github.com/sunormesky-max/epicode/issues/263)聚合) ([#264](https://github.com/sunormesky-max/epicode/issues/264)) ([c5cec01](https://github.com/sunormesky-max/epicode/commit/c5cec01b2df4720915969f4a69a255c119488bb0))
+
+
+### Bug Fixes
+
+* **console:** consistent load-error states with retry; no raw JSON parse errors ([#242](https://github.com/sunormesky-max/epicode/issues/242)) ([d45074f](https://github.com/sunormesky-max/epicode/commit/d45074ffef8f2f8e0b36247a71287321d9cb0426))
+* **governor:** 字段级 MemoryOp 替代整包写回,并发用户写入不再丢失 / governor uses field-level MemoryOps instead of whole-payload writeback ([#256](https://github.com/sunormesky-max/epicode/issues/256)) ([6aa0540](https://github.com/sunormesky-max/epicode/commit/6aa0540077e67689df4816b25c5bc0700a20e394))
+* **identity:** 身份读取与校准接口按角色权限校验,与其他人格/记忆接口一致 ([#240](https://github.com/sunormesky-max/epicode/issues/240)) ([5baad71](https://github.com/sunormesky-max/epicode/commit/5baad71aaaac9deb6a3d3000da2b7ecf841f663a))
+* **memory:** 剩余整包写回全部改为字段级补丁 / migrate all remaining whole-payload writebacks to field-level patch ([#257](https://github.com/sunormesky-max/epicode/issues/257)) ([a1ac7ce](https://github.com/sunormesky-max/epicode/commit/a1ac7cebdab4819df468ab9a0892dcf0286e39b3))
+
+
+### Performance Improvements
+
+* **console:** single-flight concurrent GETs; keep sub-account rail item stable ([#241](https://github.com/sunormesky-max/epicode/issues/241)) ([1b119de](https://github.com/sunormesky-max/epicode/commit/1b119dee3b0136e1751aa6e3850de456f3f9dd21))
+
 ## [1.8.3](https://github.com/sunormesky-max/epicode/compare/v1.8.2...v1.8.3) (2026-10-09)
 
 
