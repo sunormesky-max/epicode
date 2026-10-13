@@ -302,6 +302,7 @@ impl GatewayCenter {
                         dup_id
                     );
                     if let Some(mut old_tetra) = self.space.get_tetrahedron(*dup_id) {
+                        let base_old_tetra = old_tetra.data.clone();
                         if !old_tetra.data.labels.iter().any(|l| l == "superseded") {
                             old_tetra.data.labels.push("superseded".into());
                         }
@@ -310,7 +311,9 @@ impl GatewayCenter {
                         old_tetra.data.valid_to = Some(ts);
                         // 能力B：双时序——记录失效得知时间
                         old_tetra.data.invalidated_at = Some(ts);
-                        let _ = self.space.update_payload(*dup_id, old_tetra.data);
+                        let _ = self
+                            .space
+                            .patch_payload(*dup_id, &base_old_tetra, old_tetra.data);
                         // S2修复: Mem0 调和的旧记忆进脏集, auto_save 持久化 (重启不回滚)
                         self.mark_dirty(*dup_id);
                     }
@@ -328,11 +331,14 @@ impl GatewayCenter {
                         || content.contains("switched to");
                     if contradicts {
                         if let Some(mut old_tetra) = self.space.get_tetrahedron(*dup_id) {
+                            let base_old_tetra = old_tetra.data.clone();
                             old_tetra.data.expired_at = Some(ts);
                             if old_tetra.data.valid_to.is_none() {
                                 old_tetra.data.valid_to = Some(ts);
                             }
-                            let _ = self.space.update_payload(*dup_id, old_tetra.data);
+                            let _ =
+                                self.space
+                                    .patch_payload(*dup_id, &base_old_tetra, old_tetra.data);
                             self.mark_dirty(*dup_id);
                             self.pending_contradictions
                                 .lock()
@@ -346,6 +352,7 @@ impl GatewayCenter {
                     }
                     // UPDATE 操作：中等相似度 → 旧记忆补充新标签（Mem0 调和）
                     if let Some(mut old_tetra) = self.space.get_tetrahedron(*dup_id) {
+                        let base_old_tetra = old_tetra.data.clone();
                         let mut added = Vec::new();
                         for l in &labels {
                             if !old_tetra.data.labels.contains(l)
@@ -358,7 +365,9 @@ impl GatewayCenter {
                         }
                         if !added.is_empty() {
                             tracing::info!("[Gateway] Mem0 UPDATE: tetra {} enriched with labels {:?} (sim={:.3})", dup_id, added, sim);
-                            let _ = self.space.update_payload(*dup_id, old_tetra.data);
+                            let _ =
+                                self.space
+                                    .patch_payload(*dup_id, &base_old_tetra, old_tetra.data);
                             // S2修复: 标签富集同样持久化
                             self.mark_dirty(*dup_id);
                         }
@@ -1297,7 +1306,7 @@ impl GatewayCenter {
         new_payload.content = new_content.to_string();
         new_payload.content_hash = new_hash;
         new_payload.embedding = new_embedding.clone();
-        self.space.update_payload(id, new_payload)?;
+        self.space.patch_payload(id, &existing.data, new_payload)?;
 
         if !new_embedding.is_empty() && new_embedding.len() == EMBEDDING_DIM {
             self.search.hnsw.write().insert(id, new_embedding);

@@ -54,15 +54,22 @@ pub fn generate_aliases(
                 if merged.len() > 10 {
                     merged.drain(0..merged.len() - 10);
                 }
-                if let Err(e) = ctx.space.update_aliases(id, merged.clone()) {
-                    tracing::warn!("[Cognitive] alias update failed for {}: {}", id, e);
-                } else if let Err(e) = ctx.storage.update_aliases(id, &merged) {
+                // 字段级:只合并本次增删,不覆盖并发写入的别名;持久化锁内合并后的实际值
+                let desired = merged;
+                let merged = match ctx.space.patch_aliases(id, &existing, &desired) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::warn!("[Cognitive] alias update failed for {}: {}", id, e);
+                        continue;
+                    }
+                };
+                if let Err(e) = ctx.storage.update_aliases(id, &merged) {
                     tracing::warn!(
                         "[Cognitive] alias persist failed for {}: {}, rolling back",
                         id,
                         e
                     );
-                    if let Err(re) = ctx.space.update_aliases(id, existing) {
+                    if let Err(re) = ctx.space.patch_aliases(id, &desired, &existing) {
                         tracing::error!("[Cognitive] ROLLBACK FAILED for {}: {}", id, re);
                     }
                 } else {
@@ -118,15 +125,21 @@ pub fn reclassify_memories(
 
         if let Ok(new_labels) = ctx.cognitive.classify_content(&t.content) {
             if new_labels != old_labels {
-                if let Err(e) = ctx.space.update_labels(id, new_labels.clone()) {
-                    tracing::warn!("[Reclassify] update labels failed for {}: {}", id, e);
-                } else if let Err(e) = ctx.storage.update_labels(id, &new_labels) {
+                let desired = new_labels;
+                let new_labels = match ctx.space.patch_labels(id, &old_labels, &desired) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::warn!("[Reclassify] update labels failed for {}: {}", id, e);
+                        continue;
+                    }
+                };
+                if let Err(e) = ctx.storage.update_labels(id, &new_labels) {
                     tracing::warn!(
                         "[Reclassify] persist labels failed for {}: {}, rolling back",
                         id,
                         e
                     );
-                    if let Err(re) = ctx.space.update_labels(id, old_labels.clone()) {
+                    if let Err(re) = ctx.space.patch_labels(id, &desired, &old_labels) {
                         tracing::error!("[Reclassify] ROLLBACK FAILED for {}: {}", id, re);
                     }
                 } else {

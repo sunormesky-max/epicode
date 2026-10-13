@@ -619,7 +619,7 @@ impl SchedulerCenter {
                         data.importance = importance;
                         data.memory_type = intake.memory_type;
                         data.rationale = intake.rationale;
-                        if let Err(e) = self.space.update_payload(g.id, data) {
+                        if let Err(e) = self.space.patch_payload(g.id, &tetra.data, data) {
                             tracing::warn!("[Scheduler] update_payload {} failed: {}", g.id, e);
                         }
                     }
@@ -666,7 +666,7 @@ impl SchedulerCenter {
                 data.importance = importance;
                 data.memory_type = intake.memory_type;
                 data.rationale = intake.rationale;
-                if let Err(e) = self.space.update_payload(g.id, data) {
+                if let Err(e) = self.space.patch_payload(g.id, &tetra.data, data) {
                     tracing::warn!("[Scheduler] update_payload {} failed: {}", g.id, e);
                 }
             }
@@ -743,7 +743,7 @@ impl SchedulerCenter {
                 data.importance = importance;
                 data.memory_type = intake.memory_type;
                 data.rationale = intake.rationale;
-                if let Err(e) = self.space.update_payload(id, data) {
+                if let Err(e) = self.space.patch_payload(id, &tetra.data, data) {
                     tracing::warn!("[Scheduler] update_payload {} failed: {}", id, e);
                 }
             }
@@ -814,7 +814,7 @@ impl SchedulerCenter {
         let mut data = tetra.data.clone();
         data.memory_class = Some(class.to_string());
         self.space
-            .update_payload(id, data)
+            .patch_payload(id, &tetra.data, data)
             .map_err(|e| format!("update memory_class failed: {}", e))?;
         self.persist_tetra(id);
         Ok(())
@@ -840,7 +840,7 @@ impl SchedulerCenter {
         updated.importance = super::governor::FORGET_IMPORTANCE;
         updated.invalidated_at = Some(now);
 
-        match self.space.update_payload(id, updated) {
+        match self.space.patch_payload(id, &tetra.data, updated) {
             Ok(_) => {
                 self.gateway_handle().mark_dirty(id);
                 // P0-2 持久化修复: forget 同步写盘, 保证重启后 valid_to 不丢
@@ -1204,7 +1204,7 @@ impl SchedulerCenter {
                 }
             }
             if changed {
-                let _ = self.space.update_payload(t.id, data);
+                let _ = self.space.patch_payload(t.id, &t.data, data);
                 if let Some(updated) = self.space.get_tetrahedron(t.id) {
                     let _ = self.storage.upsert_tetra(&updated);
                 }
@@ -1252,7 +1252,7 @@ impl SchedulerCenter {
                             let mut data = tetra.data.clone();
                             data.valid_to = Some(now);
                             data.importance = super::governor::FORGET_IMPORTANCE;
-                            let _ = self.space.update_payload(*id, data);
+                            let _ = self.space.patch_payload(*id, &tetra.data, data);
                             self.persist_tetra(*id);
                             duplicates += 1;
                         }
@@ -1273,7 +1273,7 @@ impl SchedulerCenter {
                 let mut data = t.data.clone();
                 data.valid_to = Some(now);
                 data.importance = super::governor::FORGET_IMPORTANCE;
-                let _ = self.space.update_payload(t.id, data);
+                let _ = self.space.patch_payload(t.id, &t.data, data);
                 self.persist_tetra(t.id);
                 empties += 1;
             }
@@ -1287,7 +1287,7 @@ impl SchedulerCenter {
             if t.data.valid_to.is_some() && t.data.importance > super::governor::FORGET_IMPORTANCE {
                 let mut data = t.data.clone();
                 data.importance = super::governor::FORGET_IMPORTANCE;
-                let _ = self.space.update_payload(t.id, data);
+                let _ = self.space.patch_payload(t.id, &t.data, data);
                 self.persist_tetra(t.id);
                 stale_superseded += 1;
             }
@@ -1304,7 +1304,7 @@ impl SchedulerCenter {
             if t.data.access_count == 0 && t.data.valid_to.is_none() {
                 let mut data = t.data.clone();
                 data.access_count = 1;
-                let _ = self.space.update_payload(t.id, data);
+                let _ = self.space.patch_payload(t.id, &t.data, data);
                 self.persist_tetra(t.id);
                 woke_up += 1;
             }
@@ -3105,6 +3105,7 @@ impl SchedulerCenter {
         // 去重命中时：确保旧节点有正确的 archive + parent 标签
         if !is_new {
             if let Some(mut tetra) = self.space.get_tetrahedron(id) {
+                let base_tetra = tetra.data.clone();
                 let old_labels = tetra.data.labels.clone();
                 let mut changed = false;
                 // 补 archive 标签
@@ -3138,7 +3139,7 @@ impl SchedulerCenter {
                 }
                 if changed {
                     let new_labels = tetra.data.labels.clone();
-                    if let Err(e) = self.space.update_payload(id, tetra.data) {
+                    if let Err(e) = self.space.patch_payload(id, &base_tetra, tetra.data) {
                         tracing::warn!("[H2] update_payload failed: {}", e);
                     }
                     // 管道完整性：同步标签索引 + 立即持久化
@@ -3168,11 +3169,12 @@ impl SchedulerCenter {
 
         // 记忆也加 archived 标签（向后兼容标签式查询）
         if let Some(mut tetra) = self.space.get_tetrahedron(node_id) {
+            let base_tetra = tetra.data.clone();
             if !tetra.data.labels.iter().any(|l| l == "archived") {
                 let old_labels = tetra.data.labels.clone();
                 tetra.data.labels.push("archived".to_string());
                 let new_labels = tetra.data.labels.clone();
-                if let Err(e) = self.space.update_payload(node_id, tetra.data) {
+                if let Err(e) = self.space.patch_payload(node_id, &base_tetra, tetra.data) {
                     tracing::warn!("[H2] update_payload failed: {}", e);
                 }
                 self.gateway
@@ -3235,11 +3237,12 @@ impl SchedulerCenter {
                 1.0,
             );
             if let Some(mut t) = self.space.get_tetrahedron(sid) {
+                let base_t = t.data.clone();
                 if !t.data.labels.iter().any(|l| l == "merged") {
                     let old_labels = t.data.labels.clone();
                     t.data.labels.push("merged".to_string());
                     let new_labels = t.data.labels.clone();
-                    if let Err(e) = self.space.update_payload(sid, t.data) {
+                    if let Err(e) = self.space.patch_payload(sid, &base_t, t.data) {
                         tracing::warn!("[H2] update_payload failed: {}", e);
                     }
                     self.gateway
@@ -3265,6 +3268,7 @@ impl SchedulerCenter {
                 .collect();
             for scid in &source_children {
                 if let Some(mut sc) = self.space.get_tetrahedron(*scid) {
+                    let base_sc = sc.data.clone();
                     let old_labels = sc.data.labels.clone();
                     sc.data.labels.retain(|l| {
                         l.strip_prefix("parent:")
@@ -3273,7 +3277,7 @@ impl SchedulerCenter {
                     });
                     sc.data.labels.push(format!("parent:{}", new_id));
                     let new_labels = sc.data.labels.clone();
-                    if let Err(e) = self.space.update_payload(*scid, sc.data) {
+                    if let Err(e) = self.space.patch_payload(*scid, &base_sc, sc.data) {
                         tracing::warn!("[H2] update_payload failed: {}", e);
                     }
                     self.gateway
@@ -3299,13 +3303,14 @@ impl SchedulerCenter {
 
         // 同步标签（向后兼容）
         if let Some(mut t) = self.space.get_tetrahedron(node_id) {
+            let base_t = t.data.clone();
             let old_labels = t.data.labels.clone();
             t.data.labels.retain(|l| !l.starts_with("parent:"));
             if new_parent_id > 0 {
                 t.data.labels.push(format!("parent:{}", new_parent_id));
             }
             let new_labels = t.data.labels.clone();
-            if let Err(e) = self.space.update_payload(node_id, t.data) {
+            if let Err(e) = self.space.patch_payload(node_id, &base_t, t.data) {
                 tracing::warn!("[H2] update_payload failed: {}", e);
             }
             self.gateway
@@ -3357,6 +3362,7 @@ impl SchedulerCenter {
         // category 标签变更 + 同步到 archive_nodes 表
         if let Some(cat) = category {
             if let Some(mut t) = self.space.get_tetrahedron(node_id) {
+                let base_t = t.data.clone();
                 let old_labels = t.data.labels.clone();
                 t.data.labels.retain(|l| !l.starts_with("category:"));
                 if !cat.is_empty() {
@@ -3364,7 +3370,7 @@ impl SchedulerCenter {
                 }
                 let new_labels = t.data.labels.clone();
                 if old_labels != new_labels {
-                    if let Err(e) = self.space.update_payload(node_id, t.data) {
+                    if let Err(e) = self.space.patch_payload(node_id, &base_t, t.data) {
                         tracing::warn!("[H2] update_payload failed: {}", e);
                     }
                     self.gateway
@@ -3585,7 +3591,7 @@ impl SchedulerCenter {
                     let mut d = t.data.clone();
                     d.last_reviewed_ts = Some(now);
                     d.importance = (d.importance + 0.3).min(3.0);
-                    let _ = self.space.update_payload(*id, d);
+                    let _ = self.space.patch_payload(*id, &t.data, d);
                     if let Some(t) = self.space.get_tetrahedron(*id) {
                         let _ = self.storage.upsert_tetra(&t);
                     }
@@ -3596,7 +3602,7 @@ impl SchedulerCenter {
                 if let Some(t) = self.space.get_tetrahedron(*id) {
                     let mut d = t.data.clone();
                     d.importance = (d.importance * 0.5).max(0.05);
-                    let _ = self.space.update_payload(*id, d);
+                    let _ = self.space.patch_payload(*id, &t.data, d);
                     if let Some(t) = self.space.get_tetrahedron(*id) {
                         let _ = self.storage.upsert_tetra(&t);
                     }
@@ -3703,7 +3709,7 @@ impl SchedulerCenter {
                         if let Some(t) = self.space.get_tetrahedron(id) {
                             let mut data = t.data.clone();
                             import.apply_to(&mut data);
-                            if let Err(e) = self.space.update_payload(id, data) {
+                            if let Err(e) = self.space.patch_payload(id, &t.data, data) {
                                 tracing::warn!("[Import] update_payload {} failed: {}", id, e);
                             }
                             self.persist_tetra(id);
@@ -4390,6 +4396,9 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
     pub fn storage_handle(&self) -> Arc<super::storage::StorageManager> {
         self.storage.clone()
     }
+    pub fn space_handle(&self) -> Arc<Space> {
+        self.space.clone()
+    }
 
     /// 获取认知循环效果追踪数据（用于健康检查/可观测性）
     pub fn outcome_effectiveness_summary(&self) -> Vec<(super::outcome::ActionType, f64)> {
@@ -4839,7 +4848,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         updated.valid_to = Some(now);
                         updated.importance =
                             (updated.importance * 0.15).max(super::governor::IMPORTANCE_FLOOR); // O-A
-                        if let Err(e) = self.space.update_payload(id, updated) {
+                        if let Err(e) = self.space.patch_payload(id, &t.data, updated) {
                             tracing::warn!("[Scheduler] update_payload {} failed: {}", id, e);
                         }
                         if let Err(e) = self.space.update_mass(id, 0.05) {
@@ -4867,7 +4876,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                     );
                     updated.labels = new_labels.clone();
                     updated.importance += superseded as f64 * 0.2;
-                    if let Err(e) = self.space.update_payload(*keep, updated.clone()) {
+                    if let Err(e) = self.space.patch_payload(*keep, &t.data, updated.clone()) {
                         tracing::warn!("[H2] update_payload failed: {}", e);
                     }
                     if let Err(e) = self.space.update_mass(*keep, superseded as f64 * 0.5) {
@@ -4895,7 +4904,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                             updated.labels.push("quarantine".to_string());
                         }
                         updated.importance = 0.1;
-                        if let Err(e) = self.space.update_payload(id, updated.clone()) {
+                        if let Err(e) = self.space.patch_payload(id, &t.data, updated.clone()) {
                             tracing::warn!("[H2] update_payload failed: {}", e);
                         }
                         if let Err(e) = self.space.update_mass(id, 0.05) {
@@ -4956,7 +4965,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         invalidated_at: t.data.invalidated_at,
                         last_reviewed_ts: t.data.last_reviewed_ts,
                     };
-                    if let Err(e) = self.space.update_payload(*id, updated) {
+                    if let Err(e) = self.space.patch_payload(*id, &t.data, updated) {
                         tracing::warn!(
                             "[Scheduler] relabel update_payload failed for #{}: {}",
                             id,
@@ -5119,7 +5128,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             data.valid_to = Some(now);
             data.importance = data.importance.min(super::governor::IMPORTANCE_FLOOR); // O-A
             let new_labels = data.labels.clone();
-            if let Err(e) = self.space.update_payload(id, data) {
+            if let Err(e) = self.space.patch_payload(id, &tetra.data, data) {
                 tracing::warn!("[Scheduler] update_payload {} failed: {}", id, e);
             }
             if let Err(e) = self.space.update_mass(id, 0.05) {
@@ -5970,7 +5979,7 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         let adj = (*total_delta * 0.3).clamp(-0.5, 0.5);
                         data.importance =
                             (data.importance + adj).clamp(super::governor::IMPORTANCE_FLOOR, 5.0);
-                        if let Err(e) = self.space.update_payload(*id, data) {
+                        if let Err(e) = self.space.patch_payload(*id, &tetra.data, data) {
                             tracing::warn!("[Scheduler] update_payload {} failed: {}", *id, e);
                         }
                         let _ = self.storage.update_importance(*id, adj);
