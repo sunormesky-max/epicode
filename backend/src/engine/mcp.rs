@@ -4189,14 +4189,16 @@ impl McpHandler {
         let vertices_before = self.engine.space.vertex_count();
         let cluster_before = self.cluster_of(id);
         let rels_before = self.engine.scheduler.api_get_relations(id).len();
-        match self.engine.scheduler.api_forget_memory(id) {
-            Ok(result) => {
+        // memory_delete = 永久删除(space+storage+KG+HNSW+index)。软删除请用 memory_forget。
+        // Previously this called api_forget_memory (soft, valid_to only), so memory_get
+        // still returned the row after a "permanent" delete.
+        match self.engine.scheduler.api_purge_memory(id) {
+            Ok(_) => {
                 let vertices_after = self.engine.space.vertex_count();
                 let data = serde_json::json!({
-                    "status": "forgotten",
+                    "status": "deleted",
                     "id": id,
-                    "mode": "forget",
-                    "valid_to": result.get("valid_to"),
+                    "mode": "purge",
                     "side_effects": {
                         "vertices_freed": vertices_before.saturating_sub(vertices_after),
                         "cluster_affected": cluster_before.map(|(cid, sz)| serde_json::json!({"id": cid, "size_before": sz})),
@@ -4205,7 +4207,10 @@ impl McpHandler {
                 });
                 self.smrp_ok("memory_delete", data)
             }
-            Err(e) => self.smrp_err("memory_delete", 400, &format!("forget failed: {}", e)),
+            Err(e) => {
+                let code = if e.contains("not found") { 404 } else { 400 };
+                self.smrp_err("memory_delete", code, &format!("delete failed: {}", e))
+            }
         }
     }
 
@@ -8783,6 +8788,66 @@ mod tests {
 
         let out2 = h.process_json(ctx_raw);
         assert!(out2.contains("duplicates_skipped"));
+    }
+
+    /// memory_delete must permanently purge: memory_get afterwards must miss,
+    /// also after a prior memory_forget (live repro: #3116 still readable).
+    #[tokio::test]
+    async fn memory_delete_purges_even_after_forget() {
+        let mut eng = Engine::new();
+        eng.start();
+        let h = McpHandler::new(Arc::new(eng));
+        for step in 1..=5 {
+            let val = if step == 1 { "PurgeAgent" } else { "test" };
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            );
+            h.process_json(&raw);
+        }
+        h.process_json(r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#);
+        let mut ids = Vec::new();
+        for (i, txt) in ["purge me plain", "purge me after forget"]
+            .iter()
+            .enumerate()
+        {
+            let raw = format!(
+                r#"{{"jsonrpc":"2.0","id":{},"method":"tools/call","params":{{"name":"memory_create","arguments":{{"content":"{}"}}}}}}"#,
+                i + 1,
+                txt
+            );
+            let v: serde_json::Value = serde_json::from_str(&h.process_json(&raw)).unwrap();
+            let sc = &v["result"]["structuredContent"]["data"];
+            let id = sc["id"]
+                .as_u64()
+                .or_else(|| sc["memory_id"].as_u64())
+                .unwrap_or_else(|| panic!("{v}"));
+            ids.push(id);
+        }
+        h.process_json(&format!(
+            r#"{{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{{"name":"memory_forget","arguments":{{"id":{}}}}}}}"#,
+            ids[1]
+        ));
+        for id in &ids {
+            let del: serde_json::Value = serde_json::from_str(&h.process_json(&format!(
+                r#"{{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{{"name":"memory_delete","arguments":{{"id":{}}}}}}}"#,
+                id
+            )))
+            .unwrap();
+            assert_eq!(
+                del["result"]["structuredContent"]["data"]["mode"], "purge",
+                "{del}"
+            );
+            let get: serde_json::Value = serde_json::from_str(&h.process_json(&format!(
+                r#"{{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{{"name":"memory_get","arguments":{{"id":{}}}}}}}"#,
+                id
+            )))
+            .unwrap();
+            assert!(
+                get["result"]["structuredContent"]["data"]["content"].is_null(),
+                "memory {id} still readable after delete: {get}"
+            );
+        }
     }
 
     /// Spike S1: verbosity=slim must shrink JSON vs default full envelope on same fixture.
