@@ -1290,6 +1290,7 @@ impl McpHandler {
                             "action_id": { "type": "integer" },
                             "outcome": { "type": "string", "description": "What was delivered / learned (becomes a memory)" },
                             "done_when_evidence": { "type": "array", "items": { "type": "string" }, "description": "Parallel to action.done_when — artifact-level evidence per item" },
+                            "claimed_by": { "type": "string", "description": "Worker label used at action_claim / action_assign (defaults to user id). Must match the assignee unless admin." },
                             "success": { "type": "boolean", "description": "true → state=done (default); false → blocked", "default": true },
                             "labels": { "type": "array", "items": { "type": "string" }, "description": "Extra labels for the outcome memory" },
                             "state": { "type": "string", "enum": ["done", "blocked", "exhausted"], "description": "Override terminal state" }
@@ -2583,6 +2584,7 @@ impl McpHandler {
         task_id: &str,
         outcome: &str,
         success: bool,
+        done_when_evidence: &[String],
     ) -> Option<serde_json::Value> {
         let aid = self
             .engine
@@ -2596,7 +2598,16 @@ impl McpHandler {
                     .find_by_task(task_id)
                     .map(|a| a.id)
             })?;
-        let complete_args = serde_json::json!({
+        // The bound task was started by the action's owner (bind_task checks the
+        // claimer), so complete AS that owner — not the engine user — and carry the
+        // task's done_when_evidence (the action inherited the same done_when).
+        let owner = self
+            .engine
+            .scheduler
+            .action_frontier()
+            .get(aid)
+            .and_then(|a| a.assignee.or(a.claimed_by));
+        let mut complete_args = serde_json::json!({
             "action_id": aid,
             "outcome": if outcome.trim().is_empty() {
                 format!("task {} completed", task_id)
@@ -2604,7 +2615,11 @@ impl McpHandler {
                 outcome.to_string()
             },
             "success": success,
+            "done_when_evidence": done_when_evidence,
         });
+        if let Some(o) = owner {
+            complete_args["claimed_by"] = serde_json::json!(o);
+        }
         Some(self.tool_action_complete(&complete_args))
     }
 
@@ -3254,8 +3269,17 @@ impl McpHandler {
                     "drive_evolution": format!("efficiency {}{} (stop={})", if reward > 0.0 { "+" } else { "" }, reward, stop_reason),
                     "proof": "最终交付物必须包含本 task_id — 用户可凭它 task_status 核验预算/相位/检查点全程",
                 });
+                let task_dw_evidence: Vec<String> = args
+                    .get("done_when_evidence")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 if let Some(action_feed) =
-                    self.feed_bound_action_from_task(task_id, result_text, true)
+                    self.feed_bound_action_from_task(task_id, result_text, true, &task_dw_evidence)
                 {
                     if let Some(obj) = result.as_object_mut() {
                         obj.insert("bound_action_complete".into(), action_feed);
@@ -7041,8 +7065,7 @@ impl McpHandler {
             .list()
             .into_iter()
             .map(|w| {
-                let load =
-                    crate::engine::dispatch::WorkerRegistry::load_of(frontier, &w.worker_id);
+                let load = crate::engine::dispatch::WorkerRegistry::load_of(frontier, &w.worker_id);
                 serde_json::json!({
                     "worker_id": w.worker_id,
                     "capabilities": w.capabilities,
@@ -7205,17 +7228,27 @@ impl McpHandler {
             terminal = crate::engine::agent_action::ActionState::Blocked;
         }
 
+        // Actor = the same worker label used at claim/assign/heartbeat (defaults to
+        // the engine user). Previously this always used engine.user_id, so any
+        // action claimed/assigned under a worker label could never be completed.
+        let actor: String = args
+            .get("claimed_by")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(self.engine.user_id.as_str())
+            .to_string();
         // Ownership gate BEFORE writing outcome memory (no leak on foreign complete).
         {
             let owner = action.assignee.as_deref().or(action.claimed_by.as_deref());
             if let Some(owner) = owner {
-                if owner != self.engine.user_id.as_str() && !self.is_admin_actor() {
+                if owner != actor && !self.is_admin_actor() {
                     return self.smrp_err(
                         "action_complete",
                         403,
                         &format!(
                             "action {} owned by assignee '{}'; '{}' cannot complete (ownership)",
-                            action_id, owner, self.engine.user_id
+                            action_id, owner, actor
                         ),
                     );
                 }
@@ -7273,9 +7306,8 @@ impl McpHandler {
             }
         }
 
-        let actor = self.engine.user_id.as_str();
         let is_admin = self.is_admin_actor();
-        match frontier.complete_as(action_id, outcome_id, terminal, actor, is_admin) {
+        match frontier.complete_as(action_id, outcome_id, terminal, &actor, is_admin) {
             Ok(done) => {
                 let mut done = done;
                 let mut accountability = serde_json::Value::Null;
@@ -7319,7 +7351,11 @@ impl McpHandler {
                     });
                 // Drive→Action: first successful complete acks the source drive (no double-spend of learning).
                 let mut drive_ack = serde_json::Value::Null;
-                if let Some(did) = done.source_drive_id {
+                // Only a landed Done acks the drive. A soft-failed complete is requeued
+                // (#255) and stays live; acking it would consume the drive while the
+                // action is still being reworked.
+                let landed_done = done.state == crate::engine::agent_action::ActionState::Done;
+                if let (Some(did), true) = (done.source_drive_id, landed_done) {
                     let feedback = crate::engine::drive::DriveFeedback {
                         responded_at: chrono::Utc::now().timestamp(),
                         executed: matches!(
@@ -8741,10 +8777,25 @@ mod tests {
             "empty outcome rejected: {empty}"
         );
 
+        // Foreign worker label cannot complete someone else's claim.
+        let foreign = handler.tool_action_complete(&serde_json::json!({
+            "action_id": action_id,
+            "outcome": "interloper",
+            "claimed_by": "other-agent"
+        }));
+        assert_eq!(foreign["protocol"]["error"]["code"], 403, "{foreign}");
+
+        let dw_len = actions[0]["done_when"]
+            .as_array()
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let evid: Vec<String> = (0..dw_len).map(|i| format!("artifact-{i}")).collect();
         let done = handler.tool_action_complete(&serde_json::json!({
             "action_id": action_id,
             "outcome": "Documented deploy checklist with blue-green steps and rollback pointer",
-            "success": true
+            "success": true,
+            "claimed_by": "test-agent",
+            "done_when_evidence": evid
         }));
         assert_eq!(done["protocol"]["ok"], true, "{done}");
         let outcome_id = done["data"]["outcome_memory_id"]
@@ -8806,8 +8857,12 @@ mod tests {
         }));
         assert_eq!(first["protocol"]["ok"], true, "{first}");
         let action_id = first["data"]["action"]["id"].as_u64().unwrap();
-        assert_eq!(first["data"]["action"]["origin"], "drive");
-        assert_eq!(first["data"]["action"]["source_drive_id"], drive_id);
+        // ActionCard v1+ moved provenance under lineage (#254).
+        assert_eq!(first["data"]["action"]["lineage"]["origin"], "drive");
+        assert_eq!(
+            first["data"]["action"]["lineage"]["source_drive_id"],
+            drive_id
+        );
 
         let dup = handler.tool_drive_to_actions(&serde_json::json!({
             "drive_id": drive_id
@@ -8818,10 +8873,26 @@ mod tests {
         );
         assert_eq!(dup["protocol"]["error"]["code"], 409);
 
+        // Without done_when proof the complete soft-fails → requeued, and must NOT ack.
+        let soft = handler.tool_action_complete(&serde_json::json!({
+            "action_id": action_id,
+            "outcome": "claimed it worked",
+            "success": true
+        }));
+        assert_eq!(soft["protocol"]["ok"], true, "{soft}");
+        assert!(soft["data"]["drive_ack"].is_null(), "{soft}");
+        let reclaim = handler.tool_action_claim(&serde_json::json!({"action_id": action_id}));
+        assert_eq!(reclaim["protocol"]["ok"], true, "{reclaim}");
+        let dw_len = first["data"]["action"]["done_when"]
+            .as_array()
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let evid: Vec<String> = (0..dw_len).map(|i| format!("artifact-{i}")).collect();
         let done = handler.tool_action_complete(&serde_json::json!({
             "action_id": action_id,
             "outcome": "Scaled workers and drained hot pods per playbook",
-            "success": true
+            "success": true,
+            "done_when_evidence": evid
         }));
         assert_eq!(done["protocol"]["ok"], true, "{done}");
         assert_eq!(done["data"]["drive_ack"]["acknowledged"], true);
@@ -8890,11 +8961,22 @@ mod tests {
 
         // Force-complete path: call feed via tool_action_complete through task_complete is heavy
         // (stop negotiation). Directly verify bind + complete helper.
-        let fed = handler.feed_bound_action_from_task(&task_id, "changelog+smoke done", true);
+        // Bound action inherits done_when; task_complete's evidence must flow through.
+        let dw_len = handler
+            .engine
+            .scheduler
+            .action_frontier()
+            .get(action_id)
+            .unwrap()
+            .done_when
+            .len();
+        let evid: Vec<String> = (0..dw_len).map(|i| format!("artifact-{i}")).collect();
+        let fed =
+            handler.feed_bound_action_from_task(&task_id, "changelog+smoke done", true, &evid);
         let fed = fed.expect("feed");
         assert_eq!(fed["protocol"]["ok"], true, "{fed}");
         assert_eq!(fed["data"]["action"]["state"], "done");
-        assert_eq!(fed["data"]["action"]["bound_task_id"], task_id);
+        assert_eq!(fed["data"]["action"]["lineage"]["bound_task_id"], task_id);
     }
 
     #[test]
