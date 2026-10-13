@@ -26,6 +26,8 @@ pub enum ActionState {
     Done,
     Blocked,
     Exhausted,
+    /// Goal achieved before this action finished — terminal, NOT a failure.
+    Cancelled,
 }
 
 impl ActionState {
@@ -36,6 +38,7 @@ impl ActionState {
             ActionState::Done => "done",
             ActionState::Blocked => "blocked",
             ActionState::Exhausted => "exhausted",
+            ActionState::Cancelled => "cancelled",
         }
     }
 
@@ -46,6 +49,7 @@ impl ActionState {
             "done" => Some(Self::Done),
             "blocked" => Some(Self::Blocked),
             "exhausted" => Some(Self::Exhausted),
+            "cancelled" => Some(Self::Cancelled),
             _ => None,
         }
     }
@@ -53,7 +57,10 @@ impl ActionState {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            ActionState::Done | ActionState::Blocked | ActionState::Exhausted
+            ActionState::Done
+                | ActionState::Blocked
+                | ActionState::Exhausted
+                | ActionState::Cancelled
         )
     }
 }
@@ -98,6 +105,56 @@ impl FailureKind {
         matches!(self, FailureKind::Blocked | FailureKind::LeaseExpired)
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalState {
+    Open,
+    /// Proven via done_when evidence; remaining actions cancelled.
+    Achieved,
+    /// Every action landed Done (auto-close).
+    Closed,
+}
+
+impl GoalState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GoalState::Open => "open",
+            GoalState::Achieved => "achieved",
+            GoalState::Closed => "closed",
+        }
+    }
+}
+
+/// A goal groups actions (PR-M). Achieving it stops the remaining work.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionGoal {
+    pub id: u64,
+    pub title: String,
+    #[serde(default)]
+    pub done_when: Vec<String>,
+    pub state: GoalState,
+    #[serde(default)]
+    pub evidence: Vec<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl ActionGoal {
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.id,
+            "title": self.title,
+            "done_when": self.done_when,
+            "state": self.state.as_str(),
+            "evidence": self.evidence,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        })
+    }
+}
+
+pub const GOAL_MET_REASON_PREFIX: &str = "goal_met:";
 
 /// Deterministic dependency readiness (PR-K).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,6 +230,9 @@ pub struct AgentAction {
     /// Upstream action ids that must be Done before this one is claimable.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<u64>,
+    /// Goal this action serves (PR-M).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_id: Option<u64>,
     #[serde(default)]
     pub transient_retries: u32,
     /// Backoff gate: not claimable/assignable before this unix sec.
@@ -231,6 +291,7 @@ impl AgentAction {
             "lease_until": self.lease_until,
             "requeue_count": self.requeue_count,
             "depends_on": self.depends_on,
+            "goal_id": self.goal_id,
             "transient_retries": self.transient_retries,
             "not_before": self.not_before,
             "last_failure_kind": self.last_failure_kind.map(|k| k.as_str()),
@@ -271,6 +332,8 @@ pub struct ActionFrontier {
     max_open: usize,
     lease_secs: i64,
     clock: Clock,
+    goals: Mutex<HashMap<u64, ActionGoal>>,
+    next_goal_id: AtomicU64,
 }
 
 impl Default for ActionFrontier {
@@ -292,6 +355,8 @@ impl ActionFrontier {
             max_open: 64,
             lease_secs: lease_secs.max(1),
             clock,
+            goals: Mutex::new(HashMap::new()),
+            next_goal_id: AtomicU64::new(1),
         }
     }
 
@@ -335,6 +400,149 @@ impl ActionFrontier {
         Ok(action.clone())
     }
 
+    // ---- Goals (PR-M) ----------------------------------------------------
+
+    pub fn create_goal(&self, title: &str, done_when: Vec<String>) -> Result<ActionGoal, String> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err("goal title is required".into());
+        }
+        let now = self.now();
+        let id = self.next_goal_id.fetch_add(1, Ordering::SeqCst);
+        let g = ActionGoal {
+            id,
+            title: title.to_string(),
+            done_when: done_when
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            state: GoalState::Open,
+            evidence: Vec::new(),
+            created_at: now,
+            updated_at: now,
+        };
+        self.goals.lock().insert(id, g.clone());
+        Ok(g)
+    }
+
+    pub fn goal(&self, id: u64) -> Option<ActionGoal> {
+        self.goals.lock().get(&id).cloned()
+    }
+
+    pub fn goals(&self) -> Vec<ActionGoal> {
+        let mut v: Vec<ActionGoal> = self.goals.lock().values().cloned().collect();
+        v.sort_by_key(|g| g.id);
+        v
+    }
+
+    pub fn goals_snapshot(&self) -> Vec<ActionGoal> {
+        self.goals()
+    }
+
+    pub fn restore_goals(&self, goals: Vec<ActionGoal>) {
+        let mut m = self.goals.lock();
+        m.clear();
+        let mut max_id = 0;
+        for g in goals {
+            max_id = max_id.max(g.id);
+            m.insert(g.id, g);
+        }
+        self.next_goal_id
+            .store(max_id.saturating_add(1).max(1), Ordering::SeqCst);
+    }
+
+    /// New actions may only join an Open goal.
+    pub fn check_goal_open(&self, goal_id: u64) -> Result<(), String> {
+        match self.goal(goal_id) {
+            None => Err(format!("goal {} not found", goal_id)),
+            Some(g) if g.state != GoalState::Open => Err(format!(
+                "goal {} is {} — cannot add actions",
+                goal_id,
+                g.state.as_str()
+            )),
+            Some(_) => Ok(()),
+        }
+    }
+
+    /// Prove a goal with evidence parallel to its done_when. On success the goal
+    /// is Achieved and every non-terminal action in it becomes Cancelled (not a
+    /// failure: no requeue budget, no blacklist, no escalation). Returns cancelled ids.
+    pub fn prove_goal(
+        &self,
+        goal_id: u64,
+        evidence: Vec<String>,
+    ) -> Result<(ActionGoal, Vec<u64>), String> {
+        let now = self.now();
+        let mut goals = self.goals.lock();
+        let g = goals
+            .get_mut(&goal_id)
+            .ok_or_else(|| format!("goal {} not found", goal_id))?;
+        if g.state != GoalState::Open {
+            return Err(format!("goal {} already {}", goal_id, g.state.as_str()));
+        }
+        let debts = if g.done_when.is_empty() {
+            if evidence.iter().all(|e| e.trim().is_empty()) {
+                vec!["goal has no done_when — at least one evidence item required".to_string()]
+            } else {
+                vec![]
+            }
+        } else {
+            prove_done_when(&g.done_when, &evidence)
+        };
+        if !debts.is_empty() {
+            return Err(format!("goal {} unproven: {}", goal_id, debts.join("; ")));
+        }
+        g.state = GoalState::Achieved;
+        g.evidence = evidence;
+        g.updated_at = now;
+        let goal = g.clone();
+        drop(goals);
+        let mut cancelled = Vec::new();
+        let mut map = self.actions.lock();
+        for a in map.values_mut() {
+            if a.goal_id == Some(goal_id) && !a.state.is_terminal() {
+                a.state = ActionState::Cancelled;
+                a.last_failure_reason = Some(format!("{}{}", GOAL_MET_REASON_PREFIX, goal_id));
+                a.claimed_at = None;
+                a.lease_until = None;
+                a.not_before = None;
+                a.updated_at = now;
+                cancelled.push(a.id);
+            }
+        }
+        cancelled.sort_unstable();
+        Ok((goal, cancelled))
+    }
+
+    /// Auto-close: an Open goal whose actions are all Done becomes Closed.
+    /// Returns true when it closed now.
+    pub fn maybe_close_goal(&self, goal_id: u64) -> bool {
+        let all_done = {
+            let map = self.actions.lock();
+            let mut any = false;
+            let ok = map
+                .values()
+                .filter(|a| a.goal_id == Some(goal_id))
+                .inspect(|_| any = true)
+                .all(|a| a.state == ActionState::Done);
+            any && ok
+        };
+        if !all_done {
+            return false;
+        }
+        let now = self.now();
+        let mut goals = self.goals.lock();
+        match goals.get_mut(&goal_id) {
+            Some(g) if g.state == GoalState::Open => {
+                g.state = GoalState::Closed;
+                g.updated_at = now;
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn readiness_in(map: &HashMap<u64, AgentAction>, a: &AgentAction) -> Readiness {
         let mut waiting = Vec::new();
         let mut failed = Vec::new();
@@ -365,6 +573,10 @@ impl ActionFrontier {
     pub fn card(&self, a: &AgentAction) -> serde_json::Value {
         let mut c = a.to_action_card();
         c["readiness"] = self.readiness(a).to_json();
+        c["goal"] = match a.goal_id.and_then(|g| self.goal(g)) {
+            Some(g) => serde_json::json!({"id": g.id, "title": g.title, "state": g.state.as_str()}),
+            None => serde_json::Value::Null,
+        };
         c
     }
 
@@ -505,8 +717,12 @@ impl ActionFrontier {
         let action = map
             .get_mut(&id)
             .ok_or_else(|| format!("action {} not found", id))?;
-        if action.state == ActionState::Done {
-            return Err(format!("action {} is done — cannot retry", id));
+        if matches!(action.state, ActionState::Done | ActionState::Cancelled) {
+            return Err(format!(
+                "action {} is {} — cannot retry",
+                id,
+                action.state.as_str()
+            ));
         }
         action.transient_retries = action.transient_retries.saturating_add(1);
         action.not_before =
@@ -765,8 +981,12 @@ impl ActionFrontier {
         if action.state == ActionState::Open {
             return Err(format!("action {} is already open", id));
         }
-        if action.state == ActionState::Done {
-            return Err(format!("action {} is done — cannot requeue", id));
+        if matches!(action.state, ActionState::Done | ActionState::Cancelled) {
+            return Err(format!(
+                "action {} is {} — cannot requeue",
+                id,
+                action.state.as_str()
+            ));
         }
         let responsible = action
             .assignee
@@ -919,6 +1139,7 @@ impl ActionFrontier {
         let mut done = 0u64;
         let mut blocked = 0u64;
         let mut exhausted = 0u64;
+        let mut cancelled = 0u64;
         for a in map.values() {
             match a.state {
                 ActionState::Open => open += 1,
@@ -926,6 +1147,7 @@ impl ActionFrontier {
                 ActionState::Done => done += 1,
                 ActionState::Blocked => blocked += 1,
                 ActionState::Exhausted => exhausted += 1,
+                ActionState::Cancelled => cancelled += 1,
             }
         }
         serde_json::json!({
@@ -935,6 +1157,7 @@ impl ActionFrontier {
             "done": done,
             "blocked": blocked,
             "exhausted": exhausted,
+            "cancelled": cancelled,
             "non_terminal": open + claimed,
         })
     }
@@ -1117,6 +1340,7 @@ impl AgentActionDraft {
             lease_until: None,
             requeue_count: 0,
             depends_on: Vec::new(),
+            goal_id: None,
             transient_retries: 0,
             not_before: None,
             last_failure_kind: None,
@@ -1413,5 +1637,60 @@ mod tests {
         assert_eq!(f.prune_terminal_older_than(10), 0);
         assert_eq!(f.readiness(&f.get(b.id).unwrap()), Readiness::Ready);
         assert!(f.cascade_dep_failures().is_empty());
+    }
+
+    /// PR-M: cancelled is terminal and immune to failure accounting.
+    #[test]
+    fn cancelled_is_terminal_not_failure() {
+        let f = ActionFrontier::new();
+        let g = f.create_goal("g", vec!["x".into()]).unwrap();
+        let mut a = draft_action();
+        a.goal_id = Some(g.id);
+        let a = f.enqueue(a).unwrap();
+        f.claim(a.id, "w").unwrap();
+        assert!(f.prove_goal(g.id, vec![]).is_err(), "unproven");
+        let (g2, cancelled) = f.prove_goal(g.id, vec!["proof".into()]).unwrap();
+        assert_eq!(g2.state, GoalState::Achieved);
+        assert_eq!(cancelled, vec![a.id]);
+        assert!(f.requeue(a.id, "x", 1).is_err());
+        assert!(f.retry_transient(a.id, "x").is_err());
+        assert!(f
+            .complete_as(a.id, 1, ActionState::Done, "w", false)
+            .is_err());
+        assert!(
+            f.check_goal_open(g.id).is_err(),
+            "achieved goal accepts no new actions"
+        );
+        assert!(f.expired_claims().is_empty());
+        assert_eq!(f.stats()["cancelled"], 1);
+        // Goals survive a snapshot roundtrip with ids preserved.
+        let snap = f.goals_snapshot();
+        let f2 = ActionFrontier::new();
+        f2.restore_goals(snap);
+        assert_eq!(f2.goal(g.id).unwrap().state, GoalState::Achieved);
+        assert!(f2.create_goal("next", vec![]).unwrap().id > g.id);
+    }
+
+    #[test]
+    fn goal_autocloses_only_when_all_done() {
+        let f = ActionFrontier::new();
+        let g = f.create_goal("g", vec![]).unwrap();
+        assert!(!f.maybe_close_goal(g.id), "empty goal does not auto-close");
+        let mut ids = vec![];
+        for _ in 0..2 {
+            let mut a = draft_action();
+            a.goal_id = Some(g.id);
+            ids.push(f.enqueue(a).unwrap().id);
+        }
+        f.claim(ids[0], "w").unwrap();
+        f.complete_as(ids[0], 1, ActionState::Done, "w", false)
+            .unwrap();
+        assert!(!f.maybe_close_goal(g.id));
+        f.claim(ids[1], "w").unwrap();
+        f.complete_as(ids[1], 2, ActionState::Done, "w", false)
+            .unwrap();
+        assert!(f.maybe_close_goal(g.id));
+        assert_eq!(f.goal(g.id).unwrap().state, GoalState::Closed);
+        assert!(!f.maybe_close_goal(g.id), "idempotent");
     }
 }

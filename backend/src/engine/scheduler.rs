@@ -1487,6 +1487,11 @@ impl SchedulerCenter {
         if pruned > 0 {
             tracing::info!("[action] pruned {} stale terminal actions", pruned);
         }
+        if let Ok(js) = serde_json::to_string(&self.action_frontier.goals_snapshot()) {
+            if let Err(e) = self.storage.save_drive_kv("agent_action_goals", &js) {
+                tracing::warn!("[action] goals save failed: {}", e);
+            }
+        }
         let snap = self.action_frontier.snapshot();
         match serde_json::to_string(&snap) {
             Ok(js) => {
@@ -1499,6 +1504,12 @@ impl SchedulerCenter {
     }
 
     pub fn restore_action_frontier(&self) {
+        if let Some(js) = self.storage.load_drive_kv("agent_action_goals") {
+            match serde_json::from_str::<Vec<super::agent_action::ActionGoal>>(&js) {
+                Ok(g) => self.action_frontier.restore_goals(g),
+                Err(e) => tracing::warn!("[action] goals restore failed: {}", e),
+            }
+        }
         if let Some(js) = self.storage.load_drive_kv("agent_action_frontier") {
             match serde_json::from_str::<Vec<super::agent_action::AgentAction>>(&js) {
                 Ok(actions) => {

@@ -425,6 +425,7 @@ impl McpHandler {
             | "drive_inbox"
             | "action_list"
             | "action_planner_status"
+            | "action_goal_list"
             | "worker_list"
             | "blocks_get" => Some(P::MemoryRead),
             // These tools change memories or persistent session/drive state.
@@ -454,7 +455,9 @@ impl McpHandler {
             | "worker_register"
             | "action_assign"
             | "action_dispatch"
-            | "action_planner_run" => Some(P::MemoryWrite),
+            | "action_planner_run"
+            | "action_goal_create"
+            | "action_goal_prove" => Some(P::MemoryWrite),
             // Deletion, quarantine and restoration change protected memory state.
             "memory_delete" | "memory_forget" | "memory_restore" => Some(P::MemoryDelete),
             // Skill and library management.
@@ -1258,6 +1261,7 @@ impl McpHandler {
                             "query": { "type": "string", "description": "What you want to act on (natural language)" },
                             "limit": { "type": "integer", "description": "Max actions to propose (default 3, max 5)", "default": 3, "minimum": 1, "maximum": 5 },
                             "depends_on": { "type": "array", "items": { "type": "integer" }, "description": "Existing action ids every proposed action must wait on (claimable only after all are done). Unknown ids / cycles rejected." },
+                            "goal_id": { "type": "integer", "description": "Attach proposed actions to an open goal (action_goal_create)." },
                             "chain": { "type": "boolean", "description": "Serial plan: proposed step i depends on step i-1, so only the head is claimable until its predecessor lands done. Upstream escalation cascades blocked (dep_failed) downstream.", "default": false }
                         },
                         "required": ["query"]
@@ -1266,6 +1270,27 @@ impl McpHandler {
                 {
                     "name": "action_planner_status",
                     "description": "Server-side planner pass (deterministic, no LLM): outcome wake triggers are coalesced (debounce) into one pass; a heartbeat pass runs even when idle. Reports ready/claimed/waiting counts and stall signals: no_eligible_worker (ready work, no capable/available worker), stalled (nothing ready, nothing running), escalated (needs human). New signals are also pushed to drive_inbox once. Read-only: to force a pass use action_planner_run (write permission).",
+                    "inputSchema": { "type": "object", "properties": {} }
+                },
+                {
+                    "name": "action_goal_create",
+                    "description": "Create a goal that groups actions (pass goal_id to memory_propose_actions). done_when = goal-level completion criteria.",
+                    "inputSchema": { "type": "object", "properties": {
+                        "title": { "type": "string" },
+                        "done_when": { "type": "array", "items": { "type": "string" } }
+                    }, "required": ["title"] }
+                },
+                {
+                    "name": "action_goal_prove",
+                    "description": "Mark a goal achieved with evidence parallel to its done_when. Remaining open/claimed actions in the goal become 'cancelled' (terminal, not a failure: no requeue/blacklist/escalation; late outcomes are rejected and write no memory). A goal whose actions all land done auto-closes without proving.",
+                    "inputSchema": { "type": "object", "properties": {
+                        "goal_id": { "type": "integer" },
+                        "evidence": { "type": "array", "items": { "type": "string" } }
+                    }, "required": ["goal_id", "evidence"] }
+                },
+                {
+                    "name": "action_goal_list",
+                    "description": "List goals with state (open|achieved|closed) and per-state action counts.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
@@ -1479,6 +1504,7 @@ impl McpHandler {
             | "drive_inbox"
             | "action_list"
             | "action_planner_status"
+            | "action_goal_list"
             | "worker_list"
             | "ctx_load" => (true, false, true, false),
             // Destructive / hard-to-reverse
@@ -1497,6 +1523,8 @@ impl McpHandler {
             | "action_assign"
             | "action_dispatch"
             | "action_planner_run"
+            | "action_goal_create"
+            | "action_goal_prove"
             | "skill_feedback"
             | "feedback_submit"
             | "task_check" => (false, false, true, false),
@@ -1692,6 +1720,9 @@ impl McpHandler {
             "action_list" => self.tool_action_list(&args),
             "action_planner_status" => self.tool_action_planner_status(&args),
             "action_planner_run" => self.tool_action_planner_run(&args),
+            "action_goal_create" => self.tool_action_goal_create(&args),
+            "action_goal_prove" => self.tool_action_goal_prove(&args),
+            "action_goal_list" => self.tool_action_goal_list(&args),
             "action_claim" => self.tool_action_claim(&args),
             "action_heartbeat" => self.tool_action_heartbeat(&args),
             "action_complete" => self.tool_action_complete(&args),
@@ -1990,7 +2021,7 @@ impl McpHandler {
             "system_skill": {"name": "epicode-system", "version": Self::manual_version(&system_skill), "content": system_skill},
             "session_context": {"knowledge_cards": card_json, "identity": {"system": "Epicode"}},
             "action_tool_surface": {
-                "planner": ["memory_propose_actions", "drive_to_actions", "action_list", "action_planner_status", "action_planner_run"],
+                "planner": ["memory_propose_actions", "drive_to_actions", "action_list", "action_planner_status", "action_planner_run", "action_goal_create", "action_goal_prove", "action_goal_list"],
                 "worker": ["action_claim", "action_heartbeat", "action_complete", "task_start", "task_complete", "skill_execute"],
                 "skill": "skill_get('动作角色分工')",
                 "rule": "Planner proposes; Worker claims+completes with outcome write-back",
@@ -6854,6 +6885,12 @@ impl McpHandler {
             .unwrap_or_default();
         let chain = args.get("chain").and_then(|v| v.as_bool()).unwrap_or(false);
         let frontier = self.engine.scheduler.action_frontier();
+        let goal_id = args.get("goal_id").and_then(|v| v.as_u64());
+        if let Some(g) = goal_id {
+            if let Err(e) = frontier.check_goal_open(g) {
+                return self.smrp_err("memory_propose_actions", 409, &e);
+            }
+        }
         for d in &base_deps {
             if frontier.get(*d).is_none() {
                 return self.smrp_err(
@@ -6870,6 +6907,7 @@ impl McpHandler {
         for draft in drafts {
             let mut action = draft.into_action(query);
             action.depends_on = base_deps.clone();
+            action.goal_id = goal_id;
             if chain {
                 if let Some(p) = prev {
                     action.depends_on.push(p);
@@ -6912,6 +6950,87 @@ impl McpHandler {
                 serde_json::json!("run_now moved to action_planner_run (write permission)");
         }
         self.smrp_ok("action_planner_status", status)
+    }
+
+    fn tool_action_goal_create(&self, args: &serde_json::Value) -> serde_json::Value {
+        let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("");
+        let dw: Vec<String> = args
+            .get("done_when")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        match self
+            .engine
+            .scheduler
+            .action_frontier()
+            .create_goal(title, dw)
+        {
+            Ok(g) => {
+                self.engine.scheduler.save_action_frontier();
+                self.smrp_ok(
+                    "action_goal_create",
+                    serde_json::json!({"goal": g.to_json()}),
+                )
+            }
+            Err(e) => self.smrp_err("action_goal_create", 400, &e),
+        }
+    }
+
+    fn tool_action_goal_prove(&self, args: &serde_json::Value) -> serde_json::Value {
+        let gid = match args.get("goal_id").and_then(|v| v.as_u64()) {
+            Some(g) => g,
+            None => return self.smrp_err("action_goal_prove", 400, "goal_id is required"),
+        };
+        let ev: Vec<String> = args
+            .get("evidence")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let frontier = self.engine.scheduler.action_frontier();
+        match frontier.prove_goal(gid, ev) {
+            Ok((g, cancelled)) => {
+                // Dependents outside the goal that relied on cancelled work.
+                let cascaded = frontier.cascade_dep_failures();
+                self.engine.scheduler.save_action_frontier();
+                self.smrp_ok(
+                    "action_goal_prove",
+                    serde_json::json!({"goal": g.to_json(), "cancelled": cancelled, "dep_failed_cascade": cascaded}),
+                )
+            }
+            Err(e) => {
+                let code = if e.contains("not found") { 404 } else { 409 };
+                self.smrp_err("action_goal_prove", code, &e)
+            }
+        }
+    }
+
+    fn tool_action_goal_list(&self, _args: &serde_json::Value) -> serde_json::Value {
+        let frontier = self.engine.scheduler.action_frontier();
+        let actions = frontier.snapshot();
+        let goals: Vec<serde_json::Value> = frontier
+            .goals()
+            .into_iter()
+            .map(|g| {
+                let mut counts = serde_json::Map::new();
+                for a in actions.iter().filter(|a| a.goal_id == Some(g.id)) {
+                    let k = a.state.as_str().to_string();
+                    let n = counts.get(&k).and_then(|v| v.as_u64()).unwrap_or(0) + 1;
+                    counts.insert(k, serde_json::json!(n));
+                }
+                let mut j = g.to_json();
+                j["action_counts"] = serde_json::Value::Object(counts);
+                j
+            })
+            .collect();
+        self.smrp_ok("action_goal_list", serde_json::json!({"goals": goals}))
     }
 
     fn tool_action_planner_run(&self, _args: &serde_json::Value) -> serde_json::Value {
@@ -7443,6 +7562,12 @@ impl McpHandler {
             Ok(done) => {
                 let mut done = done;
                 let mut accountability = serde_json::Value::Null;
+                let mut goal_closed = false;
+                if done.state == crate::engine::agent_action::ActionState::Done {
+                    if let Some(g) = done.goal_id {
+                        goal_closed = frontier.maybe_close_goal(g);
+                    }
+                }
                 if matches!(
                     done.state,
                     crate::engine::agent_action::ActionState::Blocked
@@ -7534,6 +7659,7 @@ impl McpHandler {
                         "outcome_memory_id": outcome_id,
                         "relations_created": linked,
                         "drive_ack": drive_ack,
+                        "goal_closed": goal_closed,
                         "done_when_debts": goal_debts.clone(),
                         "done_when_proven": goal_debts.is_empty(),
                         "accountability": accountability,
@@ -7541,6 +7667,10 @@ impl McpHandler {
                 )
             }
             Err(e) => {
+                // The outcome memory was written before the frontier transition;
+                // if the transition lost (cancelled/terminal in between), remove it
+                // so a late/raced outcome never pollutes memory.
+                let _ = self.engine.scheduler.api_delete_memory(outcome_id);
                 let code = if e.contains("ownership") { 403 } else { 409 };
                 self.smrp_err("action_complete", code, &e)
             }
@@ -9448,6 +9578,116 @@ mod tests {
         // Re-running the planner pass must not duplicate the notification.
         handler.engine.scheduler.run_action_planner_pass_now();
         assert_eq!(hits(&handler), 1);
+    }
+
+    fn call_tool(h: &McpHandler, name: &str, args: serde_json::Value) -> serde_json::Value {
+        h.handle(McpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(serde_json::json!(1)),
+            method: "tools/call".into(),
+            params: Some(serde_json::json!({"name": name, "arguments": args})),
+        })
+        .result
+        .unwrap()["structuredContent"]
+            .clone()
+    }
+
+    fn evid_for(card: &serde_json::Value) -> Vec<String> {
+        let n = card["done_when"].as_array().map(|a| a.len()).unwrap_or(0);
+        (0..n).map(|i| format!("artifact-{i}")).collect()
+    }
+
+    /// PR-M: goal achieved cancels the rest (not a failure, no late outcome memory);
+    /// all-done auto-closes. Fails on #261: no goal tools.
+    #[test]
+    fn goal_met_cancels_remaining_and_all_done_autocloses() {
+        let h = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&h);
+        for c in ["goal evidence alpha", "goal evidence beta"] {
+            let _ = h.tool_memory_create(&serde_json::json!({"content": c, "labels": ["ops"]}));
+        }
+        let g = call_tool(
+            &h,
+            "action_goal_create",
+            serde_json::json!({
+                "title": "ship release", "done_when": ["release tagged"]
+            }),
+        );
+        assert_eq!(g["protocol"]["ok"], true, "{g}");
+        let gid = g["data"]["goal"]["id"].as_u64().unwrap();
+        let p = h.tool_memory_propose_actions(
+            &serde_json::json!({"query": "goal evidence", "limit": 2, "goal_id": gid}),
+        );
+        let acts = p["data"]["actions"].as_array().cloned().unwrap();
+        assert_eq!(acts.len(), 2, "{p}");
+        assert_eq!(acts[0]["goal"]["id"], gid, "{p}");
+        let (a, b) = (
+            acts[0]["id"].as_u64().unwrap(),
+            acts[1]["id"].as_u64().unwrap(),
+        );
+        // b is claimed by a worker that will report late.
+        assert_eq!(
+            h.tool_action_claim(&serde_json::json!({"action_id": b, "claimed_by": "slow"}))
+                ["protocol"]["ok"],
+            true
+        );
+        // Unproven goal cannot be marked achieved.
+        let bad = call_tool(
+            &h,
+            "action_goal_prove",
+            serde_json::json!({"goal_id": gid, "evidence": []}),
+        );
+        assert_eq!(bad["protocol"]["ok"], false, "{bad}");
+        let ok = call_tool(
+            &h,
+            "action_goal_prove",
+            serde_json::json!({"goal_id": gid, "evidence": ["v1.9.0 tag"]}),
+        );
+        assert_eq!(ok["protocol"]["ok"], true, "{ok}");
+        assert_eq!(ok["data"]["goal"]["state"], "achieved");
+        assert_eq!(ok["data"]["cancelled"], serde_json::json!([a, b]));
+        let fa = h.engine.scheduler.action_frontier().get(b).unwrap();
+        assert_eq!(fa.state.as_str(), "cancelled");
+        assert_eq!(fa.requeue_count, 0);
+        assert!(!fa.escalated);
+        // Late outcome from the slow worker: rejected, and no memory written.
+        let before = h.engine.space.tetra_count();
+        let late = h.tool_action_complete(&serde_json::json!({
+            "action_id": b, "outcome": "late result", "claimed_by": "slow"
+        }));
+        assert_eq!(late["protocol"]["ok"], false, "{late}");
+        assert_eq!(
+            h.engine.space.tetra_count(),
+            before,
+            "late outcome must not pollute memory"
+        );
+
+        // Second goal: every action done → auto-close.
+        let g2 = call_tool(
+            &h,
+            "action_goal_create",
+            serde_json::json!({"title": "small"}),
+        );
+        let gid2 = g2["data"]["goal"]["id"].as_u64().unwrap();
+        let p2 = h.tool_memory_propose_actions(
+            &serde_json::json!({"query": "goal evidence", "limit": 1, "goal_id": gid2}),
+        );
+        let c = p2["data"]["actions"][0].clone();
+        let cid = c["id"].as_u64().unwrap();
+        h.tool_action_claim(&serde_json::json!({"action_id": cid, "claimed_by": "w"}));
+        let d = h.tool_action_complete(&serde_json::json!({
+            "action_id": cid, "outcome": "done", "claimed_by": "w", "done_when_evidence": evid_for(&c)
+        }));
+        assert_eq!(d["data"]["action"]["state"], "done", "{d}");
+        let gl = call_tool(&h, "action_goal_list", serde_json::json!({}));
+        let g2s = gl["data"]["goals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["id"] == gid2)
+            .cloned()
+            .unwrap();
+        assert_eq!(g2s["state"], "closed", "{gl}");
     }
 
     #[test]
