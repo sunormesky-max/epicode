@@ -1946,7 +1946,7 @@ impl McpHandler {
             ) {
                 Ok(a) => {
                     // Persist reverse lookup for task_complete.
-                    let _ = self
+                    self
                         .engine
                         .storage
                         .save_drive_kv(&format!("task_action:{}", task_id), &aid.to_string());
@@ -1972,7 +1972,7 @@ impl McpHandler {
                         }
                         // Stash for later goal persistence by rewriting args is impossible;
                         // write goal json directly after session exists.
-                        let _ = self
+                        self
                             .engine
                             .storage
                             .set_task_goal_json(&task_id, &g.to_string());
@@ -5267,7 +5267,7 @@ impl McpHandler {
 
             let _ = self.engine.space.update_mass(id, total_delta);
             if let Some(t) = self.engine.space.get_tetrahedron(id) {
-                let _ = self
+                self
                     .engine
                     .scheduler
                     .storage_handle()
@@ -5293,14 +5293,14 @@ impl McpHandler {
                 }
                 let labels_changed = payload.labels != old_labels;
                 let _ = self.engine.space.update_payload(id, payload.clone());
-                let _ = self
+                self
                     .engine
                     .scheduler
                     .storage_handle()
                     .update_importance(id, final_delta);
                 // 管道完整性：is_correction 和 is_restored 都改变标签，都需要持久化
                 if labels_changed {
-                    let _ = self
+                    self
                         .engine
                         .scheduler
                         .storage_handle()
