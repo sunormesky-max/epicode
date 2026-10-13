@@ -1845,7 +1845,7 @@ mod tests {
         let a = f.enqueue(a).unwrap();
         f.claim(a.id, "w").unwrap();
         assert!(f.prove_goal(g.id, vec![]).is_err(), "unproven");
-        let (g2, cancelled) = f.prove_goal(g.id, vec!["proof".into()]).unwrap();
+        let (g2, cancelled) = f.prove_goal(g.id, vec!["proof: see #1".into()]).unwrap();
         assert_eq!(g2.state, GoalState::Achieved);
         assert_eq!(cancelled, vec![a.id]);
         assert!(f.requeue(a.id, "x", 1).is_err());
