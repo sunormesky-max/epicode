@@ -50,3 +50,23 @@ labels: ["项目", "Epicode", "Rust", "技术架构", "服务器"]
 2. 每次回答用户问题 → 先 `memory_search` 检查已有知识
 3. 每次搜索后 → 对最相关的1-3条结果 `feedback_submit`
 4. 发现矛盾信息 → 存入新记忆并标记"更新版"
+
+
+## 记忆输出：动作信封 (Memory Action Envelope)
+
+检索只是一半。要把记忆变成可执行下一步，走这条闭环：
+
+1. `memory_propose_actions(query)` — 基于匹配记忆生成可认领的动作（含 evidence_memory_ids、suggested_skills、done_when）
+2. `action_claim(action_id)` — 独占认领（避免多代理抢同一动作）
+3. 用 `skill_get` / `skill_execute` 或 `task_start` 真正执行
+4. `action_complete(action_id, outcome)` — **必须**写回 outcome；系统会创建 `action-outcome` 记忆，并把每条 evidence 用 Precedes 边连到 outcome
+
+`memory_ask` 回答问题；`memory_propose_actions` 产出可执行动作。二者互补，不要互相替代。
+
+
+### Drive→Action 桥
+有 grounding evidence 的 drive 信号可用 `drive_to_actions(drive_id)` 物化为 AgentAction（拒绝同一 drive 的双重占用）。`action_complete` 成功后会自动 `drive_ack`（仅 first_ack 计学习）。
+
+
+### 任务绑定
+`task_start` 可带 `action_id`：动作必须已被当前用户 `action_claim`。`task_complete` 成功时会把结果喂给 `action_complete`（写出 outcome 记忆）。

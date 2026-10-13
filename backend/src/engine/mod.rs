@@ -51,15 +51,18 @@ pub mod user_manager;
 
 // Auxiliary systems
 pub mod adaptive;
+pub mod agent_action;
 pub mod auto_pipeline;
 pub mod constitution;
 pub mod digestion;
+pub mod dispatch;
 pub mod drive;
 pub mod dynamics;
 pub mod emotion;
 pub mod layer_pipeline;
 pub mod memcard;
 pub mod outcome;
+pub mod planner_pass;
 pub mod spike_flags;
 
 use std::sync::Arc;
@@ -410,6 +413,10 @@ impl Engine {
 
         // L0: Restore drive queue from SQLite after scheduler init
         scheduler.restore_drive_queue();
+        scheduler.restore_action_frontier();
+        scheduler.restore_worker_registry();
+        // Restart recovery: claims whose lease lapsed while we were down go back to Open.
+        scheduler.sweep_action_leases();
         scheduler.restore_tick_state();
         // 稳态恢复: 演化权重/历史跨重启存活 + ingested去重集
         scheduler.restore_drive_engine();
@@ -800,6 +807,7 @@ impl Engine {
 
     pub fn final_save(&self) {
         self.scheduler.save_drive_queue();
+        self.scheduler.save_action_frontier();
         let kg = self.scheduler.kg_handle();
         match self.storage.save_all(&self.space, &kg) {
             Ok(()) => tracing::info!("Final save complete — all data persisted."),

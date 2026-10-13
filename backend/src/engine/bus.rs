@@ -30,6 +30,12 @@ pub enum EngineEvent {
         count: u32,
     },
     Shutdown,
+    /// Memory Action Envelope: an action reached a terminal state with outcome memory.
+    ActionOutcomeLanded {
+        action_id: u64,
+        outcome_memory_id: u64,
+        state: String,
+    },
 }
 
 pub type EventSender = broadcast::Sender<EngineEvent>;

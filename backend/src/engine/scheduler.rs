@@ -353,6 +353,12 @@ pub struct SchedulerCenter {
     skill_feedback_agg_cache: ParkMutex<Option<(usize, std::time::Instant, HashSet<u64>)>>,
     drive_queue: Arc<super::drive::DriveQueue>,
     drive_save_gate: ParkMutex<()>,
+    /// Agent-facing memory action frontier (propose → claim → complete → outcome memory).
+    action_frontier: Arc<super::agent_action::ActionFrontier>,
+    /// Dispatch: registered workers for capability-aware assignment.
+    worker_registry: Arc<super::dispatch::WorkerRegistry>,
+    /// PR-L: deterministic planner pass (coalesced wake + heartbeat stall detection).
+    planner_pass: Arc<super::planner_pass::PlannerPass>,
 }
 
 impl SchedulerCenter {
@@ -441,6 +447,9 @@ impl SchedulerCenter {
             skill_feedback_agg_cache: ParkMutex::new(None),
             drive_queue: Arc::new(super::drive::DriveQueue::new()),
             drive_save_gate: ParkMutex::new(()),
+            action_frontier: Arc::new(super::agent_action::ActionFrontier::new()),
+            worker_registry: Arc::new(super::dispatch::WorkerRegistry::new()),
+            planner_pass: Arc::new(super::planner_pass::PlannerPass::with_defaults()),
         }
     }
 
@@ -1342,6 +1351,177 @@ impl SchedulerCenter {
 
     pub fn drive_queue(&self) -> &Arc<super::drive::DriveQueue> {
         &self.drive_queue
+    }
+
+    pub fn action_frontier(&self) -> &Arc<super::agent_action::ActionFrontier> {
+        &self.action_frontier
+    }
+
+    pub fn worker_registry(&self) -> &Arc<super::dispatch::WorkerRegistry> {
+        &self.worker_registry
+    }
+
+    pub fn save_worker_registry(&self) {
+        let snap = self.worker_registry.snapshot();
+        match serde_json::to_string(&snap) {
+            Ok(js) => {
+                if let Err(e) = self.storage.save_drive_kv("worker_registry", &js) {
+                    tracing::warn!("[dispatch] worker registry save failed: {}", e);
+                }
+            }
+            Err(e) => tracing::warn!("[dispatch] worker registry serialize failed: {}", e),
+        }
+    }
+
+    pub fn restore_worker_registry(&self) {
+        if let Some(js) = self.storage.load_drive_kv("worker_registry") {
+            match serde_json::from_str::<Vec<super::dispatch::WorkerRecord>>(&js) {
+                Ok(workers) => {
+                    self.worker_registry.restore(workers);
+                    tracing::info!(
+                        "[dispatch] restored {} workers",
+                        self.worker_registry.list().len()
+                    );
+                }
+                Err(e) => tracing::warn!("[dispatch] worker registry restore failed: {}", e),
+            }
+        }
+    }
+
+    /// PR-I: return lapsed claims to the frontier (or escalate). Called on
+    /// restart (after registry restore) and from the Routine save cadence.
+    pub fn sweep_action_leases(&self) -> usize {
+        let swept =
+            super::dispatch::sweep_expired_leases(&self.worker_registry, &self.action_frontier);
+        // PR-K: also settle dependents of failed/pruned upstreams (e.g. after restart).
+        let cascaded = self.action_frontier.cascade_dep_failures();
+        if !cascaded.is_empty() {
+            tracing::info!("[action] dep_failed cascade blocked {:?}", cascaded);
+        }
+        if !swept.is_empty() || !cascaded.is_empty() {
+            tracing::info!("[action] lease sweep reclaimed {:?}", swept);
+            self.save_action_frontier();
+        }
+        swept.len()
+    }
+
+    pub fn planner_pass(&self) -> &Arc<super::planner_pass::PlannerPass> {
+        &self.planner_pass
+    }
+
+    /// PR-L: run a pass if the debounce/heartbeat says so; notify new signals.
+    pub fn run_action_planner_pass_if_due(&self) {
+        if let Some(r) = self
+            .planner_pass
+            .maybe_run(&self.action_frontier, &self.worker_registry)
+        {
+            self.notify_planner_signals(&r.new_signals);
+        }
+    }
+
+    /// Force a pass now (MCP/tests).
+    pub fn run_action_planner_pass_now(&self) -> super::planner_pass::PassReport {
+        let r = self.planner_pass.run(
+            super::planner_pass::PassReason::Manual,
+            &self.action_frontier,
+            &self.worker_registry,
+        );
+        self.notify_planner_signals(&r.new_signals);
+        r
+    }
+
+    /// Immediate hook for escalation (does not wait for the next pass). Deduped
+    /// with the pass, so the human is told exactly once per escalated action.
+    pub fn notify_action_escalated(&self, action_id: u64, reason: &str) {
+        let sig = super::planner_pass::StallSignal::Escalated {
+            action_id,
+            reason: reason.to_string(),
+        };
+        if self.planner_pass.mark_notified(&sig) {
+            self.enqueue_planner_drive(&sig);
+        }
+    }
+
+    fn notify_planner_signals(&self, sigs: &[super::planner_pass::StallSignal]) {
+        for s in sigs {
+            tracing::warn!("[planner_pass] {}", s.describe());
+            self.enqueue_planner_drive(s);
+        }
+    }
+
+    fn enqueue_planner_drive(&self, sig: &super::planner_pass::StallSignal) {
+        use super::drive::{DriveIntent, DriveSignal, DriveUrgency};
+        let urgency = match sig {
+            super::planner_pass::StallSignal::Escalated { .. } => DriveUrgency::High,
+            _ => DriveUrgency::Medium,
+        };
+        let signal = DriveSignal {
+            id: 0,
+            timestamp: chrono::Utc::now().timestamp(),
+            intent_type: DriveIntent::Warn,
+            description: sig.describe(),
+            evidence: vec![],
+            urgency: urgency.clone(),
+            target_capability: Some("conversation".into()),
+            emotion: None,
+            origin_tick: self.tick_count.load(Ordering::SeqCst),
+            status: super::drive::default_status(),
+            feedback: None,
+            retry_count: 0,
+            expires_at: super::drive::default_expires_at(&urgency),
+            enqueued_at_ms: 0,
+            time_budget_ms: None,
+            grounding: None,
+            terminal_reason: None,
+        };
+        match self.drive_queue.try_enqueue(signal) {
+            Ok(_) => self.save_drive_queue(),
+            Err(e) => tracing::warn!("[planner_pass] drive enqueue failed: {:?}", e),
+        }
+    }
+
+    pub fn save_action_frontier(&self) {
+        self.save_worker_registry();
+        // Keep frontier bounded across restarts: drop terminal actions older than 7 days.
+        let pruned = self.action_frontier.prune_terminal_older_than(7 * 86400);
+        if pruned > 0 {
+            tracing::info!("[action] pruned {} stale terminal actions", pruned);
+        }
+        if let Ok(js) = serde_json::to_string(&self.action_frontier.goals_snapshot()) {
+            if let Err(e) = self.storage.save_drive_kv("agent_action_goals", &js) {
+                tracing::warn!("[action] goals save failed: {}", e);
+            }
+        }
+        let snap = self.action_frontier.snapshot();
+        match serde_json::to_string(&snap) {
+            Ok(js) => {
+                if let Err(e) = self.storage.save_drive_kv("agent_action_frontier", &js) {
+                    tracing::warn!("[action] frontier save failed: {}", e);
+                }
+            }
+            Err(e) => tracing::warn!("[action] frontier serialize failed: {}", e),
+        }
+    }
+
+    pub fn restore_action_frontier(&self) {
+        if let Some(js) = self.storage.load_drive_kv("agent_action_goals") {
+            match serde_json::from_str::<Vec<super::agent_action::ActionGoal>>(&js) {
+                Ok(g) => self.action_frontier.restore_goals(g),
+                Err(e) => tracing::warn!("[action] goals restore failed: {}", e),
+            }
+        }
+        if let Some(js) = self.storage.load_drive_kv("agent_action_frontier") {
+            match serde_json::from_str::<Vec<super::agent_action::AgentAction>>(&js) {
+                Ok(actions) => {
+                    self.action_frontier.restore(actions);
+                    tracing::info!(
+                        "[action] restored {} actions from storage",
+                        self.action_frontier.snapshot().len()
+                    );
+                }
+                Err(e) => tracing::warn!("[action] frontier restore failed: {}", e),
+            }
+        }
     }
     pub fn api_stats(&self) -> super::gateway::SpaceStats {
         self.gateway.stats()
@@ -6416,6 +6596,8 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
         let Some(ct) = thought else {
             let count = self.tick_count.load(Ordering::SeqCst);
             if count.is_multiple_of(3) {
+                self.sweep_action_leases();
+                self.run_action_planner_pass_if_due();
                 self.auto_save();
             } // P0: flush every 3 ticks
             if count.is_multiple_of(5) {
@@ -6596,6 +6778,27 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                         }
                         Ok(EngineEvent::EnergyLow { remaining }) => {
                             tracing::warn!("[Scheduler] energy low: {:.1}", remaining);
+                        }
+                        Ok(EngineEvent::ActionOutcomeLanded {
+                            action_id,
+                            outcome_memory_id,
+                            state,
+                        }) => {
+                            // Wake path: outcome write-back is a stimulus for the next
+                            // deliberative/dream cadence (horizon + event log).
+                            self.horizon.lock().note_stimulus(0.55);
+                            // PR-L: buffer; the Routine cadence coalesces bursts into one pass.
+                            self.planner_pass.note_trigger(action_id, &state);
+                            self.log_event(format!(
+                                "action_outcome(id={}, mem={}, state={})",
+                                action_id, outcome_memory_id, state
+                            ));
+                            tracing::info!(
+                                "[action] outcome landed action={} memory={} state={}",
+                                action_id,
+                                outcome_memory_id,
+                                state
+                            );
                         }
                         Err(broadcast::error::RecvError::Closed) => {
                             tracing::info!("[Scheduler] event bus closed, persisting state");
