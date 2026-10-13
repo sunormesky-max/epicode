@@ -10788,9 +10788,10 @@ mod input_validation_tests {
 }
 
 mod recall_self_tests {
+    #[allow(dead_code)]
     fn isolated_engine() -> crate::engine::Engine {
         crate::engine::Engine::with_data_dir(
-            std::env::temp_dir().join(format!("epicode-recall-{}", uuid::Uuid::new_v4())),
+            std::env::temp_dir().join(format!("mcp-recall-self-{}", uuid::Uuid::new_v4())),
         )
     }
 
