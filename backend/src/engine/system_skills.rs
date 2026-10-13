@@ -53,6 +53,8 @@ const SYSTEM_SKILLS: &[(&str, &str, &str)] = &[
      include_str!("../../system_skills/09_executor_playbook.md")),
     ("Epicode 详细参考", "何时用: 遇到具体操作问题 — '怎么建子任务'/'怎么装Pulse'/'时间效性怎么用'/相位机/时间树/校准链全操作细节都在这里。",
      include_str!("../../system_skills/10_epicode_reference.md")),
+    ("动作角色分工", "何时用: 使用 Memory Action Envelope 时 — 分清 Planner(propose/list) 与 Worker(claim/complete)；避免未认领就交付、或只检索不写回 outcome。",
+     include_str!("../../system_skills/11_action_roles.md")),
 ];
 
 fn content_hash(content: &str) -> String {

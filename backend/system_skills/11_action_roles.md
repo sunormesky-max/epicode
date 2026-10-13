@@ -1,0 +1,19 @@
+# 动作角色分工 (Planner ≠ Worker)
+
+> 权威流程仍以握手 / `skill_get('epicode-system')` 为准。本技能说明 Memory Action Envelope 的角色面。
+
+## Planner（规划面）
+只产出方向，不独占执行：
+- `memory_propose_actions` / `drive_to_actions` — 写入前沿
+- `action_list` — 观察前沿
+
+## Worker（执行面）
+认领并闭环：
+- `action_claim` — CAS 独占
+- `skill_get` / `skill_execute` / `task_start(action_id)` — 真正干活
+- `action_complete` — **必须**写 outcome（可被 `task_complete` 代劳）
+
+## 规则
+1. 不要在同一次回合里既大批量 propose 又假装已经完成 — 先 claim 再交付。
+2. Viewer 角色默认只能 `action_list`（只读）；propose/claim/complete 需要写权限。
+3. 同一 `source_drive_id` 在非终态时不可再次 `drive_to_actions`。

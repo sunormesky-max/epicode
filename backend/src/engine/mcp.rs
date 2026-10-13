@@ -1901,6 +1901,12 @@ impl McpHandler {
             "session_continuity": session_continuity,
             "system_skill": {"name": "epicode-system", "version": Self::manual_version(&system_skill), "content": system_skill},
             "session_context": {"knowledge_cards": card_json, "identity": {"system": "Epicode"}},
+            "action_tool_surface": {
+                "planner": ["memory_propose_actions", "drive_to_actions", "action_list"],
+                "worker": ["action_claim", "action_complete", "task_start", "task_complete", "skill_execute"],
+                "skill": "skill_get('动作角色分工')",
+                "rule": "Planner proposes; Worker claims+completes with outcome write-back"
+            },
         });
         self.smrp_ok_nn("epicode_handshake", result)
     }
@@ -1946,10 +1952,10 @@ impl McpHandler {
             ) {
                 Ok(a) => {
                     // Persist reverse lookup for task_complete.
-                    let _ = self.engine.storage.save_drive_kv(
-                        &format!("task_action:{}", task_id),
-                        &aid.to_string(),
-                    );
+                    let _ = self
+                        .engine
+                        .storage
+                        .save_drive_kv(&format!("task_action:{}", task_id), &aid.to_string());
                     // Inherit done_when/stop_if into goal when caller omitted goal.done_when.
                     let goal_empty_dw = args
                         .get("goal")
@@ -1972,8 +1978,7 @@ impl McpHandler {
                         }
                         // Stash for later goal persistence by rewriting args is impossible;
                         // write goal json directly after session exists.
-                        self
-                            .engine
+                        self.engine
                             .storage
                             .set_task_goal_json(&task_id, &g.to_string());
                     }
@@ -7288,6 +7293,10 @@ mod tests {
             "drive_ack",
             "blocks_set",
             "identity_finalize",
+            "memory_propose_actions",
+            "action_claim",
+            "action_complete",
+            "drive_to_actions",
             "future_write_tool",
         ] {
             let response = h.handle(McpRequest {
@@ -8574,5 +8583,24 @@ mod tests {
         assert_eq!(fed["protocol"]["ok"], true, "{fed}");
         assert_eq!(fed["data"]["action"]["state"], "done");
         assert_eq!(fed["data"]["action"]["bound_task_id"], task_id);
+    }
+
+    #[test]
+    fn action_tool_surface_advertises_planner_worker() {
+        let h = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&h);
+        let raw = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"epicode_handshake","arguments":{}}}"#;
+        let v: serde_json::Value = serde_json::from_str(&h.process_json(raw)).unwrap();
+        let surface = &v["result"]["structuredContent"]["data"]["action_tool_surface"];
+        assert!(surface["planner"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x == "memory_propose_actions"));
+        assert!(surface["worker"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x == "action_claim"));
     }
 }
