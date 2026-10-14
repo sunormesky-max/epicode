@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.2](https://github.com/sunormesky-max/epicode/compare/v1.9.1...v1.9.2) (2026-10-14)
+
+
+### Bug Fixes
+
+* **frontend:** align permission names, api types and stale i18n with backend; add contract tests ([#272](https://github.com/sunormesky-max/epicode/issues/272)) ([4c1b25e](https://github.com/sunormesky-max/epicode/commit/4c1b25e811a3fc43f02e40ebb928f4b343936c10))
+* **mcp:** memory_recall 默认 slim；full 去掉 sections 重复并按相似度截 20 条 / default slim recall, capped full ([#269](https://github.com/sunormesky-max/epicode/issues/269)) ([744453c](https://github.com/sunormesky-max/epicode/commit/744453cdd7ed2412688ee5b56ba98d842edab880))
+* **mcp:** task_pulse/handshake 使用有效活跃钟 (real_active_ms 优先)，与 ctx/task_check 一致 ([#270](https://github.com/sunormesky-max/epicode/issues/270)) ([43b75bd](https://github.com/sunormesky-max/epicode/commit/43b75bdd8d8ed6f388e8c79038ef3c70f682be17))
+* **mcp:** 工具目录单一来源，修复宣称与实际工具不一致 / single-source tool catalog ([#271](https://github.com/sunormesky-max/epicode/issues/271)) ([40fc33b](https://github.com/sunormesky-max/epicode/commit/40fc33b52a2b11c44182891c769007f99769b0ba))
+* **mcp:** 工具目录单一来源，修复宣称与实际工具不一致 / single-source tool catalog ([#271](https://github.com/sunormesky-max/epicode/issues/271)) ([b54563a](https://github.com/sunormesky-max/epicode/commit/b54563a92acf5c5575613f567515915cfd23928f))
+
 ## [1.9.1](https://github.com/sunormesky-max/epicode/compare/v1.9.0...v1.9.1) (2026-10-13)
 
 
