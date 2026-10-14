@@ -1009,11 +1009,19 @@ export function getTimeline(limit?: number, offset?: number): Promise<{
   return request(`/v1/timeline${qs ? '?' + qs : ''}`);
 }
 
-export function deleteMemory(id: number): Promise<{ forgotten: number; mode: string }> {
+/** 永久删除(purge):记忆与其关联关系一并移除,不可恢复。与 MCP memory_delete 同语义。 */
+export interface DeleteMemoryResult { status: 'deleted'; id: number; mode: 'purge'; relations_removed: number }
+export function deleteMemory(id: number): Promise<DeleteMemoryResult> {
   invalidateCache('/v1/stats', '/v1/timeline');
-  return request<{ forgotten: number; mode: string }>(`/v1/memories/${id}`, {
+  return request<DeleteMemoryResult>(`/v1/memories/${id}`, {
     method: 'DELETE',
   });
+}
+
+/** 可恢复的遗忘(设置 valid_to、降低重要度),可通过 memory_restore 恢复。与 MCP memory_forget 同语义。 */
+export function forgetMemory(id: number): Promise<{ id?: number; valid_to?: number; [key: string]: unknown }> {
+  invalidateCache('/v1/stats', '/v1/timeline');
+  return request(`/v1/memories/${id}/forget`, { method: 'POST' });
 }
 
 export function updateMemoryContent(id: number, content: string): Promise<{ updated: number; fields_updated?: string[] }> {
@@ -1036,9 +1044,10 @@ export function listDocuments(): Promise<{ documents: number; docs: { id: number
   return request('/v1/docs');
 }
 
-export function batchDeleteMemories(ids: number[]): Promise<{ forgotten: number[]; forgotten_count: number; mode: string }> {
+export interface BatchDeleteResult { deleted: number[]; deleted_count: number; mode: 'purge'; failed: number[]; failed_count: number }
+export function batchDeleteMemories(ids: number[]): Promise<BatchDeleteResult> {
   invalidateCache('/v1/stats', '/v1/timeline');
-  return request<{ forgotten: number[]; forgotten_count: number; mode: string }>('/v1/memories/batch-delete', {
+  return request<BatchDeleteResult>('/v1/memories/batch-delete', {
     method: 'POST',
     body: { ids },
   });

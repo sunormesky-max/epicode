@@ -297,3 +297,50 @@ fn documented_endpoints_exist_with_method() {
         "documented endpoints missing/wrong method: {bad:?}"
     );
 }
+
+/// REST and MCP "delete" must share one implementation (permanent purge,
+/// `mode: "purge"`); soft forgetting lives only on the explicit forget paths.
+#[test]
+fn rest_and_mcp_delete_share_purge_semantics() {
+    fn fn_body<'a>(src: &'a str, sig: &str) -> &'a str {
+        let s = src.find(sig).unwrap_or_else(|| panic!("{sig} not found"));
+        let rest = &src[s + sig.len()..];
+        let e = ["\npub async fn ", "\npub fn ", "\n    fn ", "\n    pub fn "]
+            .iter()
+            .filter_map(|n| rest.find(n))
+            .min()
+            .unwrap_or(rest.len());
+        &rest[..e]
+    }
+    let rest_src = read("backend/src/bin/cloud/memory.rs");
+    let mcp_src = read("backend/src/engine/mcp.rs");
+    for (name, body) in [
+        (
+            "REST delete_memory",
+            fn_body(&rest_src, "pub async fn delete_memory("),
+        ),
+        (
+            "REST batch_delete_memories",
+            fn_body(&rest_src, "pub async fn batch_delete_memories("),
+        ),
+        (
+            "MCP memory_delete",
+            fn_body(&mcp_src, "fn tool_memory_delete("),
+        ),
+    ] {
+        assert!(
+            body.contains("api_delete_memory("),
+            "{name} must use scheduler.api_delete_memory"
+        );
+        assert!(
+            !body.contains("api_forget_memory("),
+            "{name} must not soft-forget"
+        );
+    }
+    assert_eq!(epicode::engine::scheduler::DELETE_MODE, "purge");
+    let forget = fn_body(&rest_src, "pub async fn forget_memory(");
+    assert!(
+        forget.contains("api_forget_memory("),
+        "REST forget path must stay recoverable"
+    );
+}
