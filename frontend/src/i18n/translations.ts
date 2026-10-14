@@ -196,6 +196,7 @@ export type TranslationKey =
   | 'dash.mem.tierHub' | 'dash.mem.tierExperiential' | 'dash.mem.tierContext'
   | 'dash.mem.saving' | 'dash.mem.save' | 'dash.mem.cancel' | 'dash.mem.copied'
   | 'dash.mem.edit' | 'dash.mem.delete' | 'dash.mem.deleteConfirm' | 'dash.mem.deleteFailed'
+  | 'dash.mem.forget' | 'dash.mem.forgetFailed' | 'dash.mem.forgetHint' | 'dash.mem.deleteHint'
   | 'dash.mem.storeDeduped' | 'dash.mem.storeExists' | 'dash.mem.storeOk' | 'dash.mem.storeFailed'
   | 'dash.mem.importFailed' | 'dash.mem.emptySearchPrefix' | 'dash.mem.emptySearchSuffix'
   | 'dash.mem.emptySearchHint' | 'dash.mem.emptyFilter' | 'dash.mem.emptyTitle' | 'dash.mem.emptyHint'
@@ -232,7 +233,7 @@ export type TranslationKey =
   | 'docs.section.memory.title' | 'docs.section.memory.desc'
   | 'docs.section.memory.ep1.desc' | 'docs.section.memory.ep2.desc' | 'docs.section.memory.ep3.desc'
   | 'docs.section.memory.ep4.desc' | 'docs.section.memory.ep5.desc' | 'docs.section.memory.ep6.desc'
-  | 'docs.section.memory.ep7.desc' | 'docs.section.memory.ep8.desc'
+  | 'docs.section.memory.ep7.desc' | 'docs.section.memory.ep8.desc' | 'docs.section.memory.epForget.desc'
   | 'docs.section.docs.title' | 'docs.section.docs.desc'
   | 'docs.section.docs.ep1.desc' | 'docs.section.docs.ep2.desc'
   | 'docs.section.stats.title' | 'docs.section.stats.desc'
@@ -896,9 +897,13 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.mem.cancel': '取消',
     'dash.mem.copied': '已Copy ✓',
     'dash.mem.edit': '编辑',
-    'dash.mem.delete': '删除',
-    'dash.mem.deleteConfirm': '确定删除此记忆？',
+    'dash.mem.delete': '永久删除',
+    'dash.mem.deleteConfirm': '永久删除这条记忆？\n记忆本身和它的关联关系都会被彻底移除，无法恢复。\n如果只是想让它失效、以后还能恢复，请改用「遗忘」。',
     'dash.mem.deleteFailed': '删除失败',
+    'dash.mem.forget': '遗忘',
+    'dash.mem.forgetFailed': '遗忘失败',
+    'dash.mem.forgetHint': '标记失效，之后可恢复',
+    'dash.mem.deleteHint': '彻底移除，不可恢复',
     'dash.mem.storeDeduped': '检测到重复记忆，已自动去重',
     'dash.mem.storeExists': '该记忆已存在',
     'dash.mem.storeOk': '记忆已存储',
@@ -984,8 +989,9 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'docs.section.memory.ep4.desc': '基于记忆的问答',
     'docs.section.memory.ep5.desc': '消化长文本，自动拆分为多条记忆',
     'docs.section.memory.ep6.desc': '记忆时间线',
-    'docs.section.memory.ep7.desc': '删除单条记忆',
-    'docs.section.memory.ep8.desc': '批量删除记忆',
+    'docs.section.memory.ep7.desc': '永久删除单条记忆(连同关联关系,不可恢复;身份锚点与强制规则会被拒绝)',
+    'docs.section.memory.ep8.desc': '批量永久删除记忆(不可恢复)',
+    'docs.section.memory.epForget.desc': '遗忘单条记忆(可恢复:标记失效并降低重要度,可用 memory_restore 恢复)',
     'docs.section.docs.title': '文档系统',
     'docs.section.docs.desc': 'Markdown 文档整篇导入，自动嵌入并与现有记忆知识图谱关联',
     'docs.section.docs.ep1.desc': '导入 Markdown 文档（整篇入库，自动去重）',
@@ -1836,9 +1842,13 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.mem.cancel': 'Cancel',
     'dash.mem.copied': 'Copied ✓',
     'dash.mem.edit': 'Edit',
-    'dash.mem.delete': 'Delete',
-    'dash.mem.deleteConfirm': 'Delete this memory?',
+    'dash.mem.delete': 'Delete permanently',
+    'dash.mem.deleteConfirm': 'Permanently delete this memory?\nThe memory and all of its relations will be removed and cannot be recovered.\nTo make it inactive but recoverable, use "Forget" instead.',
     'dash.mem.deleteFailed': 'Failed to delete',
+    'dash.mem.forget': 'Forget',
+    'dash.mem.forgetFailed': 'Failed to forget',
+    'dash.mem.forgetHint': 'Mark inactive; can be restored later',
+    'dash.mem.deleteHint': 'Remove completely; cannot be undone',
     'dash.mem.storeDeduped': 'Duplicate detected, auto-deduped',
     'dash.mem.storeExists': 'Memory already exists',
     'dash.mem.storeOk': 'Memory stored',
@@ -1924,8 +1934,9 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'docs.section.memory.ep4.desc': 'Memory-based Q&A',
     'docs.section.memory.ep5.desc': 'Digest long text, auto-split into multiple memories',
     'docs.section.memory.ep6.desc': 'Memory timeline',
-    'docs.section.memory.ep7.desc': 'Delete a single memory',
-    'docs.section.memory.ep8.desc': 'Batch delete memories',
+    'docs.section.memory.ep7.desc': 'Permanently delete a memory and its relations (irreversible; identity anchors and enforced rules are refused)',
+    'docs.section.memory.ep8.desc': 'Permanently delete memories in batch (irreversible)',
+    'docs.section.memory.epForget.desc': 'Forget a memory (recoverable: marks it superseded and lowers importance; restore with memory_restore)',
     'docs.section.docs.title': 'Document System',
     'docs.section.docs.desc': 'Import whole Markdown documents; auto-embed and link to the existing memory knowledge graph',
     'docs.section.docs.ep1.desc': 'Import a Markdown document (whole-doc ingest with auto-dedup)',
