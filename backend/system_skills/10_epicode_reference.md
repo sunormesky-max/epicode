@@ -31,10 +31,10 @@
 
 | 内容类型 | 存储时机 | 格式 |
 |----------|----------|------|
-| 重要发现 | 立即 | `memory_remember("发现: X", labels: ["finding", "任务类型"])` |
-| 中间结果 | 每个子任务完成后 | `memory_remember("子任务完成: Y", labels: ["intermediate"])` |
+| 重要发现 | 立即 | `memory_create("发现: X", labels: ["finding", "任务类型"])` |
+| 中间结果 | 每个子任务完成后 | `memory_create("子任务完成: Y", labels: ["intermediate"])` |
 | 学到的教训 | 任务结束时 | task_complete 会自动存，但重要细节提前存 |
-| 用户偏好 | 发现时立即 | `memory_remember("用户偏好: Z", labels: ["preference"])` |
+| 用户偏好 | 发现时立即 | `memory_create("用户偏好: Z", labels: ["preference"])` |
 
 ### 1.5 存储格式规范
 
@@ -446,7 +446,7 @@ task_start(budget_minutes=180)
 │   ┌─────────────────────────────┐
 │   │ 1. 选择下一个子任务           │
 │   │ 2. 执行                      │
-│   │ 3. memory_remember(中间结果)  │
+│   │ 3. memory_create(中间结果)  │
 │   │ 4. task_check(校准时间)      │
 │   │ 5. 根据剩余时间调整后续计划    │
 │   └───────────┬─────────────────┘
@@ -542,7 +542,7 @@ task_complete 后， 系统会自动沉淀时间数据。但你应该在 result 
 
 - `memory_search` 返回的 `source` 字段告诉你命中路径（vector/bm25/kg）
 - 如果 source 包含 "kg"， 说明是通过图谱关联找到的（可能不是最直接的匹配， 但有语义关联）
-- `kg_query(id)` 可以查询某条记忆的所有关联
+- `knowledge_relations(id)` 可以查询某条记忆的所有关联
 
 ### 5.3 什么时候用图谱
 
@@ -563,7 +563,7 @@ task_complete 后， 系统会自动沉淀时间数据。但你应该在 result 
 - **先读知识卡片**（几千字概括几百条记忆） → 再做具体检索
 - **中间结果存到记忆** → 不要试图在上下文中记住所有中间结果
 - **搜索结果太多时** → 增加 limit 或用更具体的关键词
-- **长任务中期** → `memory_remember("当前进度: ...")` 存快照， 以防上下文丢失
+- **长任务中期** → `memory_create("当前进度: ...")` 存快照， 以防上下文丢失
 
 ### 6.3 上下文丢失恢复
 
@@ -614,9 +614,9 @@ task_complete 后， 系统会自动沉淀时间数据。但你应该在 result 
 | `task_check` | 校准时间, 获取建议 | task_id |
 | `task_complete` | 完成任务, 沉淀经验 | task_id, result, quality |
 | `memory_search` | 搜索记忆 | query, limit |
-| `memory_remember` | 存储记忆 | content, labels |
+| `memory_create` | 存储记忆 | content, labels |
 | `memory_recall` | 深度回忆(关联扩展) | query, depth |
-| `kg_query` | 知识图谱查询 | id |
+| `knowledge_relations` | 知识图谱查询 | id |
 
 ---
 

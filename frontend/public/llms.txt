@@ -91,5 +91,5 @@ Do NOT fetch /#/... routes: they are hash routes of a JS single-page app; every 
 Numbers reproduced verbatim from measured runs on /#/benchmarks. This file is the machine-facing source of truth; human pages may lag.
 
 ## LIVE DATA (always fetch this instead of trusting doc numbers)
-GET https://epicode.cn/api/stats/public → {"total_users":…,"total_memories":…,"total_skills":…,"total_mcp_tools":41}
+GET https://epicode.cn/api/stats/public → {"total_users":…,"total_memories":…,"total_skills":…,"total_mcp_tools":…}
 All counts in this file are snapshots of their measurement date. For any current figure, fetch the endpoint above. This is the structural fix for stale-number drift.

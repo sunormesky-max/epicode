@@ -264,7 +264,7 @@ export default function Benchmarks() {
               <MetricCard icon={Brain} label={t('bench.metric.globalMemories')} value={pubStats.total_memories.toLocaleString()} unit={t('bench.metric.unitRecords')} color="#8b7ec8" />
               <MetricCard icon={GitBranch} label={t('bench.metric.skills')} value={String(pubStats.total_skills)} unit={t('bench.metric.unitItems')} color="#3ecfae" />
               <MetricCard icon={Activity} label={t('bench.metric.activeUsers')} value={String(pubStats.total_users)} unit={t('bench.metric.unitPeople')} color="#3ecfae" />
-              <MetricCard icon={Zap} label={t('bench.metric.mcpTools' as never)} value={String(pubStats.total_mcp_tools ?? 41)} unit={t('bench.metric.unitItems')} color="#8b7ec8" />
+              <MetricCard icon={Zap} label={t('bench.metric.mcpTools' as never)} value={String(pubStats.total_mcp_tools ?? '—')} unit={t('bench.metric.unitItems')} color="#8b7ec8" />
             </div>
           )}
 

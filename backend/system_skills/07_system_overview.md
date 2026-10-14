@@ -20,8 +20,8 @@
 ### 认知工具
 | 工具 | 用途 |
 |------|------|
-| `ask_question` | 向系统提问 |
-| `knowledge_graph` | 获取知识图谱 |
+| `memory_ask` | 基于记忆回答问题 |
+| `knowledge_relations` | 查询知识图谱关联 |
 | `skill_execute` | 发现和执行技能 |
 | `feedback_submit` | 提交反馈（驱动系统进化） |
 
