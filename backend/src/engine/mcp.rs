@@ -579,7 +579,6 @@ impl McpHandler {
             "memory_delete" | "memory_forget" | "memory_restore" => Some(P::MemoryDelete),
             // Skill and library management.
             "skill_auto_extract" | "skills_sync" | "skill_feedback" => Some(P::SkillManage),
-            "library_ingest" => Some(P::LibraryManage),
             "dream_cycle" => Some(P::MemoryDelete),
             // Identity setup is immutable; migration rewrites stored embeddings.
             "identity_confirm" | "identity_step" | "identity_finalize" | "embedding_migrate" => {
@@ -617,6 +616,7 @@ impl McpHandler {
             "tools/list" => self.tools_list(req.id),
             "tools/call" => self.tools_call(req.id, req.params),
             "resources/list" => self.resources_list(req.id),
+            "resources/read" => self.resources_read(req.id, req.params),
             "logging/setLevel" => self.logging_set_level(req.id, req.params),
             "subscriptions/listen" => self.subscriptions_listen(req.id, req.params),
             "notifications/initialized" => McpResponse {
@@ -668,8 +668,7 @@ impl McpHandler {
                 "serverInfo": { "name": "Epicode", "version": env!("CARGO_PKG_VERSION") },
                 "capabilities": {
                     "tools": { "listChanged": false },
-                    "resources": { "listChanged": false },
-                    "prompts": { "listChanged": false }
+                    "resources": { "listChanged": false }
                 },
                 "_meta": {
                     "io.modelcontextprotocol/protocolVersion": "2025-11-25",
@@ -694,8 +693,7 @@ impl McpHandler {
                 "serverInfo": { "name": "Epicode", "version": env!("CARGO_PKG_VERSION") },
                 "capabilities": {
                     "tools": { "listChanged": false },
-                    "resources": { "listChanged": false },
-                    "prompts": { "listChanged": false }
+                    "resources": { "listChanged": false }
                 },
                 "_meta": {
                     "io.modelcontextprotocol/serverInfo": {
@@ -752,6 +750,19 @@ impl McpHandler {
     }
 
     fn tools_list(&self, id: Option<serde_json::Value>) -> McpResponse {
+        let result = Self::tool_catalog();
+        McpResponse {
+            jsonrpc: "2.0".into(),
+            id,
+            result: Some(result),
+            error: None,
+        }
+    }
+
+    /// Single source of truth for the advertised MCP tool catalog (`tools/list`).
+    /// MemCard tools (blocks_get/blocks_set) are first-class since 1.9.x (no env gate).
+    /// Public counts (e.g. `/api/stats/public`) must derive from this, never a literal.
+    pub fn tool_catalog() -> serde_json::Value {
         let mut result = serde_json::json!({
             "resultType": "complete",
             "ttlMs": 300000,
@@ -943,7 +954,7 @@ impl McpHandler {
                 },
                 {
                     "name": "memory_update",
-                    "description": "Update a memory's content, labels, aliases, or enforced status by ID. Content updates recompute embedding and hash automatically while preserving ID, KG relations, and cluster topology.",
+                    "description": "Update a memory's content, labels, or aliases by ID (enforced status is managed only via pattern_learn/enforced_rules and is rejected here). Content updates recompute embedding and hash automatically while preserving ID, KG relations, and cluster topology.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1584,12 +1595,12 @@ impl McpHandler {
                 },
             ]
         });
-        // Spike S2: expose blocks_get/set only when EPICODE_MEMCARD=1
-        if super::memcard::memcard_enabled() {
+        // MemCard working-memory cards: always registered.
+        {
             if let Some(tools) = result["tools"].as_array_mut() {
                 tools.push(serde_json::json!({
                     "name": "blocks_get",
-                    "description": "Spike MemCard: get a persona/user/project/working card (≤2KB). Feature-flagged via EPICODE_MEMCARD.",
+                    "description": "MemCard: get a persona/user/project/working card (≤2KB).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1601,7 +1612,7 @@ impl McpHandler {
                 }));
                 tools.push(serde_json::json!({
                     "name": "blocks_set",
-                    "description": "Spike MemCard: set a persona/user/project/working card (≤2KB, versioned). Feature-flagged via EPICODE_MEMCARD.",
+                    "description": "MemCard: set a persona/user/project/working card (≤2KB, versioned).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1623,18 +1634,33 @@ impl McpHandler {
                 }
             }
         }
-        McpResponse {
-            jsonrpc: "2.0".into(),
-            id,
-            result: Some(result),
-            error: None,
-        }
+        result
+    }
+
+    /// Number of MCP tools advertised by tools/list.
+    pub fn public_tool_count() -> usize {
+        Self::tool_catalog()["tools"]
+            .as_array()
+            .map_or(0, |tools| tools.len())
     }
 
     /// MCP ToolAnnotations (spec): hints so clients can auto-approve safe reads
     /// and warn on destructive calls. Pure metadata — no runtime behavior change.
     fn tool_annotations(name: &str) -> serde_json::Value {
-        let (read_only, destructive, idempotent, open_world) = match name {
+        let (read_only, destructive, idempotent, open_world) =
+            Self::tool_annotation_class(name).unwrap_or((false, false, false, false));
+        serde_json::json!({
+            "readOnlyHint": read_only,
+            "destructiveHint": destructive,
+            "idempotentHint": idempotent,
+            "openWorldHint": open_world,
+        })
+    }
+
+    /// Explicit (readOnly, destructive, idempotent, openWorld) class per tool.
+    /// `None` = unclassified; the catalog consistency test rejects that.
+    fn tool_annotation_class(name: &str) -> Option<(bool, bool, bool, bool)> {
+        let class = match name {
             // Pure reads
             "memory_search"
             | "memory_recall"
@@ -1662,6 +1688,7 @@ impl McpHandler {
             | "action_planner_status"
             | "action_goal_list"
             | "worker_list"
+            | "blocks_get"
             | "ctx_load" => (true, false, true, false),
             // Destructive / hard-to-reverse
             "memory_delete" | "memory_forget" | "dream_cycle" | "embedding_migrate"
@@ -1685,6 +1712,7 @@ impl McpHandler {
             | "action_control"
             | "skill_feedback"
             | "feedback_submit"
+            | "blocks_set"
             | "task_check" => (false, false, true, false),
             // Other writes / side-effects
             "memory_create" | "memory_restore" | "memory_improve" | "ctx_save"
@@ -1693,14 +1721,9 @@ impl McpHandler {
             | "task_alert" | "skill_auto_extract" | "doc_import" | "epicode_handshake" => {
                 (false, false, false, false)
             }
-            _ => (false, false, false, false),
+            _ => return None,
         };
-        serde_json::json!({
-            "readOnlyHint": read_only,
-            "destructiveHint": destructive,
-            "idempotentHint": idempotent,
-            "openWorldHint": open_world,
-        })
+        Some(class)
     }
 
     fn smrp_output_schema() -> serde_json::Value {
@@ -5028,13 +5051,6 @@ impl McpHandler {
     }
 
     fn tool_blocks_get(&self, args: &serde_json::Value) -> serde_json::Value {
-        if !super::memcard::memcard_enabled() {
-            return self.smrp_err(
-                "blocks_get",
-                403,
-                "MemCard disabled — set EPICODE_MEMCARD=1 to enable",
-            );
-        }
         let kind = args["kind"].as_str().unwrap_or("");
         let project = args["project"].as_str();
         match self.engine.memcards.get_parsed(kind, project) {
@@ -5063,13 +5079,6 @@ impl McpHandler {
     }
 
     fn tool_blocks_set(&self, args: &serde_json::Value) -> serde_json::Value {
-        if !super::memcard::memcard_enabled() {
-            return self.smrp_err(
-                "blocks_set",
-                403,
-                "MemCard disabled — set EPICODE_MEMCARD=1 to enable",
-            );
-        }
         let kind = args["kind"].as_str().unwrap_or("");
         let content = args["content"].as_str().unwrap_or("").to_string();
         let project = args["project"].as_str();
@@ -6114,6 +6123,52 @@ impl McpHandler {
                 "resources": [
                     { "uri": "epicode://space/stats", "name": "Space Statistics", "mimeType": "application/json" }
                 ]
+            })),
+            error: None,
+        }
+    }
+
+    /// Resource URIs advertised by resources/list; each must be readable.
+    pub const RESOURCE_URIS: &'static [&'static str] = &["epicode://space/stats"];
+
+    /// MCP resources/read. Uses the same read permission as the backing tool.
+    fn resources_read(
+        &self,
+        id: Option<serde_json::Value>,
+        params: Option<serde_json::Value>,
+    ) -> McpResponse {
+        let uri = params
+            .as_ref()
+            .and_then(|p| p.get("uri"))
+            .and_then(|u| u.as_str())
+            .unwrap_or("");
+        let backing_tool = match uri {
+            "epicode://space/stats" => "space_stats",
+            "" => return self.error(id, -32602, "missing params.uri"),
+            other => return self.error(id, -32002, &format!("resource not found: {other}")),
+        };
+        if let Some(role) = self.role_gate {
+            let allowed = Self::tool_permission(backing_tool).is_some_and(|perm| {
+                if let Some(custom) = &self.custom_permissions {
+                    custom.iter().any(|n| n == perm.as_str())
+                } else {
+                    role.can(perm)
+                }
+            });
+            if !allowed {
+                return self.error(id, -32003, "insufficient role for this resource");
+            }
+        }
+        let body = self.tool_space_stats();
+        McpResponse {
+            jsonrpc: "2.0".into(),
+            id,
+            result: Some(serde_json::json!({
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": serde_json::to_string(&body).unwrap_or_default(),
+                }]
             })),
             error: None,
         }
@@ -9414,17 +9469,13 @@ mod tests {
         let mut eng = Engine::new();
         eng.start();
         let h = McpHandler::new(Arc::new(eng));
+        // Promoted: listed and callable without EPICODE_MEMCARD.
         let list_off = h.process_json(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
-        assert!(!list_off.contains("blocks_get"));
-        let denied = h.process_json(
-            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"blocks_set","arguments":{"kind":"persona","content":"x"}}}"#,
+        assert!(list_off.contains("blocks_get") && list_off.contains("blocks_set"));
+        let call_off = h.process_json(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"blocks_get","arguments":{"kind":"persona"}}}"#,
         );
-        assert!(
-            denied.contains("403")
-                || denied.contains("MemCard disabled")
-                || denied.contains("unknown tool")
-                || denied.contains("identity_not_confirmed")
-        );
+        assert!(!call_off.contains("MemCard disabled"), "{call_off}");
 
         std::env::set_var("EPICODE_MEMCARD", "1");
         let tmp = std::env::temp_dir().join(format!(
@@ -10903,5 +10954,241 @@ mod recall_self_tests {
             assert!(slim["items"].as_array().unwrap().len() <= 20);
             assert!(after * 2 < before, "slim cap should at least halve payload");
         }
+    }
+}
+
+/// Catalog consistency contract: what Epicode ADVERTISES (tools/list, discovery
+/// manifest, public tool count, marketing copy) must equal what it can actually
+/// DO (dispatch arms, permission gate, annotations, handler params).
+#[cfg(test)]
+mod catalog_consistency {
+    use super::McpHandler;
+    use std::collections::BTreeSet;
+
+    fn repo_file(rel: &str) -> String {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(rel);
+        std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
+    }
+
+    fn names(catalog: &serde_json::Value) -> Vec<String> {
+        catalog["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .map(|t| t["name"].as_str().expect("tool name").to_string())
+            .collect()
+    }
+
+    /// Quoted identifiers between `start` and the first `end` after it.
+    fn quoted_between(src: &str, start: &str, end: &str) -> BTreeSet<String> {
+        let s = src
+            .find(start)
+            .unwrap_or_else(|| panic!("{start} not found"));
+        let e = s + src[s..]
+            .find(end)
+            .unwrap_or_else(|| panic!("{end} not found"));
+        src[s..e]
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .filter(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
+            .map(String::from)
+            .collect()
+    }
+
+    #[test]
+    fn registry_dispatch_permission_annotation_agree() {
+        let src = include_str!("mcp.rs");
+        let full = names(&McpHandler::tool_catalog());
+        let listed: BTreeSet<String> = full.iter().cloned().collect();
+        assert_eq!(listed.len(), full.len(), "duplicate tool names in catalog");
+
+        let dispatch: BTreeSet<String> = src
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with('"') && l.contains("=> self.tool_"))
+            .filter_map(|l| l[1..].split('"').next().map(String::from))
+            .collect();
+        assert_eq!(listed, dispatch, "tools/list vs tools/call dispatch drift");
+
+        for n in &listed {
+            assert!(
+                McpHandler::tool_permission(n).is_some(),
+                "{n}: listed but no permission (subaccounts get 403)"
+            );
+            assert!(
+                McpHandler::tool_annotation_class(n).is_some(),
+                "{n}: listed but no explicit annotation class"
+            );
+        }
+        let perm = quoted_between(src, "fn tool_permission(", "_ => None");
+        let stale: Vec<_> = perm.difference(&listed).collect();
+        assert!(
+            stale.is_empty(),
+            "permission map names non-existent MCP tools: {stale:?}"
+        );
+        let ann = quoted_between(src, "fn tool_annotation_class(", "_ => return None");
+        let stale: Vec<_> = ann.difference(&listed).collect();
+        assert!(
+            stale.is_empty(),
+            "annotation map names non-existent MCP tools: {stale:?}"
+        );
+    }
+
+    #[test]
+    fn schemas_are_well_formed() {
+        for t in McpHandler::tool_catalog()["tools"].as_array().unwrap() {
+            let n = t["name"].as_str().unwrap();
+            let schema = &t["inputSchema"];
+            assert_eq!(schema["type"], "object", "{n}: inputSchema.type");
+            let props = schema["properties"].as_object();
+            for r in schema["required"].as_array().into_iter().flatten() {
+                let r = r.as_str().unwrap();
+                assert!(
+                    props.is_some_and(|p| p.contains_key(r)),
+                    "{n}: required `{r}` not in properties"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn advertised_catalog_matches_registry() {
+        let public = names(&McpHandler::tool_catalog());
+        assert_eq!(McpHandler::public_tool_count(), public.len());
+
+        let disc: serde_json::Value =
+            serde_json::from_str(&repo_file(".well-known/mcp/discovery.json"))
+                .expect("discovery.json");
+        let advertised: Vec<String> = names(&disc);
+        assert_eq!(
+            advertised, public,
+            ".well-known/mcp/discovery.json drifted from tools/list"
+        );
+
+        // Marketing / docs copy: any "<N> MCP tools" / "<N> 个 MCP 工具" claim must not
+        // exceed the real public count, and an exact claim must equal it.
+        let count = public.len();
+        for rel in [
+            "README.md",
+            "README.zh.md",
+            "frontend/index.html",
+            "frontend/public/llms.txt",
+            "frontend/src/i18n/translations.ts",
+            "frontend/src/lib/page-meta.ts",
+            "mcp-bridge/README.md",
+        ] {
+            let text = repo_file(rel);
+            for (i, _) in text.match_indices("MCP") {
+                let before = text[..i].trim_end().trim_end_matches('个').trim_end();
+                let digits: String = before
+                    .trim_end_matches('+')
+                    .chars()
+                    .rev()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
+                let after = &text[i + 3..];
+                let about_tools = after.trim_start().starts_with("tool")
+                    || after.trim_start().starts_with("工具");
+                if digits.is_empty() || !about_tools {
+                    continue;
+                }
+                let n: usize = digits.parse().unwrap();
+                if before.ends_with('+') {
+                    assert!(n <= count, "{rel}: claims {n}+ MCP tools, actual {count}");
+                } else {
+                    assert_eq!(n, count, "{rel}: claims {n} MCP tools, actual {count}");
+                }
+            }
+        }
+    }
+
+    /// Regenerate `.well-known/mcp/discovery.json` from the live registry:
+    /// `cargo test --lib regenerate_discovery_manifest -- --ignored`
+    #[test]
+    #[ignore]
+    fn regenerate_discovery_manifest() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../.well-known/mcp/discovery.json");
+        let mut disc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        disc["tools"] = McpHandler::tool_catalog()["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "name": t["name"],
+                    "description": t["description"],
+                    "inputSchema": t["inputSchema"],
+                    "annotations": t["annotations"],
+                })
+            })
+            .collect();
+        std::fs::write(&path, serde_json::to_string_pretty(&disc).unwrap() + "\n").unwrap();
+    }
+
+    #[test]
+    fn advertised_resources_are_readable() {
+        let h = McpHandler::new(std::sync::Arc::new(super::tests::isolated_engine()));
+        let call = |method: &str, params: serde_json::Value| {
+            h.handle(super::McpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(serde_json::json!(1)),
+                method: method.into(),
+                params: Some(params),
+            })
+        };
+        let init = call("initialize", serde_json::json!({}));
+        let caps = &init.result.expect("initialize")["capabilities"];
+        for cap in caps.as_object().unwrap().keys() {
+            let probe = match cap.as_str() {
+                "tools" => "tools/list",
+                "resources" => "resources/list",
+                "prompts" => "prompts/list",
+                other => panic!("capability {other} has no probe; add one"),
+            };
+            let r = call(probe, serde_json::json!({}));
+            assert!(
+                r.error.is_none(),
+                "capability {cap} advertised but {probe} fails"
+            );
+        }
+        let list = call("resources/list", serde_json::json!({}));
+        let listed: Vec<String> = list.result.unwrap()["resources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["uri"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(listed, McpHandler::RESOURCE_URIS);
+        for uri in &listed {
+            let r = call("resources/read", serde_json::json!({ "uri": uri }));
+            assert!(r.error.is_none(), "{uri}: {:?}", r.error.map(|e| e.message));
+            let c = &r.result.unwrap()["contents"][0];
+            assert_eq!(c["uri"], uri.as_str());
+            let parsed: serde_json::Value =
+                serde_json::from_str(c["text"].as_str().unwrap()).unwrap();
+            assert_eq!(parsed["protocol"]["ok"], true, "{uri}: {parsed}");
+        }
+        let missing = call(
+            "resources/read",
+            serde_json::json!({ "uri": "epicode://nope" }),
+        );
+        assert_eq!(missing.error.unwrap().code, -32002);
+        let disc: serde_json::Value =
+            serde_json::from_str(&repo_file(".well-known/mcp/discovery.json")).unwrap();
+        let disc_uris: Vec<&str> = disc["resources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["uri"].as_str().unwrap())
+            .collect();
+        assert_eq!(disc_uris, McpHandler::RESOURCE_URIS);
     }
 }

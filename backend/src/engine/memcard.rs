@@ -1,5 +1,6 @@
 //! MemCard — small versioned persona/user/project/working blocks (≤2KB each).
-//! Spike behind `EPICODE_MEMCARD=1`. Default OFF leaves production path untouched.
+//! First-class MCP tools (blocks_get/blocks_set). `EPICODE_MEMCARD=1` now only adds
+//! card metadata to every SMRP status block (kept opt-in to avoid envelope bloat).
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -325,6 +326,7 @@ pub fn answer_prefs_from_card(content: &str, query: &str) -> String {
     }
 }
 
+/// Opt-in: include MemCard meta in SMRP `status` (tools are always available).
 pub fn memcard_enabled() -> bool {
     crate::engine::spike_flags::env_flag("EPICODE_MEMCARD")
 }

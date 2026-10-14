@@ -18,11 +18,11 @@ export interface PageMeta { zh: LocalizedMeta; en: LocalizedMeta; /** 控制台�
 const HOME: PageMeta = {
   zh: {
     title: 'Epicode — AI 记忆操作系统',
-    description: '给 AI 一段忘不掉的记忆:持久记忆、语义检索、知识图谱、双环认知与技能交换,提供 REST API 与 41 个 MCP 工具。',
+    description: '给 AI 一段忘不掉的记忆:持久记忆、语义检索、知识图谱、双环认知与技能交换,提供 REST API 与 60+ 个 MCP 工具。',
   },
   en: {
     title: 'Epicode — AI Memory Operating System',
-    description: 'Give AI an unforgettable memory: persistent memory, semantic search, knowledge graph, dual-loop cognition and skill exchange, via REST API and 41 MCP tools.',
+    description: 'Give AI an unforgettable memory: persistent memory, semantic search, knowledge graph, dual-loop cognition and skill exchange, via REST API and 60+ MCP tools.',
   },
 };
 

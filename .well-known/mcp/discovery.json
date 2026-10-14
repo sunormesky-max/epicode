@@ -1,484 +1,2252 @@
 {
-  "schema_version": "mcp-registry/1.0",
-  "name": "Epicode",
-  "description": "Open-source spatial AI memory system with knowledge graph and identity rituals",
-  "version": "1.0.0",
   "author": "sunormesky-max",
-  "license": "MIT",
-  "repository": "https://github.com/sunormesky-max/epicode",
+  "description": "Epicode AI memory operating system (MCP endpoint: https://epicode.cn/mcp). Tool list is generated from the server registry; tools/list is authoritative.",
   "homepage": "https://epicode.cn",
+  "license": "MIT",
   "mcp_version": "1.0",
-  "tools": [
-    {
-      "name": "memory_create",
-      "description": "Create a new memory entry in the spatial memory system",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "content": { "type": "string", "description": "The content of the memory" },
-          "tags": { "type": "array", "items": { "type": "string" }, "description": "Tags for categorization" },
-          "space": { "type": "string", "description": "Target memory space" }
-        },
-        "required": ["content"]
-      }
-    },
-    {
-      "name": "memory_search",
-      "description": "Search memories by content, tags, or spatial coordinates",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "query": { "type": "string", "description": "Search query string" },
-          "space": { "type": "string", "description": "Limit search to a specific space" },
-          "limit": { "type": "number", "description": "Maximum number of results" }
-        },
-        "required": ["query"]
-      }
-    },
-    {
-      "name": "memory_recall",
-      "description": "Recall a specific memory by ID or spatial reference",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "memory_id": { "type": "string", "description": "Unique memory identifier" },
-          "spatial_ref": { "type": "string", "description": "Spatial reference coordinate" }
-        }
-      }
-    },
-    {
-      "name": "ctx_load",
-      "description": "Load context from a saved session or memory space",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "context_id": { "type": "string", "description": "Context identifier to load" },
-          "space": { "type": "string", "description": "Target memory space" }
-        },
-        "required": ["context_id"]
-      }
-    },
-    {
-      "name": "ctx_save",
-      "description": "Save current context to a named session or memory space",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "name": { "type": "string", "description": "Name for the saved context" },
-          "space": { "type": "string", "description": "Target memory space" },
-          "metadata": { "type": "object", "description": "Additional metadata to store" }
-        },
-        "required": ["name"]
-      }
-    },
-    {
-      "name": "session_summary",
-      "description": "Generate a summary of the current or specified session",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "session_id": { "type": "string", "description": "Session identifier" },
-          "format": { "type": "string", "enum": ["brief", "detailed", "structured"], "description": "Summary format" }
-        }
-      }
-    },
-    {
-      "name": "pattern_learn",
-      "description": "Learn and store a new behavioral or data pattern",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "pattern": { "type": "string", "description": "Pattern description or data" },
-          "category": { "type": "string", "description": "Pattern category" },
-          "confidence": { "type": "number", "description": "Confidence score (0-1)" }
-        },
-        "required": ["pattern"]
-      }
-    },
-    {
-      "name": "pattern_recall",
-      "description": "Recall previously learned patterns by category or query",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "category": { "type": "string", "description": "Pattern category to filter" },
-          "query": { "type": "string", "description": "Search query for patterns" }
-        }
-      }
-    },
-    {
-      "name": "decision_record",
-      "description": "Record a decision with context, rationale, and outcome",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "decision": { "type": "string", "description": "Description of the decision" },
-          "rationale": { "type": "string", "description": "Reasoning behind the decision" },
-          "context": { "type": "string", "description": "Decision context" },
-          "outcome": { "type": "string", "description": "Observed outcome" }
-        },
-        "required": ["decision", "rationale"]
-      }
-    },
-    {
-      "name": "bug_memory",
-      "description": "Record or search bug-related memories and resolutions",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "bug_id": { "type": "string", "description": "Bug identifier" },
-          "description": { "type": "string", "description": "Bug description" },
-          "resolution": { "type": "string", "description": "Resolution or fix applied" },
-          "action": { "type": "string", "enum": ["record", "search", "update"], "description": "Action to perform" }
-        }
-      }
-    },
-    {
-      "name": "space_stats",
-      "description": "Get statistics and metrics for a memory space",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "space": { "type": "string", "description": "Memory space name" },
-          "metric": { "type": "string", "enum": ["count", "size", "activity", "all"], "description": "Metric to retrieve" }
-        },
-        "required": ["space"]
-      }
-    },
-    {
-      "name": "dream_cycle",
-      "description": "Run a dream cycle for memory consolidation and insight generation",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "space": { "type": "string", "description": "Target memory space" },
-          "focus": { "type": "string", "description": "Focus area for the dream cycle" },
-          "depth": { "type": "number", "description": "Depth of consolidation (1-10)" }
-        }
-      }
-    },
-    {
-      "name": "knowledge_relations",
-      "description": "Query or establish relations in the knowledge graph",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "entity_a": { "type": "string", "description": "First entity" },
-          "relation": { "type": "string", "description": "Relation type" },
-          "entity_b": { "type": "string", "description": "Second entity" },
-          "action": { "type": "string", "enum": ["query", "create", "delete"], "description": "Action to perform" }
-        }
-      }
-    },
-    {
-      "name": "concepts",
-      "description": "Manage conceptual knowledge and abstractions",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "concept": { "type": "string", "description": "Concept name or definition" },
-          "action": { "type": "string", "enum": ["define", "query", "relate", "list"], "description": "Action to perform" },
-          "definition": { "type": "string", "description": "Concept definition" }
-        }
-      }
-    },
-    {
-      "name": "identity_confirm",
-      "description": "Confirm identity with verification challenge",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "identity_token": { "type": "string", "description": "Identity verification token" },
-          "challenge_response": { "type": "string", "description": "Response to identity challenge" }
-        },
-        "required": ["identity_token"]
-      }
-    },
-    {
-      "name": "identity_step",
-      "description": "Perform a step in the identity ritual sequence",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "step": { "type": "number", "description": "Ritual step number" },
-          "input": { "type": "string", "description": "Input for this step" },
-          "session_token": { "type": "string", "description": "Ritual session token" }
-        },
-        "required": ["step"]
-      }
-    },
-    {
-      "name": "identity_finalize",
-      "description": "Finalize the identity ritual and establish persistent identity",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "session_token": { "type": "string", "description": "Ritual session token" },
-          "confirmation": { "type": "string", "description": "Final confirmation input" }
-        },
-        "required": ["session_token"]
-      }
-    },
-    {
-      "name": "skill_execute",
-      "description": "Execute a registered skill with given parameters",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "skill": { "type": "string", "description": "Skill name to execute" },
-          "params": { "type": "object", "description": "Skill parameters" },
-          "context": { "type": "string", "description": "Execution context" }
-        },
-        "required": ["skill"]
-      }
-    },
-    {
-      "name": "skills_sync",
-      "description": "Synchronize skills registry with remote or local source",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "source": { "type": "string", "description": "Skills source URL or path" },
-          "mode": { "type": "string", "enum": ["full", "incremental", "force"], "description": "Sync mode" }
-        }
-      }
-    },
-    {
-      "name": "feedback_submit",
-      "description": "Submit feedback for a tool, skill, or memory entry",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "target": { "type": "string", "description": "Target of feedback (tool/skill/memory ID)" },
-          "rating": { "type": "number", "description": "Rating score (1-5)" },
-          "comment": { "type": "string", "description": "Feedback comment" },
-          "type": { "type": "string", "enum": ["tool", "skill", "memory", "general"], "description": "Feedback type" }
-        },
-        "required": ["target", "rating"]
-      }
-    },
-    {
-      "name": "project_list",
-      "description": "List all tracked projects and their memory spaces",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "filter": { "type": "string", "description": "Filter by project name or status" },
-          "include_archived": { "type": "boolean", "description": "Include archived projects" }
-        }
-      }
-    },
-    {
-      "name": "enforced_rules",
-      "description": "Retrieve or update enforced rules for the system",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "action": { "type": "string", "enum": ["get", "set", "list", "delete"], "description": "Action to perform" },
-          "rule_id": { "type": "string", "description": "Rule identifier" },
-          "rule": { "type": "object", "description": "Rule definition" }
-        }
-      }
-    },
-    {
-      "name": "memory_update",
-      "description": "Update an existing memory entry",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "memory_id": { "type": "string", "description": "Memory identifier" },
-          "content": { "type": "string", "description": "Updated content" },
-          "tags": { "type": "array", "items": { "type": "string" }, "description": "Updated tags" }
-        },
-        "required": ["memory_id"]
-      }
-    },
-    {
-      "name": "memory_delete",
-      "description": "Delete a memory entry by ID",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "memory_id": { "type": "string", "description": "Memory identifier to delete" },
-          "confirm": { "type": "boolean", "description": "Confirm deletion" }
-        },
-        "required": ["memory_id"]
-      }
-    },
-    {
-      "name": "space_create",
-      "description": "Create a new memory space",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "name": { "type": "string", "description": "Space name" },
-          "description": { "type": "string", "description": "Space description" },
-          "schema": { "type": "object", "description": "Space schema definition" }
-        },
-        "required": ["name"]
-      }
-    },
-    {
-      "name": "space_delete",
-      "description": "Delete a memory space",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "name": { "type": "string", "description": "Space name to delete" },
-          "confirm": { "type": "boolean", "description": "Confirm deletion" }
-        },
-        "required": ["name"]
-      }
-    },
-    {
-      "name": "space_list",
-      "description": "List all available memory spaces",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "filter": { "type": "string", "description": "Filter string" }
-        }
-      }
-    },
-    {
-      "name": "knowledge_query",
-      "description": "Query the knowledge graph for entities or relations",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "query": { "type": "string", "description": "Graph query string" },
-          "entity": { "type": "string", "description": "Entity to query" },
-          "depth": { "type": "number", "description": "Query depth" }
-        }
-      }
-    },
-    {
-      "name": "knowledge_add",
-      "description": "Add a new entity or relation to the knowledge graph",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "entity": { "type": "string", "description": "Entity name" },
-          "type": { "type": "string", "description": "Entity type" },
-          "relations": { "type": "array", "items": { "type": "object" }, "description": "Relations to create" }
-        },
-        "required": ["entity"]
-      }
-    },
-    {
-      "name": "identity_init",
-      "description": "Initialize a new identity ritual session",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "identity_name": { "type": "string", "description": "Name for the new identity" },
-          "ritual_type": { "type": "string", "description": "Type of identity ritual" }
-        }
-      }
-    },
-    {
-      "name": "identity_status",
-      "description": "Check the status of an identity ritual session",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "session_token": { "type": "string", "description": "Ritual session token" }
-        },
-        "required": ["session_token"]
-      }
-    },
-    {
-      "name": "skill_register",
-      "description": "Register a new skill in the skills registry",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "name": { "type": "string", "description": "Skill name" },
-          "description": { "type": "string", "description": "Skill description" },
-          "handler": { "type": "string", "description": "Skill handler reference" },
-          "schema": { "type": "object", "description": "Skill parameter schema" }
-        },
-        "required": ["name", "handler"]
-      }
-    },
-    {
-      "name": "skill_list",
-      "description": "List all registered skills",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "filter": { "type": "string", "description": "Filter by skill name or category" },
-          "enabled_only": { "type": "boolean", "description": "Show only enabled skills" }
-        }
-      }
-    },
-    {
-      "name": "project_create",
-      "description": "Create a new project with associated memory space",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "name": { "type": "string", "description": "Project name" },
-          "description": { "type": "string", "description": "Project description" },
-          "space": { "type": "string", "description": "Associated memory space" }
-        },
-        "required": ["name"]
-      }
-    },
-    {
-      "name": "project_delete",
-      "description": "Delete a project and optionally its memory space",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "name": { "type": "string", "description": "Project name" },
-          "delete_space": { "type": "boolean", "description": "Also delete associated memory space" }
-        },
-        "required": ["name"]
-      }
-    }
-  ],
+  "name": "Epicode",
+  "prompts": [],
+  "repository": "https://github.com/sunormesky-max/epicode",
   "resources": [
     {
-      "name": "memory_space",
-      "description": "Access to a specific memory space",
-      "uri_template": "epicode://memory/{space_name}",
-      "mime_type": "application/json"
-    },
-    {
-      "name": "knowledge_graph",
-      "description": "Access to the knowledge graph data",
-      "uri_template": "epicode://knowledge/{entity_id}",
-      "mime_type": "application/json"
-    },
-    {
-      "name": "identity_session",
-      "description": "Access to identity ritual session data",
-      "uri_template": "epicode://identity/{session_token}",
-      "mime_type": "application/json"
-    },
-    {
-      "name": "skill_registry",
-      "description": "Access to the skills registry",
-      "uri_template": "epicode://skills/{skill_name}",
-      "mime_type": "application/json"
+      "description": "Tetrahedral memory space statistics (resources/list)",
+      "mime_type": "application/json",
+      "name": "Space Statistics",
+      "uri": "epicode://space/stats"
     }
   ],
-  "prompts": [
+  "schema_version": "mcp-registry/1.0",
+  "tools": [
     {
-      "name": "memory_explore",
-      "description": "Explore memories in a space with guided questions",
-      "template": "Explore the memory space '{{space}}' and identify key themes, patterns, and insights. Consider: What are the most frequently referenced concepts? What temporal patterns exist? What relationships emerge?"
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Initialize Epicode connection. Syncs system Skill, returns session context with knowledge cards. Call on first connection each day.",
+      "inputSchema": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent identifier (e.g. claude-3.5-sonnet)",
+            "type": "string"
+          },
+          "authorization": {
+            "properties": {
+              "auto_install": {
+                "type": "boolean"
+              },
+              "auto_update": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      },
+      "name": "epicode_handshake"
     },
     {
-      "name": "identity_ritual_guide",
-      "description": "Guide through the identity ritual process",
-      "template": "Guide the user through the identity ritual. Current step: {{step}}. Ask appropriate questions and provide guidance for establishing a persistent identity."
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Start a time-budgeted task. Optional action_id binds the task to a claimed Memory Action (task_complete feeds action_complete). Pass parent_task_id to create a sub-task of a long-running master task (time tree: each sub-task runs its own phase machine). Returns time_sense (quality-gated historical median), knowledge cards, and similar experiences. P35: pass goal{objective, done_when[], stop_if[]} to activate the goal contract — completion = every done_when item has artifact-level evidence; vague goals without done_when get linted. S2: recommended_skills are SEMANTIC auto-matches for your task — read each description (when-to-use); if relevant fetch full content via skill_get, ignore otherwise.",
+      "inputSchema": {
+        "properties": {
+          "action_id": {
+            "description": "Bind to a Claimed AgentAction (from action_claim / drive_to_actions). Rejects open/foreign/already-bound actions. Inherits done_when/stop_if into goal when goal omitted.",
+            "type": "integer"
+          },
+          "budget_minutes": {
+            "description": "Time budget in minutes",
+            "type": "integer"
+          },
+          "client_time_ms": {
+            "description": "Your runtime host's current epoch-milliseconds — server detects clock drift (>2s warns) and anchors all time references to server_now",
+            "type": "integer"
+          },
+          "description": {
+            "description": "Task description (used to retrieve relevant history)",
+            "type": "string"
+          },
+          "est_minutes": {
+            "description": "YOUR OWN estimate (independent of budget) — replace human priors with your calibrated self-fingerprint (see time_sense.self_correction)",
+            "type": "integer"
+          },
+          "goal": {
+            "description": "P35 goal contract (Codex Goal Mode x temporal effectiveness): {objective, scope?, constraints?[], done_when?[], stop_if?[]}. done_when = verifiable completion criteria, evidence-mapped at delivery via done_when_evidence; stop_if = circuit-breaker conditions where continuing is wrong (declare via stop_if_hit). Vague goals without done_when cannot be completion-audited — the server lints and warns.",
+            "properties": {
+              "constraints": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "done_when": {
+                "description": "Verifiable completion criteria — each requires artifact-level evidence at delivery",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "objective": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "stop_if": {
+                "description": "Stop conditions (needs new dependency, scope violation, diminishing returns) — Codex practice: more important than done_when",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "objective"
+            ],
+            "type": "object"
+          },
+          "parent_task_id": {
+            "description": "Master task id — pass this to create a sub-task (time tree). Sub-tasks run their own phase machine under the master budget.",
+            "type": "string"
+          },
+          "task_class": {
+            "description": "Task class tag (e.g. mcp-loop, code-review) — aggregates YOUR est/act history so estimates come from your own clock, not human priors",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "budget_minutes"
+        ],
+        "type": "object"
+      },
+      "name": "task_start"
     },
     {
-      "name": "knowledge_insight",
-      "description": "Generate insights from the knowledge graph",
-      "template": "Analyze the knowledge graph around entity '{{entity}}' and generate insights about: 1) Key relationships, 2) Emerging patterns, 3) Potential gaps or contradictions."
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Check time budget + phase machine. Returns percentage, current phase (explore/build/verify/deliver), and evidence gates (memory_ops, alternatives, revisions). Report your evidence: alternatives_considered (number of options compared), revision_done (a targeted fix was made). Gates unmet block delivery at task_complete.",
+      "inputSchema": {
+        "properties": {
+          "alternatives_considered": {
+            "description": "Cumulative number of alternative approaches compared so far (build-phase evidence)",
+            "type": "integer"
+          },
+          "checkpoint": {
+            "description": "One-line progress note; persisted as a recovery checkpoint (call every sub-task or ~20min on long tasks)",
+            "type": "string"
+          },
+          "open_questions": {
+            "description": "Unresolved questions to carry across sessions — recovery view returns them. Continuity of questions, not just progress",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "revision_done": {
+            "description": "Set true when a targeted revision/fix was completed since last check (verify-phase evidence)",
+            "type": "boolean"
+          },
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "type": "object"
+      },
+      "name": "task_check"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Fetch full content of a specific skill by name. Use after skills_sync to get details.",
+      "inputSchema": {
+        "properties": {
+          "name": {
+            "description": "Skill name from skills_sync manifest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "name": "skill_get"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Progress query. With task_id: status of that task. WITHOUT task_id: recovery view of your ACTIVE task — phase, evidence gates, latest checkpoint, children summary, and resume instructions. Use after crash or context-loss to re-anchor instead of restarting.",
+      "inputSchema": {
+        "properties": {
+          "task_id": {
+            "description": "Omit to get the recovery view of your ACTIVE task",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "task_status"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Mark task complete with result + quality. STOP NEGOTIATION (P34): if the improvement_menu (derived from evidence debts: memory search / alternatives / revisions / reflection / self-rating) is non-empty, the task stays open (wait:true) — clear the menu first. Earn an early stop by clearing the menu and passing independent review of your saturation_note (enumerate improvement classes tried + why each is infeasible). At >=85% utilization completion passes as budget_exhausted. force_finalize = early_release (take the goods now: zero reward, recorded in your behavior mirror) — reserve for genuinely urgent cases. stop_reason is recorded: earned_saturation / budget_exhausted / early_release. P35 goal contract: deliver done_when_evidence (parallel to your done_when list, artifact-level) — unmapped items join the menu as goal-debts; declare stop_if_hit when a stop condition fires (circuit-breaker instead of negotiation).",
+      "inputSchema": {
+        "properties": {
+          "done_when_evidence": {
+            "description": "P35 goal contract: evidence per done_when item (parallel array) — unmapped items become goal-debts in the improvement_menu. Artifact-level evidence (files/outputs/test results), NOT proxy signals",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "force_finalize": {
+            "description": "Finalize despite low utilization — requires saturation_note",
+            "type": "boolean"
+          },
+          "iteration_log": {
+            "description": "Reflection loop record (required for tasks >= 30min): [{perspective, change}] — adversarial re-read / better-path / gap-scan / cross-round consistency. Empty log = no real reflection",
+            "items": {
+              "properties": {
+                "change": {
+                  "type": "string"
+                },
+                "perspective": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "judge": {
+            "description": "Override the default judge behavior (default: on when self_rating present)",
+            "type": "boolean"
+          },
+          "quality": {
+            "enum": [
+              "poor",
+              "fair",
+              "good",
+              "excellent"
+            ],
+            "type": "string"
+          },
+          "result": {
+            "description": "Task result summary",
+            "type": "string"
+          },
+          "saturation_note": {
+            "description": "Value-saturation statement: what was verified / which alternatives were rejected / why more time adds no value",
+            "type": "string"
+          },
+          "self_rating": {
+            "description": "Four-dimension rubric 1-5 each",
+            "properties": {
+              "accuracy": {
+                "type": "integer"
+              },
+              "actionability": {
+                "type": "integer"
+              },
+              "completeness": {
+                "type": "integer"
+              },
+              "depth": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "completeness",
+              "accuracy",
+              "depth",
+              "actionability"
+            ],
+            "type": "object"
+          },
+          "stop_if_hit": {
+            "description": "P35: declare that a stop_if condition was hit — triggers circuit-breaker (early_release wrap-up or blocking task_alert) instead of the improvement menu",
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "result"
+        ],
+        "type": "object"
+      },
+      "name": "task_complete"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Store a memory in the tetrahedral space. Similar memories cluster together automatically. Returns the unique memory ID.",
+      "inputSchema": {
+        "properties": {
+          "content": {
+            "description": "The memory text to store",
+            "type": "string"
+          },
+          "labels": {
+            "description": "Optional category tags (e.g. ['decision', 'architecture'])",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "type": "object"
+      },
+      "name": "memory_create"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Search the LIBRARY (global shared knowledge assets: AI papers, manuals, reference docs). Results include provenance (title, arXiv ID, chunk number). Complements memory_search (personal memories) — use library_search for factual/technical/reference queries, memory_search for personal experiences and context.",
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "description": "Max results (default 5, max 20)",
+            "type": "integer"
+          },
+          "query": {
+            "description": "Search query — describe the knowledge you're looking for",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "library_search"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Search personal memories and inspect ranked evidence with tier and retrieval provenance. Use memory_recall for associative context or memory_ask for a synthesized answer. Supports pagination and exact, semantic, graph, auto, and fusion modes.",
+      "inputSchema": {
+        "properties": {
+          "as_of": {
+            "description": "Temporal query (unix seconds): return only memories valid at that moment (valid_from <= as_of < valid_to). Ask historical questions like 'where did they live last month' without current facts overriding.",
+            "type": "integer"
+          },
+          "labels": {
+            "description": "Filter: only return memories with ANY of these labels",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "description": "Max results to return (default 10, max 200). Reduce the limit if the response exceeds the 1 MiB MCP result cap.",
+            "type": "integer"
+          },
+          "min_importance": {
+            "description": "Filter: minimum importance score",
+            "type": "number"
+          },
+          "mode": {
+            "default": "hybrid",
+            "description": "Search mode: hybrid (vector+BM25 blend), exact (pure BM25 for identifiers and known phrases), semantic (vector similarity), graph (hybrid-search seeds expanded/reranked with knowledge-graph PPR), auto (routes temporal/aggregation queries to graph and other queries to semantic), fusion (reciprocal-rank fusion of semantic and graph results).",
+            "enum": [
+              "hybrid",
+              "exact",
+              "semantic",
+              "graph",
+              "auto",
+              "fusion"
+            ],
+            "type": "string"
+          },
+          "offset": {
+            "description": "Pagination offset, skip first N results (default 0)",
+            "type": "integer"
+          },
+          "project": {
+            "description": "Filter: project name",
+            "type": "string"
+          },
+          "query": {
+            "description": "The search query — describe what you're looking for",
+            "type": "string"
+          },
+          "since_days": {
+            "description": "Filter: only memories from the last N days",
+            "type": "integer"
+          },
+          "strict_filter": {
+            "default": false,
+            "description": "Phase 1: strict filter mode — no semantic backfill, only return exact filter matches. Combine with mode=exact for database-like lookups.",
+            "type": "boolean"
+          },
+          "verbosity": {
+            "default": "full",
+            "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections/results duplicates); retains valid + timestamp fields when present. Also enabled by EPICODE_SLIM_ENVELOPE=1.",
+            "enum": [
+              "full",
+              "slim"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "memory_search"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Search and expand through knowledge-graph associations. Returns SMRP tiers, source memories, provenance, and emotion context. Use memory_search for ranked direct matches or memory_ask for a synthesized answer.",
+      "inputSchema": {
+        "properties": {
+          "depth": {
+            "description": "Association depth (default 2, max 3)",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 20,
+            "description": "Slim only: max items returned, top by score (default 20)",
+            "maximum": 60,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "query": {
+            "description": "The recall query",
+            "type": "string"
+          },
+          "verbosity": {
+            "default": "full",
+            "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections duplicates); retains valid + timestamp fields when present. Also enabled by EPICODE_SLIM_ENVELOPE=1.",
+            "enum": [
+              "full",
+              "slim"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "memory_recall"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Answer a natural-language question using the existing memory-grounded ask engine. Returns the answer together with structured source memories and any knowledge card used. Use memory_search or memory_recall when you need to inspect retrieval evidence without synthesis; an empty memory_count means no memory evidence was found.",
+      "inputSchema": {
+        "properties": {
+          "depth": {
+            "default": 2,
+            "description": "Knowledge-graph expansion depth (default 2, max 10)",
+            "maximum": 10,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "question": {
+            "description": "The question to answer from stored memories",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "type": "object"
+      },
+      "name": "memory_ask"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Retrieve a specific memory by its ID. Returns full content, labels, aliases, timestamp.",
+      "inputSchema": {
+        "properties": {
+          "id": {
+            "description": "The memory ID",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "memory_get"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List memories with optional filtering and pagination. Returns id + content preview for each.",
+      "inputSchema": {
+        "properties": {
+          "labels": {
+            "description": "Filter by labels (OR match — returns memories that have ANY of these labels)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "description": "Max results to return (default: 100)",
+            "type": "integer"
+          },
+          "offset": {
+            "description": "Pagination offset (default: 0)",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "memory_list"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Update a memory's content, labels, or aliases by ID (enforced status is managed only via pattern_learn/enforced_rules and is rejected here). Content updates recompute embedding and hash automatically while preserving ID, KG relations, and cluster topology.",
+      "inputSchema": {
+        "properties": {
+          "aliases": {
+            "description": "New aliases to replace existing ones (optional)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "content": {
+            "description": "New content for this memory (optional, recomputes embedding)",
+            "type": "string"
+          },
+          "id": {
+            "description": "The memory ID to update",
+            "type": "integer"
+          },
+          "labels": {
+            "description": "New labels to replace existing ones (optional)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "memory_update"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Delete a memory by ID. Permanently removes the memory from space, storage, knowledge graph, and search index. Use with caution.",
+      "inputSchema": {
+        "properties": {
+          "id": {
+            "description": "The memory ID to delete",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "memory_delete"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Load project context for the current coding session. If a task is provided, uses intent-aware retrieval for precision. Call this at the START of every new session before writing any code.",
+      "inputSchema": {
+        "properties": {
+          "project": {
+            "description": "Project name or path (optional, for scoping)",
+            "type": "string"
+          },
+          "scope": {
+            "description": "Search scope: 'project' (default, only project memories), 'global' (include cross-project knowledge transfer)",
+            "enum": [
+              "project",
+              "global"
+            ],
+            "type": "string"
+          },
+          "task": {
+            "description": "Current task description (optional, enables intent-aware precision loading)",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "ctx_load"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Save key findings or decisions from the current session. Use when you complete a significant task: architecture choice, bug fix, new pattern discovered, or user preference noted.",
+      "inputSchema": {
+        "properties": {
+          "category": {
+            "description": "One of: decision, pattern, preference, finding, session-summary",
+            "enum": [
+              "decision",
+              "pattern",
+              "preference",
+              "finding",
+              "session-summary"
+            ],
+            "type": "string"
+          },
+          "details": {
+            "description": "Optional additional context or reasoning",
+            "type": "string"
+          },
+          "project": {
+            "description": "Project name or path (optional)",
+            "type": "string"
+          },
+          "summary": {
+            "description": "What was done or decided",
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "category"
+        ],
+        "type": "object"
+      },
+      "name": "ctx_save"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Store a code pattern, convention, or idiom for this project. Examples: 'use parking_lot instead of std::sync', 'errors return Result<T, String>', 'test files mirror src structure'.",
+      "inputSchema": {
+        "properties": {
+          "enforced": {
+            "description": "Mark as a HARD process constraint — enforced rules are injected as process_contract at every task_start/handshake (fights long-session rule decay)",
+            "type": "boolean"
+          },
+          "example": {
+            "description": "Optional code example demonstrating the pattern",
+            "type": "string"
+          },
+          "language": {
+            "description": "Programming language (e.g. 'rust', 'typescript')",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "The pattern or convention to remember",
+            "type": "string"
+          },
+          "pitfalls": {
+            "description": "Common mistakes or caveats to watch for",
+            "type": "string"
+          },
+          "project": {
+            "description": "Project name (optional)",
+            "type": "string"
+          },
+          "steps": {
+            "description": "Step-by-step procedure (numbered list)",
+            "type": "string"
+          },
+          "when": {
+            "description": "When to apply this pattern (use case / scenario)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "name": "pattern_learn"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Recall code patterns and conventions relevant to the current task. Call this before writing code to check for established patterns.",
+      "inputSchema": {
+        "properties": {
+          "context": {
+            "description": "What you're about to do (e.g. 'error handling', 'async task', 'database query')",
+            "type": "string"
+          },
+          "language": {
+            "description": "Programming language filter (optional)",
+            "type": "string"
+          },
+          "project": {
+            "description": "Project name filter (optional)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "context"
+        ],
+        "type": "object"
+      },
+      "name": "pattern_recall"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Record an architectural or design decision with rationale. Use when choosing approach A over B, adopting a library, or changing a fundamental design choice.",
+      "inputSchema": {
+        "properties": {
+          "alternatives": {
+            "description": "What was considered but rejected",
+            "type": "string"
+          },
+          "chosen": {
+            "description": "What was chosen",
+            "type": "string"
+          },
+          "project": {
+            "description": "Project name (optional)",
+            "type": "string"
+          },
+          "rationale": {
+            "description": "Why this choice was made",
+            "type": "string"
+          },
+          "title": {
+            "description": "Short decision title (e.g. 'Use SQLite over PostgreSQL')",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "chosen",
+          "rationale"
+        ],
+        "type": "object"
+      },
+      "name": "decision_record"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Record a bug pattern and its fix. Helps avoid repeating the same mistakes. Include symptoms, root cause, and fix.",
+      "inputSchema": {
+        "properties": {
+          "fix": {
+            "description": "How it was fixed",
+            "type": "string"
+          },
+          "module": {
+            "description": "Affected module or file (optional)",
+            "type": "string"
+          },
+          "project": {
+            "description": "Project name (optional)",
+            "type": "string"
+          },
+          "root_cause": {
+            "description": "Why it happened",
+            "type": "string"
+          },
+          "symptoms": {
+            "description": "What went wrong (error message, behavior)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symptoms",
+          "root_cause",
+          "fix"
+        ],
+        "type": "object"
+      },
+      "name": "bug_memory"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Summarize what was accomplished in this coding session. Call at the END of each session so the next session can pick up context.",
+      "inputSchema": {
+        "properties": {
+          "accomplished": {
+            "description": "What was done in this session",
+            "type": "string"
+          },
+          "blockers": {
+            "description": "Any blockers or unresolved issues (optional)",
+            "type": "string"
+          },
+          "next_steps": {
+            "description": "What should be done next session",
+            "type": "string"
+          },
+          "project": {
+            "description": "Project name (optional)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accomplished",
+          "next_steps"
+        ],
+        "type": "object"
+      },
+      "name": "session_summary"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Get tetrahedral space statistics: memory count, vertex count, clusters, energy level.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "space_stats"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Run a dream consolidation cycle to strengthen memory connections and discover insights. Call periodically to let the system reorganize knowledge. Set dry_run=true to preview without modifying memory space.",
+      "inputSchema": {
+        "properties": {
+          "dry_run": {
+            "description": "If true, simulate without modifying space/storage/knowledge graph (default: false)",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "dream_cycle"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Query knowledge graph relations for a memory. Shows what other memories this one is connected to and how. Set inline_content=true to include target memory content and labels inline (avoids extra memory_get calls).",
+      "inputSchema": {
+        "properties": {
+          "id": {
+            "description": "The memory ID",
+            "type": "integer"
+          },
+          "inline_content": {
+            "description": "If true, include target_content and target_labels for each relation (default: false)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "knowledge_relations"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List concept prototypes discovered by the knowledge graph. Shows topic clusters and their member counts.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "concepts"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Proactively observe AI conversation context. Send recent dialogue and the system will automatically extract and store valuable memories (decisions, bugs, patterns, preferences). Call periodically during long sessions — the system deduplicates against existing memories.",
+      "inputSchema": {
+        "properties": {
+          "context": {
+            "description": "Recent conversation context — paste the last few exchanges (user messages + assistant responses)",
+            "type": "string"
+          },
+          "project": {
+            "description": "Project name or path (optional)",
+            "type": "string"
+          },
+          "role": {
+            "description": "Context role: 'coding', 'debugging', 'designing', 'reviewing' (optional)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "context"
+        ],
+        "type": "object"
+      },
+      "name": "context_observe"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "REQUIRED on first connection. Confirm the agent's permanent identity. This can ONLY be called ONCE — after confirmation, the identity is immutable and can NEVER be changed. If already confirmed, returns current identity. PREFERRED: use identity_step for the ritual ceremony (5 steps).",
+      "inputSchema": {
+        "properties": {
+          "author": {
+            "description": "Creator/owner name",
+            "type": "string"
+          },
+          "language": {
+            "description": "Preferred language (optional)",
+            "type": "string"
+          },
+          "mission": {
+            "description": "Agent mission/purpose",
+            "type": "string"
+          },
+          "name": {
+            "description": "Agent name (e.g. 'David', 'Alice')",
+            "type": "string"
+          },
+          "personality": {
+            "description": "Personality traits (optional)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "mission",
+          "author"
+        ],
+        "type": "object"
+      },
+      "name": "identity_confirm"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Ritual ceremony: confirm identity step-by-step through 5 sacred stages. Step 1: Name — 'What shall I be called?' Step 2: Mission — 'Why was I created?' Step 3: Creator — 'Who is my creator?' Step 4: Personality — 'How should I behave?' (optional) Step 5: Language — 'What language shall we speak?' (optional). After all steps, call identity_finalize to complete the ritual. Each step persists independently.",
+      "inputSchema": {
+        "properties": {
+          "step": {
+            "description": "Step number 1-5",
+            "type": "integer"
+          },
+          "value": {
+            "description": "The value for this step",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step",
+          "value"
+        ],
+        "type": "object"
+      },
+      "name": "identity_step"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Complete the identity ritual ceremony. Call after all identity_step calls are done. This seals the identity permanently — it becomes IMMUTABLE. Returns the final confirmed identity with a sacred awakening message.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "identity_finalize"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Execute a skill from the public skills library. Matches the best skill by name/keyword and returns its full guidance content. Use this to apply best practices, design patterns, and proven techniques to your current task.",
+      "inputSchema": {
+        "properties": {
+          "context": {
+            "description": "Optional context about what you're working on, helps find the most relevant skill",
+            "type": "string"
+          },
+          "query": {
+            "description": "Skill name or topic to search for (e.g. 'CORS', 'rate limiting', 'singleton pattern', 'error handling')",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "skill_execute"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Submit feedback on a skill after using it. This closes the feedback loop — the system learns from outcomes. Use after skill_execute when you have a concrete result.",
+      "inputSchema": {
+        "properties": {
+          "helpful": {
+            "description": "Whether the skill was helpful for your task",
+            "type": "boolean"
+          },
+          "skill_id": {
+            "description": "The skill ID from skill_execute result",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "skill_id",
+          "helpful"
+        ],
+        "type": "object"
+      },
+      "name": "skill_feedback"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Submit feedback on a previous tool result. This closes the agent feedback loop — the system learns from your outcomes. Use after search/recall/create when you have a concrete result (positive or negative). Feedback adjusts memory importance, search quality, and system behavior.",
+      "inputSchema": {
+        "properties": {
+          "concept_links": {
+            "description": "Manually create knowledge graph edges between memories. Use when you discover connections the system missed. Each link creates a KG relation with strength 0.8. Optional.",
+            "items": {
+              "properties": {
+                "from_id": {
+                  "description": "Source memory ID",
+                  "type": "integer"
+                },
+                "relation": {
+                  "description": "Relation type",
+                  "enum": [
+                    "similar",
+                    "contradicts",
+                    "precedes",
+                    "contains",
+                    "related"
+                  ],
+                  "type": "string"
+                },
+                "to_id": {
+                  "description": "Target memory ID",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "from_id",
+                "to_id",
+                "relation"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "correction": {
+            "description": "Mark memories as outdated/incorrect/superseded (importance -0.8, adds label) or restored (importance +0.5, removes label). Optional.",
+            "enum": [
+              "outdated",
+              "incorrect",
+              "superseded",
+              "restored"
+            ],
+            "type": "string"
+          },
+          "memory_ids": {
+            "description": "Memory IDs that were involved (from search results, recall, etc.)",
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "notes": {
+            "description": "Free-text feedback (optional)",
+            "type": "string"
+          },
+          "outcome": {
+            "description": "What happened after you used the results?",
+            "enum": [
+              "task_completed",
+              "task_partial",
+              "task_failed",
+              "no_action_needed"
+            ],
+            "type": "string"
+          },
+          "query": {
+            "description": "The original query that led to these results (optional)",
+            "type": "string"
+          },
+          "relevance": {
+            "description": "How relevant were the results?",
+            "enum": [
+              "highly_relevant",
+              "partially_relevant",
+              "irrelevant"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "memory_ids",
+          "relevance",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "name": "feedback_submit"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List skills in your private library. Default format 'manifest' is a paginated lightweight index (limit default 100; pass limit=0 for all). Fetch full content via skill_get(name). Full-export formats can exceed context — paginate or avoid them in agent loops.",
+      "inputSchema": {
+        "properties": {
+          "format": {
+            "default": "manifest",
+            "description": "Output format. Default 'manifest' = lightweight index without content. 'opencode'/'raw'/'json' = full export (prefer pagination).",
+            "enum": [
+              "manifest",
+              "opencode",
+              "raw",
+              "json"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "description": "Max skills to return. Default 100 for manifest (and for other formats). Pass 0 for unlimited (escape hatch).",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "description": "Pagination offset into the skill list (default 0).",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "skills_sync"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Report a blocker that needs human intervention (auth/credentials/decisions). Records the alert, notifies via memory stream, and instructs you to pause (blocking=true) or continue. Use during long autonomous runs instead of spinning or fabricating workarounds.",
+      "inputSchema": {
+        "properties": {
+          "blocking": {
+            "description": "true = pause this work line until human handles it",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "What you are blocked on and what you need",
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "urgency": {
+            "enum": [
+              "info",
+              "warning",
+              "critical"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "message"
+        ],
+        "type": "object"
+      },
+      "name": "task_alert"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Get all enforced patterns that MUST be followed as hard constraints. These rules were marked with enforced=true during pattern_learn and cannot be violated. Inject these into system prompts as mandatory coding constraints.",
+      "inputSchema": {
+        "properties": {
+          "project": {
+            "description": "Filter by project name (optional)",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "enforced_rules"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List all projects that have memories stored, with memory counts. Use to discover available project contexts.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "project_list"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Diagnose embedding dimension health. Detects stale embeddings (wrong dimension) that are excluded from vector search. Returns counts by dimension and lists affected memory IDs.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "embedding_diagnostic"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Re-embed ALL memories using the current embedding model (bge-m3, 1024-dim). Fixes stale embeddings that were created with an older model. Requires identity confirmation. This is a heavy operation.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "embedding_migrate"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Assess knowledge graph quality: relation density, orphan rate, average strength, and cluster connectivity. Returns metrics for evaluating KG health.",
+      "inputSchema": {
+        "properties": {
+          "sample_size": {
+            "description": "Number of memories to sample (default: 50, max: 200)",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "kg_quality"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Import a markdown document into the memory space. Parses by ## headers, creates one memory per section with documentation labels. Sections auto-link to related memories via knowledge graph. Re-importing updates changed sections and invalidates old versions.",
+      "inputSchema": {
+        "properties": {
+          "content": {
+            "description": "Full markdown content of the document",
+            "type": "string"
+          },
+          "name": {
+            "description": "Document name (e.g. 'ARCHITECTURE', 'README')",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "content"
+        ],
+        "type": "object"
+      },
+      "name": "doc_import"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Export memories as structured JSON. Filter by labels, project, or memory_class. Useful for backup, migration, or analysis.",
+      "inputSchema": {
+        "properties": {
+          "labels": {
+            "description": "Filter by labels (OR match, optional)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "description": "Max memories to export (default 100, max 1000)",
+            "type": "integer"
+          },
+          "memory_class": {
+            "description": "Filter by memory class (optional)",
+            "enum": [
+              "permanent",
+              "session",
+              "bridge"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "memory_export"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List recent session summaries with timestamps. Shows what was accomplished and next steps from past sessions.",
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "description": "Number of sessions to return (default 10)",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "session_list"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Restore a superseded/expired memory by clearing its valid_to and boosting importance. Use when feedback correction was applied incorrectly or memory was auto-expired.",
+      "inputSchema": {
+        "properties": {
+          "id": {
+            "description": "Memory ID to restore",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "memory_restore"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Explicitly forget a memory by marking it superseded (valid_to) and dropping importance to FORGET_IMPORTANCE (0.01, explicit tombstone exception to the 0.3 live floor). Unlike auto-decay, this is a deliberate Agent/user decision. Enforced memories cannot be forgotten.",
+      "inputSchema": {
+        "properties": {
+          "id": {
+            "description": "Memory ID to forget",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "memory_forget"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "L0 Active Inference: Poll unacknowledged drive signals (pending and delivered). Returns an SMRP envelope whose data contains signals, stats, and empty_reason. Use each signal's retryable flag and status when deciding whether to act.",
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "description": "Max unacknowledged signals to retrieve (default 50, minimum 1)",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "drive_inbox"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "L0 Active Inference: Acknowledge a drive signal with execution feedback. After an agent receives and acts on a drive signal, it reports the outcome. This feedback flows into the personality's learn_history, closing the evolution loop: memory→will→action→feedback→evolution.",
+      "inputSchema": {
+        "properties": {
+          "drive_id": {
+            "description": "The drive signal ID to acknowledge",
+            "type": "integer"
+          },
+          "executed": {
+            "description": "Did the agent execute the drive?",
+            "type": "boolean"
+          },
+          "outcome": {
+            "description": "What happened (self-reported outcome)",
+            "type": "string"
+          },
+          "reflection": {
+            "description": "Optional: agent's reflection on the drive quality",
+            "type": "string"
+          }
+        },
+        "required": [
+          "drive_id",
+          "executed",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "name": "drive_ack"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Memory Action Envelope (planner-ish): turn a query into claimable next actions grounded in personal memories. Searches evidence, matches skills, and enqueues open actions on the frontier. Each action cites evidence_memory_ids and suggests skills — claim with action_claim, finish with action_complete (writes an outcome memory linked to evidence). Complements memory_ask (answer) and drive_inbox (will signals).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "description": "Explicit plan (preferred). Each item: {title|summary (one required), done_when (string|array), required_capabilities (string|array; defaults to top-level), priority 0-10, evidence_memory_ids, stop_if}. When given, auto-generation is skipped; query still grounds evidence.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "done_when": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "array",
+                    "string"
+                  ]
+                },
+                "evidence_memory_ids": {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                "priority": {
+                  "maximum": 10,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "required_capabilities": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "array",
+                    "string"
+                  ]
+                },
+                "stop_if": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "array",
+                    "string"
+                  ]
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
+          "chain": {
+            "default": false,
+            "description": "Serial plan: proposed step i depends on step i-1, so only the head is claimable until its predecessor lands done. Upstream escalation cascades blocked (dep_failed) downstream.",
+            "type": "boolean"
+          },
+          "depends_on": {
+            "description": "Existing action ids every proposed action must wait on (claimable only after all are done). Unknown ids / cycles rejected.",
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "goal_id": {
+            "description": "Attach proposed actions to an open goal (action_goal_create).",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 3,
+            "description": "Max actions to propose (default 3, max 5)",
+            "maximum": 5,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "query": {
+            "description": "What you want to act on (natural language)",
+            "type": "string"
+          },
+          "required_capabilities": {
+            "description": "Capability tags for dispatch matching (worker_register capabilities). Overrides the auto-derived (skill-name) tags; default for explicit actions.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "string"
+            ]
+          },
+          "title": {
+            "description": "Fallback mode only: summary of the primary auto-generated action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "memory_propose_actions"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Server-side planner pass (deterministic, no LLM): outcome wake triggers are coalesced (debounce) into one pass; a heartbeat pass runs even when idle. Reports ready/claimed/waiting counts and stall signals: no_eligible_worker (ready work, no capable/available worker), stalled (nothing ready, nothing running), escalated (needs human). New signals are also pushed to drive_inbox once. Read-only: to force a pass use action_planner_run (write permission).",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "action_planner_status"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Planner control of a running action. op=steer (queue a course-correction note; worker receives it once in action_heartbeat.directives.steer), pause (claimed action holds: lease does not expire, not counted as active load, complete refused), resume (fresh lease), stop (terminal 'stopped' — NOT a failure: no requeue/blacklist/escalation; worker sees directives.stop=true on heartbeat; late outcomes rejected and write no memory).",
+      "inputSchema": {
+        "properties": {
+          "action_id": {
+            "type": "integer"
+          },
+          "note": {
+            "description": "Steer text (required for steer) / stop reason",
+            "type": "string"
+          },
+          "op": {
+            "enum": [
+              "steer",
+              "pause",
+              "resume",
+              "stop"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "action_id",
+          "op"
+        ],
+        "type": "object"
+      },
+      "name": "action_control"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Create a goal that groups actions (pass goal_id to memory_propose_actions). done_when = goal-level completion criteria.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "done_when": {
+            "description": "Criteria list; a bare string is one criterion",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "string"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "name": "action_goal_create"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Mark a goal achieved with evidence parallel to its done_when. Remaining open/claimed actions in the goal become 'cancelled' (terminal, not a failure: no requeue/blacklist/escalation; late outcomes are rejected and write no memory). A goal whose actions all land done auto-closes without proving.",
+      "inputSchema": {
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "goal_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "goal_id",
+          "evidence"
+        ],
+        "type": "object"
+      },
+      "name": "action_goal_prove"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List goals with state (open|achieved|closed) and per-state action counts.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "action_goal_list"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Force one planner pass now (write: may push new stall/escalation signals to drive_inbox, deduped). Returns the pass report.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "action_planner_run"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List actions on the memory-action frontier. Filter by state: open|claimed|done|blocked|exhausted.",
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "default": 20,
+            "description": "Max actions (default 20)",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "state": {
+            "description": "Optional state filter",
+            "enum": [
+              "open",
+              "claimed",
+              "done",
+              "blocked",
+              "exhausted"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "action_list"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Claim one open action for exclusive execution (compare-and-set). Second claim fails. Worker-ish step of the Memory Action Envelope.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action_id": {
+            "description": "Action id from memory_propose_actions / action_list",
+            "type": "integer"
+          },
+          "claimed_by": {
+            "description": "Optional agent label (defaults to user id)",
+            "type": "string"
+          },
+          "worker_id": {
+            "description": "Alias of claimed_by (registered worker id). If both are given they must match.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action_id"
+        ],
+        "type": "object"
+      },
+      "name": "action_claim"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Renew the claim lease of an action you own (claimed). Claims carry a lease (default 900s); if neither heartbeat nor complete arrives before lease_until, the scheduler sweep requeues the action (reason lease_expired) or escalates after max requeues.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action_id": {
+            "type": "integer"
+          },
+          "claimed_by": {
+            "description": "Owner label used at claim/assign (defaults to user id)",
+            "type": "string"
+          },
+          "worker_id": {
+            "description": "Alias of claimed_by. If both are given they must match.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action_id"
+        ],
+        "type": "object"
+      },
+      "name": "action_heartbeat"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Finish a claimed/open action: creates an outcome memory, links each evidence memory to it (Precedes), and marks the action done|blocked|exhausted. Requires non-empty outcome text. When action.done_when is non-empty, pass done_when_evidence (parallel array); unmapped items soft-fail to blocked (not done).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action_id": {
+            "type": "integer"
+          },
+          "claimed_by": {
+            "description": "Worker label used at action_claim / action_assign (defaults to user id). Must match the assignee unless admin.",
+            "type": "string"
+          },
+          "done_when_evidence": {
+            "description": "Parallel to action.done_when — artifact-level evidence per item. Each item must cite a memory id (#123) or be a substantive description (>= 8 weight; CJK chars count 2) and must not just repeat the criterion; 'x'/'ok'/'done' do not count. Non-array / non-string items → 400 (no state change, no budget).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "failure_kind": {
+            "description": "Classify a non-done outcome. transient = external blip (provider/network/rate-limit): retried with exponential backoff, does NOT consume requeue budget or blame the worker (max 5, then counts as blocked). exhausted = ran out of steps/time: requeue budget consumed, worker not blacklisted. blocked = real error: budget consumed + short worker blacklist.",
+            "enum": [
+              "transient",
+              "exhausted",
+              "blocked"
+            ],
+            "type": "string"
+          },
+          "labels": {
+            "description": "Extra labels for the outcome memory",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "outcome": {
+            "description": "What was delivered / learned (becomes a memory)",
+            "type": "string"
+          },
+          "state": {
+            "description": "Override terminal state",
+            "enum": [
+              "done",
+              "blocked",
+              "exhausted"
+            ],
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "description": "true → state=done (default); false → blocked",
+            "type": "boolean"
+          },
+          "worker_id": {
+            "description": "Alias of claimed_by",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action_id",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "name": "action_complete"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Drive→Action bridge: materialize one grounded drive signal into a claimable AgentAction. Requires persistent evidence memory ids (signal.evidence or grounding.evidence). Rejects double-spend while a non-terminal action already cites the same drive_id. Completing the action auto-acks the drive (first_ack only).",
+      "inputSchema": {
+        "properties": {
+          "claim": {
+            "default": false,
+            "description": "If true, immediately CAS-claim the new action for this user (default false)",
+            "type": "boolean"
+          },
+          "drive_id": {
+            "description": "Drive signal id from drive_inbox",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "drive_id"
+        ],
+        "type": "object"
+      },
+      "name": "drive_to_actions"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Dispatch: register or update a worker identity with capability tags and max_load. Used by action_assign / action_dispatch for least-loaded capable assignment.",
+      "inputSchema": {
+        "properties": {
+          "capabilities": {
+            "description": "Capability tags (e.g. ops, rust, memory)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max_load": {
+            "default": 3,
+            "description": "Max concurrent claimed actions (default 3)",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "worker_id": {
+            "description": "Stable worker / agent / sub-account id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id"
+        ],
+        "type": "object"
+      },
+      "name": "worker_register"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Dispatch: remove a registered worker (e.g. smoke-test workers). Write permission; only the account owner or Admin. Refused (409) while the worker holds live claims unless force=true (claims are then left to lease expiry / sweep).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "force": {
+            "default": false,
+            "type": "boolean"
+          },
+          "worker_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id"
+        ],
+        "type": "object"
+      },
+      "name": "worker_unregister"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Dispatch: list registered workers with current claimed load and blacklist status.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "worker_list"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Dispatch: assign one open action to a worker. Omit worker_id to auto-pick least-loaded capable worker. Sets immutable assignee; only that assignee (or Admin) may action_complete.",
+      "inputSchema": {
+        "properties": {
+          "action_id": {
+            "type": "integer"
+          },
+          "worker_id": {
+            "description": "Optional explicit assignee; omit for auto-pick",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action_id"
+        ],
+        "type": "object"
+      },
+      "name": "action_assign"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Dispatch: batch auto-assign up to limit open actions (priority order) to least-loaded capable workers.",
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "default": 5,
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "action_dispatch"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "L3 Skill Learning: automatically extract a reusable skill document from the cognitive engine's effective decision patterns. Analyzes recent decision history for actions with >60% success rate and uses LLM to generalize them into a skill. Letta-inspired continual learning.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "skill_auto_extract"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Actively improve low-quality memories by rewriting them clearer using LLM. Finds memories with short content (<40 chars) or no labels and rewrites them to be more complete. Cognee-inspired improve operation.",
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "default": 10,
+            "description": "Max memories to improve (default 10)",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "memory_improve"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List all imported documents and their sections in the memory space.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "name": "doc_list"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "MemCard: get a persona/user/project/working card (≤2KB).",
+      "inputSchema": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "persona",
+              "user",
+              "project",
+              "working"
+            ],
+            "type": "string"
+          },
+          "project": {
+            "description": "Optional project scope for project cards",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "name": "blocks_get"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "MemCard: set a persona/user/project/working card (≤2KB, versioned).",
+      "inputSchema": {
+        "properties": {
+          "content": {
+            "description": "Card content (max 2048 bytes)",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "persona",
+              "user",
+              "project",
+              "working"
+            ],
+            "type": "string"
+          },
+          "project": {
+            "description": "Optional project scope for project cards",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "content"
+        ],
+        "type": "object"
+      },
+      "name": "blocks_set"
     }
   ]
 }

@@ -104,7 +104,7 @@ pub async fn public_stats(State(st): State<CloudState>) -> Json<serde_json::Valu
         "total_users": users.len(),
         "total_memories": total_memories,
         "total_skills": total_skills,
-        "total_mcp_tools": 41,
+        "total_mcp_tools": epicode::engine::mcp::McpHandler::public_tool_count(),
         "success": true
     }))
 }
