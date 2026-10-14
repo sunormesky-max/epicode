@@ -16,7 +16,7 @@ export type TranslationKey =
   // Footer
   | 'footer.brand' | 'footer.tagline' | 'footer.docs' | 'footer.quickStart' | 'footer.apiDocs'
   | 'footer.mcpProtocol' | 'footer.benchmarks' | 'footer.community' | 'footer.communitySkills'
-  | 'footer.github' | 'footer.discord' | 'footer.copyright' | 'footer.version'
+  | 'footer.github' | 'footer.discord' | 'footer.copyright'
   | 'footer.contact'
   // Home - Hero
   | 'home.hero.overline' | 'home.hero.title' | 'home.hero.taglineZh' | 'home.hero.taglineEn'
@@ -437,7 +437,6 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'footer.github': 'GitHub',
     'footer.discord': 'Discord',
     'footer.copyright': '© 2025 Epicode. 保留所有权利。',
-    'footer.version': 'v1.0.0',
     'footer.contact': '联系我们',
     // Home - Hero
     'home.hero.overline': 'AI 记忆操作系统',
@@ -1378,7 +1377,6 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'footer.github': 'GitHub',
     'footer.discord': 'Discord',
     'footer.copyright': '© 2025 Epicode. All rights reserved.',
-    'footer.version': 'v1.0.0',
     'footer.contact': 'Contact',
     // Home - Hero
     'home.hero.overline': 'AI MEMORY OPERATING SYSTEM',

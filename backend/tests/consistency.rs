@@ -204,3 +204,96 @@ fn cloud_mcp_transports_share_handler_and_access_gates() {
         "HTTP notifications must be acknowledged without a JSON-RPC response body"
     );
 }
+
+/// Permission names: the console's grant list must use exactly the spellings
+/// `Permission::parse` accepts (a typo turns into a 400 "unknown permission").
+#[test]
+fn frontend_permission_names_match_backend() {
+    use epicode::engine::user_manager::Permission;
+    let backend: BTreeSet<String> = Permission::all()
+        .into_iter()
+        .map(|p| p.as_str().to_string())
+        .collect();
+    let api = read("frontend/src/lib/api.ts");
+    let start = api
+        .find("export const PERMISSIONS")
+        .expect("PERMISSIONS list in api.ts");
+    let body = &api[start..start + api[start..].find("];").expect("PERMISSIONS end")];
+    let frontend: BTreeSet<String> = body
+        .split('\'')
+        .skip(1)
+        .step_by(2)
+        .map(String::from)
+        .collect();
+    assert_eq!(
+        frontend, backend,
+        "frontend PERMISSIONS drifted from Permission::as_str"
+    );
+
+    let page = read("frontend/src/pages/DashboardPermissions.tsx");
+    for name in &backend {
+        assert!(
+            page.contains(&format!("{name}: {{")),
+            "DashboardPermissions.tsx has no label for {name}"
+        );
+    }
+}
+
+/// Route table with HTTP methods: path -> {GET, POST, ...} (static scan of cloud.rs).
+fn backend_route_methods() -> std::collections::BTreeMap<String, BTreeSet<String>> {
+    let src = read("backend/src/bin/cloud.rs");
+    let mut out: std::collections::BTreeMap<String, BTreeSet<String>> = Default::default();
+    let chunks: Vec<&str> = src.split(".route(").skip(1).collect();
+    for chunk in chunks {
+        let t = chunk.trim_start();
+        let Some(rest) = t.strip_prefix('"') else {
+            continue;
+        };
+        let Some(end) = rest.find('"') else { continue };
+        let path = rest[..end].to_string();
+        let body = &rest[end..];
+        let body = &body[..body.find(".layer(").unwrap_or(body.len())];
+        let entry = out.entry(path).or_default();
+        for m in ["get", "post", "put", "delete", "patch"] {
+            let needle = format!("{m}(");
+            let hit = body.match_indices(&needle).any(|(i, _)| {
+                i == 0
+                    || !body.as_bytes()[i - 1].is_ascii_alphanumeric()
+                        && body.as_bytes()[i - 1] != b'_'
+            });
+            if hit {
+                entry.insert(m.to_uppercase());
+            }
+        }
+    }
+    out
+}
+
+/// The public API docs page (docs-endpoints.ts) must only document routes that
+/// exist with the documented HTTP method.
+#[test]
+fn documented_endpoints_exist_with_method() {
+    let routes = backend_route_methods();
+    let docs = read("frontend/src/lib/docs-endpoints.ts");
+    let mut checked = 0;
+    let mut bad = Vec::new();
+    for seg in docs.split("method: '").skip(1) {
+        let method = &seg[..seg.find('\'').unwrap()];
+        let Some(p) = seg.find("path: '") else {
+            continue;
+        };
+        let path_full = &seg[p + 7..];
+        let path = &path_full[..path_full.find('\'').unwrap()];
+        let path = path.split('?').next().unwrap();
+        checked += 1;
+        match routes.get(path) {
+            Some(ms) if ms.contains(method) => {}
+            other => bad.push(format!("{method} {path} -> {other:?}")),
+        }
+    }
+    assert!(checked >= 20, "docs endpoint extraction broke ({checked})");
+    assert!(
+        bad.is_empty(),
+        "documented endpoints missing/wrong method: {bad:?}"
+    );
+}
