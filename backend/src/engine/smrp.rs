@@ -607,6 +607,45 @@ pub fn cap_slim_items(slim: &mut serde_json::Value, max_items: usize) {
     }
 }
 
+/// MCP full-mode recall shaping: drop the `sections` duplicate (tiers already
+/// carry every fragment with provenance; HTTP `/v1/recall` keeps `sections`),
+/// keep the top-`max_items` fragments across tiers by `similarity` (tier
+/// structure preserved), and record `items_total` / `items_truncated`.
+pub fn cap_full_recall(data: &mut serde_json::Value, max_items: usize) {
+    if let Some(obj) = data.as_object_mut() {
+        obj.remove("sections");
+    }
+    let Some(tiers) = data.get_mut("tiers").and_then(|v| v.as_object_mut()) else {
+        return;
+    };
+    let mut all: Vec<(String, serde_json::Value)> = Vec::new();
+    for (name, arr) in tiers.iter_mut() {
+        if let Some(a) = arr.as_array_mut() {
+            for it in a.drain(..) {
+                all.push((name.clone(), it));
+            }
+        }
+    }
+    let total = all.len();
+    all.sort_by(|a, b| {
+        let sa = a.1["similarity"].as_f64().unwrap_or(0.0);
+        let sb = b.1["similarity"].as_f64().unwrap_or(0.0);
+        sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    all.truncate(max_items.max(1));
+    let kept = all.len();
+    for (name, it) in all {
+        if let Some(a) = tiers.get_mut(&name).and_then(|v| v.as_array_mut()) {
+            a.push(it);
+        }
+    }
+    data["items_total"] = serde_json::json!(total);
+    data["items_returned"] = serde_json::json!(kept);
+    if kept < total {
+        data["items_truncated"] = serde_json::json!(true);
+    }
+}
+
 /// Estimate JSON byte size / tokens of a data payload (for benchmarks).
 pub fn estimate_payload_size(data: &serde_json::Value) -> (usize, usize) {
     let bytes = serde_json::to_vec(data).map(|v| v.len()).unwrap_or(0);
@@ -843,5 +882,25 @@ mod tests {
         assert_eq!(slim["items"][0]["valid"], true);
         assert_eq!(slim["items"][0]["timestamp"], 99);
         assert!(slim["items"][0].get("valid_to").is_none());
+    }
+
+    #[test]
+    fn cap_full_recall_drops_sections_and_keeps_top_by_similarity() {
+        let mut d = serde_json::json!({
+            "tiers": {
+                "primary": [{"id": 1, "similarity": 0.9}, {"id": 2, "similarity": 0.1}],
+                "contextual": [{"id": 3, "similarity": 0.5}],
+                "hub": []
+            },
+            "sections": {"x": [{"id": 1}]}
+        });
+        crate::engine::smrp::cap_full_recall(&mut d, 2);
+        assert!(d.get("sections").is_none());
+        assert_eq!(d["tiers"]["primary"].as_array().unwrap().len(), 1);
+        assert_eq!(d["tiers"]["primary"][0]["id"], 1);
+        assert_eq!(d["tiers"]["contextual"][0]["id"], 3);
+        assert_eq!(d["tiers"]["hub"].as_array().unwrap().len(), 0);
+        assert_eq!(d["items_total"], 3);
+        assert_eq!(d["items_truncated"], true);
     }
 }

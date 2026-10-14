@@ -900,8 +900,8 @@ impl McpHandler {
                         "properties": {
                             "query": { "type": "string", "description": "The recall query" },
                             "depth": { "type": "integer", "description": "Association depth (default 2, max 3)" },
-                            "limit": { "type": "integer", "minimum": 1, "maximum": 60, "default": 20, "description": "Slim only: max items returned, top by score (default 20)" },
-                            "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "full", "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections duplicates); retains valid + timestamp fields when present. Also enabled by EPICODE_SLIM_ENVELOPE=1." }
+                            "limit": { "type": "integer", "minimum": 1, "maximum": 60, "default": 20, "description": "Max items returned, top by score/similarity (default 20; applies to slim and full)" },
+                            "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "slim", "description": "'slim' (default) returns compact items[]+why+budget_spent. 'full' returns SMRP tiers with full content (no sections duplicate), capped by limit; items_total/items_truncated report what was cut." }
                         },
                         "required": ["query"]
                     }
@@ -4082,14 +4082,21 @@ impl McpHandler {
         match self.engine.scheduler.api_recall(query, depth) {
             Ok(result) => {
                 let mut data = super::smrp::recall_data(&self.engine, &result, query, depth);
-                // Spike S1 Slim Envelope (flag/arg); default path unchanged.
-                if super::spike_flags::slim_envelope_requested(args) {
+                // MCP default is slim (full recall can reach 160-270KB on real
+                // spaces); `verbosity:"full"` keeps the tier structure, capped.
+                let cap = args["limit"]
+                    .as_u64()
+                    .map(|n| n.clamp(1, 60) as usize)
+                    .unwrap_or(super::smrp::SLIM_RECALL_MAX_ITEMS);
+                let full = args["verbosity"]
+                    .as_str()
+                    .is_some_and(|s| s.eq_ignore_ascii_case("full"))
+                    && !super::spike_flags::slim_envelope_env();
+                if full {
+                    super::smrp::cap_full_recall(&mut data, cap);
+                } else {
                     data =
                         super::smrp::to_slim_envelope(&data, super::smrp::SLIM_MAX_CONTENT_CHARS);
-                    let cap = args["limit"]
-                        .as_u64()
-                        .map(|n| n.clamp(1, 60) as usize)
-                        .unwrap_or(super::smrp::SLIM_RECALL_MAX_ITEMS);
                     super::smrp::cap_slim_items(&mut data, cap);
                 }
                 self.smrp_ok("memory_recall", data)
@@ -9371,7 +9378,7 @@ mod tests {
         );
 
         let full_recall = h.process_json(
-            r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"tetrahedral memory clustering slim-bench","depth":2}}}"#,
+            r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"tetrahedral memory clustering slim-bench","depth":2,"verbosity":"full"}}}"#,
         );
         let slim_recall = h.process_json(
             r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"tetrahedral memory clustering slim-bench","depth":2,"verbosity":"slim"}}}"#,
@@ -9381,7 +9388,11 @@ mod tests {
         let frd = &fr["result"]["structuredContent"]["data"];
         let srd = &sr["result"]["structuredContent"]["data"];
         assert!(frd.get("tiers").is_some());
-        assert!(frd.get("sections").is_some());
+        assert!(
+            frd.get("sections").is_none(),
+            "MCP full drops sections duplicate"
+        );
+        assert!(frd.get("items_total").is_some());
         assert_eq!(srd["envelope"], "slim");
         assert!(srd.get("sections").is_none());
         assert!(srd.get("tiers").is_none());
@@ -10838,6 +10849,19 @@ mod recall_self_tests {
                 "depth {depth}: target not top-ranked"
             );
             let full = crate::engine::smrp::recall_data(&engine, &r, target, depth);
+            let full_before = serde_json::to_vec(&full).unwrap().len();
+            let mut capped = full.clone();
+            crate::engine::smrp::cap_full_recall(
+                &mut capped,
+                crate::engine::smrp::SLIM_RECALL_MAX_ITEMS,
+            );
+            let full_after = serde_json::to_vec(&capped).unwrap().len();
+            eprintln!("full depth={depth} before={full_before} after={full_after}");
+            assert!(capped.get("sections").is_none());
+            assert!(
+                full_after * 2 < full_before,
+                "full cap should at least halve payload"
+            );
             let mut slim = crate::engine::smrp::to_slim_envelope(
                 &full,
                 crate::engine::smrp::SLIM_MAX_CONTENT_CHARS,
