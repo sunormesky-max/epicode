@@ -2180,6 +2180,73 @@
         "type": "object"
       },
       "name": "doc_list"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "MemCard: get a persona/user/project/working card (≤2KB).",
+      "inputSchema": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "persona",
+              "user",
+              "project",
+              "working"
+            ],
+            "type": "string"
+          },
+          "project": {
+            "description": "Optional project scope for project cards",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "name": "blocks_get"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "MemCard: set a persona/user/project/working card (≤2KB, versioned).",
+      "inputSchema": {
+        "properties": {
+          "content": {
+            "description": "Card content (max 2048 bytes)",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "persona",
+              "user",
+              "project",
+              "working"
+            ],
+            "type": "string"
+          },
+          "project": {
+            "description": "Optional project scope for project cards",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "content"
+        ],
+        "type": "object"
+      },
+      "name": "blocks_set"
     }
   ]
 }

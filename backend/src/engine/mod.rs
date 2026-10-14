@@ -100,7 +100,7 @@ pub struct Engine {
     /// P4-3 项目隔离：当前激活项目（None = 全局，不做过滤）
     pub current_project: parking_lot::RwLock<Option<String>>,
     /// Spike S2: MemCard store (persona/user/project/working). Always constructed;
-    /// MCP/status surface gated by EPICODE_MEMCARD.
+    /// MemCard store (blocks_get/blocks_set). EPICODE_MEMCARD only adds card meta to SMRP status.
     pub memcards: self::memcard::SharedMemCards,
 }
 
@@ -442,12 +442,8 @@ impl Engine {
             skills.set_vector(vec);
         }
 
-        // Spike S2: avoid shared sqlite lock on default `data/` when flag is off.
-        let memcards = std::sync::Arc::new(if self::memcard::memcard_enabled() {
-            self::memcard::MemCardStore::open(&data_path)
-        } else {
-            self::memcard::MemCardStore::in_memory()
-        });
+        // MemCard is first-class: always persisted next to the engine's data.
+        let memcards = std::sync::Arc::new(self::memcard::MemCardStore::open(&data_path));
 
         Self {
             space,
