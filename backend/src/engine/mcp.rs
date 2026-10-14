@@ -1972,7 +1972,8 @@ impl McpHandler {
                         .and_then(|v| v.as_i64())
                         .unwrap_or(1)
                         .max(1);
-                    let active = self.engine.storage.get_task_active_ms(&atid);
+                    // 与 ctx/task_check/task_complete 同一口径: 插件上报的真实活跃时间优先
+                    let active = self.engine.storage.get_effective_active_ms(&atid);
                     let (m_ops, alts, revs, _) = self.engine.storage.get_task_counters(&atid);
                     let pct = (active as f64 / budget as f64 * 100.0).round().min(100.0) as i64;
                     if let Some(data) = result.get_mut("data").and_then(|d| d.as_object_mut()) {
@@ -2122,7 +2123,7 @@ impl McpHandler {
         let unfinished = self.engine.storage.get_active_task_for_user(user_id).and_then(|tid| {
             self.engine.storage.get_task_session(&tid).map(|s| {
                 let budget = s.get("budget_ms").and_then(|v| v.as_i64()).unwrap_or(1).max(1);
-                let active = self.engine.storage.get_task_active_ms(&tid);
+                let active = self.engine.storage.get_effective_active_ms(&tid);
                 serde_json::json!({
                     "task_id": tid,
                     "description": s.get("description"),
@@ -10193,6 +10194,31 @@ mod tests {
         // Re-running the planner pass must not duplicate the notification.
         handler.engine.scheduler.run_action_planner_pass_now();
         assert_eq!(hits(&handler), 1);
+    }
+
+    /// task_pulse / handshake 必须和 ctx、task_check 用同一个活跃钟(real_active_ms 优先)。
+    /// Fails on 3218241: pulse 读原始 active_ms(=0) 报 explore, ctx 报 95%。
+    #[test]
+    fn task_pulse_uses_effective_active_clock() {
+        let h = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&h);
+        let st = call_tool(
+            &h,
+            "task_start",
+            serde_json::json!({"description": "pulse clock parity", "budget_minutes": 10}),
+        );
+        let tid = st["data"]["task_id"].as_str().expect("task_id").to_string();
+        let uid = h.engine.user_id.clone();
+        h.engine
+            .storage
+            .set_real_active(&tid, &uid, 570_000)
+            .unwrap();
+        let r = call_tool(&h, "memory_search", serde_json::json!({"query": "pulse"}));
+        let pulse = &r["data"]["task_pulse"];
+        assert_eq!(pulse["active_pct"], 95, "{r}");
+        assert_eq!(pulse["phase"], "deliver", "{r}");
+        let ctx_rule = r["data"]["ctx"]["◆"].as_str().unwrap_or("");
+        assert!(ctx_rule.contains("95%"), "{r}");
     }
 
     fn call_tool(h: &McpHandler, name: &str, args: serde_json::Value) -> serde_json::Value {
