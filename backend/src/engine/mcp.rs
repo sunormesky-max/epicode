@@ -911,8 +911,8 @@ impl McpHandler {
                         "properties": {
                             "query": { "type": "string", "description": "The recall query" },
                             "depth": { "type": "integer", "description": "Association depth (default 2, max 3)" },
-                            "limit": { "type": "integer", "minimum": 1, "maximum": 60, "default": 20, "description": "Slim only: max items returned, top by score (default 20)" },
-                            "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "full", "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections duplicates); retains valid + timestamp fields when present. Also enabled by EPICODE_SLIM_ENVELOPE=1." }
+                            "limit": { "type": "integer", "minimum": 1, "maximum": 60, "default": 20, "description": "Max items returned, top by score/similarity (default 20; applies to slim and full)" },
+                            "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "slim", "description": "'slim' (default) returns compact items[]+why+budget_spent. 'full' returns SMRP tiers with full content (no sections duplicate), capped by limit; items_total/items_truncated report what was cut." }
                         },
                         "required": ["query"]
                     }
@@ -1995,7 +1995,8 @@ impl McpHandler {
                         .and_then(|v| v.as_i64())
                         .unwrap_or(1)
                         .max(1);
-                    let active = self.engine.storage.get_task_active_ms(&atid);
+                    // 与 ctx/task_check/task_complete 同一口径: 插件上报的真实活跃时间优先
+                    let active = self.engine.storage.get_effective_active_ms(&atid);
                     let (m_ops, alts, revs, _) = self.engine.storage.get_task_counters(&atid);
                     let pct = (active as f64 / budget as f64 * 100.0).round().min(100.0) as i64;
                     if let Some(data) = result.get_mut("data").and_then(|d| d.as_object_mut()) {
@@ -2145,7 +2146,7 @@ impl McpHandler {
         let unfinished = self.engine.storage.get_active_task_for_user(user_id).and_then(|tid| {
             self.engine.storage.get_task_session(&tid).map(|s| {
                 let budget = s.get("budget_ms").and_then(|v| v.as_i64()).unwrap_or(1).max(1);
-                let active = self.engine.storage.get_task_active_ms(&tid);
+                let active = self.engine.storage.get_effective_active_ms(&tid);
                 serde_json::json!({
                     "task_id": tid,
                     "description": s.get("description"),
@@ -4105,14 +4106,21 @@ impl McpHandler {
         match self.engine.scheduler.api_recall(query, depth) {
             Ok(result) => {
                 let mut data = super::smrp::recall_data(&self.engine, &result, query, depth);
-                // Spike S1 Slim Envelope (flag/arg); default path unchanged.
-                if super::spike_flags::slim_envelope_requested(args) {
+                // MCP default is slim (full recall can reach 160-270KB on real
+                // spaces); `verbosity:"full"` keeps the tier structure, capped.
+                let cap = args["limit"]
+                    .as_u64()
+                    .map(|n| n.clamp(1, 60) as usize)
+                    .unwrap_or(super::smrp::SLIM_RECALL_MAX_ITEMS);
+                let full = args["verbosity"]
+                    .as_str()
+                    .is_some_and(|s| s.eq_ignore_ascii_case("full"))
+                    && !super::spike_flags::slim_envelope_env();
+                if full {
+                    super::smrp::cap_full_recall(&mut data, cap);
+                } else {
                     data =
                         super::smrp::to_slim_envelope(&data, super::smrp::SLIM_MAX_CONTENT_CHARS);
-                    let cap = args["limit"]
-                        .as_u64()
-                        .map(|n| n.clamp(1, 60) as usize)
-                        .unwrap_or(super::smrp::SLIM_RECALL_MAX_ITEMS);
                     super::smrp::cap_slim_items(&mut data, cap);
                 }
                 self.smrp_ok("memory_recall", data)
@@ -9426,7 +9434,7 @@ mod tests {
         );
 
         let full_recall = h.process_json(
-            r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"tetrahedral memory clustering slim-bench","depth":2}}}"#,
+            r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"tetrahedral memory clustering slim-bench","depth":2,"verbosity":"full"}}}"#,
         );
         let slim_recall = h.process_json(
             r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"memory_recall","arguments":{"query":"tetrahedral memory clustering slim-bench","depth":2,"verbosity":"slim"}}}"#,
@@ -9436,7 +9444,11 @@ mod tests {
         let frd = &fr["result"]["structuredContent"]["data"];
         let srd = &sr["result"]["structuredContent"]["data"];
         assert!(frd.get("tiers").is_some());
-        assert!(frd.get("sections").is_some());
+        assert!(
+            frd.get("sections").is_none(),
+            "MCP full drops sections duplicate"
+        );
+        assert!(frd.get("items_total").is_some());
         assert_eq!(srd["envelope"], "slim");
         assert!(srd.get("sections").is_none());
         assert!(srd.get("tiers").is_none());
@@ -10246,6 +10258,31 @@ mod tests {
         assert_eq!(hits(&handler), 1);
     }
 
+    /// task_pulse / handshake 必须和 ctx、task_check 用同一个活跃钟(real_active_ms 优先)。
+    /// Fails on 3218241: pulse 读原始 active_ms(=0) 报 explore, ctx 报 95%。
+    #[test]
+    fn task_pulse_uses_effective_active_clock() {
+        let h = McpHandler::new(std::sync::Arc::new(isolated_engine()));
+        confirm_test_identity(&h);
+        let st = call_tool(
+            &h,
+            "task_start",
+            serde_json::json!({"description": "pulse clock parity", "budget_minutes": 10}),
+        );
+        let tid = st["data"]["task_id"].as_str().expect("task_id").to_string();
+        let uid = h.engine.user_id.clone();
+        h.engine
+            .storage
+            .set_real_active(&tid, &uid, 570_000)
+            .unwrap();
+        let r = call_tool(&h, "memory_search", serde_json::json!({"query": "pulse"}));
+        let pulse = &r["data"]["task_pulse"];
+        assert_eq!(pulse["active_pct"], 95, "{r}");
+        assert_eq!(pulse["phase"], "deliver", "{r}");
+        let ctx_rule = r["data"]["ctx"]["◆"].as_str().unwrap_or("");
+        assert!(ctx_rule.contains("95%"), "{r}");
+    }
+
     fn call_tool(h: &McpHandler, name: &str, args: serde_json::Value) -> serde_json::Value {
         h.handle(McpRequest {
             jsonrpc: "2.0".into(),
@@ -10889,6 +10926,19 @@ mod recall_self_tests {
                 "depth {depth}: target not top-ranked"
             );
             let full = crate::engine::smrp::recall_data(&engine, &r, target, depth);
+            let full_before = serde_json::to_vec(&full).unwrap().len();
+            let mut capped = full.clone();
+            crate::engine::smrp::cap_full_recall(
+                &mut capped,
+                crate::engine::smrp::SLIM_RECALL_MAX_ITEMS,
+            );
+            let full_after = serde_json::to_vec(&capped).unwrap().len();
+            eprintln!("full depth={depth} before={full_before} after={full_after}");
+            assert!(capped.get("sections").is_none());
+            assert!(
+                full_after * 2 < full_before,
+                "full cap should at least halve payload"
+            );
             let mut slim = crate::engine::smrp::to_slim_envelope(
                 &full,
                 crate::engine::smrp::SLIM_MAX_CONTENT_CHARS,

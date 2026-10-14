@@ -13,7 +13,7 @@ const PERM_LABELS: Record<string, Record<string, string>> = {
   skill_manage: { zh: '技能管理', en: 'Skill Manage' },
   library_manage: { zh: '图书馆管理', en: 'Library Manage' },
   subaccount_manage: { zh: '子账户管理', en: 'Sub-account Mgmt' },
-  apikey_manage: { zh: '密钥管理', en: 'API Key Mgmt' },
+  api_key_manage: { zh: '密钥管理', en: 'API Key Mgmt' },
   theme_custom: { zh: '主题自定义', en: 'Theme Custom' },
   memory_output_control: { zh: '记忆输出控制', en: 'Output Control' },
   permission_edit: { zh: '权限配置编辑', en: 'Permission Edit' },

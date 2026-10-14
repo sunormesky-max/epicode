@@ -1032,7 +1032,7 @@ export function importDocument(name: string, content: string): Promise<{ documen
   });
 }
 
-export function listDocuments(): Promise<{ success: boolean; documents: number; docs: { id: number; name: string; chars: number; preview: string }[] }> {
+export function listDocuments(): Promise<{ documents: number; docs: { id: number; name: string; chars: number; preview: string }[] }> {
   return request('/v1/docs');
 }
 
@@ -1092,10 +1092,10 @@ export interface KnowledgeCard {
     domain: string;
     summary: string;
     cluster_ids: number[];
-    updated_at: number;
+    source_count: number;
 }
 
-export function getKnowledgeCards(): Promise<{ cards: KnowledgeCard[] }> {
+export function getKnowledgeCards(): Promise<{ cards: KnowledgeCard[]; total: number }> {
     return request('/v1/knowledge/cards');
 }
 
@@ -1121,14 +1121,14 @@ export function importPersonality(pkg: Partial<PersonalityPackage>): Promise<{ k
   });
 }
 
-export function confirmIdentity(identity: { name: string; mission: string; author: string; personality?: string; language?: string }): Promise<{ success: boolean; identity: IdentityInfo }> {
+export function confirmIdentity(identity: { name: string; mission: string; author: string; personality?: string; language?: string }): Promise<{ identity: IdentityInfo }> {
   return request('/v1/identity/confirm', {
     method: 'POST',
     body: identity,
   });
 }
 
-export function updateIdentity(identity: Partial<IdentityInfo>): Promise<{ success: boolean; identity: IdentityInfo }> {
+export function updateIdentity(identity: Partial<IdentityInfo>): Promise<{ identity: IdentityInfo }> {
   return request('/v1/identity', {
     method: 'PUT',
     body: identity,
@@ -1155,7 +1155,7 @@ export async function getPublicSkills(): Promise<CommunitySkill[]> {
   return data.skills ?? [];
 }
 
-export async function pullPublicSkill(id: number): Promise<{ success: boolean; message: string }> {
+export async function pullPublicSkill(id: number): Promise<{ skill: unknown }> {
   invalidateCache('/v1/skills');
   return request(`/v1/skills/public/${id}/pull`, { method: 'POST' });
 }
@@ -1190,9 +1190,9 @@ export async function deleteSkill(id: number): Promise<{ status?: string }> {
   });
 }
 
-export async function publishSkill(id: number): Promise<{ published: number }> {
+export async function publishSkill(id: number): Promise<{ skill: unknown }> {
   invalidateCache('/v1/skills');
-  return request<{ published: number }>(`/v1/skills/${id}/publish`, {
+  return request<{ skill: unknown }>(`/v1/skills/${id}/publish`, {
     method: 'POST',
   });
 }
@@ -1238,10 +1238,10 @@ export function setSubAccountRole(user_id: string, role: SubRole): Promise<{ use
 }
 
 /** Human-configured grant set. Null restores the role template. */
-/** 后端八权限点清单(与 UserRole::permissions 黄金表一致) — 供权限配置UI遍历 */
+/** 后端权限点清单 — 必须与 Permission::as_str 一致(backend/tests/consistency.rs 守护) */
 export const PERMISSIONS: string[] = [
   'memory_read', 'memory_write', 'memory_delete', 'persona_import',
-  'skill_manage', 'library_manage', 'subaccount_manage', 'apikey_manage',
+  'skill_manage', 'library_manage', 'subaccount_manage', 'api_key_manage',
   'theme_custom', 'memory_output_control', 'permission_edit',
 ];
 

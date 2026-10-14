@@ -3,7 +3,7 @@
 > Mirror of https://epicode.cn/#/benchmarks for fetch-only visitors. All numbers measured 2026-08-19/20 on sandbox space (9754 memories), 2 vCPU / 4GB RAM. Metric: hit@10 loose = answer text appears within top-10 retrieved memories. This is retrieval evidence coverage, NOT LLM-judged answer accuracy — not directly comparable to vendor-published LME scores.
 
 <!-- AUTO:BENCH -->
-## LongMemEval-S oracle, 500 questions (overall, auto-generated 2026-09-26)
+## LongMemEval-S oracle, 500 questions (overall, auto-generated 2026-10-14)
 | mode | score |
 |---|---|
 | hybrid | 56.4% |

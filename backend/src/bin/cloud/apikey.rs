@@ -46,31 +46,19 @@ pub async fn api_key_masked(
         .get("X-API-Key")
         .and_then(|value| value.to_str().ok());
     // 分级权限自我描述: 主账户=owner(全权); 子账户=被赋予的分级角色
+    // Names must match Permission::as_str (the only spelling Permission::parse accepts).
     let (role, permissions): (&str, serde_json::Value) = if user.parent.is_none() {
         (
             "owner",
-            serde_json::json!([
-                "memory_read",
-                "memory_write",
-                "memory_delete",
-                "persona_import",
-                "skill_manage",
-                "library_manage",
-                "subaccount_manage",
-                "apikey_manage"
-            ]),
+            serde_json::json!(epicode::engine::user_manager::Permission::all()
+                .into_iter()
+                .map(epicode::engine::user_manager::Permission::as_str)
+                .collect::<Vec<_>>()),
         )
     } else {
         (
             user.role.as_str(),
-            serde_json::to_value(
-                user.role
-                    .permissions()
-                    .iter()
-                    .map(|p| format!("{:?}", p).to_lowercase())
-                    .collect::<Vec<_>>(),
-            )
-            .unwrap_or_default(),
+            serde_json::json!(user.effective_permissions()),
         )
     };
     (
