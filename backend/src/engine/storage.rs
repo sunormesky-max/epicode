@@ -1021,18 +1021,6 @@ impl StorageManager {
         })
     }
 
-    /// P36b: 该用户的Pulse真值任务数(从未装过的agent定向提醒用)
-    pub fn count_pulse_tasks(&self, user_id: &str) -> i64 {
-        let conn = self.conn.lock();
-        Self::ensure_task_cols(&conn);
-        conn.query_row(
-            "SELECT count(*) FROM task_sessions WHERE user_id=?1 AND real_active_ms IS NOT NULL",
-            params![user_id],
-            |r| r.get::<_, i64>(0),
-        )
-        .unwrap_or(0)
-    }
-
     pub fn set_task_stop_reason(&self, task_id: &str, reason: &str) {
         let conn = self.conn.lock();
         Self::ensure_task_cols(&conn);
@@ -1065,7 +1053,10 @@ impl StorageManager {
         .flatten()
     }
 
-    /// P27 Pulse: 写入插件上报的真实活跃时间(带归属校验的调用方负责)
+    /// P27 Pulse (已下线): 曾写入插件上报的真实活跃时间。Pulse 端点未挂路由,
+    /// 2026-10 已删除; 仅保留给测试构造历史行(real_active_ms 列仍被
+    /// get_effective_active_ms 读取以兼容旧数据)。
+    #[cfg(test)]
     pub fn set_real_active(
         &self,
         task_id: &str,
