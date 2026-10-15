@@ -115,10 +115,15 @@ class NodeResponse:
 
 @dataclass(frozen=True)
 class KnowledgeResponse:
+    """``POST /v1/knowledge``: relations ``[{target, type, strength}]`` of one memory.
+
+    ``details`` is deprecated (not returned) and stays empty.
+    """
     success: bool
     id: str
     relations: list[Any] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
+    count: int = 0
 
 
 @dataclass(frozen=True)
@@ -170,7 +175,14 @@ class AdminStatsResponse:
 
 @dataclass(frozen=True)
 class TieredMemoryResult:
-    """A single tiered memory result with knowledge graph associations."""
+    """One memory from ``POST /v1/recall`` ``data.tiers``.
+
+    ``tier`` is the 1-based position of ``tier_name`` in
+    ``primary, contextual, experiential, hub``.
+    ``kg_associations`` and ``spatial_coords`` are deprecated: the server does
+    not return per-memory associations or coordinates (use
+    ``EpicodeClient.knowledge`` for relations); they stay empty/zero.
+    """
     id: str
     content: str
     tier: int
@@ -178,41 +190,73 @@ class TieredMemoryResult:
     kg_associations: list[dict[str, Any]] = field(default_factory=list)
     emotional_valence: Emotion = field(default_factory=Emotion)
     spatial_coords: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    tier_name: str = ""
+    labels: list[str] = field(default_factory=list)
+    source: list[str] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
+    topology: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
 class RecallWithTiersResponse:
-    """Tiered memory recall response via SMRP (Structured Memory Response Protocol)."""
+    """Tiered recall built from the SMRP ``POST /v1/recall`` response.
+
+    ``knowledge_graph_edges`` is deprecated (not returned by the server) and
+    stays empty.
+    """
     success: bool
     query: str = ""
     tiers: list[list[TieredMemoryResult]] = field(default_factory=list)
     total_results: int = 0
     knowledge_graph_edges: list[dict[str, Any]] = field(default_factory=list)
+    smrp: SmrpEnvelope | None = None
 
 
 @dataclass(frozen=True)
 class IdentityStepResponse:
-    """Response from an identity ritual step."""
+    """Response from ``POST /v1/identity/step``.
+
+    ``agent_name``, ``ritual_state`` and ``personality_signature`` are
+    deprecated (the server never returned them) and stay empty.
+    """
     success: bool
     step: int = 0
     agent_name: str = ""
     ritual_state: str = ""
     personality_signature: dict[str, Any] = field(default_factory=dict)
+    progress: dict[str, Any] = field(default_factory=dict)
+    next_prompt: str = ""
+    pending: dict[str, Any] = field(default_factory=dict)
+    smrp: SmrpEnvelope | None = None
 
 
 @dataclass(frozen=True)
 class DreamCycleResponse:
-    """Response from triggering a background memory consolidation (dream cycle)."""
+    """Response from the MCP ``dream_cycle`` tool.
+
+    Counts are parsed from the server's ``report`` text. ``energy_delta`` is
+    deprecated (not reported) and stays 0.0.
+    """
     success: bool
     cycles_completed: int = 0
     memories_consolidated: int = 0
     new_associations: int = 0
     energy_delta: float = 0.0
+    duplicates_merged: int = 0
+    junk_evicted: int = 0
+    importance_updated: int = 0
+    dry_run: bool = False
+    report: str = ""
+    smrp: SmrpEnvelope | None = None
 
 
 @dataclass(frozen=True)
 class KnowledgeGraphNode:
-    """A node in the knowledge graph visualization."""
+    """A node in the 1-hop relation graph around a memory.
+
+    ``label``, ``content``, ``x``/``y``/``z`` and ``tier`` are not returned by
+    ``POST /v1/knowledge`` and stay at their defaults.
+    """
     id: str
     label: str
     content: str
@@ -224,7 +268,7 @@ class KnowledgeGraphNode:
 
 @dataclass(frozen=True)
 class KnowledgeGraphEdge:
-    """An edge in the knowledge graph visualization."""
+    """A knowledge-graph relation (``relation`` is the server's relation type)."""
     source: str
     target: str
     relation: str
@@ -233,9 +277,13 @@ class KnowledgeGraphEdge:
 
 @dataclass(frozen=True)
 class KnowledgeGraphResponse:
-    """Knowledge graph visualization data."""
+    """1-hop relation graph built from ``POST /v1/knowledge``.
+
+    ``clusters`` is deprecated (not returned) and stays empty.
+    """
     success: bool
     node_id: str = ""
     nodes: list[KnowledgeGraphNode] = field(default_factory=list)
     edges: list[KnowledgeGraphEdge] = field(default_factory=list)
     clusters: list[dict[str, Any]] = field(default_factory=list)
+    smrp: SmrpEnvelope | None = None

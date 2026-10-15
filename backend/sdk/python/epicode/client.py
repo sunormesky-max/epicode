@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import re
+import warnings
 from typing import Any
 
 import requests
@@ -79,6 +82,14 @@ def _unwrap_smrp(
     return envelope.data, envelope
 
 
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
 def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -123,9 +134,16 @@ class EpicodeClient:
         base_url: str | None = None,
         timeout: int | None = None,
         session: requests.Session | None = None,
+        mcp_url: str | None = None,
     ) -> None:
         self._api_key = api_key
         self._base_url = (base_url or self.DEFAULT_BASE_URL).rstrip("/")
+        # MCP JSON-RPC endpoint (tools without a REST route, e.g. dream_cycle).
+        # Public API: https://host/api/v1 -> https://host/api/mcp.
+        if mcp_url is None:
+            root = self._base_url[:-3] if self._base_url.endswith("/v1") else self._base_url
+            mcp_url = f"{root}/mcp"
+        self._mcp_url = mcp_url
         self._timeout = timeout or self.DEFAULT_TIMEOUT
         self._session = session or requests.Session()
         # 审计三轮中优: 密钥不写入(可能是调用方共享的) Session 全局 headers —
@@ -140,6 +158,44 @@ class EpicodeClient:
         # 禁止重定向时携带认证头(跨主机泄漏)
         resp = self._session.request(method, url, headers=headers, allow_redirects=False, **kwargs)
         return self._handle_response(resp)
+
+    def _mcp_call(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Call one MCP tool via JSON-RPC ``tools/call``; returns its SMRP envelope."""
+        payload: dict[str, Any] = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
+        }
+        headers = {"Content-Type": "application/json", "X-API-Key": self._api_key}
+        resp = self._session.request(
+            "POST",
+            self._mcp_url,
+            headers=headers,
+            json=payload,
+            timeout=self._timeout,
+            allow_redirects=False,
+        )
+        body = self._handle_response(resp)
+        if isinstance(body.get("error"), dict):
+            err = body["error"]
+            raise EpicodeError(
+                str(err.get("message", "MCP error")), status_code=resp.status_code, response_body=body
+            )
+        result = body.get("result")
+        if not isinstance(result, dict):
+            raise EpicodeError("Invalid MCP response: missing result", status_code=resp.status_code, response_body=body)
+        structured = result.get("structuredContent")
+        if isinstance(structured, dict):
+            return structured
+        content = result.get("content") or [{}]
+        try:
+            parsed = json.loads(content[0].get("text", ""))
+        except (ValueError, AttributeError, IndexError):
+            raise EpicodeError("Invalid MCP response: unparseable content", status_code=resp.status_code, response_body=body)
+        if not isinstance(parsed, dict):
+            raise EpicodeError("Invalid MCP response: content is not an object", status_code=resp.status_code, response_body=body)
+        return parsed
 
     @staticmethod
     def _handle_response(resp: requests.Response) -> dict[str, Any]:
@@ -327,45 +383,54 @@ class EpicodeClient:
         content: str,
         *,
         labels: list[str] | None = None,
-        timestamp: str | None = None,
+        timestamp: int | str | None = None,
     ) -> CreateNodeResponse:
-        """Create a knowledge graph node."""
+        """Create a memory node (``POST /v1/nodes``).
+
+        ``timestamp`` is Unix seconds; a numeric string is accepted for
+        backward compatibility.
+        """
         payload: dict[str, Any] = {"content": content}
         if labels is not None:
             payload["labels"] = labels
         if timestamp is not None:
-            payload["timestamp"] = timestamp
-        data = self._request("POST", "/nodes", json=payload)
+            payload["timestamp"] = int(timestamp)
+        data, smrp = _unwrap_smrp(self._request("POST", "/nodes", json=payload))
         return CreateNodeResponse(
-            success=data.get("success", False),
-            id=data.get("id", ""),
+            success=smrp.protocol.ok if smrp else data.get("success", False),
+            id=str(data.get("id", "")),
         )
 
-    def get_node(self, node_id: str) -> NodeResponse:
-        """Retrieve a knowledge graph node by ID."""
-        data = self._request("GET", f"/nodes/{node_id}")
+    def get_node(self, node_id: str | int) -> NodeResponse:
+        """Retrieve a memory node by ID (``GET /v1/nodes/:id``)."""
+        data, smrp = _unwrap_smrp(self._request("GET", f"/nodes/{node_id}"))
         return NodeResponse(
-            success=data.get("success", False),
-            id=data.get("id", ""),
+            success=smrp.protocol.ok if smrp else data.get("success", False),
+            id=str(data.get("id", "")),
             content=data.get("content", ""),
-            labels=data.get("labels", []),
+            labels=_string_list(data.get("labels")),
         )
 
-    def knowledge(self, id: str) -> KnowledgeResponse:
-        """Expand a memory node into related knowledge."""
-        data = self._request("POST", "/knowledge", json={"id": id})
+    def knowledge(self, id: str | int) -> KnowledgeResponse:
+        """Knowledge-graph relations of one memory (``POST /v1/knowledge``).
+
+        Returns ``relations`` as ``[{target, type, strength}]``.
+        """
+        data, smrp = _unwrap_smrp(self._request("POST", "/knowledge", json={"id": int(id)}))
+        relations = data.get("relations", [])
         return KnowledgeResponse(
-            success=data.get("success", False),
-            id=data.get("id", ""),
-            relations=data.get("relations", []),
-            details=data.get("details", {}),
+            success=smrp.protocol.ok if smrp else data.get("success", False),
+            id=str(data.get("id", "")),
+            relations=_list(relations),
+            details=_dict(data.get("details")),
+            count=int(data.get("count", 0) or 0),
         )
 
     def stats(self) -> StatsResponse:
         """Get account usage statistics."""
-        data = self._request("GET", "/stats")
+        data, smrp = _unwrap_smrp(self._request("GET", "/stats"))
         return StatsResponse(
-            success=data.get("success", False),
+            success=smrp.protocol.ok if smrp else data.get("success", False),
             user_id=data.get("user_id", ""),
             plan=data.get("plan", ""),
             memories_used=data.get("memories_used", 0),
@@ -377,151 +442,154 @@ class EpicodeClient:
 
     def timeline(self) -> TimelineResponse:
         """Get the memory timeline."""
-        data = self._request("GET", "/timeline")
+        data, smrp = _unwrap_smrp(self._request("GET", "/timeline"))
         return TimelineResponse(
-            success=data.get("success", False),
+            success=smrp.protocol.ok if smrp else data.get("success", False),
             events=data.get("events", []),
             total=data.get("total", 0),
         )
 
+    #: Server tier names in ``data.tiers``; ``TieredMemoryResult.tier`` is 1-based index.
+    RECALL_TIERS = ("primary", "contextual", "experiential", "hub")
+
     def recall_with_tiers(self, query: str, depth: int = 2) -> RecallWithTiersResponse:
-        """Return tiered memory results with knowledge graph associations.
+        """Recall associative memories grouped by SMRP tier.
 
-        This is Epicode's key differentiator — not just flat vector search,
-        but structured memory with tiers and KG relationships. SMRP (Structured
-        Memory Response Protocol) returns tiered, contextual memories with
-        emotional valence and spatial placement.
-
-        Args:
-            query: The search query.
-            depth: How many tiers to traverse in the knowledge graph.
-
-        Returns:
-            A ``RecallWithTiersResponse`` containing tiered results and KG edges.
+        Calls ``POST /v1/recall`` and groups ``data.tiers`` in the order
+        ``primary, contextual, experiential, hub``. ``emotional_valence`` on
+        each item is the recall-level emotion. Per-memory KG associations and
+        spatial coordinates are not returned by the server — use
+        :meth:`knowledge` for relations.
         """
-        payload: dict[str, Any] = {"query": query, "depth": depth}
-        data = self._request("POST", "/recall/tiers", json=payload)
-
+        raw = self._request("POST", "/recall", json={"query": query, "depth": depth})
+        data, smrp = _unwrap_smrp(raw)
+        raw_emotion = _dict(data.get("emotion"))
+        emotion = Emotion(
+            pleasure=raw_emotion.get("pleasure", 0.0),
+            arousal=raw_emotion.get("arousal", 0.0),
+            dominance=raw_emotion.get("dominance", 0.0),
+        )
+        raw_tiers = _dict(data.get("tiers"))
         tiers: list[list[TieredMemoryResult]] = []
-        for tier_list in data.get("tiers", []):
-            tier_results: list[TieredMemoryResult] = []
-            for r in tier_list:
-                raw_emotion = r.get("emotional_valence", {})
-                emotion = Emotion(
-                    pleasure=raw_emotion.get("pleasure", 0.0),
-                    arousal=raw_emotion.get("arousal", 0.0),
-                    dominance=raw_emotion.get("dominance", 0.0),
-                )
-                coords = r.get("spatial_coords", [0.0, 0.0, 0.0])
-                if len(coords) < 3:
-                    coords = [0.0, 0.0, 0.0]
-                tier_results.append(
+        for idx, name in enumerate(self.RECALL_TIERS, start=1):
+            items = _list(raw_tiers.get(name))
+            tiers.append(
+                [
                     TieredMemoryResult(
-                        id=r.get("id", ""),
-                        content=r.get("content", ""),
-                        tier=r.get("tier", 1),
-                        similarity=r.get("similarity", 0.0),
-                        kg_associations=r.get("kg_associations", []),
+                        id=str(r.get("id", "")),
+                        content=str(r.get("content", "")),
+                        tier=idx,
+                        similarity=float(r.get("similarity", 0.0)),
                         emotional_valence=emotion,
-                        spatial_coords=(coords[0], coords[1], coords[2]),
+                        tier_name=name,
+                        labels=_string_list(r.get("labels")),
+                        source=_string_list(r.get("source")),
+                        metrics=_dict(r.get("metrics")),
+                        topology=r.get("topology") if isinstance(r.get("topology"), dict) else None,
                     )
-                )
-            tiers.append(tier_results)
-
+                    for r in items
+                    if isinstance(r, dict)
+                ]
+            )
         return RecallWithTiersResponse(
-            success=data.get("success", False),
-            query=data.get("query", ""),
+            success=smrp.protocol.ok if smrp else data.get("success", False),
+            query=str(data.get("query", query)),
             tiers=tiers,
-            total_results=data.get("total_results", 0),
-            knowledge_graph_edges=data.get("knowledge_graph_edges", []),
+            total_results=sum(len(t) for t in tiers),
+            smrp=smrp,
         )
 
-    def identity_step(self, step: int, agent_name: str) -> IdentityStepResponse:
-        """Perform the identity ritual step.
+    def identity_step(
+        self, step: int, value: str | None = None, *, agent_name: str | None = None
+    ) -> IdentityStepResponse:
+        """Answer one step of the identity ritual (``POST /v1/identity/step``).
 
-        Identity rituals give AI agents persistent personality across sessions.
-        This is a unique Epicode feature that goes far beyond simple vector
-        storage, allowing agents to build and maintain a sense of self over time.
-
-        Args:
-            step: The ritual step number (1-7).
-            agent_name: The name of the agent performing the ritual.
-
-        Returns:
-            An ``IdentityStepResponse`` with the updated ritual state.
+        Steps: 1 name, 2 mission, 3 creator, 4 personality, 5 language; then
+        call :meth:`identity_finalize`. ``agent_name=`` is a deprecated alias
+        for ``value``.
         """
-        payload = {"step": step, "agent_name": agent_name}
-        data = self._request("POST", "/identity/step", json=payload)
+        if value is None:
+            if agent_name is None:
+                raise TypeError("identity_step() requires value")
+            warnings.warn(
+                "identity_step(agent_name=...) is deprecated; pass value=",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            value = agent_name
+        data, smrp = _unwrap_smrp(
+            self._request("POST", "/identity/step", json={"step": step, "value": value})
+        )
         return IdentityStepResponse(
-            success=data.get("success", False),
-            step=data.get("step", 0),
-            agent_name=data.get("agent_name", ""),
-            ritual_state=data.get("ritual_state", ""),
-            personality_signature=data.get("personality_signature", {}),
+            success=smrp.protocol.ok if smrp else data.get("success", False),
+            step=int(data.get("step", step) or 0),
+            progress=_dict(data.get("progress")),
+            next_prompt=str(data.get("next_prompt", "")),
+            pending=_dict(data.get("pending")),
+            smrp=smrp,
         )
 
-    def dream_cycle(self) -> DreamCycleResponse:
-        """Trigger background memory consolidation.
+    def identity_finalize(self) -> dict[str, Any]:
+        """Seal the identity ritual (``POST /v1/identity/finalize``); returns SMRP data."""
+        data, _ = _unwrap_smrp(self._request("POST", "/identity/finalize"))
+        return data
 
-        The "living memory system" aspect of Epicode. Dream cycles run in the
-        background to consolidate memories, form new associations, and prune weak
-        connections — mimicking how biological brains strengthen memories during
-        sleep. This is not something flat vector databases can do.
+    def dream_cycle(self, *, dry_run: bool = False) -> DreamCycleResponse:
+        """Run memory consolidation via the MCP ``dream_cycle`` tool.
 
-        Returns:
-            A ``DreamCycleResponse`` with consolidation metrics.
+        There is no REST route; this calls the MCP endpoint (``mcp_url``).
+        ``dry_run=True`` previews without modifying the space. Counts are
+        parsed from the server ``report`` text.
         """
-        data = self._request("POST", "/dream/cycle")
+        data, smrp = _unwrap_smrp(self._mcp_call("dream_cycle", {"dry_run": dry_run}))
+        report = str(data.get("report", ""))
+
+        def count(key: str) -> int:
+            m = re.search(rf"\b{key}: (\d+)", report)
+            return int(m.group(1)) if m else 0
+
+        is_dry = bool(data.get("dry_run", dry_run))
         return DreamCycleResponse(
-            success=data.get("success", False),
-            cycles_completed=data.get("cycles_completed", 0),
-            memories_consolidated=data.get("memories_consolidated", 0),
-            new_associations=data.get("new_associations", 0),
-            energy_delta=data.get("energy_delta", 0.0),
+            success=smrp.protocol.ok if smrp else False,
+            cycles_completed=0 if is_dry else 1,
+            memories_consolidated=count("consolidated"),
+            new_associations=count("connections_formed"),
+            duplicates_merged=count("merged"),
+            junk_evicted=count("evicted"),
+            importance_updated=count("importance_updated"),
+            dry_run=is_dry,
+            report=report,
+            smrp=smrp,
         )
 
-    def knowledge_graph(self, node_id: str) -> KnowledgeGraphResponse:
-        """Return knowledge graph visualization data for a node.
+    def knowledge_graph(self, node_id: str | int) -> KnowledgeGraphResponse:
+        """1-hop knowledge-graph neighbourhood of a memory.
 
-        Epicode automatically extracts knowledge graph relationships from
-        memories stored as tetrahedrons in 3D space. This method returns the
-        nodes, edges, and clusters that make up the graph around a given memory.
-
-        Args:
-            node_id: The ID of the central node to visualize.
-
-        Returns:
-            A ``KnowledgeGraphResponse`` with nodes, edges, and cluster data.
+        Built from :meth:`knowledge` (``POST /v1/knowledge``): the centre node
+        plus one node per relation target, and one edge per relation. The
+        server does not return node content, coordinates or clusters.
         """
-        data = self._request("GET", f"/knowledge-graph/{node_id}")
-        nodes = [
-            KnowledgeGraphNode(
-                id=n.get("id", ""),
-                label=n.get("label", ""),
-                content=n.get("content", ""),
-                x=n.get("x", 0.0),
-                y=n.get("y", 0.0),
-                z=n.get("z", 0.0),
-                tier=n.get("tier", 1),
+        k = self.knowledge(node_id)
+        centre = str(k.id or node_id)
+        nodes = [KnowledgeGraphNode(id=centre, label="", content="")]
+        edges: list[KnowledgeGraphEdge] = []
+        seen = {centre}
+        for rel in k.relations:
+            if not isinstance(rel, dict):
+                continue
+            target = str(rel.get("target", ""))
+            if target and target not in seen:
+                seen.add(target)
+                nodes.append(KnowledgeGraphNode(id=target, label="", content=""))
+            edges.append(
+                KnowledgeGraphEdge(
+                    source=centre,
+                    target=target,
+                    relation=str(rel.get("type", "")),
+                    strength=float(rel.get("strength", 0.5)),
+                )
             )
-            for n in data.get("nodes", [])
-        ]
-        edges = [
-            KnowledgeGraphEdge(
-                source=e.get("source", ""),
-                target=e.get("target", ""),
-                relation=e.get("relation", ""),
-                strength=e.get("strength", 0.5),
-            )
-            for e in data.get("edges", [])
-        ]
-        return KnowledgeGraphResponse(
-            success=data.get("success", False),
-            node_id=data.get("node_id", ""),
-            nodes=nodes,
-            edges=edges,
-            clusters=data.get("clusters", []),
-        )
+        return KnowledgeGraphResponse(success=k.success, node_id=centre, nodes=nodes, edges=edges)
 
     def close(self) -> None:
         """Close the underlying HTTP session."""

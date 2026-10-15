@@ -109,6 +109,16 @@ client = EpicodeClient(
 
 The SDK's memory methods accept the current SMRP REST envelope and continue to expose the existing convenience fields (`results`, `answer`, and so on). The original structured response is available as `response.smrp`; successful search results also retain tier, source, metrics, and topology where returned. An SMRP `protocol.ok: false` response raises `EpicodeError` instead of appearing as a successful empty result. Legacy flat responses remain supported.
 
+## Migration notes (next release)
+
+- `identity_step(step, value)` now sends `value` (the server never accepted `agent_name`); `agent_name=` still works with a `DeprecationWarning`. New: `identity_finalize()`.
+- `recall_with_tiers()` now calls `POST /v1/recall` and groups `data.tiers`; items gain `tier_name`, `labels`, `source`, `metrics`, `topology`. `kg_associations`, `spatial_coords` and `knowledge_graph_edges` are deprecated (never returned) and stay empty.
+- `dream_cycle(dry_run=False)` calls the MCP `dream_cycle` tool (no REST route); pass `mcp_url=` to the client if your MCP endpoint is not `<base without /v1>/mcp`. `energy_delta` is deprecated.
+- `knowledge_graph(id)` is built from `knowledge(id)` (`POST /v1/knowledge`); node content/coordinates and `clusters` are not returned.
+- `knowledge()` sends an integer id; `create_node(timestamp=)` sends Unix seconds as an integer; `timeline()`, `get_node()`, `create_node()`, `stats()` and `knowledge()` unwrap SMRP envelopes.
+- `EpicodeAdmin` now calls `/api/register` and `/api/admin/*` (they are not under `/api/v1`).
+- `backend/tests/sdk_contract.rs` fails CI if any SDK route or MCP tool stops existing.
+
 ## Requirements
 
 - Python >= 3.10
