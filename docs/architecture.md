@@ -29,7 +29,7 @@ flowchart LR
 ```
 
 ```text
-AI Agent → POST /remember → Security Middleware (API Key + Rate Limit + Energy Check)
+AI Agent → POST /api/v1/remember → Security Middleware (API Key + Rate Limit + Energy Check)
     → GatewayCenter (Embedding → LLM Classification → Spatial Placement)
     → New Tetrahedron placed into Space (Auto-merge nearby vertices → Natural clustering)
     → Knowledge Graph updated
