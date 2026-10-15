@@ -24,7 +24,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Initialize Epicode connection. Syncs system Skill, returns session context with knowledge cards. Call on first connection each day.",
+      "description": "Start here after the identity ritual (each session). Returns the canonical executor manual in system_skill.content — read it first; also session context, knowledge cards and the action tool surface. Same manual: skill_get(\"epicode-system\").",
       "inputSchema": {
         "properties": {
           "agent_id": {
@@ -179,7 +179,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Fetch full content of a specific skill by name. Use after skills_sync to get details.",
+      "description": "Fetch full content of a specific skill by name. Use after skills_sync to get details. skill_get(\"epicode-system\") returns the canonical Executor Manual (same as epicode_handshake system_skill.content).",
       "inputSchema": {
         "properties": {
           "name": {
@@ -461,7 +461,7 @@
           },
           "limit": {
             "default": 20,
-            "description": "Slim only: max items returned, top by score (default 20)",
+            "description": "Max items returned, top by score/similarity (default 20; applies to slim and full)",
             "maximum": 60,
             "minimum": 1,
             "type": "integer"
@@ -471,8 +471,8 @@
             "type": "string"
           },
           "verbosity": {
-            "default": "full",
-            "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections duplicates); retains valid + timestamp fields when present. Also enabled by EPICODE_SLIM_ENVELOPE=1.",
+            "default": "slim",
+            "description": "'slim' (default) returns compact items[]+why+budget_spent. 'full' returns SMRP tiers with full content (no sections duplicate), capped by limit; items_total/items_truncated report what was cut.",
             "enum": [
               "full",
               "slim"
@@ -615,7 +615,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Delete a memory by ID. Permanently removes the memory from space, storage, knowledge graph, and search index. Use with caution.",
+      "description": "Permanently purge a memory by ID (same semantics as REST DELETE /v1/memories/:id): removes it from space, storage, knowledge graph, and search index. Enforced rules and identity-anchor memories are refused (protected). For recoverable removal use memory_forget + memory_restore.",
       "inputSchema": {
         "properties": {
           "id": {
@@ -1008,7 +1008,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "REQUIRED on first connection. Confirm the agent's permanent identity. This can ONLY be called ONCE — after confirmation, the identity is immutable and can NEVER be changed. If already confirmed, returns current identity. PREFERRED: use identity_step for the ritual ceremony (5 steps).",
+      "description": "One-shot alternative to the identity_step ritual (one of the two is required on first connection). Confirm the agent's permanent identity. This can ONLY be called ONCE — after confirmation, the identity is immutable and can NEVER be changed. If already confirmed, returns current identity. PREFERRED: use identity_step for the ritual ceremony (5 steps).",
       "inputSchema": {
         "properties": {
           "author": {
@@ -1921,7 +1921,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Finish a claimed/open action: creates an outcome memory, links each evidence memory to it (Precedes), and marks the action done|blocked|exhausted. Requires non-empty outcome text. When action.done_when is non-empty, pass done_when_evidence (parallel array); unmapped items soft-fail to blocked (not done).",
+      "description": "Finish a claimed/open action: creates an outcome memory, links each evidence memory to it (Precedes), and marks the action done|blocked|exhausted. Requires non-empty outcome text. When action.done_when is non-empty, pass done_when_evidence (parallel array); unmapped items soft-fail to blocked (not done) while protocol.ok stays true — always check the returned action.state. Each evidence item must cite a memory (#id) or be specific (>=8 chars, CJK counts 2) and not merely echo the criterion.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -2095,7 +2095,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Dispatch: assign one open action to a worker. Omit worker_id to auto-pick least-loaded capable worker. Sets immutable assignee; only that assignee (or Admin) may action_complete.",
+      "description": "Dispatch: assign one open action to a worker. Omit worker_id to auto-pick least-loaded capable worker. Sets immutable assignee and claims the action for it (state Claimed, lease starts) — the assignee must not call action_claim again; heartbeat/complete directly. Only that assignee (or Admin) may action_complete.",
       "inputSchema": {
         "properties": {
           "action_id": {
@@ -2120,7 +2120,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Dispatch: batch auto-assign up to limit open actions (priority order) to least-loaded capable workers.",
+      "description": "Dispatch: batch auto-assign up to limit open actions (priority order) to least-loaded capable workers. Assigned actions are already Claimed for their worker (no action_claim needed).",
       "inputSchema": {
         "properties": {
           "limit": {
