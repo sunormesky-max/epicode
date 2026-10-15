@@ -346,6 +346,13 @@ async function request<T>(
   return data as T;
 }
 
+/** Strip trailing slashes without a regex (avoids polynomial backtracking). */
+function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") end--;
+  return url.slice(0, end);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -456,7 +463,7 @@ export class EpicodeClient {
    */
   constructor(apiKey: string, baseUrl?: string, mcpUrl?: string) {
     this.apiKey = apiKey;
-    this.baseUrl = (baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+    this.baseUrl = trimTrailingSlashes(baseUrl ?? DEFAULT_BASE_URL);
     this.mcpUrl =
       mcpUrl ??
       `${this.baseUrl.endsWith("/v1") ? this.baseUrl.slice(0, -3) : this.baseUrl}/mcp`;
@@ -900,7 +907,7 @@ export class EpicodeAdmin {
 
   constructor(adminKey: string, baseUrl?: string) {
     this.adminKey = adminKey;
-    const base = (baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+    const base = trimTrailingSlashes(baseUrl ?? DEFAULT_BASE_URL);
     this.rootUrl = base.endsWith("/v1") ? base.slice(0, -3) : base;
   }
 
