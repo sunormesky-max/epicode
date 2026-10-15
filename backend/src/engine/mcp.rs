@@ -2575,7 +2575,7 @@ impl McpHandler {
                 "note": "完成=每条done_when有产物级证据; 交付时task_complete带done_when_evidence平行数组逐条映射; 代理信号(测试过/流程走完/代码多/耗时长)不是证据; 不确定=未达成; stop_if命中时带stop_if_hit走熔断",
             }))
             .unwrap_or(serde_json::Value::Null);
-        // P36b Pulse 提醒已移除: /v1/pulse/script 与 /v1/pulse/heartbeat 未挂路由,
+        // P36b Pulse 提醒已移除(Pulse 插件 2026-10 整体下线, 端点从未挂路由),
         // 指引执行者去 curl 不存在的端点只会误导(执行者手册审计 2026-10-15)。
         // P35 目标可审计性lint: 虚词+无done_when清单=无法完成审计(Codex社区实战坑产品化)
         let vague_words = [
