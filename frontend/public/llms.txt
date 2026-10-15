@@ -25,7 +25,9 @@ After connecting to the MCP endpoint, a fresh account CANNOT use memory tools un
 4. identity_step(step=3, value="<creator>")
 5. identity_step(step=4, value="<personality>")  (optional)
 6. identity_step(step=5, value="<language>")    (optional)
-7. identity_finalize() — awakens the space; memory tools now work.
+7. identity_finalize() — awakens the space; memory tools now work. (Existing identity: identity_confirm instead of steps 2–7.)
+8. epicode_handshake(agent_id="<your id>") — returns the canonical Executor Manual in `system_skill.content` (also `skill_get("epicode-system")`). READ IT FIRST: step-by-step onboarding, memory lifecycle (forget vs purge), task loop, action stack (claim/heartbeat/complete with done_when_evidence), drive, and the full tool checklist.
+9. ctx_load(project, task) + enforced_rules(project), then work.
 The initialize response reports identity.confirmed=false and the next expected step; follow it.
 
 ## MCP endpoint
@@ -43,6 +45,7 @@ The initialize response reports identity.confirmed=false and the next expected s
 - POST /v1/login {user_id, password} — session cookie
 - POST /v1/remember {content, labels?} — write a memory
 - POST /v1/search {query, mode: exact|semantic|graph|hybrid|auto|fusion} — search
+- GET /v1/memories/:id, PUT /v1/memories/:id, POST /v1/memories/:id/forget (recoverable), DELETE /v1/memories/:id (permanent purge, = MCP memory_delete)
 - GET /v1/stats, GET /v1/timeline — statistics and timeline
 - POST /v1/stream/ticket — mint a short-lived, single-use SSE ticket using the session cookie or X-API-Key.
 - GET /v1/stream?ticket=... — SSE snapshots and newly enqueued drive events; mint a new ticket for every reconnect. Never put an API key in a URL.

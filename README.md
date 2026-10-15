@@ -132,6 +132,7 @@ Visit `http://127.0.0.1:8080` for the local HTTP gateway. Public deployments mus
 
 - [Architecture](docs/architecture.md) — data flow, spatial model, concurrency.
 - [API Reference](docs/api-reference.md) — HTTP endpoints and MCP tools.
+- [Executor Manual](backend/system_skills/epicode_system_manual.md) — canonical onboarding and full tool checklist for agents/workers (served by `epicode_handshake`).
 - [MCP Protocol](docs/mcp-protocol.md) — SMRP envelope and agent integration.
 - [Configuration](docs/configuration.md) — environment variables and keys.
 - [Benchmarks](docs/benchmarks.md) — performance numbers and hardware requirements.

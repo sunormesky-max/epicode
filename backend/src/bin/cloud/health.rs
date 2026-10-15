@@ -264,7 +264,7 @@ pub async fn persona_ready(
 pub async fn agent_guide() -> (
     StatusCode,
     [(axum::http::HeaderName, &'static str); 2],
-    &'static str,
+    String,
 ) {
     let guide = concat!(
                 "# Epicode Agent Guide\n",
@@ -318,88 +318,11 @@ pub async fn agent_guide() -> (
         "  -32000  Request or response exceeds the 1 MiB limit\n",
         "  SMRP ok=false / result.isError=true = tool-level error (data may be null)\n",
         "\n",
-        "## 4. Session Lifecycle (MANDATORY)\n",
+        "## 4. Executor Manual (canonical)\n",
         "\n",
-        "  1. identity_confirm(name, mission, author)   -- ONCE, then immutable forever\n",
-        "  2. ctx_load(project, task)                    -- ALWAYS at session start\n",
-        "  3. ... work normally, call tools below ...\n",
-        "  4. session_summary(accomplished, next_steps)  -- ALWAYS at session end\n",
+        "Everything below is the canonical Executor Manual, identical to MCP epicode_handshake\n",
+        "system_skill.content and skill_get(\"epicode-system\"). tools/list is authoritative for schemas.\n",
         "\n",
-        "- ctx_load with task param enables intent-aware retrieval - always pass a task description.\n",
-        "- session_summary auto-tags as memory_class=session - next ctx_load picks up from it.\n",
-        "\n",
-        "## 5. Representative Tool Quick Reference (tools/list is authoritative)\n",
-        "\n",
-        "### Memory CRUD & Search (9 tools)\n",
-        "  memory_create    Store a memory; similar memories auto-cluster\n",
-        "  memory_search    Semantic search (vector + BM25 hybrid, max limit 200)\n",
-        "  memory_recall    Deep recall via knowledge graph associations\n",
-        "  memory_ask       Synthesize a memory-grounded answer with structured source memories\n",
-        "  memory_get       Get a specific memory by ID\n",
-        "  memory_list      List memories with filters (labels, pagination)\n",
-        "  memory_update    Update content/labels of a memory\n",
-        "  memory_delete    Delete a memory by ID\n",
-        "  memory_export    Bulk export memories (JSON, optional label filter)\n",
-        "  memory_restore   Restore importance/state of a memory\n",
-        "\n",
-        "### Session Lifecycle (4 tools)\n",
-        "  ctx_load         MANDATORY at session start - loads relevant context\n",
-        "  ctx_save         Manually save a context checkpoint\n",
-        "  session_summary  MANDATORY at session end - persists summary\n",
-        "  session_list     List recent session memories\n",
-        "\n",
-        "### Knowledge Capture (4 tools)\n",
-        "  pattern_learn    Store a code pattern/convention\n",
-        "  pattern_recall   Recall patterns relevant to a context\n",
-        "  decision_record  Record an architecture/design decision\n",
-        "  bug_memory       Record a bug + fix to avoid repeating\n",
-        "\n",
-        "### Knowledge Graph (4 tools)\n",
-        "  knowledge_relations  Query KG relations for a memory\n",
-        "  concepts             List concept prototypes (topic clusters)\n",
-        "  kg_quality           Assess KG health (density, orphan rate)\n",
-        "  dream_cycle          Run consolidation to strengthen connections\n",
-        "\n",
-        "### Identity - Immutable (3 tools)\n",
-        "  identity_confirm    Confirm permanent identity - ONCE then immutable\n",
-        "  identity_step       Ritual ceremony: 5-step identity confirmation\n",
-        "  identity_finalize   Seal identity permanently\n",
-        "\n",
-        "### Skills & Feedback (6 tools)\n",
-        "  skill_execute    Execute a skill from the library\n",
-        "  skill_feedback   Submit skill helpfulness feedback\n",
-        "  skills_sync      Export skills to local agent directories\n",
-        "  feedback_submit  Submit memory outcome feedback (system learns)\n",
-        "  enforced_rules   Get hard constraints (inject into system prompts)\n",
-        "  project_list     List projects with stored memories\n",
-        "\n",
-        "### Documents & Diagnostics (6 tools)\n",
-        "  doc_import           Import markdown doc into memory\n",
-        "  doc_list             List imported documents\n",
-        "  context_observe      Auto-extract & store conversation context\n",
-        "  embedding_diagnostic Diagnose embedding dimension health\n",
-        "  embedding_migrate    Re-embed ALL memories (heavy operation)\n",
-        "  space_stats          Space statistics (memory/vertex/cluster count)\n",
-        "\n",
-        "## 6. Memory Class System\n",
-        "\n",
-        "Memories are layered by lifecycle class:\n",
-        "  permanent  Default; long-lived, importance decays slowly\n",
-        "  session    Superseded after 7 days; auto-tagged by session_summary/ctx_save\n",
-        "  bridge     Short-lived connector; superseded after 1 day (auto-fuse)\n",
-        "\n",
-        "null memory_class is treated as permanent.\n",
-        "\n",
-        "## 7. Best Practices\n",
-        "\n",
-        "- ALWAYS call feedback_submit after using search/recall results.\n",
-        "- ALWAYS call ctx_load(task=...) at start for precision retrieval.\n",
-        "- ALWAYS call session_summary at end so next session resumes cleanly.\n",
-        "- Inject enforced_rules() output into your system prompt as mandatory constraints.\n",
-        "- Use memory_recall (not memory_search) when you need connected context.\n",
-        "- Run dream_cycle periodically to strengthen KG connections.\n",
-        "- Identity is IMMUTABLE after identity_confirm - choose wisely.\n",
-
     );
     (
         StatusCode::OK,
@@ -413,7 +336,10 @@ pub async fn agent_guide() -> (
                 "public, max-age=3600",
             ),
         ],
-        guide,
+        format!(
+            "{guide}{}",
+            epicode::engine::mcp::McpHandler::system_manual()
+        ),
     )
 }
 
@@ -523,170 +449,6 @@ pub struct LoginRequest {
     /// user_id or registered email
     pub user_id: String,
     pub password: String,
-}
-
-/// P27 Pulse: 接收守护进程遥测 — 真实活跃时间回流(带身份验证+归属校验)
-#[derive(serde::Deserialize)]
-#[allow(dead_code)] // 运维探针保留
-pub struct PulseHeartbeat {
-    pub task_id: String,
-    pub real_active_ms: i64,
-    pub local_now_ms: i64,
-}
-
-#[allow(dead_code)] // 运维探针保留
-pub async fn pulse_heartbeat(
-    State(st): State<CloudState>,
-    axum::extract::Extension(user): axum::extract::Extension<UserInfo>,
-    axum::Json(req): axum::Json<PulseHeartbeat>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    if req.real_active_ms < 0 || req.real_active_ms > 86_400_000 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "real_active_ms out of range"})),
-        );
-    }
-    let engine = match st.user_mgr.get_engine(&user.user_id) {
-        Ok(e) => e,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": e})),
-            )
-        }
-    };
-    match engine
-        .storage
-        .set_real_active(&req.task_id, &user.user_id, req.real_active_ms)
-    {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"ok": true}))),
-        Err(e) if e.contains("not found") => (
-            StatusCode::NOT_FOUND,
-            Json(
-                serde_json::json!({"ok": false, "stop": true, "reason": "task completed or not found — stop pulsing"}),
-            ),
-        ),
-        Err(e) => (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"ok": false, "stop": true, "error": e})),
-        ),
-    }
-}
-
-/// P27c: Pulse 脚本分发(带API Key验证)
-#[allow(dead_code)] // 运维探针保留
-pub async fn pulse_script(
-    _user: axum::extract::Extension<UserInfo>,
-) -> impl axum::response::IntoResponse {
-    (
-        StatusCode::OK,
-        [("content-type", "text/plain; charset=utf-8")],
-        r#"#!/usr/bin/env bash
-# Epicode Pulse v2.0 - 时间掐表器
-# 掐表: pulse-start --task-id <id> --api-key <key> --budget-ms <ms>
-# 停表: pulse-stop --task-id <id>
-# 查表: pulse-status
-
-__epicode_pulse_start() {
-  local TASK_ID="" API_KEY="" BUDGET_MS=0 ENDPOINT="https://epicode.cn"
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --task-id) TASK_ID="$2"; shift 2 ;;
-      --api-key) API_KEY="$2"; shift 2 ;;
-      --budget-ms) BUDGET_MS="$2"; shift 2 ;;
-      --endpoint) ENDPOINT="$2"; shift 2 ;;
-      *) shift ;;
-    esac
-  done
-  if [ -z "$TASK_ID" ] || [ -z "$API_KEY" ] || [ "$BUDGET_MS" -eq 0 ]; then
-    echo "usage: pulse-start --task-id <id> --api-key <key> --budget-ms <ms>" >&2
-    return 1
-  fi
-  local DIR="$HOME/.epicode"
-  mkdir -p "$DIR"
-  local PID_FILE="$DIR/pulse-${TASK_ID}.pid"
-  local SIG_FILE="$DIR/pulse-${TASK_ID}"
-  if [ -f "$PID_FILE" ]; then kill "$(cat "$PID_FILE")" 2>/dev/null; fi
-  (
-    local START=$(date +%s%3N)
-    local LAST_BEAT=0
-    while true; do
-      local NOW=$(date +%s%3N)
-      local ELAPSED=$((NOW - START))
-      local PCT=$((ELAPSED * 100 / BUDGET_MS))
-      local PHASE="explore"
-      if [ "$PCT" -ge 90 ]; then PHASE="deliver"
-      elif [ "$PCT" -ge 70 ]; then PHASE="verify"
-      elif [ "$PCT" -ge 30 ]; then PHASE="build"
-      fi
-      echo "[+$((ELAPSED/1000))s|剩$((100-PCT))%|${PHASE}]" > "$SIG_FILE"
-      if [ $((NOW - LAST_BEAT)) -ge 30000 ]; then
-        local RESP
-        RESP=$(curl -s -m 5 -X POST "${ENDPOINT}/api/v1/task-heartbeat" \
-          -H "X-API-Key: ${API_KEY}" \
-          -H "Content-Type: application/json" \
-          -d "{\"task_id\":\"${TASK_ID}\",\"real_active_ms\":${ELAPSED},\"local_now_ms\":${NOW}}" 2>/dev/null)
-        if echo "$RESP" | grep -q '"stop"\|"error"\|401\|403'; then
-          cp "$SIG_FILE" "$SIG_FILE.final" 2>/dev/null
-          rm -f "$PID_FILE" "$SIG_FILE" 2>/dev/null
-          exit 0
-        fi
-        LAST_BEAT=$NOW
-      fi
-      if [ $((ELAPSED - BUDGET_MS * 2)) -gt 0 ]; then
-        cp "$SIG_FILE" "$SIG_FILE.final" 2>/dev/null
-        rm -f "$PID_FILE" "$SIG_FILE" 2>/dev/null
-        exit 0
-      fi
-      sleep 5
-    done
-  ) &
-  echo $! > "$PID_FILE"
-  echo "pulse started: task=$TASK_ID pid=$(cat "$PID_FILE")"
-}
-
-__epicode_pulse_stop() {
-  local TID=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --task-id) TID="$2"; shift 2 ;;
-      *) shift ;;
-    esac
-  done
-  if [ -z "$TID" ]; then
-    echo "usage: pulse-stop --task-id <id>" >&2
-    return 1
-  fi
-  local PF="$HOME/.epicode/pulse-${TID}.pid"
-  if [ -f "$PF" ]; then
-    kill "$(cat "$PF")" 2>/dev/null
-    rm -f "$PF" "$HOME/.epicode/pulse-${TID}"
-    echo "pulse stopped: task=$TID"
-  else
-    echo "no pulse running for task=$TID"
-  fi
-}
-
-__epicode_pulse_status() {
-  local found=0
-  for pf in "$HOME"/.epicode/pulse-*.pid; do
-    [ -f "$pf" ] || continue
-    local t
-    t=$(basename "$pf" .pid | sed 's/pulse-//')
-    if kill -0 "$(cat "$pf")" 2>/dev/null; then
-      echo "running: $t"
-      found=1
-    fi
-  done
-  if [ "$found" -eq 0 ]; then echo "no active pulses"; fi
-  return 0
-}
-
-pulse-start() { __epicode_pulse_start "$@"; }
-pulse-stop() { __epicode_pulse_stop "$@"; }
-pulse-status() { __epicode_pulse_status; }
-"#,
-    )
 }
 
 pub async fn login_user(

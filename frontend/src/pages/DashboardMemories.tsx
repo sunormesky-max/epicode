@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
-import { AUTH_CHANGE_EVENT, getUserId, searchMemories, getTimeline, deleteMemory, updateMemoryContent, storeMemory, importDocument, recallMemories, errMsg, type SearchResult, type TimelineEvent } from '@/lib/api';
+import { AUTH_CHANGE_EVENT, getUserId, searchMemories, getTimeline, deleteMemory, forgetMemory, updateMemoryContent, storeMemory, importDocument, recallMemories, errMsg, type SearchResult, type TimelineEvent } from '@/lib/api';
 import { SearchLifecycle, visibleSearchResults } from '@/lib/search-lifecycle';
 import DashboardLayout from '@/components/DashboardLayout';
 import { DashboardLoading, ErrorBanner } from '@/components/DashboardUI';
@@ -192,13 +192,24 @@ export default function DashboardMemories() {
     void runSearch(query);
   }
 
+  function dropFromLists(id: number) {
+    setResults(prev => prev.filter(r => r.id !== id));
+    setEvents(prev => prev.filter(r => r.id !== id));
+    setTotalEvents(t => Math.max(0, t - 1));
+  }
+
+  async function handleForget(id: number) {
+    try {
+      await forgetMemory(id);
+      dropFromLists(id);
+    } catch (e: unknown) { setError(errMsg(e) || t('dash.mem.forgetFailed')); }
+  }
+
   async function handleDelete(id: number) {
     if (!confirm(t('dash.mem.deleteConfirm'))) return;
     try {
       await deleteMemory(id);
-      setResults(prev => prev.filter(r => r.id !== id));
-      setEvents(prev => prev.filter(r => r.id !== id));
-      setTotalEvents(t => Math.max(0, t - 1));
+      dropFromLists(id);
     } catch (e: unknown) { setError(errMsg(e) || t('dash.mem.deleteFailed')); }
   }
 
@@ -651,7 +662,13 @@ export default function DashboardMemories() {
                         style={{ background: 'rgba(var(--overlay-rgb), 0.04)', color: 'var(--accent-purple)', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
                         <Pencil size={12} /> {t('dash.mem.edit')}
                       </button>
-                      <button onClick={e => { e.stopPropagation(); handleDelete(item.id); }}
+                      <button onClick={e => { e.stopPropagation(); void handleForget(item.id); }}
+                        title={t('dash.mem.forgetHint')}
+                        style={{ background: 'rgba(var(--overlay-rgb), 0.04)', color: 'var(--text-secondary)', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
+                        {t('dash.mem.forget')}
+                      </button>
+                      <button onClick={e => { e.stopPropagation(); void handleDelete(item.id); }}
+                        title={t('dash.mem.deleteHint')}
                         style={{ background: 'rgba(var(--overlay-rgb), 0.04)', color: 'var(--danger-red)', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
                         {t('dash.mem.delete')}
                       </button>

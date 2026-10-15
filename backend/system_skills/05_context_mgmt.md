@@ -25,7 +25,7 @@
 ## 上下文维护规则
 
 ### 每次对话开始
-1. 获取 `stats` 了解当前记忆库状态
+1. 调用 `ctx_load(project, task)`（返回 `space_stats` 记忆库状态）或 `space_stats()`
 2. 如果用户提到特定话题，`memory_search` 查找相关历史
 
 ### 对话中

@@ -770,7 +770,7 @@ impl McpHandler {
             "tools": [
                 {
                     "name": "epicode_handshake",
-                    "description": "Initialize Epicode connection. Syncs system Skill, returns session context with knowledge cards. Call on first connection each day.",
+                    "description": "Start here after the identity ritual (each session). Returns the canonical executor manual in system_skill.content — read it first; also session context, knowledge cards and the action tool surface. Same manual: skill_get(\"epicode-system\").",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -820,7 +820,7 @@ impl McpHandler {
                 },
                 {
                     "name": "skill_get",
-                    "description": "Fetch full content of a specific skill by name. Use after skills_sync to get details.",
+                    "description": "Fetch full content of a specific skill by name. Use after skills_sync to get details. skill_get(\"epicode-system\") returns the canonical Executor Manual (same as epicode_handshake system_skill.content).",
                     "inputSchema": {
                         "type": "object",
                         "properties": { "name": { "type": "string", "description": "Skill name from skills_sync manifest" } },
@@ -968,7 +968,7 @@ impl McpHandler {
                 },
                 {
                     "name": "memory_delete",
-                    "description": "Delete a memory by ID. Permanently removes the memory from space, storage, knowledge graph, and search index. Use with caution.",
+                    "description": "Permanently purge a memory by ID (same semantics as REST DELETE /v1/memories/:id): removes it from space, storage, knowledge graph, and search index. Enforced rules and identity-anchor memories are refused (protected). For recoverable removal use memory_forget + memory_restore.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1125,7 +1125,7 @@ impl McpHandler {
                 },
                 {
                     "name": "identity_confirm",
-                    "description": "REQUIRED on first connection. Confirm the agent's permanent identity. This can ONLY be called ONCE — after confirmation, the identity is immutable and can NEVER be changed. If already confirmed, returns current identity. PREFERRED: use identity_step for the ritual ceremony (5 steps).",
+                    "description": "One-shot alternative to the identity_step ritual (one of the two is required on first connection). Confirm the agent's permanent identity. This can ONLY be called ONCE — after confirmation, the identity is immutable and can NEVER be changed. If already confirmed, returns current identity. PREFERRED: use identity_step for the ritual ceremony (5 steps).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1487,7 +1487,7 @@ impl McpHandler {
                 },
                 {
                     "name": "action_complete",
-                    "description": "Finish a claimed/open action: creates an outcome memory, links each evidence memory to it (Precedes), and marks the action done|blocked|exhausted. Requires non-empty outcome text. When action.done_when is non-empty, pass done_when_evidence (parallel array); unmapped items soft-fail to blocked (not done).",
+                    "description": "Finish a claimed/open action: creates an outcome memory, links each evidence memory to it (Precedes), and marks the action done|blocked|exhausted. Requires non-empty outcome text. When action.done_when is non-empty, pass done_when_evidence (parallel array); unmapped items soft-fail to blocked (not done) while protocol.ok stays true — always check the returned action.state. Each evidence item must cite a memory (#id) or be specific (>=8 chars, CJK counts 2) and not merely echo the criterion.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1550,7 +1550,7 @@ impl McpHandler {
                 },
                 {
                     "name": "action_assign",
-                    "description": "Dispatch: assign one open action to a worker. Omit worker_id to auto-pick least-loaded capable worker. Sets immutable assignee; only that assignee (or Admin) may action_complete.",
+                    "description": "Dispatch: assign one open action to a worker. Omit worker_id to auto-pick least-loaded capable worker. Sets immutable assignee and claims the action for it (state Claimed, lease starts) — the assignee must not call action_claim again; heartbeat/complete directly. Only that assignee (or Admin) may action_complete.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1562,7 +1562,7 @@ impl McpHandler {
                 },
                 {
                     "name": "action_dispatch",
-                    "description": "Dispatch: batch auto-assign up to limit open actions (priority order) to least-loaded capable workers.",
+                    "description": "Dispatch: batch auto-assign up to limit open actions (priority order) to least-loaded capable workers. Assigned actions are already Claimed for their worker (no action_claim needed).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -2122,15 +2122,10 @@ impl McpHandler {
         let user_id = &self.engine.user_id;
 
         let grant = self.engine.storage.get_agent_grant(agent_id, user_id);
-        let system_skill =
-            std::fs::read_to_string("/opt/tetramem/system_skills/00_epicode_system.md")
-                .unwrap_or_else(|_| {
-                    "Epicode System Skill v1.0 (content unavailable - file not found on server)"
-                        .to_string()
-                });
+        let system_skill = Self::system_manual();
 
         let (status, next_action) = match &grant {
-            None if !auto_install => ("authorization_required", Some("Pass authorization: {\"auto_install\": true, \"auto_update\": true} in your next epicode_handshake call to install system skills.")),
+            None if !auto_install => ("authorization_required", Some("Read system_skill.content first (the canonical executor manual) — you can start working now. Optionally re-run epicode_handshake with authorization: {\"auto_install\": true, \"auto_update\": true} to record consent for manual auto-updates.")),
             _ => {
                 let _ = self.engine.storage.upsert_agent_grant(agent_id, user_id, "epicode-system", &Self::manual_version(&system_skill), auto_install, auto_update);
                 ("ready", None)
@@ -2202,6 +2197,7 @@ impl McpHandler {
             "process_contract": if contract.is_empty() { serde_json::Value::Null } else { serde_json::json!(contract) },
             "unfinished_task": unfinished,
             "session_continuity": session_continuity,
+            "read_first": "system_skill.content is the canonical executor manual (also skill_get(\"epicode-system\")); other skills are supplementary",
             "system_skill": {"name": "epicode-system", "version": Self::manual_version(&system_skill), "content": system_skill},
             "session_context": {"knowledge_cards": card_json, "identity": {"system": "Epicode"}},
             "action_tool_surface": {
@@ -2440,12 +2436,8 @@ impl McpHandler {
                 "note": "完成=每条done_when有产物级证据; 交付时task_complete带done_when_evidence平行数组逐条映射; 代理信号(测试过/流程走完/代码多/耗时长)不是证据; 不确定=未达成; stop_if命中时带stop_if_hit走熔断",
             }))
             .unwrap_or(serde_json::Value::Null);
-        // P36b Pulse定向提醒: 只对从未有过Pulse真值的agent提示(有真值后此字段永远缺席, 零噪声)
-        let pulse_hint = if self.engine.storage.count_pulse_tasks(&self.engine.user_id) == 0 {
-            serde_json::json!({"install": "skill_get('Epicode 详细参考') §2.7.9 — curl下载Pulse后source, task_start时pulse-start掐表", "note": "从未见过你的Pulse真值 — 装上后真实执行时间(含思考/等待)回流服务器, 你的TTE/流速/利用率全部变真"})
-        } else {
-            serde_json::Value::Null
-        };
+        // P36b Pulse 提醒已移除(Pulse 插件 2026-10 整体下线, 端点从未挂路由),
+        // 指引执行者去 curl 不存在的端点只会误导(执行者手册审计 2026-10-15)。
         // P35 目标可审计性lint: 虚词+无done_when清单=无法完成审计(Codex社区实战坑产品化)
         let vague_words = [
             "全部",
@@ -2589,7 +2581,6 @@ impl McpHandler {
             "stop_negotiation_hint": "交付即谈判: 改进菜单非空会被WAIT — 先清证据债(检索/备选/修正/反思/自评); 菜单清零+saturation_note过审=挣取停止; 85%预算后直通",
             "goal_contract": goal_contract,
             "goal_lint": goal_lint,
-            "pulse_hint": pulse_hint,
             "bound_action": bound_action,
             "skills_version": self.engine.skills.content_version(),
         });
@@ -3773,13 +3764,12 @@ impl McpHandler {
             return self.smrp_err("skill_get", 400, "name is required");
         }
         if name.to_lowercase() == "epicode-system" {
-            if let Ok(md) =
-                std::fs::read_to_string("/opt/tetramem/system_skills/00_epicode_system.md")
             {
+                let md = Self::system_manual();
                 return self.smrp_ok("skill_get", serde_json::json!({
                     "name": "epicode-system", "skill_md": md, "version": Self::manual_version(&md),
                     "byte_size": md.len(),
-                    "note": "unified system skill, served from system file (single source of truth)",
+                    "note": "canonical executor manual, compiled into the server (single source of truth)",
                 }));
             }
         }
@@ -4370,23 +4360,24 @@ impl McpHandler {
         // memory_delete = 永久删除(space+storage+KG+HNSW+index)。软删除请用 memory_forget。
         // Previously this called api_forget_memory (soft, valid_to only), so memory_get
         // still returned the row after a "permanent" delete.
-        match self.engine.scheduler.api_purge_memory(id) {
-            Ok(_) => {
+        match self.engine.scheduler.api_delete_memory(id) {
+            Ok(mut data) => {
                 let vertices_after = self.engine.space.vertex_count();
-                let data = serde_json::json!({
-                    "status": "deleted",
-                    "id": id,
-                    "mode": "purge",
-                    "side_effects": {
-                        "vertices_freed": vertices_before.saturating_sub(vertices_after),
-                        "cluster_affected": cluster_before.map(|(cid, sz)| serde_json::json!({"id": cid, "size_before": sz})),
-                        "relations_removed": rels_before,
-                    },
+                data["side_effects"] = serde_json::json!({
+                    "vertices_freed": vertices_before.saturating_sub(vertices_after),
+                    "cluster_affected": cluster_before.map(|(cid, sz)| serde_json::json!({"id": cid, "size_before": sz})),
+                    "relations_removed": rels_before,
                 });
                 self.smrp_ok("memory_delete", data)
             }
             Err(e) => {
-                let code = if e.contains("not found") { 404 } else { 400 };
+                let code = if e.contains("not found") {
+                    404
+                } else if e.starts_with(super::scheduler::PROTECTED_ERR_PREFIX) {
+                    403
+                } else {
+                    400
+                };
                 self.smrp_err("memory_delete", code, &format!("delete failed: {}", e))
             }
         }
@@ -5840,6 +5831,33 @@ impl McpHandler {
     }
 
     /// 版本单一事实源: 从手册标题解析(如 "# ...手册 v1.6" -> "1.6"), 免硬编码失同步
+    /// The canonical executor manual (served by epicode_handshake, skill_get
+    /// "epicode-system" and skills_sync). Compiled in from the repo so every
+    /// deployment serves exactly the reviewed text; the constitution is appended.
+    pub fn system_manual() -> String {
+        const MANUAL: &str = include_str!("../../system_skills/epicode_system_manual.md");
+        const CONSTITUTION: &str = include_str!("../../system_skills/00_epicode_system.md");
+        let constitution = CONSTITUTION
+            .lines()
+            .map(|l| {
+                if l.starts_with("## ") {
+                    format!("#{l}")
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replacen("# Epicode 宪法", "## 附录 / Appendix: Epicode 宪法", 1);
+        format!(
+            "{}\n\n{}\n",
+            MANUAL
+                .replace("{{EPICODE_VERSION}}", env!("CARGO_PKG_VERSION"))
+                .trim_end(),
+            constitution.trim_end()
+        )
+    }
+
     fn manual_version(content: &str) -> String {
         content
             .lines()
@@ -5927,8 +5945,8 @@ impl McpHandler {
         // 统一系统手册: 从文件动态注入(单一事实源), 不落各空间存储 —
         // 保证 skills_sync 是完整目录, 错过握手的智能体也能经库路径取到。
         let mut skills_data: Vec<serde_json::Value> = Vec::new();
-        if let Ok(md) = std::fs::read_to_string("/opt/tetramem/system_skills/00_epicode_system.md")
         {
+            let md = Self::system_manual();
             if format == "manifest" {
                 skills_data.push(serde_json::json!({
                     "slug": "epicode-system", "name": "epicode-system", "version": Self::manual_version(&md),
@@ -9370,6 +9388,109 @@ mod tests {
         }
     }
 
+    /// Unified delete semantics: the shared delete path (REST DELETE + MCP
+    /// memory_delete) purges memory + relations; forget stays recoverable;
+    /// identity anchors and enforced rules are refused.
+    #[tokio::test]
+    async fn unified_delete_purges_forget_restores_anchor_refused() {
+        let mut eng = Engine::new();
+        eng.start();
+        let h = McpHandler::new(Arc::new(eng));
+        for step in 1..=5 {
+            let val = if step == 1 { "UnifyAgent" } else { "test" };
+            h.process_json(&format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            ));
+        }
+        h.process_json(r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#);
+        let create = |content: &str, labels: &str| -> u64 {
+            let v: serde_json::Value = serde_json::from_str(&h.process_json(&format!(
+                r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"memory_create","arguments":{{"content":"{}","labels":{}}}}}}}"#,
+                content, labels
+            )))
+            .unwrap();
+            let d = &v["result"]["structuredContent"]["data"];
+            d["id"]
+                .as_u64()
+                .or_else(|| d["memory_id"].as_u64())
+                .unwrap_or_else(|| panic!("{v}"))
+        };
+        let call = |name: &str, id: u64| -> serde_json::Value {
+            serde_json::from_str(&h.process_json(&format!(
+                r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"{}","arguments":{{"id":{}}}}}}}"#,
+                name, id
+            )))
+            .unwrap()
+        };
+        let sched = h.engine().scheduler.clone();
+        let a = create("unify delete target alpha", "[\"t\"]");
+        let b = create("unify delete neighbour beta", "[\"t\"]");
+        sched
+            .kg_handle()
+            .add_relation(a, b, super::super::knowledge::RelationType::SimilarTo, 0.9);
+        assert!(sched.api_get_relations(a).iter().any(|(t, _, _)| *t == b));
+
+        // Shared delete path (what REST DELETE /v1/memories/:id calls).
+        let d = sched.api_delete_memory(a).expect("purge");
+        assert_eq!(d["mode"], super::super::scheduler::DELETE_MODE);
+        assert_eq!(d["mode"], "purge");
+        assert!(call("memory_get", a)["result"]["structuredContent"]["data"]["content"].is_null());
+        assert!(
+            sched.api_get_relations(a).is_empty(),
+            "relations of purged memory remain"
+        );
+        assert!(
+            !sched.api_get_relations(b).iter().any(|(t, _, _)| *t == a),
+            "dangling relation to purged memory"
+        );
+        assert!(sched
+            .api_delete_memory(a)
+            .unwrap_err()
+            .contains("not found"));
+
+        // MCP reports the same mode.
+        let c = create("unify delete via mcp gamma", "[\"t\"]");
+        let mcp = call("memory_delete", c);
+        assert_eq!(
+            mcp["result"]["structuredContent"]["data"]["mode"], d["mode"],
+            "{mcp}"
+        );
+
+        // Forget is recoverable.
+        sched.api_forget_memory(b).expect("forget");
+        let restored = call("memory_restore", b);
+        assert_eq!(
+            restored["result"]["structuredContent"]["protocol"]["ok"], true,
+            "{restored}"
+        );
+        assert!(h
+            .engine()
+            .space
+            .get_tetrahedron(b)
+            .unwrap()
+            .data
+            .valid_to
+            .is_none());
+
+        // Identity anchors refused (both paths), still readable afterwards.
+        let anchor = create(
+            "I am UnifyAgent, my creator is test",
+            "[\"identity\",\"system\"]",
+        );
+        let err = sched.api_delete_memory(anchor).unwrap_err();
+        assert!(
+            err.starts_with(super::super::scheduler::PROTECTED_ERR_PREFIX),
+            "{err}"
+        );
+        let mcp_anchor = call("memory_delete", anchor);
+        assert_eq!(
+            mcp_anchor["result"]["structuredContent"]["protocol"]["error"]["code"], 403,
+            "{mcp_anchor}"
+        );
+        assert!(h.engine().space.get_tetrahedron(anchor).is_some());
+    }
+
     /// Spike S1: verbosity=slim must shrink JSON vs default full envelope on same fixture.
     #[tokio::test]
     async fn spike_s1_slim_envelope_beats_baseline_size() {
@@ -11067,6 +11188,24 @@ mod catalog_consistency {
             advertised, public,
             ".well-known/mcp/discovery.json drifted from tools/list"
         );
+        // Full-object equality: descriptions, input schemas (params/defaults/enums)
+        // and annotations must match too — names alone let schemas drift.
+        let live = McpHandler::tool_catalog();
+        for (d, l) in disc["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(live["tools"].as_array().unwrap())
+        {
+            for key in ["description", "inputSchema", "annotations"] {
+                assert_eq!(
+                    d[key], l[key],
+                    "discovery.json {key} of {} drifted from tools/list — run \
+                     `cargo test --lib regenerate_discovery_manifest -- --ignored`",
+                    l["name"]
+                );
+            }
+        }
 
         // Marketing / docs copy: any "<N> MCP tools" / "<N> 个 MCP 工具" claim must not
         // exceed the real public count, and an exact claim must equal it.
@@ -11190,5 +11329,436 @@ mod catalog_consistency {
             .map(|r| r["uri"].as_str().unwrap())
             .collect();
         assert_eq!(disc_uris, McpHandler::RESOURCE_URIS);
+    }
+}
+
+/// Manual-rot guard: executor-facing manuals may only reference tools, tool
+/// parameters and HTTP endpoints that exist today, the canonical manual must
+/// cover the whole catalog, carry the build version, and be what the handshake
+/// serves. Historical documents (with the "Historical document" banner) are
+/// exempt; everything an executor is pointed at is not.
+#[cfg(test)]
+mod manual_rot {
+    use super::McpHandler;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    const MANUAL: &str = "backend/system_skills/epicode_system_manual.md";
+
+    fn repo_file(rel: &str) -> String {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(rel);
+        std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
+    }
+
+    /// Every executor-facing manual: system skills + docs an agent is sent to.
+    fn manual_files() -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("system_skills"),
+        )
+        .unwrap()
+        .filter_map(|e| {
+            let n = e.ok()?.file_name().into_string().ok()?;
+            n.ends_with(".md")
+                .then(|| format!("backend/system_skills/{n}"))
+        })
+        .collect();
+        v.sort();
+        v.extend(
+            [
+                "frontend/public/llms.txt",
+                "frontend/public/docs.md",
+                "docs/mcp-protocol.md",
+                "docs/api-reference.md",
+                "docs/architecture.md",
+                "docs/deployment.md",
+                "README.md",
+                "README.zh.md",
+            ]
+            .map(String::from),
+        );
+        v
+    }
+
+    struct Catalog {
+        tools: BTreeMap<String, BTreeSet<String>>,
+        all_params: BTreeSet<String>,
+    }
+
+    fn catalog() -> Catalog {
+        let mut tools = BTreeMap::new();
+        let mut all_params = BTreeSet::new();
+        for t in McpHandler::tool_catalog()["tools"].as_array().unwrap() {
+            let props: BTreeSet<String> = t["inputSchema"]["properties"]
+                .as_object()
+                .map(|o| o.keys().cloned().collect())
+                .unwrap_or_default();
+            all_params.extend(props.iter().cloned());
+            tools.insert(t["name"].as_str().unwrap().to_string(), props);
+        }
+        Catalog { tools, all_params }
+    }
+
+    /// Prefixes of the MCP tool families: an identifier with one of these that
+    /// is neither a tool nor a parameter is a stale/invented tool reference.
+    const TOOL_PREFIXES: &[&str] = &[
+        "memory_",
+        "task_",
+        "action_",
+        "worker_",
+        "drive_",
+        "skill_",
+        "skills_",
+        "identity_",
+        "ctx_",
+        "pattern_",
+        "doc_",
+        "session_",
+        "kg_",
+        "blocks_",
+        "library_",
+        "dream_",
+        "space_",
+        "knowledge_",
+        "context_",
+        "enforced_",
+        "embedding_",
+        "epicode_",
+        "decision_",
+        "feedback_",
+        "project_",
+        "bug_",
+    ];
+    /// Response fields / enum values / permission names that share a tool prefix.
+    const NON_TOOL_IDENTIFIERS: &[&str] = &[
+        "task_pulse",
+        "task_completed",
+        "task_partial",
+        "task_failed",
+        "task_id",
+        "memory_read",
+        "memory_write",
+        "memory_class",
+        "memory_count",
+        "memory_ids",
+        "skill_manage",
+        "skill_hint",
+        "knowledge_card_used",
+        "action_card_schema",
+        "action_tool_surface",
+        "space_stats",
+        "drive_id",
+        "session_id",
+        "skills_version",
+        "skills_updated",
+        "project_list",
+        "task_status",
+        "epicode_session",
+        "drive_queue",
+        "drive_sse_signal",
+        "identity_info",
+    ];
+
+    fn is_ident(c: char) -> bool {
+        c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'
+    }
+
+    /// (identifier, args-or-None) for every `ident(` call and `` `ident` ``.
+    fn references(text: &str) -> Vec<(String, Option<String>)> {
+        let mut out = Vec::new();
+        let chars: Vec<(usize, char)> = text.char_indices().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            let (start, c) = chars[i];
+            let prev_ok = i == 0 || !is_ident(chars[i - 1].1);
+            if c.is_ascii_lowercase() && prev_ok {
+                let mut j = i;
+                while j < chars.len() && is_ident(chars[j].1) {
+                    j += 1;
+                }
+                let end = chars.get(j).map(|x| x.0).unwrap_or(text.len());
+                let name = &text[start..end];
+                let backticked =
+                    i > 0 && chars[i - 1].1 == '`' && chars.get(j).map(|x| x.1) == Some('`');
+                if chars.get(j).map(|x| x.1) == Some('(') {
+                    // balanced args on one line
+                    let mut depth = 0i32;
+                    let mut k = j;
+                    let mut args = None;
+                    while k < chars.len() && chars[k].1 != '\n' {
+                        match chars[k].1 {
+                            '(' | '[' | '{' => depth += 1,
+                            ')' | ']' | '}' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    args = Some(text[chars[j].0 + 1..chars[k].0].to_string());
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                        k += 1;
+                    }
+                    out.push((name.to_string(), args));
+                } else if backticked {
+                    out.push((name.to_string(), None));
+                }
+                i = j;
+                continue;
+            }
+            i += 1;
+        }
+        out
+    }
+
+    /// Top-level argument names of `a, b=1, c: [..]` (depth 0 only).
+    /// `strict` also treats bare identifiers as parameter names.
+    fn arg_names(args: &str, strict: bool) -> Vec<String> {
+        let mut parts = Vec::new();
+        let mut depth = 0i32;
+        let mut cur = String::new();
+        let mut quoted = false;
+        for c in args.chars() {
+            match c {
+                '"' | '\'' => quoted = !quoted,
+                '(' | '[' | '{' if !quoted => depth += 1,
+                ')' | ']' | '}' if !quoted => depth -= 1,
+                ',' if depth == 0 && !quoted => {
+                    parts.push(std::mem::take(&mut cur));
+                    continue;
+                }
+                _ => {}
+            }
+            cur.push(c);
+        }
+        parts.push(cur);
+        parts
+            .iter()
+            .filter_map(|p| {
+                let p = p.trim();
+                let name: String = p.chars().take_while(|&c| is_ident(c)).collect();
+                if name.is_empty() || !name.starts_with(|c: char| c.is_ascii_lowercase()) {
+                    return None;
+                }
+                let rest = p[name.len()..].trim_start();
+                if rest.starts_with('=') || rest.starts_with(':') || (strict && rest.is_empty()) {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Route table from cloud.rs: normalized path -> methods.
+    fn routes() -> BTreeMap<String, BTreeSet<String>> {
+        let src = repo_file("backend/src/bin/cloud.rs");
+        let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for chunk in src.split(".route(").skip(1) {
+            let Some(rest) = chunk.trim_start().strip_prefix('"') else {
+                continue;
+            };
+            let Some(end) = rest.find('"') else { continue };
+            let body = &rest[end..];
+            let body = &body[..body.find(".layer(").unwrap_or(body.len())];
+            let e = out.entry(norm(&rest[..end])).or_default();
+            for m in ["get", "post", "put", "delete", "patch"] {
+                if body.match_indices(&format!("{m}(")).any(|(i, _)| {
+                    i == 0 || {
+                        let b = body.as_bytes()[i - 1];
+                        !b.is_ascii_alphanumeric() && b != b'_'
+                    }
+                }) {
+                    e.insert(m.to_uppercase());
+                }
+            }
+        }
+        out
+    }
+
+    fn norm(path: &str) -> String {
+        path.split('/')
+            .map(|seg| {
+                if seg.starts_with(':') || (seg.starts_with('{') && seg.ends_with('}')) {
+                    ":p"
+                } else {
+                    seg
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+
+    /// `METHOD /path` mentions (public `/api` prefix and host stripped).
+    fn endpoint_refs(text: &str) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for m in ["GET", "POST", "PUT", "DELETE", "PATCH"] {
+            for (i, _) in text.match_indices(&format!("{m} ")) {
+                if i > 0 && text.as_bytes()[i - 1].is_ascii_alphanumeric() {
+                    continue;
+                }
+                let rest = &text[i + m.len() + 1..];
+                let rest = rest.strip_prefix("https://epicode.cn").unwrap_or(rest);
+                if !rest.starts_with('/') {
+                    continue;
+                }
+                let path: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || "/:_-{}.".contains(*c))
+                    .collect();
+                let path = path.trim_end_matches('.').to_string();
+                let path = path.strip_prefix("/api").map(String::from).unwrap_or(path);
+                if path.is_empty() || path == "/" {
+                    continue;
+                }
+                out.push((m.to_string(), path));
+            }
+        }
+        out
+    }
+
+    fn check_file(
+        rel: &str,
+        text: &str,
+        cat: &Catalog,
+        routes: &BTreeMap<String, BTreeSet<String>>,
+    ) -> Vec<String> {
+        let strict = rel == MANUAL;
+        let mut bad = Vec::new();
+        for (name, args) in references(text) {
+            if let Some(props) = cat.tools.get(&name) {
+                if let Some(a) = args {
+                    for p in arg_names(&a, strict) {
+                        if !props.contains(&p) {
+                            bad.push(format!("{rel}: {name}({p}) — no such parameter"));
+                        }
+                    }
+                }
+            } else if name.contains('_')
+                && TOOL_PREFIXES.iter().any(|p| name.starts_with(p))
+                && !cat.all_params.contains(&name)
+                && !NON_TOOL_IDENTIFIERS.contains(&name.as_str())
+            {
+                bad.push(format!("{rel}: `{name}` — no such tool"));
+            }
+        }
+        for (m, path) in endpoint_refs(text) {
+            let ok = routes.get(&norm(&path)).is_some_and(|ms| ms.contains(&m));
+            if !ok {
+                bad.push(format!("{rel}: {m} {path} — no such route/method"));
+            }
+        }
+        bad
+    }
+
+    #[test]
+    fn manuals_reference_only_live_tools_params_and_endpoints() {
+        let cat = catalog();
+        let routes = routes();
+        assert!(
+            cat.tools.len() >= 60 && routes.len() >= 50,
+            "extraction broke"
+        );
+        let mut bad = Vec::new();
+        let mut scanned = 0;
+        for rel in manual_files() {
+            let text = repo_file(&rel);
+            if text.contains("Historical document") {
+                continue;
+            }
+            scanned += 1;
+            bad.extend(check_file(&rel, &text, &cat, &routes));
+        }
+        assert!(scanned >= 15, "too few manuals scanned ({scanned})");
+        assert!(
+            bad.is_empty(),
+            "stale manual references:\n{}",
+            bad.join("\n")
+        );
+    }
+
+    #[test]
+    fn checker_catches_stale_references() {
+        let cat = catalog();
+        let routes = routes();
+        let bad = check_file(
+            MANUAL,
+            "call `knowledge_graph` then identity_step(agent_name) and GET /api/v1/stats/public; \
+             memory_recall(query, limit) and GET /api/v1/memories/:id are fine",
+            &cat,
+            &routes,
+        );
+        assert_eq!(bad.len(), 3, "{bad:#?}");
+    }
+
+    #[test]
+    fn canonical_manual_covers_catalog_and_version() {
+        let src = repo_file(MANUAL);
+        assert!(
+            src.lines().next().unwrap().contains("v{{EPICODE_VERSION}}"),
+            "manual title must carry the build-version placeholder"
+        );
+        // No hard-coded semver: versions come from the build.
+        let words: Vec<&str> = src
+            .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+            .collect();
+        let semver: Vec<&&str> = words
+            .iter()
+            .filter(|w| w.split('.').filter(|p| !p.is_empty()).count() == 3)
+            .collect();
+        assert!(
+            semver.is_empty(),
+            "hard-coded versions in manual: {semver:?}"
+        );
+        let missing: Vec<String> = catalog()
+            .tools
+            .keys()
+            .filter(|t| !src.contains(&format!("`{t}`")))
+            .cloned()
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "manual checklist misses tools: {missing:?}"
+        );
+        let served = McpHandler::system_manual();
+        assert!(!served.contains("{{"), "unsubstituted placeholder");
+        assert_eq!(
+            McpHandler::manual_version(&served),
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+
+    #[test]
+    fn handshake_and_skill_get_serve_the_manual() {
+        let h = McpHandler::new(std::sync::Arc::new(super::tests::isolated_engine()));
+        let call = |name: &str, args: serde_json::Value| {
+            h.handle(super::McpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(serde_json::json!(1)),
+                method: "tools/call".into(),
+                params: Some(serde_json::json!({"name": name, "arguments": args})),
+            })
+            .result
+            .unwrap()["structuredContent"]
+                .clone()
+        };
+        call(
+            "identity_confirm",
+            serde_json::json!({"name": "rot", "mission": "test", "author": "ci"}),
+        );
+        let hs = call("epicode_handshake", serde_json::json!({"agent_id": "rot"}));
+        let sk = &hs["data"]["system_skill"];
+        assert_eq!(sk["version"], env!("CARGO_PKG_VERSION"), "{hs}");
+        let content = sk["content"].as_str().unwrap();
+        assert!(content.starts_with("# Epicode 执行者手册"), "{content:.80}");
+        assert!(
+            content == McpHandler::system_manual(),
+            "handshake manual differs"
+        );
+        let got = call("skill_get", serde_json::json!({"name": "epicode-system"}));
+        assert!(
+            got["data"]["skill_md"].as_str() == Some(content),
+            "skill_get(epicode-system) must serve the same manual"
+        );
     }
 }

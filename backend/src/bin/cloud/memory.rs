@@ -1466,25 +1466,34 @@ pub async fn delete_memory(
             )),
         );
     }
+    // Permanent delete (purge), identical to MCP memory_delete. Recoverable
+    // forgetting is POST /v1/memories/:id/forget.
     let scheduler = engine.scheduler.clone();
-    let result = tokio::task::spawn_blocking(move || scheduler.api_forget_memory(id)).await;
+    let result = tokio::task::spawn_blocking(move || scheduler.api_delete_memory(id)).await;
     match result {
         Ok(Ok(d)) => (
             StatusCode::OK,
             Json(epicode::engine::smrp::envelope_ok(
                 &engine,
                 "memory_delete",
-                serde_json::json!({"forgotten": id, "mode": "forget", "valid_to": d.get("valid_to")}),
+                d,
             )),
         ),
         Ok(Err(e)) => {
-            tracing::error!("memory_delete error: {}", e);
+            tracing::warn!("memory_delete refused: {}", e);
+            let code = if e.contains("not found") {
+                StatusCode::NOT_FOUND
+            } else if e.starts_with(epicode::engine::scheduler::PROTECTED_ERR_PREFIX) {
+                StatusCode::FORBIDDEN
+            } else {
+                StatusCode::BAD_REQUEST
+            };
             (
-                StatusCode::BAD_REQUEST,
+                code,
                 Json(epicode::engine::smrp::envelope_err(
                     &engine,
                     "memory_delete",
-                    400,
+                    code.as_u16() as i64,
                     &e,
                 )),
             )
@@ -1593,32 +1602,27 @@ pub async fn batch_delete_memories(
     let engine_inner = engine.clone();
     let ids = body.ids;
     let result = tokio::task::spawn_blocking(move || {
-        let mut forgotten = Vec::new();
+        let mut deleted = Vec::new();
         let mut failed = Vec::new();
         for id in ids {
-            let exists = engine_inner.space().get_tetrahedron(id).is_some();
-            if !exists {
-                failed.push(id);
-                continue;
-            }
-            match engine_inner.scheduler.api_forget_memory(id) {
-                Ok(_) => forgotten.push(id),
+            match engine_inner.scheduler.api_delete_memory(id) {
+                Ok(_) => deleted.push(id),
                 Err(_) => failed.push(id),
             }
         }
-        (forgotten, failed)
+        (deleted, failed)
     })
     .await;
     match result {
-        Ok((forgotten, failed)) => (
+        Ok((deleted, failed)) => (
             StatusCode::OK,
             Json(epicode::engine::smrp::envelope_ok(
                 &engine,
                 "memory_batch_delete",
                 serde_json::json!({
-                    "forgotten": forgotten,
-                    "forgotten_count": forgotten.len(),
-                    "mode": "forget",
+                    "deleted": deleted,
+                    "deleted_count": deleted.len(),
+                    "mode": epicode::engine::scheduler::DELETE_MODE,
                     "failed": failed,
                     "failed_count": failed.len(),
                 }),
