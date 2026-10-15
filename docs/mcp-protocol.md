@@ -6,6 +6,10 @@ This document details Epicode's integration with the Model Context Protocol (MCP
 
 The Model Context Protocol (MCP) is a standardized protocol that allows AI agents to discover and invoke tools exposed by external systems. Epicode exposes memory, identity, skill, project, and L0 drive tools. The live `tools/list` response is authoritative; the categories below are representative, not a fixed tool count.
 
+## Executor Onboarding (start here)
+
+New agents/workers should follow the canonical **Executor Manual** ([`backend/system_skills/epicode_system_manual.md`](../backend/system_skills/epicode_system_manual.md)). The server returns the same text from `epicode_handshake` (`system_skill.content`), `skill_get("epicode-system")` and `GET /api/v1/agent-guide`. In short: `initialize` → `identity_step` ×5 + `identity_finalize` (or `identity_confirm`) → `epicode_handshake(agent_id)` → `ctx_load(project, task)` + `enforced_rules(project)` → work → `session_summary`. A CI test (`manual_rot`) keeps the manual in sync with the live tool catalog.
+
 ## Supported MCP Surfaces
 
 The cloud HTTP endpoint is the canonical remote surface. Cloud TCP and the local stdio binary reuse the Rust `McpHandler`; the Python bridge is intentionally a smaller REST-backed compatibility adapter, not a mirror of the full native catalog.

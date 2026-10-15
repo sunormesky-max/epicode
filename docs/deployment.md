@@ -143,7 +143,7 @@ spec:
 ## Monitoring
 
 - **Health check**: `GET /health` (no auth) — returns `{"status":"ok"}` and is suitable for liveness/readiness probes
-- **Public stats**: `GET /api/v1/stats/public` — lightweight metrics without auth
+- **Public stats**: `GET /api/stats/public` — lightweight metrics without auth
 - **Logs**: backend emits structured logs via `tracing`; set `RUST_LOG=info` (or `debug` for troubleshooting)
 - **Metrics endpoint**: planned; for now scrape `/api/v1/stats` with auth
 
@@ -169,7 +169,7 @@ readinessProbe:
 1. **Backup**: `cp -r backend/data backend/data.backup-$(date +%F)`
 2. **Pull new image**: `docker compose pull` (or update tag in K8s manifest)
 3. **Rolling update**: `docker compose up -d` (or `kubectl rollout restart deployment/epicode-backend`)
-4. **Verify**: `curl https://your-host/health` and `curl https://your-host/api/v1/stats/public`
+4. **Verify**: `curl https://your-host/health` and `curl https://your-host/api/stats/public`
 5. **Rollback** if needed:
    - Docker Compose: revert image tag, `docker compose up -d`
    - Kubernetes: `kubectl rollout undo deployment/epicode-backend`

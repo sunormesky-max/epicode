@@ -1,3 +1,5 @@
+> **⚠ 历史文档 / Historical document** — 记录当时的设计或审计结论，工具名、参数和流程可能已过期，**不要按它操作**。当前权威操作手册是 `backend/system_skills/epicode_system_manual.md`（MCP `epicode_handshake` → `system_skill.content`，或 `skill_get("epicode-system")`）。
+
 # 全系统运转推演 v2 — 细到每一颗记忆体，大到系统物理学
 
 > 2026-10-01 · 大卫 · 应刘启航令"继续推演所有细节，往最深处推演，细到每一颗记忆体，大到系统运转逻辑"

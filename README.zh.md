@@ -123,6 +123,7 @@ docker compose up --build -d
 
 - [Architecture](docs/architecture.md) — 数据流、空间模型、并发模型（英文）。
 - [API Reference](docs/api-reference.md) — HTTP 端点与 MCP 工具（英文）。
+- [执行者手册](backend/system_skills/epicode_system_manual.md) — 智能体/worker 接入的唯一权威手册与完整工具清单（由 `epicode_handshake` 下发）。
 - [MCP Protocol](docs/mcp-protocol.md) — SMRP 信封与代理集成（英文）。
 - [Configuration](docs/configuration.md) — 环境变量与密钥（英文）。
 - [Benchmarks](docs/benchmarks.md) — 性能数据与硬件需求（英文）。

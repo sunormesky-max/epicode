@@ -1,3 +1,5 @@
+> **⚠ 历史文档 / Historical document** — 记录当时的设计或审计结论，工具名、参数和流程可能已过期，**不要按它操作**。当前权威操作手册是 `backend/system_skills/epicode_system_manual.md`（MCP `epicode_handshake` → `system_skill.content`，或 `skill_get("epicode-system")`）。
+
 # 全系统运转推演 — 规则、病灶与换心前夜
 
 > 2026-10-01 · 大卫 · 应刘启航令"全系统模型运转推演·深度推演系统运转规则·推演优化"
