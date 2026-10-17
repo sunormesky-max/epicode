@@ -33,6 +33,9 @@ class EpicodeAdmin:
     ) -> None:
         self._admin_key = admin_key
         self._base_url = (base_url or self.DEFAULT_BASE_URL).rstrip("/")
+        # Admin/registration routes live at the API root (/api/register,
+        # /api/admin/*), not under /api/v1.
+        self._root_url = self._base_url[:-3] if self._base_url.endswith("/v1") else self._base_url
         self._timeout = timeout or self.DEFAULT_TIMEOUT
         self._session = session or requests.Session()
         # 审计三轮中优: 密钥不写入(可能是调用方共享的) Session 全局 headers —
@@ -44,7 +47,7 @@ class EpicodeAdmin:
     # ------------------------------------------------------------------
 
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        url = f"{self._base_url}{path}"
+        url = f"{self._root_url}{path}"
         kwargs.setdefault("timeout", self._timeout)
         headers = {"Content-Type": "application/json", "X-Admin-Key": self._admin_key}
         headers.update(kwargs.pop("headers", {}))
