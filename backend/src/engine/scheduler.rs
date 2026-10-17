@@ -4365,16 +4365,21 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             }));
         }
 
-        let all_items = self.gateway.expand_from_seeds(&seed_results, depth);
+        // 与 api_recall 共用同一扩展/打分路径：KG + 同簇联想，assoc = 父分 × 边强度（#267），
+        // 排序按 max(direct, assoc)。此前这里 assoc 被写死为 0.0，联想条目全被 `max>0` 过滤掉。
+        let clusters = self.find_clusters_cached();
+        let all_items =
+            self.gateway
+                .expand_from_seeds_with_clusters(&seed_results, depth, &clusters);
 
         let mut sorted_items: Vec<(u64, f64, f64)> = all_items
             .iter()
-            .map(|(id, direct, _ls, _c, _ts)| (*id, *direct, 0.0f64))
+            .map(|(id, direct, assoc, _ls, _c, _ts)| (*id, *direct, *assoc))
             .collect();
 
         let mut item_data: std::collections::HashMap<u64, (Vec<String>, String)> =
             std::collections::HashMap::new();
-        for (id, _, labels, content, _) in &all_items {
+        for (id, _, _, labels, content, _) in &all_items {
             item_data
                 .entry(*id)
                 .or_insert_with(|| (labels.clone(), content.clone()));
