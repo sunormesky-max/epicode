@@ -158,14 +158,18 @@ export interface GetNodeResponse {
 }
 
 export interface KnowledgeRequest {
-  id: string;
+  id: number;
 }
 
+/** `POST /v1/knowledge`: relations `[{target, type, strength}]` of one memory. */
 export interface KnowledgeResponse {
   success: boolean;
   id: string;
   relations: unknown[];
+  /** @deprecated not returned by the server; always {}. */
   details: unknown;
+  count: number;
+  smrp?: SmrpEnvelope;
 }
 
 export interface StatsResponse {
@@ -188,14 +192,27 @@ export interface TimelineResponse {
   events: TimelineEvent[];
   total: number;
 }
+/**
+ * One memory from `POST /v1/recall` `data.tiers`. `tier` is the 1-based index of
+ * `tier_name` in primary, contextual, experiential, hub.
+ * @deprecated fields `kg_associations` / `spatial_coords` are not returned by
+ * the server and stay empty/zero; use `knowledge()` for relations.
+ */
 export interface TieredMemoryResult {
   id: string;
   content: string;
   tier: number;
   similarity: number;
+  /** @deprecated not returned by the server; always empty. */
   kg_associations: unknown[];
   emotional_valence: Emotion;
+  /** @deprecated not returned by the server; always [0, 0, 0]. */
   spatial_coords: [number, number, number];
+  tier_name: string;
+  labels: string[];
+  source: string[];
+  metrics?: Record<string, unknown>;
+  topology?: Record<string, unknown>;
 }
 
 export interface RecallWithTiersResponse {
@@ -203,25 +220,43 @@ export interface RecallWithTiersResponse {
   query: string;
   tiers: TieredMemoryResult[][];
   total_results: number;
+  /** @deprecated not returned by the server; always empty. */
   knowledge_graph_edges: unknown[];
+  smrp?: SmrpEnvelope;
 }
 
 export interface IdentityStepResponse {
   success: boolean;
   step: number;
+  /** @deprecated never returned by the server; always "". */
   agent_name: string;
+  /** @deprecated never returned by the server; always "". */
   ritual_state: string;
+  /** @deprecated never returned by the server; always {}. */
   personality_signature: Record<string, unknown>;
+  progress: Record<string, unknown>;
+  next_prompt: string;
+  pending: Record<string, unknown>;
+  smrp?: SmrpEnvelope;
 }
 
+/** Response of the MCP `dream_cycle` tool; counts are parsed from `report`. */
 export interface DreamCycleResponse {
   success: boolean;
   cycles_completed: number;
   memories_consolidated: number;
   new_associations: number;
+  /** @deprecated not reported by the server; always 0. */
   energy_delta: number;
+  duplicates_merged: number;
+  junk_evicted: number;
+  importance_updated: number;
+  dry_run: boolean;
+  report: string;
+  smrp?: SmrpEnvelope;
 }
 
+/** Node of the 1-hop relation graph; label/content/coords/tier are not returned by the server. */
 export interface KnowledgeGraphNode {
   id: string;
   label: string;
@@ -244,9 +279,10 @@ export interface KnowledgeGraphResponse {
   node_id: string;
   nodes: KnowledgeGraphNode[];
   edges: KnowledgeGraphEdge[];
+  /** @deprecated not returned by the server; always empty. */
   clusters: unknown[];
+  smrp?: SmrpEnvelope;
 }
-
 
 export interface RegisterRequest {
   user_id: string;
@@ -308,6 +344,13 @@ async function request<T>(
     throw new EpicodeError(response.status, response.statusText, data);
   }
   return data as T;
+}
+
+/** Strip trailing slashes without a regex (avoids polynomial backtracking). */
+function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") end--;
+  return url.slice(0, end);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -408,14 +451,71 @@ function askMemory(value: unknown): AskMemory | undefined {
 export class EpicodeClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
+  private readonly mcpUrl: string;
 
-  constructor(apiKey: string, baseUrl?: string) {
+  /** Recall tier names; `TieredMemoryResult.tier` is the 1-based index. */
+  static readonly RECALL_TIERS = ["primary", "contextual", "experiential", "hub"] as const;
+
+  /**
+   * @param mcpUrl MCP JSON-RPC endpoint for tools without a REST route
+   *   (dreamCycle). Defaults to the base URL with a trailing `/v1` replaced by
+   *   `/mcp` (https://host/api/v1 -> https://host/api/mcp).
+   */
+  constructor(apiKey: string, baseUrl?: string, mcpUrl?: string) {
     this.apiKey = apiKey;
-    this.baseUrl = baseUrl ?? DEFAULT_BASE_URL;
+    this.baseUrl = trimTrailingSlashes(baseUrl ?? DEFAULT_BASE_URL);
+    this.mcpUrl =
+      mcpUrl ??
+      `${this.baseUrl.endsWith("/v1") ? this.baseUrl.slice(0, -3) : this.baseUrl}/mcp`;
   }
 
   private authHeaders(): Record<string, string> {
     return { "X-API-Key": this.apiKey };
+  }
+
+  /** Call one MCP tool via JSON-RPC `tools/call`; returns its SMRP envelope. */
+  private async mcpCall(
+    tool: string,
+    args: Record<string, unknown>
+  ): Promise<unknown> {
+    const body = await request<unknown>(
+      this.mcpUrl,
+      "",
+      "POST",
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: tool, arguments: args },
+      },
+      this.authHeaders()
+    );
+    if (!isRecord(body)) {
+      throw new EpicodeError(0, "Invalid MCP response", body);
+    }
+    if (isRecord(body.error)) {
+      throw new EpicodeError(
+        200,
+        typeof body.error.message === "string" ? body.error.message : "MCP error",
+        body
+      );
+    }
+    const result = body.result;
+    if (!isRecord(result)) {
+      throw new EpicodeError(0, "Invalid MCP response: missing result", body);
+    }
+    if (isRecord(result.structuredContent)) {
+      return result.structuredContent;
+    }
+    const content = Array.isArray(result.content) ? result.content[0] : undefined;
+    if (isRecord(content) && typeof content.text === "string") {
+      try {
+        return JSON.parse(content.text);
+      } catch {
+        // fall through
+      }
+    }
+    throw new EpicodeError(0, "Invalid MCP response: unparseable content", body);
   }
 
   health(): Promise<HealthResponse> {
@@ -558,141 +658,257 @@ export class EpicodeClient {
     };
   }
 
-  createNode(
+  /** Create a memory node (`POST /v1/nodes`); `timestamp` is Unix seconds. */
+  async createNode(
     content: string,
     labels?: string[],
-    timestamp?: string
+    timestamp?: number | string
   ): Promise<CreateNodeResponse> {
-    return request<CreateNodeResponse>(
+    const response = await request<unknown>(
       this.baseUrl,
       "/nodes",
       "POST",
-      { content, labels, timestamp },
+      {
+        content,
+        labels,
+        timestamp: timestamp === undefined ? undefined : Number(timestamp),
+      },
       this.authHeaders()
     );
+    const { data, smrp } = unwrapSmrpResponse(response);
+    return {
+      success: smrp?.protocol.ok ?? data.success === true,
+      id: data.id === undefined ? "" : String(data.id),
+    };
   }
 
-  getNode(id: string): Promise<GetNodeResponse> {
-    return request<GetNodeResponse>(
+  /** Get a memory node (`GET /v1/nodes/:id`). */
+  async getNode(id: string | number): Promise<GetNodeResponse> {
+    const response = await request<unknown>(
       this.baseUrl,
-      `/nodes/${encodeURIComponent(id)}`,
+      `/nodes/${encodeURIComponent(String(id))}`,
       "GET",
       undefined,
       this.authHeaders()
     );
+    const { data, smrp } = unwrapSmrpResponse(response);
+    return {
+      success: smrp?.protocol.ok ?? data.success === true,
+      id: data.id === undefined ? "" : String(data.id),
+      content: typeof data.content === "string" ? data.content : "",
+      labels: stringList(data.labels),
+    };
   }
 
-  knowledge(id: string): Promise<KnowledgeResponse> {
-    return request<KnowledgeResponse>(
+  /** Knowledge-graph relations of one memory (`POST /v1/knowledge`). */
+  async knowledge(id: string | number): Promise<KnowledgeResponse> {
+    const response = await request<unknown>(
       this.baseUrl,
       "/knowledge",
       "POST",
-      { id },
+      { id: Number(id) },
       this.authHeaders()
     );
+    const { data, smrp } = unwrapSmrpResponse(response);
+    return {
+      success: smrp?.protocol.ok ?? data.success === true,
+      id: data.id === undefined ? "" : String(data.id),
+      relations: Array.isArray(data.relations) ? data.relations : [],
+      details: isRecord(data.details) ? data.details : {},
+      count: typeof data.count === "number" ? data.count : 0,
+      smrp,
+    };
   }
 
-  stats(): Promise<StatsResponse> {
-    return request<StatsResponse>(
+  async stats(): Promise<StatsResponse> {
+    const response = await request<unknown>(
       this.baseUrl,
       "/stats",
       "GET",
       undefined,
       this.authHeaders()
     );
+    const { data, smrp } = unwrapSmrpResponse(response);
+    return { ...(data as unknown as StatsResponse), success: smrp?.protocol.ok ?? data.success === true };
   }
 
-  timeline(): Promise<TimelineResponse> {
-    return request<TimelineResponse>(
+  async timeline(): Promise<TimelineResponse> {
+    const response = await request<unknown>(
       this.baseUrl,
       "/timeline",
       "GET",
       undefined,
       this.authHeaders()
     );
+    const { data, smrp } = unwrapSmrpResponse(response);
+    return {
+      success: smrp?.protocol.ok ?? data.success === true,
+      events: Array.isArray(data.events) ? (data.events as TimelineEvent[]) : [],
+      total: typeof data.total === "number" ? data.total : 0,
+    };
   }
 
   /**
-   * Recall associative memories with tiered results via SMRP.
-   *
-   * SMRP (Structured Memory Response Protocol) returns tiered, contextual
-   * memories with emotional valence and spatial placement. Unlike flat
-   * vector databases, Epicode returns memories organized by relevance tiers
-   * with knowledge graph associations.
+   * Recall associative memories grouped by SMRP tier (`POST /v1/recall`).
+   * Groups `data.tiers` as primary, contextual, experiential, hub. Per-memory
+   * KG associations / coordinates are not returned; use `knowledge()`.
    */
-  recallWithTiers(
+  async recallWithTiers(
     query: string,
-    depth?: number
+    depth = 2
   ): Promise<RecallWithTiersResponse> {
-    return request<RecallWithTiersResponse>(
+    const response = await request<unknown>(
       this.baseUrl,
-      "/recall/tiers",
+      "/recall",
       "POST",
       { query, depth },
       this.authHeaders()
     );
+    const { data, smrp } = unwrapSmrpResponse(response);
+    const e = isRecord(data.emotion) ? data.emotion : {};
+    const emotion: Emotion = {
+      pleasure: typeof e.pleasure === "number" ? e.pleasure : 0,
+      arousal: typeof e.arousal === "number" ? e.arousal : 0,
+      dominance: typeof e.dominance === "number" ? e.dominance : 0,
+    };
+    const rawTiers = isRecord(data.tiers) ? data.tiers : {};
+    const tiers = EpicodeClient.RECALL_TIERS.map((name, i) => {
+      const items = Array.isArray(rawTiers[name]) ? (rawTiers[name] as unknown[]) : [];
+      return items.filter(isRecord).map(
+        (r): TieredMemoryResult => ({
+          id: r.id === undefined ? "" : String(r.id),
+          content: typeof r.content === "string" ? r.content : "",
+          tier: i + 1,
+          similarity: typeof r.similarity === "number" ? r.similarity : 0,
+          kg_associations: [],
+          emotional_valence: emotion,
+          spatial_coords: [0, 0, 0],
+          tier_name: name,
+          labels: stringList(r.labels),
+          source: stringList(r.source),
+          metrics: isRecord(r.metrics) ? r.metrics : undefined,
+          topology: isRecord(r.topology) ? r.topology : undefined,
+        })
+      );
+    });
+    return {
+      success: smrp?.protocol.ok ?? data.success === true,
+      query: typeof data.query === "string" ? data.query : query,
+      tiers,
+      total_results: tiers.reduce((n, t) => n + t.length, 0),
+      knowledge_graph_edges: [],
+      smrp,
+    };
   }
 
   /**
-   * Perform an identity ritual step.
-   *
-   * Identity rituals give AI agents persistent personality across sessions.
-   * This is a unique Epicode feature that goes far beyond simple vector
-   * storage, allowing agents to build and maintain a sense of self over time.
+   * Answer one identity-ritual step (`POST /v1/identity/step`): 1 name,
+   * 2 mission, 3 creator, 4 personality, 5 language; then `identityFinalize()`.
    */
-  identityStep(step: number, agentName: string): Promise<IdentityStepResponse> {
-    return request<IdentityStepResponse>(
+  async identityStep(step: number, value: string): Promise<IdentityStepResponse> {
+    const response = await request<unknown>(
       this.baseUrl,
       "/identity/step",
       "POST",
-      { step, agent_name: agentName },
+      { step, value },
       this.authHeaders()
     );
+    const { data, smrp } = unwrapSmrpResponse(response);
+    return {
+      success: smrp?.protocol.ok ?? data.success === true,
+      step: typeof data.step === "number" ? data.step : step,
+      agent_name: "",
+      ritual_state: "",
+      personality_signature: {},
+      progress: isRecord(data.progress) ? data.progress : {},
+      next_prompt: typeof data.next_prompt === "string" ? data.next_prompt : "",
+      pending: isRecord(data.pending) ? data.pending : {},
+      smrp,
+    };
   }
 
-  /**
-   * Trigger background memory consolidation (dream cycle).
-   *
-   * The "living memory system" aspect of Epicode. Dream cycles run in the
-   * background to consolidate memories, form new associations, and prune weak
-   * connections — mimicking how biological brains strengthen memories during
-   * sleep. This is not something flat vector databases can do.
-   */
-  dreamCycle(): Promise<DreamCycleResponse> {
-    return request<DreamCycleResponse>(
+  /** Seal the identity ritual (`POST /v1/identity/finalize`); returns SMRP data. */
+  async identityFinalize(): Promise<Record<string, unknown>> {
+    const response = await request<unknown>(
       this.baseUrl,
-      "/dream/cycle",
+      "/identity/finalize",
       "POST",
       undefined,
       this.authHeaders()
     );
+    return unwrapSmrpResponse(response).data;
   }
 
   /**
-   * Return knowledge graph visualization data for a node.
-   *
-   * Epicode automatically extracts knowledge graph relationships from
-   * memories stored as tetrahedrons in 3D space. This method returns the
-   * nodes, edges, and clusters that make up the graph around a given memory.
+   * Run memory consolidation via the MCP `dream_cycle` tool (no REST route).
+   * `dryRun` previews without modifying the space.
    */
-  knowledgeGraph(nodeId: string): Promise<KnowledgeGraphResponse> {
-    return request<KnowledgeGraphResponse>(
-      this.baseUrl,
-      `/knowledge-graph/${encodeURIComponent(nodeId)}`,
-      "GET",
-      undefined,
-      this.authHeaders()
+  async dreamCycle(dryRun = false): Promise<DreamCycleResponse> {
+    const { data, smrp } = unwrapSmrpResponse(
+      await this.mcpCall("dream_cycle", { dry_run: dryRun })
     );
+    const report = typeof data.report === "string" ? data.report : "";
+    const count = (key: string): number => {
+      const m = new RegExp(`\\b${key}: (\\d+)`).exec(report);
+      return m ? Number(m[1]) : 0;
+    };
+    const isDry = typeof data.dry_run === "boolean" ? data.dry_run : dryRun;
+    return {
+      success: smrp?.protocol.ok ?? false,
+      cycles_completed: isDry ? 0 : 1,
+      memories_consolidated: count("consolidated"),
+      new_associations: count("connections_formed"),
+      energy_delta: 0,
+      duplicates_merged: count("merged"),
+      junk_evicted: count("evicted"),
+      importance_updated: count("importance_updated"),
+      dry_run: isDry,
+      report,
+      smrp,
+    };
+  }
+
+  /**
+   * 1-hop knowledge-graph neighbourhood of a memory, built from `knowledge()`
+   * (`POST /v1/knowledge`). Node content, coordinates and clusters are not
+   * returned by the server.
+   */
+  async knowledgeGraph(nodeId: string | number): Promise<KnowledgeGraphResponse> {
+    const k = await this.knowledge(nodeId);
+    const centre = k.id || String(nodeId);
+    const node = (id: string): KnowledgeGraphNode => ({
+      id, label: "", content: "", x: 0, y: 0, z: 0, tier: 1,
+    });
+    const nodes = [node(centre)];
+    const seen = new Set([centre]);
+    const edges: KnowledgeGraphEdge[] = [];
+    for (const rel of k.relations) {
+      if (!isRecord(rel)) continue;
+      const target = rel.target === undefined ? "" : String(rel.target);
+      if (target && !seen.has(target)) {
+        seen.add(target);
+        nodes.push(node(target));
+      }
+      edges.push({
+        source: centre,
+        target,
+        relation: typeof rel.type === "string" ? rel.type : "",
+        strength: typeof rel.strength === "number" ? rel.strength : 0.5,
+      });
+    }
+    return { success: k.success, node_id: centre, nodes, edges, clusters: [], smrp: k.smrp };
   }
 }
 
 export class EpicodeAdmin {
   private readonly adminKey: string;
-  private readonly baseUrl: string;
+  /** Admin/registration routes live at the API root (/api/register, /api/admin/*). */
+  private readonly rootUrl: string;
 
   constructor(adminKey: string, baseUrl?: string) {
     this.adminKey = adminKey;
-    this.baseUrl = baseUrl ?? DEFAULT_BASE_URL;
+    const base = trimTrailingSlashes(baseUrl ?? DEFAULT_BASE_URL);
+    this.rootUrl = base.endsWith("/v1") ? base.slice(0, -3) : base;
   }
 
   private authHeaders(): Record<string, string> {
@@ -701,7 +917,7 @@ export class EpicodeAdmin {
 
   register(userId: string, plan?: string): Promise<RegisterResponse> {
     return request<RegisterResponse>(
-      this.baseUrl,
+      this.rootUrl,
       "/register",
       "POST",
       { user_id: userId, plan },
@@ -711,7 +927,7 @@ export class EpicodeAdmin {
 
   users(): Promise<AdminUsersResponse> {
     return request<AdminUsersResponse>(
-      this.baseUrl,
+      this.rootUrl,
       "/admin/users",
       "GET",
       undefined,
@@ -721,7 +937,7 @@ export class EpicodeAdmin {
 
   stats(): Promise<AdminStatsResponse> {
     return request<AdminStatsResponse>(
-      this.baseUrl,
+      this.rootUrl,
       "/admin/stats",
       "GET",
       undefined,

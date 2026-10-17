@@ -36,19 +36,23 @@ from epicode import EpicodeClient
 
 client = EpicodeClient("your-api-key")
 
-# Tiered recall with SMRP — not just similar vectors
+# Tiered recall with SMRP (POST /v1/recall) — grouped primary/contextual/experiential/hub
 result = client.recall_with_tiers("project context", depth=2)
-# Returns: Tier 1 (direct) → Tier 2 (contextual) → Tier 3 (KG relationships)
-# Plus emotional valence and spatial placement metadata
+for tier in result.tiers:
+    for m in tier:
+        print(m.tier_name, m.id, m.similarity, m.source)
 
-# Identity ritual — persistent agent personality
-client.identity_step(1, agent_name="MyAssistant")
+# Identity ritual (steps 1-5: name, mission, creator, personality, language), then seal it
+client.identity_step(1, "MyAssistant")
+client.identity_finalize()
 
-# Dream cycle — background memory consolidation
-client.dream_cycle()
+# Dream cycle — memory consolidation via the MCP dream_cycle tool (preview first)
+preview = client.dream_cycle(dry_run=True)
+print(preview.report)
 
-# Knowledge graph visualization
-kg = client.knowledge_graph(node_id="abc123")
+# 1-hop knowledge graph around a memory (POST /v1/knowledge)
+kg = client.knowledge_graph(42)
+print([(e.target, e.relation, e.strength) for e in kg.edges])
 ```
 
 ## Why Epicode vs. Pinecone?
