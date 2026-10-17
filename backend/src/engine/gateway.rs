@@ -921,56 +921,6 @@ impl GatewayCenter {
         )
     }
 
-    pub fn expand_from_seeds(
-        &self,
-        seed_results: &[(TetraId, f64, f64, MemoryPayload)],
-        depth: usize,
-    ) -> Vec<(TetraId, f64, Vec<String>, String, i64)> {
-        let mut collected: HashMap<u64, (f64, Vec<String>, String, i64)> = HashMap::new();
-        for (id, sim, _mass, payload) in seed_results {
-            collected.insert(
-                *id,
-                (
-                    *sim,
-                    payload.labels.clone(),
-                    payload.content.clone(),
-                    payload.timestamp,
-                ),
-            );
-        }
-
-        let mut frontier: Vec<(u64, usize, f64)> = seed_results
-            .iter()
-            .map(|(id, sim, _, _)| (*id, 0, *sim))
-            .collect();
-        let mut visited: HashSet<u64> = seed_results.iter().map(|(id, _, _, _)| *id).collect();
-
-        while let Some((current_id, d, inherited_sim)) = frontier.pop() {
-            if d >= depth {
-                continue;
-            }
-            for (target_id, _rel_type, strength) in self.get_relations(current_id) {
-                if visited.contains(&target_id) {
-                    continue;
-                }
-                visited.insert(target_id);
-                if let Some(payload) = self.get_node(target_id) {
-                    let assoc = inherited_sim * strength.clamp(0.0, 1.0);
-                    collected.insert(
-                        target_id,
-                        (0.0, payload.labels, payload.content, payload.timestamp),
-                    );
-                    frontier.push((target_id, d + 1, assoc));
-                }
-            }
-        }
-
-        collected
-            .into_iter()
-            .map(|(id, (ds, ls, c, ts))| (id, ds, ls, c, ts))
-            .collect()
-    }
-
     pub fn expand_from_seeds_with_clusters(
         &self,
         seed_results: &[(TetraId, f64, f64, MemoryPayload)],

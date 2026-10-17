@@ -115,8 +115,23 @@ const client = new EpicodeClient("key", "http://localhost:9111/v1");
 | POST | `/knowledge` | `client.knowledge(id)` |
 | GET | `/stats` | `client.stats()` |
 | GET | `/timeline` | `client.timeline()` |
-| POST | `/register` | `admin.register(userId, plan?)` |
-| GET | `/admin/users` | `admin.users()` |
-| GET | `/admin/stats` | `admin.stats()` |
+| POST | `/recall` | `client.recallWithTiers(query, depth?)` |
+| POST | `/identity/step` | `client.identityStep(step, value)` |
+| POST | `/identity/finalize` | `client.identityFinalize()` |
+| MCP | `dream_cycle` | `client.dreamCycle(dryRun?)` |
+| POST | `/knowledge` | `client.knowledgeGraph(id)` |
+| POST | `/api/register` | `admin.register(userId, plan?)` |
+| GET | `/api/admin/users` | `admin.users()` |
+| GET | `/api/admin/stats` | `admin.stats()` |
+
+## Migration notes (next release)
+
+- `identityStep(step, value)` now sends `value` (the server never accepted `agent_name`). New: `identityFinalize()`.
+- `recallWithTiers()` now calls `POST /v1/recall` and groups `data.tiers`; items gain `tier_name`, `labels`, `source`, `metrics`, `topology`. `kg_associations`, `spatial_coords` and `knowledge_graph_edges` are deprecated (never returned) and stay empty.
+- `dreamCycle(dryRun = false)` calls the MCP `dream_cycle` tool (no REST route); pass `mcpUrl` (3rd constructor argument) if your MCP endpoint is not `<base without /v1>/mcp`. `energy_delta` is deprecated.
+- `knowledgeGraph(id)` is built from `knowledge(id)` (`POST /v1/knowledge`); node content/coordinates and `clusters` are not returned.
+- `knowledge()` sends an integer id; `createNode(..., timestamp)` sends Unix seconds as an integer; `timeline()`, `getNode()`, `createNode()`, `stats()` and `knowledge()` unwrap SMRP envelopes.
+- `EpicodeAdmin` now calls `/api/register` and `/api/admin/*` (they are not under `/api/v1`).
+- `backend/tests/sdk_contract.rs` fails CI if any SDK route or MCP tool stops existing.
 
 > **Note:** The old package name `tetramem-sdk` is deprecated. Please use `epicode-sdk`.
