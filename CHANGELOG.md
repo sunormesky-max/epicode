@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0](https://github.com/sunormesky-max/epicode/compare/v1.9.2...v1.10.0) (2026-10-17)
+
+
+### Features
+
+* **observability:** 召回/结果日志 recall_log + outcome_event（design-draft §b） ([#290](https://github.com/sunormesky-max/epicode/issues/290)) ([09c58b1](https://github.com/sunormesky-max/epicode/commit/09c58b151a105eac98ad10f85a4909e9d9436159))
+
+
+### Bug Fixes
+
+* **ask:** memory_ask 复用 recall 的联想扩展打分（KG/同簇邻居不再被全部丢弃） ([#289](https://github.com/sunormesky-max/epicode/issues/289)) ([dc7d9c3](https://github.com/sunormesky-max/epicode/commit/dc7d9c30c70e270dc73b9967d07dc80ad180c1e6))
+* **deps:** bump rustls 0.23.45 -&gt; 0.23.46 (RUSTSEC-2026-0346~0349) ([#291](https://github.com/sunormesky-max/epicode/issues/291)) ([8881eed](https://github.com/sunormesky-max/epicode/commit/8881eedc0a8521102459e1366d4a7291b2517f38))
+* **sdk:** SDK 方法改指向真实路由/MCP 工具 + 路由契约测试 ([#288](https://github.com/sunormesky-max/epicode/issues/288)) ([25af8ab](https://github.com/sunormesky-max/epicode/commit/25af8ab19a1bcdbb0e07a7454c61f9dc179e1c12))
+
 ## [1.9.2](https://github.com/sunormesky-max/epicode/compare/v1.9.1...v1.9.2) (2026-10-14)
 
 
