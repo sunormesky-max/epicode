@@ -158,6 +158,40 @@ const MIGRATION_ADD_ARCHIVE_NODES: &str = "CREATE TABLE IF NOT EXISTS archive_no
 const MIGRATION_ADD_ARCHIVE_INDEXES: &str = "CREATE INDEX IF NOT EXISTS idx_archive_parent ON archive_nodes(parent_id); CREATE INDEX IF NOT EXISTS idx_archive_archived ON archive_nodes(archived)";
 const MIGRATION_ADD_API_CALL_STATS: &str = "CREATE TABLE IF NOT EXISTS api_call_stats (date TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (date))";
 
+/// Append-only recall request + task outcome logs (design-draft §b / round4).
+/// Never read by retrieval scoring. Privacy: query_hash only (sha256 of plaintext), never query text.
+/// Retention: see `RECALL_OUTCOME_RETENTION_DAYS` (default 90); prune via `prune_recall_outcome_logs`.
+const MIGRATION_ADD_RECALL_OUTCOME_LOG: &str = "
+CREATE TABLE IF NOT EXISTS recall_log (
+  recall_id   TEXT PRIMARY KEY,
+  ts          INTEGER NOT NULL,
+  user_id     TEXT NOT NULL,
+  task_id     TEXT,
+  tool        TEXT NOT NULL,
+  query_hash  TEXT NOT NULL,
+  attempt     INTEGER DEFAULT 0,
+  stage       TEXT,
+  returned    TEXT NOT NULL,
+  sources     TEXT NOT NULL,
+  reserved    TEXT
+);
+CREATE TABLE IF NOT EXISTS outcome_event (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  task_id TEXT,
+  kind TEXT NOT NULL,
+  recall_ids TEXT,
+  surfaced TEXT,
+  adopted TEXT,
+  payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_recall_task ON recall_log(task_id, ts);
+CREATE INDEX IF NOT EXISTS idx_recall_user_ts ON recall_log(user_id, ts);
+CREATE INDEX IF NOT EXISTS idx_outcome_task ON outcome_event(task_id, ts);
+CREATE INDEX IF NOT EXISTS idx_outcome_user_ts ON outcome_event(user_id, ts);
+";
+
 /// 四面体 UPSERT SQL(24 列)。upsert_tetra / batch_upsert / save_tetrahedrons_tx 三处共用,
 /// 避免列数不一致导致的静默数据丢失(曾发生 batch_upsert 列数 bug,见 SESSION_LOG §3.1)。
 const UPSERT_TETRA_SQL: &str = "INSERT OR REPLACE INTO tetrahedrons \
@@ -196,6 +230,20 @@ pub fn heartbeat_gap_secs() -> i64 {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(300)
+}
+
+/// Input for `StorageManager::log_recall`.
+/// `query_hash` must already be sha256 hex of plaintext (never pass query text).
+pub struct RecallLogRecord<'a> {
+    pub user_id: &'a str,
+    pub task_id: Option<&'a str>,
+    pub tool: &'a str,
+    pub query_hash: &'a str,
+    pub attempt: i64,
+    pub stage: Option<&'a str>,
+    pub returned: &'a [u64],
+    pub sources: &'a [Vec<String>],
+    pub reserved: &'a [u64],
 }
 
 impl StorageManager {
@@ -296,6 +344,9 @@ impl StorageManager {
         }
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_API_CALL_STATS) {
             tracing::debug!("[Storage] api_call_stats migration skipped: {}", e);
+        }
+        if let Err(e) = conn.execute_batch(MIGRATION_ADD_RECALL_OUTCOME_LOG) {
+            tracing::debug!("[Storage] recall_outcome_log migration skipped: {}", e);
         }
 
         tracing::info!("SQLite database opened: {}", db_path.display());
@@ -2403,6 +2454,223 @@ impl StorageManager {
             _ => RelationType::Related,
         }
     }
+
+    // ═══ design-draft §b: append-only recall / outcome logging ═══
+    // NEVER consulted by retrieval scoring. Dream usage edges (future) must
+    // consume only `adopted` ids from outcome_event — never invent co-occurrence.
+
+    /// Append a recall/search/ask log row. Returns the generated `recall_id` (uuid v4).
+    pub fn log_recall(&self, rec: &RecallLogRecord<'_>) -> Result<String, String> {
+        let recall_id = uuid::Uuid::new_v4().to_string();
+        let ts = chrono::Utc::now().timestamp();
+        let returned = serde_json::to_string(rec.returned).unwrap_or_else(|_| "[]".into());
+        let sources = serde_json::to_string(rec.sources).unwrap_or_else(|_| "[]".into());
+        let reserved = serde_json::to_string(rec.reserved).unwrap_or_else(|_| "[]".into());
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO recall_log (recall_id, ts, user_id, task_id, tool, query_hash, attempt, stage, returned, sources, reserved)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                recall_id,
+                ts,
+                rec.user_id,
+                rec.task_id,
+                rec.tool,
+                rec.query_hash,
+                rec.attempt,
+                rec.stage,
+                returned,
+                sources,
+                reserved,
+            ],
+        )
+        .map_err(|e| format!("log_recall: {}", e))?;
+        Ok(recall_id)
+    }
+
+    /// Most recent `n` recall_ids for a task (newest first). Empty if task_id is empty.
+    pub fn recent_recall_ids(&self, task_id: &str, n: usize) -> Vec<String> {
+        if task_id.is_empty() || n == 0 {
+            return Vec::new();
+        }
+        let conn = self.conn.lock();
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT recall_id FROM recall_log WHERE task_id = ?1 ORDER BY ts DESC LIMIT ?2",
+        ) else {
+            return Vec::new();
+        };
+        let Ok(iter) = stmt.query_map(rusqlite::params![task_id, n as i64], |r| {
+            r.get::<_, String>(0)
+        }) else {
+            return Vec::new();
+        };
+        iter.filter_map(|r| r.ok()).collect()
+    }
+
+    /// Load returned id lists for the given recall_ids (order preserved).
+    pub fn recall_returned_ids(&self, recall_ids: &[String]) -> Vec<u64> {
+        if recall_ids.is_empty() {
+            return Vec::new();
+        }
+        let conn = self.conn.lock();
+        let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for rid in recall_ids {
+            let returned: Option<String> = conn
+                .query_row(
+                    "SELECT returned FROM recall_log WHERE recall_id = ?1",
+                    rusqlite::params![rid],
+                    |r| r.get(0),
+                )
+                .ok();
+            if let Some(raw) = returned {
+                if let Ok(ids) = serde_json::from_str::<Vec<u64>>(&raw) {
+                    for id in ids {
+                        if seen.insert(id) {
+                            out.push(id);
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Append an outcome event. `surfaced` / `adopted` distinguish appearance vs use
+    /// (design-draft refinement): dream usage edges must consume only adopted.
+    #[allow(clippy::too_many_arguments)] // mirrors design-draft columns; keep flat for callers
+    pub fn log_outcome(
+        &self,
+        user_id: &str,
+        kind: &str,
+        task_id: Option<&str>,
+        recall_ids: &[String],
+        surfaced: &[u64],
+        adopted: &[u64],
+        payload: &serde_json::Value,
+    ) -> Result<i64, String> {
+        let ts = chrono::Utc::now().timestamp();
+        let recall_ids_json = serde_json::to_string(recall_ids).unwrap_or_else(|_| "[]".into());
+        let surfaced_json = serde_json::to_string(surfaced).unwrap_or_else(|_| "[]".into());
+        let adopted_json = serde_json::to_string(adopted).unwrap_or_else(|_| "[]".into());
+        let payload_json = serde_json::to_string(payload).unwrap_or_else(|_| "{}".into());
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO outcome_event (ts, user_id, task_id, kind, recall_ids, surfaced, adopted, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                ts,
+                user_id,
+                task_id,
+                kind,
+                recall_ids_json,
+                surfaced_json,
+                adopted_json,
+                payload_json,
+            ],
+        )
+        .map_err(|e| format!("log_outcome: {}", e))?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// Delete recall_log / outcome_event rows older than `older_than_days`.
+    /// Default retention is `RECALL_OUTCOME_RETENTION_DAYS` (90). Not auto-scheduled.
+    pub fn prune_recall_outcome_logs(
+        &self,
+        older_than_days: i64,
+    ) -> Result<(usize, usize), String> {
+        let cutoff = chrono::Utc::now().timestamp() - older_than_days.saturating_mul(86_400);
+        let conn = self.conn.lock();
+        let recall_n = conn
+            .execute(
+                "DELETE FROM recall_log WHERE ts < ?1",
+                rusqlite::params![cutoff],
+            )
+            .map_err(|e| e.to_string())?;
+        let outcome_n = conn
+            .execute(
+                "DELETE FROM outcome_event WHERE ts < ?1",
+                rusqlite::params![cutoff],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok((recall_n, outcome_n))
+    }
+
+    /// Test/ops helper: count rows (does not affect scoring).
+    pub fn count_recall_logs(&self) -> usize {
+        let conn = self.conn.lock();
+        conn.query_row("SELECT COUNT(*) FROM recall_log", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .unwrap_or(0) as usize
+    }
+
+    pub fn count_outcome_events(&self, kind: Option<&str>) -> usize {
+        let conn = self.conn.lock();
+        match kind {
+            Some(k) => conn
+                .query_row(
+                    "SELECT COUNT(*) FROM outcome_event WHERE kind = ?1",
+                    rusqlite::params![k],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0) as usize,
+            None => conn
+                .query_row("SELECT COUNT(*) FROM outcome_event", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap_or(0) as usize,
+        }
+    }
+
+    /// Fetch one recall_log row as JSON for tests/ops. Returns None if missing.
+    pub fn get_recall_log(&self, recall_id: &str) -> Option<serde_json::Value> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT recall_id, ts, user_id, task_id, tool, query_hash, attempt, stage, returned, sources, reserved
+             FROM recall_log WHERE recall_id = ?1",
+            rusqlite::params![recall_id],
+            |r| {
+                Ok(serde_json::json!({
+                    "recall_id": r.get::<_, String>(0)?,
+                    "ts": r.get::<_, i64>(1)?,
+                    "user_id": r.get::<_, String>(2)?,
+                    "task_id": r.get::<_, Option<String>>(3)?,
+                    "tool": r.get::<_, String>(4)?,
+                    "query_hash": r.get::<_, String>(5)?,
+                    "attempt": r.get::<_, i64>(6)?,
+                    "stage": r.get::<_, Option<String>>(7)?,
+                    "returned": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(8)?).unwrap_or(serde_json::json!([])),
+                    "sources": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(9)?).unwrap_or(serde_json::json!([])),
+                    "reserved": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(10).unwrap_or_else(|_| "[]".into())).unwrap_or(serde_json::json!([])),
+                }))
+            },
+        )
+        .ok()
+    }
+
+    pub fn latest_outcome_event(&self, kind: &str) -> Option<serde_json::Value> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id, ts, user_id, task_id, kind, recall_ids, surfaced, adopted, payload
+             FROM outcome_event WHERE kind = ?1 ORDER BY id DESC LIMIT 1",
+            rusqlite::params![kind],
+            |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, i64>(0)?,
+                    "ts": r.get::<_, i64>(1)?,
+                    "user_id": r.get::<_, String>(2)?,
+                    "task_id": r.get::<_, Option<String>>(3)?,
+                    "kind": r.get::<_, String>(4)?,
+                    "recall_ids": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(5).unwrap_or_else(|_| "[]".into())).unwrap_or(serde_json::json!([])),
+                    "surfaced": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(6).unwrap_or_else(|_| "[]".into())).unwrap_or(serde_json::json!([])),
+                    "adopted": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(7).unwrap_or_else(|_| "[]".into())).unwrap_or(serde_json::json!([])),
+                    "payload": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(8)?).unwrap_or(serde_json::json!({})),
+                }))
+            },
+        )
+        .ok()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -2810,5 +3078,90 @@ mod tests {
         let next_id = space.add_tetrahedron(&next, &positions).unwrap();
         assert_eq!(space.non_port_vertex_count(), 8);
         assert_eq!(space.port_vertex_of_tetra(next_id), None);
+    }
+}
+
+#[cfg(test)]
+mod recall_outcome_log_tests {
+    use super::*;
+
+    fn fresh() -> StorageManager {
+        let dir = std::env::temp_dir().join(format!("epicode-recall-log-{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        StorageManager::new(&dir).unwrap()
+    }
+
+    #[test]
+    fn migration_creates_tables_and_log_roundtrip() {
+        let s = fresh();
+        assert_eq!(s.count_recall_logs(), 0);
+        let sources = vec![vec!["vector".into()], vec!["kg".into()]];
+        let rid = s
+            .log_recall(&RecallLogRecord {
+                user_id: "u1",
+                task_id: Some("t1"),
+                tool: "memory_recall",
+                query_hash: "abc123deadbeef",
+                attempt: 0,
+                stage: None,
+                returned: &[10, 20, 30],
+                sources: &sources,
+                reserved: &[],
+            })
+            .unwrap();
+        assert!(!rid.is_empty());
+        let row = s.get_recall_log(&rid).unwrap();
+        assert_eq!(row["query_hash"], "abc123deadbeef");
+        assert_eq!(row["tool"], "memory_recall");
+        assert_eq!(row["returned"], serde_json::json!([10, 20, 30]));
+        // Privacy: no query plaintext column / value.
+        let raw = serde_json::to_string(&row).unwrap();
+        assert!(!raw.contains("secret query"));
+        assert_eq!(s.recent_recall_ids("t1", 5), vec![rid.clone()]);
+        s.log_outcome(
+            "u1",
+            "feedback",
+            Some("t1"),
+            std::slice::from_ref(&rid),
+            &[10, 20],
+            &[10],
+            &serde_json::json!({"relevance": "highly_relevant"}),
+        )
+        .unwrap();
+        let ev = s.latest_outcome_event("feedback").unwrap();
+        assert_eq!(ev["surfaced"], serde_json::json!([10, 20]));
+        assert_eq!(ev["adopted"], serde_json::json!([10]));
+        assert_eq!(s.count_outcome_events(Some("feedback")), 1);
+    }
+
+    #[test]
+    fn prune_respects_retention_cutoff() {
+        let s = fresh();
+        let rid = s
+            .log_recall(&RecallLogRecord {
+                user_id: "u",
+                task_id: None,
+                tool: "memory_search",
+                query_hash: "h",
+                attempt: 0,
+                stage: None,
+                returned: &[],
+                sources: &[],
+                reserved: &[],
+            })
+            .unwrap();
+        // Force old ts
+        {
+            let conn = s.conn.lock();
+            conn.execute(
+                "UPDATE recall_log SET ts = 1 WHERE recall_id = ?1",
+                rusqlite::params![rid],
+            )
+            .unwrap();
+        }
+        let (n, _) = s.prune_recall_outcome_logs(90).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(s.count_recall_logs(), 0);
     }
 }
