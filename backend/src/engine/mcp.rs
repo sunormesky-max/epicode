@@ -11883,8 +11883,6 @@ mod ask_assoc_tests {
         );
     }
 }
-
-
 /// Manual-rot guard: executor-facing manuals may only reference tools, tool
 /// parameters and HTTP endpoints that exist today, the canonical manual must
 /// cover the whole catalog, carry the build version, and be what the handshake
