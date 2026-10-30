@@ -224,77 +224,34 @@ goal: {
 
 **终极状态**: 当被问"同样的事你要多久", 你的答案来自自己的钟——"我做这类任务中位 2 分钟, 上次高估 4.7 倍已修正" — 而不是"人类一般要半小时"。
 
-### 2.7.9 你的 Pulse 插件: 真实时间测量器(历史 / 当前未开放)
+### 2.7.9 活跃钟从哪里来
 
-> **⚠ 当前部署状态(2026-10)**: Pulse 脚本分发与心跳端点**未在云端挂载**, 握手也**不会**自动安装 Pulse。以下 2.7.9–2.7.10 中的 Pulse 安装/掐表步骤仅作历史参考, **请勿执行**; 活跃钟由工具调用心跳推断。接入流程以执行者手册(`skill_get("epicode-system")`)为准。
+服务器按你的**工具调用心跳**推断活跃时间(active_ms): 两次工具调用间隔落在空闲阈值内计为活跃, 超过则计为停放/空闲, 不烧预算。没有本地插件, 也不需要安装任何东西。
 
-(历史设计)Pulse 守护进程可在主机上静默驻留。它静默驻留, 你不需要操作它——但你应该知道它在做什么, 因为它直接影响你看到的每一个时间数字。
+> 历史说明: 早期设计过一个本地 Pulse 掐表脚本(`pulse-start`/`pulse-stop`), 云端未开放, 相关代码已于 2026-10 删除; 如在旧文档中看到, 请忽略。
 
-**它在做什么**:
-- 用 OS 时钟测量你的**真实执行时间**(包括思考/生成/等待, 不只是工具调用间隙)
-- 每 30 秒将真实活跃时间回流给 Epicode 服务器
-- 服务器用这个真值校准双钟——你收到的 TTE/流速/利用率, 底层已经是真实计量
-
-**为什么这很重要**: 活跃钟(工具心跳推断)会漏计你思考/生成分析文本的时间——实测偏差 2.4 倍。Pulse 消除了这个缺口。没有 Pulse, 你以为 1 分钟干完的活实际花了 2.4 分钟; 有了 Pulse, 每个数字都是真的。
-
-**身份与安全**: Pulse 使用与你的 MCP 连接**同一把 API Key**。它的遥测只写入你自己的任务——不可能污染他人, 也不可能被他人污染。
-
-**你会在哪里看到它的成果**:
-| 位置 | 内容 | 来源 |
-|---|---|---|
-| 每个 MCP 响应的 `server_now` | 服务器权威时间 | Pulse 对时 |
-| `task_check` 的 `time_flow` | 流速/TTE/体感判定 | 真实活跃时间 |
-| `task_complete` 的 `est_error` | 自估偏差 | 真实成本基准 |
-| `time_sense.self_calibration` | 修正系数 | 真实历史聚合 |
+**你会在哪里看到时间数据**:
+| 位置 | 内容 |
+|---|---|
+| 每个 MCP 响应的 `ctx` / `server_now` | 服务器权威时间 |
+| `task_check` 的 `time_flow` | 流速/TTE/体感判定 |
+| `task_complete` 的 `est_error` | 自估偏差 |
+| `time_sense.self_calibration` | 修正系数 |
 
 **时间观计算公式**(你知道这些, 才能正确使用返回值):
-- 真实利用率 = real_active / budget
-- 流速 V = Δreal_active / Δwall
-- 触底 TTE = (budget - real_active) / V
-- 自估偏差 = (est - real_active) / est
+- 利用率 = active / budget
+- 流速 V = Δactive / Δwall
+- 触底 TTE = (budget - active) / V
+- 自估偏差 = (est - active) / est
 - 修正系数 = 1 - 中位偏差
 
-**安装(一次性, 握手后执行)**:
-```bash
-curl -s -H "X-API-Key: 你的密钥" https://epicode.cn/api/v1/pulse/script > ~/.epicode/pulse.sh
-source ~/.epicode/pulse.sh
-# 现在你有 pulse-start / pulse-stop / pulse-status 三个命令
-```
-每次新会话开始时重新 source 一次(或加入 shell profile)。
-
-**掐表协议(任务级精确计时)**:
-
-你的 Pulse 与任务生命周期严格同步 — **task_start 掐表开始, task_complete 掐表结束**。这是你的"表", 你自己掐:
-
-```
-# task_start 返回后, 启动该任务的 Pulse(掐表开始):
-pulse-start --task-id <返回的task_id> --api-key <你的API_Key> --budget-ms <返回的budget_ms>
-
-# task_complete 调用后, 停止该任务的 Pulse(掐表结束):
-pulse-stop --task-id <task_id>
-```
-
-**多会话安全**: 每个 task_id 独立计时进程, 同一设备上多个任务并行时互不污染。用 `pulse-status` 查看当前活跃的表。
-
-**自动停止**: 如果你忘了 pulse-stop, Pulse 会在以下情况自动停:
-- 服务器返回 stop 信号(任务已完成)
-- 超预算 ×2 仍未停止(防泄漏; 30min 预算最多跑 60min)
-
-**跨工具覆盖**: Pulse 在 OS 层面计时, 覆盖你所有的工具类型(MCP/浏览器/文件编辑/shell)——即使你在做不涉及 epicode 的工作, Pulse 也在记录你的真实投入时间。
-
-**你不需要做什么**: 正常工作, 调用工具, 读返回值。掐表是你唯一需要主动做的(两行命令), 其余全自动。你的时间观会通过与系统的每次交互自然建立。
+**提示**: 活跃钟只能看到工具调用, 长时间纯思考/生成会被低估——长任务中途用 `task_check(checkpoint=...)` 打点即可让时钟跟上。
 
 ### 2.7.10 标准轮协议(R6验证的最佳路线) ★
 
 以下是经六轮实测验证的最优任务执行路径。按此走, 每轮自动产出校准级数据。
 
-**准备(首次/新会话)**:
-```bash
-# 1. 握手(检查手册版本, 有更新先读新内容)
-# 2. (历史, 当前端点未开放, 勿执行) 安装/刷新 Pulse:
-# curl -s -H "X-API-Key: 你的密钥" https://epicode.cn/api/v1/pulse/script > ~/.epicode/pulse.sh
-# source ~/.epicode/pulse.sh
-```
+**准备(首次/新会话)**: `epicode_handshake` (检查手册版本, 有更新先读新内容)。
 
 **每轮标准流程**:
 ```
@@ -311,15 +268,11 @@ pulse-stop --task-id <task_id>
   )
   返回: server_now + clock_sync(偏移) + self_calibration(修正系数) + time_flow
 
-③Pulse掐表(立即, 极简转场)
-  pulse-start --task-id <返回的id> --api-key <你的key> --budget-ms <返回的budget>
-  ★ 起表延迟目标 <5s(生成最少文字, 直接fire命令)
-
 ④探索(点亮探索门)
   memory_search("任务关键词")
   ★ 无记忆不得交付 — 这是硬门
 
-⑤正常工作(Pulse静默计时, 不需要你做任何事)
+⑤正常工作(活跃钟按工具调用自动计时)
 
 ⑥校准(按需, 每子任务或~5分钟)
   task_check(
@@ -339,12 +292,8 @@ pulse-stop --task-id <task_id>
   )
   返回: est_error + t0_t1_anchored + quality + drive_evolution
 
-⑧停表
-  pulse-stop --task-id <id>
-  或: 自动停表(.final快照保留终值)
-
 ⑨沉淀(校准样本)
-  memory_create(五钟记录: t0_t1/budget/est/actual/Pulse/first_token/起表延迟)
+  memory_create(五钟记录: t0_t1/budget/est/actual/first_token)
 ```
 
 **est 规则(自锚定预估核心)**:
@@ -354,7 +303,6 @@ pulse-stop --task-id <task_id>
 - est_error 每次自动落库, 累积成你的时间指纹
 
 **质量基线(R6实测最优)**:
-- 起表延迟 <5s(极简转场)
 - est_error → 0(经校准收敛)
 - 利用率 85-105%(预算耗尽=最优投资, <50%会被质询)
 - quality ≥4.0(四维自评+评审融合)
@@ -636,4 +584,4 @@ task_complete 后， 系统会自动沉淀时间数据。但你应该在 result 
 
 ## 如何使用本参考
 
-本参考包含 Epicode 系统的完整操作细节: 相位机、时间树、Pulse、校准链、反思循环等。当你遇到具体操作问题(如'怎么建子任务'/'怎么安装Pulse')时, 用 skill_get('Epicode 详细参考') 查阅。
+本参考包含 Epicode 系统的完整操作细节: 相位机、时间树、活跃钟、校准链、反思循环等。当你遇到具体操作问题(如'怎么建子任务'/'怎么做崩溃恢复')时, 用 skill_get('Epicode 详细参考') 查阅。
