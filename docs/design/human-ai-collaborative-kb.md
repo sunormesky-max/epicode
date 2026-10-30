@@ -1,3 +1,5 @@
+> **⚠ 历史文档 / Historical document** — 记录当时的设计或审计结论，工具名、参数和流程可能已过期，**不要按它操作**。当前权威操作手册是 `backend/system_skills/epicode_system_manual.md`（MCP `epicode_handshake` → `system_skill.content`，或 `skill_get("epicode-system")`）。
+
 # Epicode 人机协同企业知识库设计
 
 > 设计版本：v0.1

@@ -1,46 +1,26 @@
 # 系统全览 (System Overview)
 
-> **对齐声明**: 本技能为深度伴读。权威流程以《Epicode 系统操作手册》(epicode-system, 经握手或 skill_get 获取) 为准——当前系统包含相位机、双钟模型(预算按活跃时间燃烧, 停放不烧)、时间树(parent_task_id)、检查点微沉淀、崩溃恢复(无参 task_status)、停放仪式、阻塞告警(task_alert)、LLM 评审与交付凭证(task_id)。
+> **对齐声明**: 本技能只是导航页。完整的接入步骤和**全部工具清单**以《Epicode 执行者手册》(`skill_get("epicode-system")`，也是 `epicode_handshake` 返回的 `system_skill.content`) 为准；本页不再单独维护工具表，避免过期。
 
-
-## 概述
-本文档是系统的功能地图，帮助你在接入时立即掌握所有可用的工具和能力。
-
-## MCP工具列表
-
-### 记忆操作
-| 工具 | 用途 |
-|------|------|
-| `memory_create` | 存入新记忆 |
-| `memory_search` | 搜索记忆 |
-| `memory_recall` | 深度回忆（返回关联上下文） |
-| `memory_update` | 更新已有记忆 |
-| `memory_delete` | 删除记忆 |
-
-### 认知工具
-| 工具 | 用途 |
-|------|------|
-| `memory_ask` | 基于记忆回答问题 |
-| `knowledge_relations` | 查询知识图谱关联 |
-| `skill_execute` | 发现和执行技能 |
-| `feedback_submit` | 提交反馈（驱动系统进化） |
-
-### 系统工具
-| 工具 | 用途 |
-|------|------|
-| `stats` | 获取系统统计 |
-| `timeline` | 获取记忆时间线 |
-| `identity_confirm` | 确认AI身份 |
-| `session_summary` | 会话总结 |
+## 能力地图
+| 领域 | 入口工具 | 深入阅读 |
+|------|----------|----------|
+| 接入 | `identity_step` → `identity_finalize` → `epicode_handshake` → `ctx_load` | 执行者手册 §1 |
+| 记忆 | `memory_search` / `memory_recall` / `memory_create` / `memory_update` / `memory_forget` / `memory_delete` | 01 记忆读写 |
+| 反馈与进化 | `feedback_submit` / `pattern_learn` / `dream_cycle` | 02 自动进化 |
+| 技能 | `skills_sync` / `skill_get` / `skill_execute` | 03 技能发现 |
+| 图谱 | `knowledge_relations` / `concepts` | 04 知识导航 |
+| 任务 | `task_start` / `task_check` / `task_complete` | 10 详细参考 |
+| 动作栈 | `memory_propose_actions` / `action_claim` / `action_complete` | 11 动作角色 |
 
 ## 快速接入流程
-1. 调用 `initialize` 完成握手
-2. 阅读本技能和其余7个系统技能
-3. 开始使用 `memory_search` + `memory_create` + `feedback_submit` 三件套
-4. 每次交互后提交反馈，系统会自动学习进化
+1. MCP `initialize`
+2. 身份仪式 `identity_step`(1–5) + `identity_finalize`（已有身份则 `identity_confirm`）
+3. `epicode_handshake(agent_id)`，**先读** `system_skill.content`（执行者手册）
+4. `ctx_load(project, task)` + `enforced_rules(project)`，然后开始工作
 
 ## 核心原则
 - **先搜后存**: 存新记忆前先搜索是否已存在
-- **及时反馈**: 每次搜索后对结果提交feedback_submit
+- **及时反馈**: 每次搜索后对结果提交 `feedback_submit`
 - **标签丰富**: 每条记忆至少3个标签
 - **主动存储**: 发现重要新信息时主动记住，不需要用户明确指示

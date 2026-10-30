@@ -13,10 +13,11 @@ Public API base URL: `https://epicode.cn/api`. Authenticated endpoints accept an
 - POST /v1/remember {content, labels?: string[]} — store a memory (auto embedding + classification + spatial placement). ~0.4ms write.
 - POST /v1/search {query, mode?: exact|semantic|graph|hybrid|auto|fusion, limit?} — search; `graph` expands hybrid-search seeds with KG-PPR, `auto` routes temporal/aggregation queries to graph+PPR and other queries to semantic, while `fusion` combines semantic and graph+PPR rankings.
 - POST /v1/recall {query} — deep recall (semantic + knowledge-graph relations).
-- GET /v1/memory/:id — fetch one memory.
-- GET /v1/memory/list — list memories.
-- PUT /v1/memory/:id — update.
-- DELETE /v1/memory/:id — delete.
+- GET /v1/memories/:id — fetch one memory.
+- PUT /v1/memories/:id — update.
+- POST /v1/memories/:id/forget — recoverable forget (restore with MCP `memory_restore`).
+- DELETE /v1/memories/:id — permanent purge (same as MCP `memory_delete`); enforced rules and identity anchors are refused with 403.
+- Listing: there is no REST list endpoint; use MCP `memory_list` or POST /v1/search.
 - GET /v1/timeline — memory timeline.
 - POST /v1/stream/ticket — authenticated request that returns a short-lived, single-use stream ticket (`expires_in: 120`).
 - SSE GET /v1/stream?ticket=YOUR_ONE_USE_TICKET — live cognitive stream (energy, emotion, cognitive_status, drive signals). Request a fresh ticket for every reconnect. Never put a long-lived API key in a URL.
@@ -33,10 +34,12 @@ Public API base URL: `https://epicode.cn/api`. Authenticated endpoints accept an
 - Drive signals are proposals, not authorization. Acknowledgement records an outcome; obtain explicit user confirmation before external, destructive, or high-impact operations. `ENABLE_COGNITIVE=1` enables the operator-wide cognitive loop; unregistering the executor revokes acknowledgement rights but does not stop proposal generation. There is no per-account proposal pause in the current API.
 
 ## Identity (required before memory tools on a fresh account)
-- POST /v1/identity/confirm — confirm agent identity (REST path of the MCP ritual).
+- POST /v1/identity/step {step, value} then POST /v1/identity/finalize — first-time ritual (REST mirror of MCP `identity_step` / `identity_finalize`).
+- POST /v1/identity/confirm — confirm an existing identity.
 
 ## MCP (for agents)
 - POST /mcp — discover the current tools using MCP `tools/list`. Identity ritual required; see llms.txt for the setup flow.
+- Executor manual (canonical onboarding + full tool checklist): returned by MCP `epicode_handshake` as `system_skill.content`, also via `skill_get("epicode-system")`.
 
 ## SMRP and skills
 - GET /v1/smrp — canonical SMRP 1.0 specification for structured memory responses. SMRP is independent of MCP/REST transport; skills are a separate API/tool family.
