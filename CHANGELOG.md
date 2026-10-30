@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0](https://github.com/sunormesky-max/epicode/compare/v1.10.0...v2.0.0) (2026-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pulse:** 删除未挂路由的 Pulse 死代码 / remove dead Pulse handler and docs ([#287](https://github.com/sunormesky-max/epicode/issues/287))
+* **memory:** 统一删除语义——REST 删除改为永久删除，遗忘保持可恢复 / unify delete semantics ([#274](https://github.com/sunormesky-max/epicode/issues/274))
+
+### Features
+
+* **memory:** 统一删除语义——REST 删除改为永久删除，遗忘保持可恢复 / unify delete semantics ([#274](https://github.com/sunormesky-max/epicode/issues/274)) ([b56eb15](https://github.com/sunormesky-max/epicode/commit/b56eb15d9607255bef7825bf7c8233fa64b33cd9))
+
+
+### Bug Fixes
+
+* **deps:** restore security audit baseline across all lockfiles ([#301](https://github.com/sunormesky-max/epicode/issues/301)) ([58622c2](https://github.com/sunormesky-max/epicode/commit/58622c2f260eb96b0d9543853976f26b7aa56ee8))
+* **storage:** preserve rows that left memory space in tetrahedrons_archive ([#303](https://github.com/sunormesky-max/epicode/issues/303)) ([5de6c0a](https://github.com/sunormesky-max/epicode/commit/5de6c0ac932787fb1e3020907280e5c73ecee8c6))
+
+
+### Documentation
+
+* 统一执行者手册 + 握手指向 + 手册防腐 CI（叠在 [#274](https://github.com/sunormesky-max/epicode/issues/274) 上） ([#286](https://github.com/sunormesky-max/epicode/issues/286)) ([f2c78ba](https://github.com/sunormesky-max/epicode/commit/f2c78ba55be4fec2515516053261e4790e09636b))
+
+
+### Miscellaneous
+
+* **pulse:** 删除未挂路由的 Pulse 死代码 / remove dead Pulse handler and docs ([#287](https://github.com/sunormesky-max/epicode/issues/287)) ([dfa12e1](https://github.com/sunormesky-max/epicode/commit/dfa12e19ebee23009775d2d982c056153ad3e7d6))
+
 ## [1.10.0](https://github.com/sunormesky-max/epicode/compare/v1.9.2...v1.10.0) (2026-10-17)
 
 
