@@ -2271,11 +2271,29 @@ impl StorageManager {
         };
 
         for id in &stale_ids {
+            // 修复: 离开内存空间的行不再物理删除, 移入 tetrahedrons_archive (宪法: 记忆不可删除).
+            // 与 archive_stale_superseded 的归档投影一致 (embedding 置 NULL 省 60% 存储).
+            tx.execute(
+                "CREATE TABLE IF NOT EXISTS tetrahedrons_archive AS SELECT * FROM tetrahedrons WHERE 1=0",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+            tx.execute(
+                "INSERT INTO tetrahedrons_archive SELECT id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, NULL as embedding, importance, enforced, rationale, access_count, memory_type, valid_from, valid_to, identity_stamp, source_agent, last_reviewed_ts, expired_at, invalidated_at, memory_class FROM tetrahedrons WHERE id = ?1 AND id NOT IN (SELECT id FROM tetrahedrons_archive)",
+                params![*id as i64],
+            )
+            .map_err(|e| format!("archive stale tetra {}: {}", id, e))?;
             tx.execute(
                 "DELETE FROM tetrahedrons WHERE id = ?1",
                 params![*id as i64],
             )
             .map_err(|e| format!("delete stale tetra {}: {}", id, e))?;
+        }
+        if !stale_ids.is_empty() {
+            tracing::warn!(
+                "[Storage] {} rows left the memory space — preserved in tetrahedrons_archive instead of hard delete",
+                stale_ids.len()
+            );
         }
 
         for t in &tetras {
@@ -2727,6 +2745,64 @@ mod tests {
             },
             mass,
         }
+    }
+
+    #[test]
+    fn save_all_preserves_rows_that_left_memory_in_archive() {
+        // 回归: 2026-10-29 生产事故——压力驱逐的 final_save 把 4707 条
+        // valid_to 墓碑记忆从主表物理删除。离场行必须进 tetrahedrons_archive。
+        let dir = tmp_dir("stale_archive");
+        let storage = StorageManager::new(&dir).unwrap();
+
+        let space = Space::new();
+        let kg = KnowledgeGraph::new();
+        for i in 0..3u64 {
+            let t = make_tetra(i, &format!("mem_{}", i), 1.0);
+            let pos = Tetrahedron::compute_vertices(t.core);
+            space.add_tetrahedron(&t, &pos).unwrap();
+        }
+        storage.save_all(&space, &kg).unwrap();
+
+        // 模拟墓碑被移出内存空间 (forget 清扫 / 驱逐前清扫)
+        space.remove_tetrahedron(2).unwrap();
+        storage.save_all(&space, &kg).unwrap();
+
+        let conn = storage.conn.lock();
+        let main_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tetrahedrons", [], |r| r.get(0))
+            .unwrap();
+        let archived: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tetrahedrons_archive WHERE id = 2",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let archived_content: Option<String> = conn
+            .query_row(
+                "SELECT content FROM tetrahedrons_archive WHERE id = 2",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+        drop(conn);
+
+        assert_eq!(main_count, 2, "离场行应离开主表");
+        assert_eq!(archived, 1, "离场行必须保存在 tetrahedrons_archive");
+        assert!(archived_content.is_some(), "归档行必须保留 content");
+
+        // 幂等: 再次保存不得产生重复归档
+        storage.save_all(&space, &kg).unwrap();
+        let conn = storage.conn.lock();
+        let archived_again: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tetrahedrons_archive WHERE id = 2",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        drop(conn);
+        assert_eq!(archived_again, 1, "归档插入必须幂等");
     }
 
     #[test]
