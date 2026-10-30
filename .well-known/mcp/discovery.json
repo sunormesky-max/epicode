@@ -1213,6 +1213,10 @@
             "description": "The original query that led to these results (optional)",
             "type": "string"
           },
+          "recall_id": {
+            "description": "Optional recall_id from a prior memory_recall/search/ask response. When omitted, the server links the most recent recalls for the active task (up to 5).",
+            "type": "string"
+          },
           "relevance": {
             "description": "How relevant were the results?",
             "enum": [
