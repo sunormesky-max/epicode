@@ -60,11 +60,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # ubuntu-latest migrated to Ubuntu 26 (glibc 2.43) on 2026-10-19 —
+          # binaries built there cannot run on Ubuntu 24.04 servers (glibc 2.39).
+          # Pin to ubuntu-24.04 so release binaries match the deployment baseline.
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             binary_suffix: ''
             archive_ext: tar.gz
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: aarch64-unknown-linux-gnu
             binary_suffix: ''
             archive_ext: tar.gz
