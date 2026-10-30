@@ -73,13 +73,18 @@ export const API_SECTIONS: { titleKey: string; descKey: string; endpoints: Endpo
       {
         method: 'DELETE', path: '/v1/memories/:id', descKey: 'docs.section.memory.ep7.desc',
         auth: true,
-        response: '{ "forgotten": 42, "mode": "forget", "valid_to": 1786970000 }',
+        response: '{ "status": "deleted", "id": 42, "mode": "purge", "relations_removed": 3 }',
+      },
+      {
+        method: 'POST', path: '/v1/memories/:id/forget', descKey: 'docs.section.memory.epForget.desc',
+        auth: true,
+        response: '{ "id": 42, "valid_to": 1786970000, ... }',
       },
       {
         method: 'POST', path: '/v1/memories/batch-delete', descKey: 'docs.section.memory.ep8.desc',
         auth: true,
         body: '{ "ids": [1, 2, 3] }',
-        response: '{ "forgotten": [1, 2, 3], "forgotten_count": 3, "mode": "forget" }',
+        response: '{ "deleted": [1, 2, 3], "deleted_count": 3, "mode": "purge", "failed": [], "failed_count": 0 }',
       },
     ],
   },

@@ -4564,23 +4564,24 @@ impl McpHandler {
         // memory_delete = 永久删除(space+storage+KG+HNSW+index)。软删除请用 memory_forget。
         // Previously this called api_forget_memory (soft, valid_to only), so memory_get
         // still returned the row after a "permanent" delete.
-        match self.engine.scheduler.api_purge_memory(id) {
-            Ok(_) => {
+        match self.engine.scheduler.api_delete_memory(id) {
+            Ok(mut data) => {
                 let vertices_after = self.engine.space.vertex_count();
-                let data = serde_json::json!({
-                    "status": "deleted",
-                    "id": id,
-                    "mode": "purge",
-                    "side_effects": {
-                        "vertices_freed": vertices_before.saturating_sub(vertices_after),
-                        "cluster_affected": cluster_before.map(|(cid, sz)| serde_json::json!({"id": cid, "size_before": sz})),
-                        "relations_removed": rels_before,
-                    },
+                data["side_effects"] = serde_json::json!({
+                    "vertices_freed": vertices_before.saturating_sub(vertices_after),
+                    "cluster_affected": cluster_before.map(|(cid, sz)| serde_json::json!({"id": cid, "size_before": sz})),
+                    "relations_removed": rels_before,
                 });
                 self.smrp_ok("memory_delete", data)
             }
             Err(e) => {
-                let code = if e.contains("not found") { 404 } else { 400 };
+                let code = if e.contains("not found") {
+                    404
+                } else if e.starts_with(super::scheduler::PROTECTED_ERR_PREFIX) {
+                    403
+                } else {
+                    400
+                };
                 self.smrp_err("memory_delete", code, &format!("delete failed: {}", e))
             }
         }
@@ -9624,6 +9625,109 @@ mod tests {
                 "memory {id} still readable after delete: {get}"
             );
         }
+    }
+
+    /// Unified delete semantics: the shared delete path (REST DELETE + MCP
+    /// memory_delete) purges memory + relations; forget stays recoverable;
+    /// identity anchors and enforced rules are refused.
+    #[tokio::test]
+    async fn unified_delete_purges_forget_restores_anchor_refused() {
+        let mut eng = Engine::new();
+        eng.start();
+        let h = McpHandler::new(Arc::new(eng));
+        for step in 1..=5 {
+            let val = if step == 1 { "UnifyAgent" } else { "test" };
+            h.process_json(&format!(
+                r#"{{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{{"name":"identity_step","arguments":{{"step":{},"value":"{}"}}}}}}"#,
+                step, val
+            ));
+        }
+        h.process_json(r#"{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"identity_finalize","arguments":{}}}"#);
+        let create = |content: &str, labels: &str| -> u64 {
+            let v: serde_json::Value = serde_json::from_str(&h.process_json(&format!(
+                r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"memory_create","arguments":{{"content":"{}","labels":{}}}}}}}"#,
+                content, labels
+            )))
+            .unwrap();
+            let d = &v["result"]["structuredContent"]["data"];
+            d["id"]
+                .as_u64()
+                .or_else(|| d["memory_id"].as_u64())
+                .unwrap_or_else(|| panic!("{v}"))
+        };
+        let call = |name: &str, id: u64| -> serde_json::Value {
+            serde_json::from_str(&h.process_json(&format!(
+                r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"{}","arguments":{{"id":{}}}}}}}"#,
+                name, id
+            )))
+            .unwrap()
+        };
+        let sched = h.engine().scheduler.clone();
+        let a = create("unify delete target alpha", "[\"t\"]");
+        let b = create("unify delete neighbour beta", "[\"t\"]");
+        sched
+            .kg_handle()
+            .add_relation(a, b, super::super::knowledge::RelationType::SimilarTo, 0.9);
+        assert!(sched.api_get_relations(a).iter().any(|(t, _, _)| *t == b));
+
+        // Shared delete path (what REST DELETE /v1/memories/:id calls).
+        let d = sched.api_delete_memory(a).expect("purge");
+        assert_eq!(d["mode"], super::super::scheduler::DELETE_MODE);
+        assert_eq!(d["mode"], "purge");
+        assert!(call("memory_get", a)["result"]["structuredContent"]["data"]["content"].is_null());
+        assert!(
+            sched.api_get_relations(a).is_empty(),
+            "relations of purged memory remain"
+        );
+        assert!(
+            !sched.api_get_relations(b).iter().any(|(t, _, _)| *t == a),
+            "dangling relation to purged memory"
+        );
+        assert!(sched
+            .api_delete_memory(a)
+            .unwrap_err()
+            .contains("not found"));
+
+        // MCP reports the same mode.
+        let c = create("unify delete via mcp gamma", "[\"t\"]");
+        let mcp = call("memory_delete", c);
+        assert_eq!(
+            mcp["result"]["structuredContent"]["data"]["mode"], d["mode"],
+            "{mcp}"
+        );
+
+        // Forget is recoverable.
+        sched.api_forget_memory(b).expect("forget");
+        let restored = call("memory_restore", b);
+        assert_eq!(
+            restored["result"]["structuredContent"]["protocol"]["ok"], true,
+            "{restored}"
+        );
+        assert!(h
+            .engine()
+            .space
+            .get_tetrahedron(b)
+            .unwrap()
+            .data
+            .valid_to
+            .is_none());
+
+        // Identity anchors refused (both paths), still readable afterwards.
+        let anchor = create(
+            "I am UnifyAgent, my creator is test",
+            "[\"identity\",\"system\"]",
+        );
+        let err = sched.api_delete_memory(anchor).unwrap_err();
+        assert!(
+            err.starts_with(super::super::scheduler::PROTECTED_ERR_PREFIX),
+            "{err}"
+        );
+        let mcp_anchor = call("memory_delete", anchor);
+        assert_eq!(
+            mcp_anchor["result"]["structuredContent"]["protocol"]["error"]["code"], 403,
+            "{mcp_anchor}"
+        );
+        assert!(h.engine().space.get_tetrahedron(anchor).is_some());
     }
 
     /// Spike S1: verbosity=slim must shrink JSON vs default full envelope on same fixture.

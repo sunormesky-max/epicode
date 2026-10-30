@@ -21,6 +21,11 @@ use super::outcome::{ActionOutcome, ActionType, OutcomeTracker};
 use super::run_layers::{LayerMetrics, RunLayer};
 use super::security::SecurityGuard;
 
+/// Mode reported by every permanent-delete entry point (REST + MCP).
+pub const DELETE_MODE: &str = "purge";
+/// Error prefix for refusals on protected memories (enforced rules, identity anchors).
+pub const PROTECTED_ERR_PREFIX: &str = "protected: ";
+
 /// SMRP §6 — 分数可解释性：记录各 boost 调整作用于哪些记忆。
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct SearchScoreNotes {
@@ -3647,11 +3652,6 @@ impl SchedulerCenter {
         self.gateway.pulse(origin, ttl)
     }
 
-    pub fn api_delete_memory(&self, id: TetraId) -> Result<TetraId, String> {
-        self.api_forget_memory(id)?;
-        Ok(id)
-    }
-
     pub fn api_purge_memory(&self, id: TetraId) -> Result<TetraId, String> {
         if self.space.get_tetrahedron(id).is_none() {
             return Err(format!("memory {} not found", id));
@@ -3662,10 +3662,35 @@ impl SchedulerCenter {
             .map(|t| t.data.enforced)
             .unwrap_or(false)
         {
-            return Err("cannot purge enforced memory (it is a hard constraint)".into());
+            return Err(format!(
+                "{PROTECTED_ERR_PREFIX}cannot purge enforced memory (it is a hard constraint)"
+            ));
+        }
+        if self
+            .space
+            .get_tetrahedron(id)
+            .map(|t| t.data.labels.iter().any(|l| l == "identity"))
+            .unwrap_or(false)
+        {
+            return Err(format!(
+                "{PROTECTED_ERR_PREFIX}memory #{id} is an identity anchor and cannot be purged; use forget (recoverable) instead"
+            ));
         }
         self.purge_tetra(id);
         Ok(id)
+    }
+
+    /// Unified permanent delete used by BOTH REST `DELETE /v1/memories/:id` and MCP
+    /// `memory_delete`: purge from space/storage/KG/index and report `mode: "purge"`.
+    pub fn api_delete_memory(&self, id: TetraId) -> Result<serde_json::Value, String> {
+        let relations_before = self.api_get_relations(id).len();
+        self.api_purge_memory(id)?;
+        Ok(serde_json::json!({
+            "status": "deleted",
+            "id": id,
+            "mode": DELETE_MODE,
+            "relations_removed": relations_before,
+        }))
     }
 
     /// P5: 突触修剪 — 平均度数88.5过高致PPR同质化, 每节点保留strength top-K关系
