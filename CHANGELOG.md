@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0](https://github.com/sunormesky-max/epicode/compare/v2.0.0...v2.1.0) (2026-10-31)
+
+
+### Features
+
+* **footer:** cross-link the docs mirror site ([#306](https://github.com/sunormesky-max/epicode/issues/306)) ([0bf6da3](https://github.com/sunormesky-max/epicode/commit/0bf6da36c8620b085d1c9835c4c4b60d94aca19b))
+
+
+### Bug Fixes
+
+* **ci:** pin release binary builds to ubuntu-24.04 ([#304](https://github.com/sunormesky-max/epicode/issues/304)) ([252498f](https://github.com/sunormesky-max/epicode/commit/252498fa1b331218dd5da80698c121011c2fd848))
+
 ## [2.0.0](https://github.com/sunormesky-max/epicode/compare/v1.10.0...v2.0.0) (2026-10-30)
 
 
