@@ -20,6 +20,8 @@ export default function Footer() {
     { href: '#/community', label: t('footer.communitySkills') },
     // 原为 https://github.com / https://discord.com 占位链接(指向站点首页而非本项目)
     { href: REPO_URL, label: 'GitHub', external: true },
+    // 文档镜像站(ZCode Sites 托管) — 双域名互链, SEO 权重传导
+    { href: 'https://epicode-docs-a72m.zai.site', label: lang === 'zh' ? '文档镜像站' : 'Docs Mirror', external: true },
     { href: '/llms.txt', label: lang === 'zh' ? 'llms.txt(AI 可读)' : 'llms.txt (for AI)', external: false },
   ];
 
