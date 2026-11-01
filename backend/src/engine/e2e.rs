@@ -63,10 +63,10 @@ pub fn decrypt_with(payload_b64: &str, pem_private: &str) -> Result<Vec<u8>, Str
         .decrypt(Oaep::new::<Sha256>(), wrapped)
         .map_err(|e| format!("rsa unwrap: {}", e))?;
 
-    use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
+    use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
     let cipher = Aes256Gcm::new_from_slice(&aes_key).map_err(|e| format!("{}", e))?;
     cipher
-        .decrypt(nonce.into(), ct)
+        .decrypt(Nonce::from_slice(nonce), ct)
         .map_err(|e| format!("aes decrypt: {}", e))
 }
 
