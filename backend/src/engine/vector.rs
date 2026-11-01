@@ -46,9 +46,7 @@ impl VectorLayer {
             return Err(format!("tokenizer not found: {}", tokenizer_path.display()));
         }
 
-        let env = ort::environment::Environment::builder()
-            .build()
-            .map_err(|e| format!("ort environment: {}", e))?;
+        let env = ort::init().build().map_err(|e| format!("ort environment: {}", e))?;
         let mut session = Session::builder(&env)
             .map_err(|e| format!("session builder: {}", e))?
             .with_optimization_level(GraphOptimizationLevel::Level1)
