@@ -93,7 +93,7 @@ async fn main() {
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()))
         .init();
 
-    tracing::info!("Epicode Cloud v1.0.0 — starting...");
+    tracing::info!("Epicode Cloud v{} — starting...", env!("CARGO_PKG_VERSION"));
 
     let admin_key = std::env::var("TETRAMEM_ADMIN_KEY")
         .expect("FATAL: admin key must be set (accepts EPICODE_ADMIN_KEY or TETRAMEM_ADMIN_KEY)");

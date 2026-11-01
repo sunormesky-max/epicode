@@ -22,7 +22,7 @@ async fn main() {
         )
         .init();
 
-    tracing::info!("Epicode v14.1 — 大卫 启动中...");
+    tracing::info!("Epicode v{} — 大卫 启动中...", env!("CARGO_PKG_VERSION"));
 
     let mut engine = Engine::new();
     engine.start();
