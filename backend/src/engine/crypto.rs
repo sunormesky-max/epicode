@@ -1,8 +1,7 @@
 use aes_gcm::{
-    aead::{Aead, KeyInit},
+    aead::{Aead, KeyInit, OsRng},
     Aes256Gcm, Nonce,
 };
-use rand::rngs::OsRng;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use hmac::{Hmac, Mac};
 use rand::RngCore;
