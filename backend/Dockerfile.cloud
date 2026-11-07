@@ -5,7 +5,7 @@
 # the link fails with "undefined reference to __isoc23_strtol". The runtime
 # image below MUST match or exceed the builder's glibc, or the binary will
 # fail at startup with "GLIBC_2.40 not found".
-FROM rust:1.88-trixie AS builder
+FROM rust:1-trixie AS builder
 
 WORKDIR /build
 COPY . .
