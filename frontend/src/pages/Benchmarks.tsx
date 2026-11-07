@@ -456,7 +456,7 @@ export default function Benchmarks() {
                   <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
                   <XAxis dataKey="nodes" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${v/1000}K` : String(v)} />
                   <YAxis tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit="ms" />
-                  <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} labelFormatter={(v: number) => t('bench.graph.labelFormatter').replace('{n}', v.toLocaleString())} />
+                  <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} labelFormatter={(v) => t('bench.graph.labelFormatter').replace('{n}', Number(v).toLocaleString())} />
                   <Legend wrapperStyle={{ fontSize: '11px', color: chart.axis }} />
                   <Area type="monotone" dataKey="graphBuild" stroke={S[1]} strokeWidth={2} fill="url(#gb)" name={t('bench.graph.legendBuild')} />
                   <Area type="monotone" dataKey="search" stroke={S[0]} strokeWidth={2} fill="url(#sr)" name={t('bench.graph.legendSearch')} />
@@ -474,7 +474,7 @@ export default function Benchmarks() {
                   <XAxis dataKey="batchSize" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} label={{ value: 'Batch Size', position: 'insideBottom', offset: -5, fontSize: 10, fill: chart.axis }} />
                   <YAxis yAxisId="left" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit=" /s" />
                   <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit="ms" />
-                  <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} labelFormatter={(v: number) => `Batch ${v}`} />
+                  <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} labelFormatter={(v) => `Batch ${v}`} />
                   <Legend wrapperStyle={{ fontSize: '11px', color: chart.axis }} />
                   <Line yAxisId="left" type="monotone" dataKey="throughput" stroke={S[1]} strokeWidth={2} dot={{ r: 3, fill: S[1] }} name={t('bench.embedBatch.legendThroughput')} />
                   <Line yAxisId="right" type="monotone" dataKey="latency" stroke={S[3]} strokeWidth={2} dot={{ r: 3, fill: S[3] }} name={t('bench.embedBatch.legendLatency')} strokeDasharray="5 5" />
