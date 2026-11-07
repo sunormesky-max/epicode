@@ -31,7 +31,7 @@ tokio-stream = "0.1"
 ort = { version = "2.0.0-rc.9", features = ["ndarray"] }
 tokenizers = "0.23"
 ndarray = "0.16"
-parking_lot = "0.12"
+parking_lot = "0.13"
 aes-gcm = "0.10"
 rsa = { version = "0.9", features = ["sha2"] }
 sha2 = "0.10"
