@@ -1,7 +1,7 @@
 # NOTE: must use trixie (glibc 2.40), not bookworm (glibc 2.36). The `ort`
 # crate ships a prebuilt ONNX Runtime that needs glibc >= 2.38 at link time
 # (__isoc23_strtol / __isoc23_strtoll). The runtime image must match.
-FROM rust:1.88-trixie AS builder
+FROM rust:1-trixie AS builder
 
 WORKDIR /build
 COPY . .
