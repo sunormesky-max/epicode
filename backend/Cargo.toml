@@ -1,3 +1,4 @@
+# v2.2.0: recharts 3, rusqlite 0.41, uuid 1.29, parking_lot 0.13, Rust builder latest
 [package]
 name = "epicode"
 version = "2.1.0"  # x-release-please-version

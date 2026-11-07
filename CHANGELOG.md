@@ -378,3 +378,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [Unreleased]: https://github.com/sunormesky-max/epicode/compare/v1.0.1...HEAD
 [1.0.1]: https://github.com/sunormesky-max/epicode/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/sunormesky-max/epicode/releases/tag/v1.0.0
+  
+"## [2.2.0] - 2026-11-07"  
+"- recharts 2.15 -> 3.10 with labelFormatter adaptation"  
+"- rusqlite 0.40 -> 0.41, uuid 1.23 -> 1.29, parking_lot 0.12 -> 0.13"  
+"- Rust Docker builder upgraded to latest stable"  
+"- Startup banner uses CARGO_PKG_VERSION"  
