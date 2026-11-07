@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1](https://github.com/sunormesky-max/epicode/compare/v2.1.0...v2.1.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **deps:** batch dependency update (recharts 3, rusqlite 0.41, uuid 1.29, parking_lot 0.13, Rust latest) ([#319](https://github.com/sunormesky-max/epicode/issues/319)) ([ad47162](https://github.com/sunormesky-max/epicode/commit/ad471627fbcd1bb42bd6af63847bc53a9c656d92))
+
 ## [2.1.0](https://github.com/sunormesky-max/epicode/compare/v2.0.0...v2.1.0) (2026-11-01)
 
 
@@ -383,4 +390,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 "- recharts 2.15 -> 3.10 with labelFormatter adaptation"  
 "- rusqlite 0.40 -> 0.41, uuid 1.23 -> 1.29, parking_lot 0.12 -> 0.13"  
 "- Rust Docker builder upgraded to latest stable"  
-"- Startup banner uses CARGO_PKG_VERSION"  
+"- Startup banner uses CARGO_PKG_VERSION"
