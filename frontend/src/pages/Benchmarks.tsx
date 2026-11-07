@@ -424,7 +424,7 @@ export default function Benchmarks() {
                   <XAxis dataKey="memories" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${v/1000}K` : String(v)} />
                   <YAxis yAxisId="left" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit=" QPS" />
                   <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: chart.axis }} axisLine={false} tickLine={false} unit="ms" />
-                  <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} labelFormatter={(v: number) => t('bench.throughput.labelFormatter').replace('{n}', v.toLocaleString())} />
+                  <Tooltip cursor={TOOLTIP_CURSOR} contentStyle={CUSTOM_TOOLTIP_STYLE} itemStyle={{ fontSize: '11px' }} labelStyle={{ color: 'var(--text-tertiary)', fontSize: '11px' }} labelFormatter={(v) => t('bench.throughput.labelFormatter').replace('{n}', Number(v).toLocaleString())} />
                   <Legend wrapperStyle={{ fontSize: '11px', color: chart.axis }} />
                   <Line yAxisId="left" type="monotone" dataKey="qps" stroke={S[0]} strokeWidth={2} dot={{ r: 3, fill: S[0] }} name="QPS" />
                   <Line yAxisId="right" type="monotone" dataKey="latency_p50" stroke={S[1]} strokeWidth={2} dot={{ r: 3, fill: S[1] }} name={t('bench.throughput.legendLatency')} />
