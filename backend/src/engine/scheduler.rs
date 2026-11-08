@@ -3803,10 +3803,14 @@ impl SchedulerCenter {
                     reviewed += 1;
                 }
             } else if fade {
-                // 无价值: 降权
+                // 无价值: 降权(×0.7, 温和) — 但尊重宪法地板 IMPORTANCE_FLOOR。
+                // 旧版 ×0.5 且 .max(0.05): 单次 LLM 判决(仅看前 200 字符预览)即可
+                // 打穿 governor 维护的活性地板, 属自动流程越权; 低于地板只允许
+                // 显式遗忘通道(FORGET_IMPORTANCE 例外, 见 governor 模块文档)。
                 if let Some(t) = self.space.get_tetrahedron(*id) {
                     let mut d = t.data.clone();
-                    d.importance = (d.importance * 0.5).max(0.05);
+                    d.importance = (d.importance * 0.7)
+                        .max(super::governor::IMPORTANCE_FLOOR);
                     let _ = self.space.patch_payload(*id, &t.data, d);
                     if let Some(t) = self.space.get_tetrahedron(*id) {
                         let _ = self.storage.upsert_tetra(&t);
@@ -5546,6 +5550,9 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                     // 突破3: 遗忘曲线 — 被搜索命中的记忆更新复习时间,重置衰减节拍
                     let now = chrono::Utc::now().timestamp();
                     let _ = self.space.update_last_reviewed(*id, now);
+                    // 探索回路闭合(滋养侧): 命中喂质量, 对抗梦周期 ×0.98 衰减——
+                    // 检索到的记忆保重, 检索不到的缓慢失重落底被隔离。
+                    let _ = self.space.update_mass(*id, 0.02);
                     dirty_updates.push((*id, cumulative));
                 }
             }

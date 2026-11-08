@@ -15,6 +15,11 @@ pub struct DreamResult {
 
 pub struct DreamEngine;
 
+/// 每个梦周期对 Active 非神殿记忆的质量衰减系数。
+/// 闭合探索回路: 无脉冲/检索滋养的记忆缓慢失重(半衰期 ~34 周期),
+/// 落到 MASS_MIN 后由 Phase1 隔离(降籍不是除名)。
+const MASS_DECAY_PER_CYCLE: f64 = 0.98;
+
 fn has_healthy_embedding(embedding: &[f64]) -> bool {
     if embedding.len() != EMBEDDING_DIM || embedding.iter().any(|value| !value.is_finite()) {
         return false;
@@ -150,6 +155,23 @@ impl DreamEngine {
         let mut evicted_ids = Vec::new();
         let mut merged_remove_ids = Vec::new();
 
+        // Phase 0: 质量衰减(闭合探索回路)——本窗口内 Active 非神殿记忆 ×MASS_DECAY_PER_CYCLE。
+        // 此前 mass 只涨不掉: update_mass 的 clamp 下限(0.1)使 is_low_mass(<0.1) 永不触发,
+        // 低质量判定实际全靠 junk 标签, 探索回路断开(见七维研究-调度器维度)。
+        if !dry_run {
+            for t in &tetras {
+                if crate::domain::ops::Lifecycle::of(&t.data) != crate::domain::ops::Lifecycle::Active
+                    || t.data.enforced
+                {
+                    continue;
+                }
+                if t.mass > crate::domain::ops::MASS_MIN {
+                    let decayed = (t.mass * MASS_DECAY_PER_CYCLE).max(crate::domain::ops::MASS_MIN);
+                    let _ = space.update_mass(t.id, decayed - t.mass);
+                }
+            }
+        }
+
         // Phase 1: Quarantine junk (no deletion — memories are sacred)
         // Mark low-quality memories with quarantine label + reduce importance
         let now_ts = std::time::SystemTime::now()
@@ -162,7 +184,9 @@ impl DreamEngine {
                 continue;
             }
             let is_junk = t.data.labels.iter().any(|l| l == "junk");
-            let is_low_mass = t.mass < 0.1;
+            // 衰减落地判定: 质量已落到底极(==MASS_MIN)即无滋养记忆。
+            // 旧判据 <0.1 因 clamp 下限而成为死条件。
+            let is_low_mass = t.mass <= crate::domain::ops::MASS_MIN + f64::EPSILON;
             let age_days = (now_ts - t.data.timestamp as f64) / 86400.0;
             let is_old_low_importance = age_days > 30.0 && t.data.importance < 0.3;
             if (is_junk || is_low_mass || is_old_low_importance) && !t.data.enforced {

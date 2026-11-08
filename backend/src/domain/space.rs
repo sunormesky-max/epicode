@@ -234,6 +234,32 @@ impl Space {
             inner.vertex_grid.entry(gk).or_default().push(vid);
         }
 
+        // 防堆叠守卫(ASC 完整性): 拒绝与已存四面体 4 顶点完全相同的插入。
+        // 定理 T1(七维研究-数学维度): 两四面体共享 4 顶点 ⟺ 核心重合的堆叠拷贝,
+        // 会使复形退化为单纯多重复形、edge/face 表 shared_by>1 破坏度数/容量结论。
+        // 堆叠曾由 find_adjacent_position 的兜底路径(best_pos.unwrap_or(anchor))产生。
+        {
+            let mut stack_hit: Option<TetraId> = None;
+            if let Some(first) = inner.vertex_to_tetras.get(&vertex_ids[0]) {
+                'cand: for &cand in first {
+                    for vid in &vertex_ids[1..] {
+                        match inner.vertex_to_tetras.get(vid) {
+                            Some(ids) if ids.contains(&cand) => {}
+                            _ => continue 'cand,
+                        }
+                    }
+                    stack_hit = Some(cand);
+                    break;
+                }
+            }
+            if let Some(existing) = stack_hit {
+                return Err(format!(
+                    "stacking rejected: tetra {} already occupies vertices {:?}",
+                    existing, vertex_ids
+                ));
+            }
+        }
+
         let merged_count = vertex_ids.iter().collect::<HashSet<_>>().len();
         if merged_count < 4 {
             tracing::info!(
@@ -1734,13 +1760,19 @@ mod tests {
 
     #[test]
     fn edge_share_count() {
+        // T1(共享基数二分法): 不同四面体的共享顶点只能是 0/1/4, 其中 4 仅指堆叠。
+        // 防堆叠守卫上线后, 堆叠插入被拒绝; 单四面体自身的棱 shared_by 恒为 1。
         let space = Space::new();
         let c = Point3::zero();
         let (t1, p1) = make_tetra(0, c);
         let (t2, p2) = make_tetra(0, c);
 
         space.add_tetrahedron(&t1, &p1).unwrap();
-        space.add_tetrahedron(&t2, &p2).unwrap();
+        let stacked = space.add_tetrahedron(&t2, &p2);
+        assert!(
+            stacked.is_err(),
+            "identical tetra insertion must be rejected as stacking"
+        );
 
         let v_ids = {
             let inner = space.inner.read();
@@ -1748,7 +1780,7 @@ mod tests {
             t.vertex_ids
         };
         let count = space.edge_share_count(v_ids[0], v_ids[1]);
-        assert_eq!(count, 2);
+        assert_eq!(count, 1);
     }
 
     #[test]

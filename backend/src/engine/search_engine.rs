@@ -904,15 +904,8 @@ fn search_graph(
         adj.entry(t).or_default();
     }
 
-    // 检索强化(记忆巩固/时间效性): 本轮扩散实际走过的边回报给KG——
-    // 常被检索的"主干道"在均匀衰减下保持高强度(earned importance)
-    {
-        let pairs: Vec<(u64, u64)> = adj
-            .iter()
-            .flat_map(|(u, es)| es.iter().map(move |(v, _)| (*u, *v)))
-            .collect();
-        ctx.knowledge.reinforce_edges(&pairs);
-    }
+    // 检索强化(记忆巩固/时间效性): 移至幂迭代后——只回报实际承载扩散质量的边
+    // (见下方 trunk-road 阈值), 死边/双向重复不再被强化。
 
     // 2) 幂迭代
     let mut rank: HashMap<u64, f64> = seed_dist.clone();
@@ -942,6 +935,33 @@ fn search_graph(
 
     // 3) 融合与输出
     let ppr_max = rank.values().cloned().fold(0.0_f64, f64::max).max(1e-9);
+
+    // 检索强化(记忆巩固/时间效性): 只强化本轮实际承载扩散质量的"主干道"——
+    // 两端 rank ≥ PPR_REINFORCE_MIN(相对 ppr_max 的 1%)才算走过; 去重防止 (u,v)/(v,u) 双计。
+    // BFS 建图扫到的全邻域边不再被强化, 避免邻域级富者愈富把衰减通道焊死。
+    {
+        const PPR_REINFORCE_MIN_FRAC: f64 = 0.01;
+        let min_rank = ppr_max * PPR_REINFORCE_MIN_FRAC;
+        let mut seen: std::collections::HashSet<(u64, u64)> = std::collections::HashSet::new();
+        let mut pairs: Vec<(u64, u64)> = Vec::new();
+        for (u, es) in &adj {
+            if rank.get(u).copied().unwrap_or(0.0) < min_rank {
+                continue;
+            }
+            for (v, _) in es {
+                if rank.get(v).copied().unwrap_or(0.0) < min_rank {
+                    continue;
+                }
+                if seen.insert((*u, *v)) {
+                    pairs.push((*u, *v));
+                }
+            }
+        }
+        if !pairs.is_empty() {
+            ctx.knowledge.reinforce_edges(&pairs);
+        }
+    }
+
     let seed_max = seed_vec
         .iter()
         .map(|r| r.1)
@@ -961,6 +981,12 @@ fn search_graph(
     let mut out: Vec<ScoredWithMatch> = Vec::new();
     for (id, score, is_seed) in scored.into_iter().take(k) {
         if let Some(t) = ctx.space.get_tetrahedron(id) {
+            // 可塑性回写: PPR 命中与 base 检索命中同权进入 access_counts 缓存,
+            // 由 scheduler::flush_access_counts 统一落盘并重置复习节拍(遗忘曲线)。
+            // 此前图模式 ~30% 检索流量绕过该回路, 扩散命中的记忆永不"被复习"。
+            if score > 0.25 {
+                *ctx.state.access_counts.lock().entry(id).or_insert(0) += 1;
+            }
             let src: Vec<&str> = if is_seed {
                 vec!["hybrid", "kg-ppr"]
             } else {

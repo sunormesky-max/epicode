@@ -176,12 +176,20 @@ impl ToolRegistry {
             .get_tetrahedron(id)
             .ok_or(format!("tetra {} not found", id))?;
         let neighbors = self.ctx.knowledge.query_relations(id);
+        // 吐结论不吐坐标(三层架构哲学): LLM 无法对坐标三元组做算术,
+        // KG 策展真正用的是簇归属——簇号与 cluster_detail 的编号对齐。
+        let cluster_index = self
+            .ctx
+            .space
+            .find_clusters()
+            .iter()
+            .position(|c| c.tetra_ids.contains(&id));
         Ok(serde_json::json!({
             "id": t.id,
             "content": t.data.content,
             "labels": t.data.labels,
             "mass": t.mass,
-            "position": [t.core.x, t.core.y, t.core.z],
+            "cluster_index": cluster_index,
             "aliases": t.data.aliases.iter().take(5).collect::<Vec<_>>(),
             "neighbors": neighbors.iter().take(5)
                 .map(|(nid, rel, strength)| serde_json::json!({"id": nid, "relation": format!("{:?}", rel), "strength": format!("{:.2}", strength)}))
