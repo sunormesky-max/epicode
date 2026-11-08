@@ -658,28 +658,37 @@ impl GatewayCenter {
         let mk = |core: Point3, has_port: bool, is_seed: bool, is_orphan: bool| {
             // 防堆叠终检: clamp_z 的层边界夹持(最多 ~0.7)可把候选核心平移到既有核心
             // 之上, 造成 4 顶点全合并——insert_tetra 守卫会拒绝并使创建失败。
-            // 四向让位螺旋: 精确检测"4 顶点全合并", 让位到 ≤3 共享的落点(合法单点共享)。
-            let mut core = core;
-            for step in 0..16u8 {
-                let verts = crate::domain::tetra::Tetrahedron::compute_vertices(core);
+            // 向日葵序让位(黄金角+√k 半径): 各方向准均匀铺开且无重复访问,
+            // 精确检测"4 顶点全合并", 让位到 ≤3 共享的落点(合法单点共享)。
+            let origin = core;
+            let mut core = origin;
+            let mut resolved = false;
+            for k in 0..24u8 {
+                let probe = if k == 0 {
+                    origin
+                } else {
+                    let theta = k as f64 * 2.399_963; // 黄金角 ≈137.5°
+                    let r = 1.5 * (k as f64).sqrt();
+                    Point3::new(
+                        origin.x + r * theta.cos(),
+                        origin.y + r * theta.sin(),
+                        origin.z,
+                    )
+                };
+                let verts = crate::domain::tetra::Tetrahedron::compute_vertices(probe);
                 if self.space.count_vertex_merges(&verts) < 4 {
+                    core = probe;
+                    resolved = true;
                     break;
                 }
-                let (dx, dy) = match step % 4 {
-                    0 => (1.3, 0.0),
-                    1 => (0.0, 1.3),
-                    2 => (-1.3, 0.0),
-                    _ => (0.0, -1.3),
-                };
-                core = Point3::new(core.x + dx, core.y + dy, core.z);
-                if step == 15 {
-                    tracing::warn!(
-                        "[Gateway] destack spiral exhausted at ({:.1},{:.1},{:.1})",
-                        core.x,
-                        core.y,
-                        core.z
-                    );
-                }
+            }
+            if !resolved {
+                tracing::warn!(
+                    "[Gateway] destack spiral exhausted near ({:.1},{:.1},{:.1})",
+                    origin.x,
+                    origin.y,
+                    origin.z
+                );
             }
             let verts = crate::domain::tetra::Tetrahedron::compute_vertices(core);
             PlacementOutcome {

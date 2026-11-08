@@ -253,9 +253,17 @@ impl Space {
                 }
             }
             if let Some(existing) = stack_hit {
+                let existing_core = inner
+                    .tetrahedrons
+                    .get(&existing)
+                    .map(|t| (t.core.x, t.core.y, t.core.z))
+                    .unwrap_or((0.0, 0.0, 0.0));
                 return Err(format!(
-                    "stacking rejected: tetra {} already occupies vertices {:?}",
-                    existing, vertex_ids
+                    "stacking rejected: tetra {} already occupies vertices {:?} (existing core {:?}, new core {:?})",
+                    existing,
+                    vertex_ids,
+                    existing_core,
+                    (tetra.core.x, tetra.core.y, tetra.core.z)
                 ));
             }
         }
