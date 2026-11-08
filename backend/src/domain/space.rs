@@ -178,6 +178,24 @@ impl Space {
         Ok(tetra.id)
     }
 
+    /// 远距让位点(以 tetra id 为盐): 密集层中确定性向日葵格点可能被同类让位填满,
+    /// id 唯一保证不同插入的远距点互不相同——并发下不可能持续碰撞。
+    fn far_displacement(core: &Point3, salt: u64, attempt: usize) -> Point3 {
+        let mut h = salt
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add((attempt as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9));
+        h ^= h >> 27;
+        h = h.wrapping_mul(0x94D0_49BB_1331_11EB);
+        let angle = (h >> 11) as f64 / (1u64 << 53) as f64 * std::f64::consts::TAU;
+        let h2 = h.rotate_left(17) ^ (h >> 33);
+        let radius = 25.0 + (h2 >> 11) as f64 / (1u64 << 53) as f64 * 35.0;
+        Point3::new(
+            core.x + radius * angle.cos(),
+            core.y + radius * angle.sin(),
+            core.z,
+        )
+    }
+
     fn insert_tetra(
         inner: &mut SpaceInner,
         tetra: &Tetrahedron,
@@ -188,20 +206,29 @@ impl Space {
         // 会使复形退化为单纯多重复形、edge/face 表 shared_by>1 破坏度数/容量结论。
         // 并发创建(主循环+分类器线程)使放置阶段的检查与插入之间存在 TOCTOU 窗口,
         // 因此堆叠检测必须在写锁内原子完成: 命中时向日葵序(黄金角+√k 半径)让位重试,
-        // 而非拒绝——保证任何放置序列都能插入成功且不产生堆叠。
-        const DESTACK_MAX: usize = 16;
+        // 格点填满后按 id 盐远距让位——保证任何放置序列都能插入成功且不产生堆叠。
+        const DESTACK_MAX: usize = 16; // 向日葵格点尝试数
+        const FAR_MAX: usize = 5; // 远距让位尝试数
+        let total_attempts = 1 + DESTACK_MAX + FAR_MAX;
         let base_next_vertex_id = inner.next_vertex_id;
 
-        for attempt in 0..=DESTACK_MAX {
+        for attempt in 0..total_attempts {
             let (core, positions) = if attempt == 0 {
                 (tetra.core, *positions)
-            } else {
+            } else if attempt <= DESTACK_MAX {
                 let theta = attempt as f64 * 2.399_963; // 黄金角 ≈137.5°
                 let r = 1.5 * (attempt as f64).sqrt();
                 let core = Point3::new(
                     tetra.core.x + r * theta.cos(),
                     tetra.core.y + r * theta.sin(),
                     tetra.core.z,
+                );
+                (core, Tetrahedron::compute_vertices(core))
+            } else {
+                let core = Self::far_displacement(
+                    &tetra.core,
+                    id,
+                    attempt - DESTACK_MAX,
                 );
                 (core, Tetrahedron::compute_vertices(core))
             };
@@ -265,7 +292,7 @@ impl Space {
                 None
             })();
             if let Some(existing) = stacked {
-                if attempt == DESTACK_MAX {
+                if attempt + 1 == total_attempts {
                     let existing_core = inner
                         .tetrahedrons
                         .get(&existing)
