@@ -1814,8 +1814,8 @@ mod tests {
         assert_ne!(first, displaced, "identical insertion must not stack");
         let (a, b) = {
             let inner = space.inner.read();
-            let ta = inner.tetrahedrons[&first];
-            let tb = inner.tetrahedrons[&displaced];
+            let ta = &inner.tetrahedrons[&first];
+            let tb = &inner.tetrahedrons[&displaced];
             assert!(
                 ta.vertex_ids.iter().all(|v| !tb.vertex_ids.contains(v)),
                 "displaced tetra must not share all vertices"
