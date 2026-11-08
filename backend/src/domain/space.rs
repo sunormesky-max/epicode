@@ -225,11 +225,7 @@ impl Space {
                 );
                 (core, Tetrahedron::compute_vertices(core))
             } else {
-                let core = Self::far_displacement(
-                    &tetra.core,
-                    id,
-                    attempt - DESTACK_MAX,
-                );
+                let core = Self::far_displacement(&tetra.core, id, attempt - DESTACK_MAX);
                 (core, Tetrahedron::compute_vertices(core))
             };
 
