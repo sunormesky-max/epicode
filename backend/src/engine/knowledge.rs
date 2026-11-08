@@ -287,10 +287,7 @@ impl KnowledgeGraph {
             if let Some(i) = idx_hit {
                 if strength > relations[i].strength {
                     relations[i].strength = strength;
-                    if !self
-                        .loading
-                        .load(std::sync::atomic::Ordering::Relaxed)
-                    {
+                    if !self.loading.load(std::sync::atomic::Ordering::Relaxed) {
                         self.queue_relation_upsert(relations[i].clone());
                     }
                     self.mark_dirty(false);

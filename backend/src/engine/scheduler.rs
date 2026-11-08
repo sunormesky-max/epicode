@@ -3809,8 +3809,7 @@ impl SchedulerCenter {
                 // 显式遗忘通道(FORGET_IMPORTANCE 例外, 见 governor 模块文档)。
                 if let Some(t) = self.space.get_tetrahedron(*id) {
                     let mut d = t.data.clone();
-                    d.importance = (d.importance * 0.7)
-                        .max(super::governor::IMPORTANCE_FLOOR);
+                    d.importance = (d.importance * 0.7).max(super::governor::IMPORTANCE_FLOOR);
                     let _ = self.space.patch_payload(*id, &t.data, d);
                     if let Some(t) = self.space.get_tetrahedron(*id) {
                         let _ = self.storage.upsert_tetra(&t);

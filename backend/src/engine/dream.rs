@@ -1037,8 +1037,7 @@ mod idempotency_tests {
         );
         // 第二轮不再合并, 质量 仅按 Phase0 衰减变化
         assert!(
-            (space.get_tetrahedron(a).unwrap().mass
-                - mass_after_first * MASS_DECAY_PER_CYCLE)
+            (space.get_tetrahedron(a).unwrap().mass - mass_after_first * MASS_DECAY_PER_CYCLE)
                 .abs()
                 < 1e-9,
             "keeper mass should only change by decay"
