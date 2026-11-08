@@ -679,12 +679,6 @@ impl GatewayCenter {
                 if self.space.count_vertex_merges(&verts) < 4 {
                     core = probe;
                     resolved = true;
-                    if k > 0 {
-                        eprintln!(
-                            "[DESTACK] moved ({:.2},{:.2},{:.2}) -> ({:.2},{:.2},{:.2})",
-                            origin.x, origin.y, origin.z, probe.x, probe.y, probe.z
-                        );
-                    }
                     break;
                 }
             }
