@@ -178,102 +178,186 @@ impl Space {
         Ok(tetra.id)
     }
 
+    /// 远距让位点(以 tetra id 为盐): 密集层中确定性向日葵格点可能被同类让位填满,
+    /// id 唯一保证不同插入的远距点互不相同——并发下不可能持续碰撞。
+    fn far_displacement(core: &Point3, salt: u64, attempt: usize) -> Point3 {
+        let mut h = salt
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add((attempt as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9));
+        h ^= h >> 27;
+        h = h.wrapping_mul(0x94D0_49BB_1331_11EB);
+        let angle = (h >> 11) as f64 / (1u64 << 53) as f64 * std::f64::consts::TAU;
+        let h2 = h.rotate_left(17) ^ (h >> 33);
+        let radius = 25.0 + (h2 >> 11) as f64 / (1u64 << 53) as f64 * 35.0;
+        Point3::new(
+            core.x + radius * angle.cos(),
+            core.y + radius * angle.sin(),
+            core.z,
+        )
+    }
+
     fn insert_tetra(
         inner: &mut SpaceInner,
         tetra: &Tetrahedron,
         id: TetraId,
         positions: &[Point3; 4],
     ) -> Result<(), String> {
-        let mut vertex_ids = [0u64; 4];
-        // Stage new vertices until all IDs have been allocated. A counter near
-        // exhaustion must not leave a partially inserted tetrahedron behind.
-        // Shape validation ensures the four positions cannot merge with each other.
-        let mut new_vertices = Vec::with_capacity(4);
-        let mut next_vertex_id = inner.next_vertex_id;
-        for i in 0..4 {
-            let pos = &positions[i];
-            let gk = grid_key(pos);
-            let mut found: Option<VertexId> = None;
-            for nk in nearby_keys(gk) {
-                if let Some(vids) = inner.vertex_grid.get(&nk) {
-                    for &vid in vids {
-                        if let Some(v) = inner.vertices.get(&vid) {
-                            if v.position.distance_to(pos) < VERTEX_MERGE_EPSILON {
-                                found = Some(vid);
-                                break;
+        // 防堆叠(ASC 完整性, 定理 T1): 两四面体共享 4 顶点 ⟺ 核心重合的堆叠拷贝,
+        // 会使复形退化为单纯多重复形、edge/face 表 shared_by>1 破坏度数/容量结论。
+        // 并发创建(主循环+分类器线程)使放置阶段的检查与插入之间存在 TOCTOU 窗口,
+        // 因此堆叠检测必须在写锁内原子完成: 命中时向日葵序(黄金角+√k 半径)让位重试,
+        // 格点填满后按 id 盐远距让位——保证任何放置序列都能插入成功且不产生堆叠。
+        const DESTACK_MAX: usize = 16; // 向日葵格点尝试数
+        const FAR_MAX: usize = 5; // 远距让位尝试数
+        let total_attempts = 1 + DESTACK_MAX + FAR_MAX;
+        let base_next_vertex_id = inner.next_vertex_id;
+
+        for attempt in 0..total_attempts {
+            let (core, positions) = if attempt == 0 {
+                (tetra.core, *positions)
+            } else if attempt <= DESTACK_MAX {
+                let theta = attempt as f64 * 2.399_963; // 黄金角 ≈137.5°
+                let r = 1.5 * (attempt as f64).sqrt();
+                let core = Point3::new(
+                    tetra.core.x + r * theta.cos(),
+                    tetra.core.y + r * theta.sin(),
+                    tetra.core.z,
+                );
+                (core, Tetrahedron::compute_vertices(core))
+            } else {
+                let core = Self::far_displacement(&tetra.core, id, attempt - DESTACK_MAX);
+                (core, Tetrahedron::compute_vertices(core))
+            };
+
+            let mut vertex_ids = [0u64; 4];
+            // Stage new vertices until all IDs have been allocated. A counter near
+            // exhaustion must not leave a partially inserted tetrahedron behind.
+            // Shape validation ensures the four positions cannot merge with each other.
+            let mut new_vertices = Vec::with_capacity(4);
+            let mut next_vertex_id = base_next_vertex_id;
+            for i in 0..4 {
+                let pos = &positions[i];
+                let gk = grid_key(pos);
+                let mut found: Option<VertexId> = None;
+                for nk in nearby_keys(gk) {
+                    if let Some(vids) = inner.vertex_grid.get(&nk) {
+                        for &vid in vids {
+                            if let Some(v) = inner.vertices.get(&vid) {
+                                if v.position.distance_to(pos) < VERTEX_MERGE_EPSILON {
+                                    found = Some(vid);
+                                    break;
+                                }
                             }
                         }
                     }
+                    if found.is_some() {
+                        break;
+                    }
                 }
-                if found.is_some() {
-                    break;
-                }
+                let vid = match found {
+                    Some(vid) => {
+                        tracing::debug!(
+                            "[Space] vertex MERGE: tetra {} vertex[{}] merged into existing vid={} (dist={:.4})",
+                            id, i, vid, inner.vertices.get(&vid).map(|v| v.position.distance_to(pos)).unwrap_or(0.0)
+                        );
+                        vid
+                    }
+                    None => {
+                        // Cylinder Port IDs and ordinary vertex IDs share a u64
+                        // namespace. Skip every occupied ID, including real Ports.
+                        let vid = Self::next_free_vertex_id(&inner.vertices, &mut next_vertex_id)?;
+                        new_vertices.push((vid, *pos, gk));
+                        vid
+                    }
+                };
+                vertex_ids[i] = vid;
             }
-            let vid = match found {
-                Some(vid) => {
-                    tracing::debug!(
-                        "[Space] vertex MERGE: tetra {} vertex[{}] merged into existing vid={} (dist={:.4})",
-                        id, i, vid, inner.vertices.get(&vid).map(|v| v.position.distance_to(pos)).unwrap_or(0.0)
-                    );
-                    vid
+
+            // 堆叠判定: 存在已存四面体包含全部 4 个顶点 id
+            let stacked = (|| -> Option<TetraId> {
+                let first = inner.vertex_to_tetras.get(&vertex_ids[0])?;
+                'cand: for &cand in first {
+                    for vid in &vertex_ids[1..] {
+                        match inner.vertex_to_tetras.get(vid) {
+                            Some(ids) if ids.contains(&cand) => {}
+                            _ => continue 'cand,
+                        }
+                    }
+                    return Some(cand);
                 }
-                None => {
-                    // Cylinder Port IDs and ordinary vertex IDs share a u64
-                    // namespace. Skip every occupied ID, including real Ports.
-                    let vid = Self::next_free_vertex_id(&inner.vertices, &mut next_vertex_id)?;
-                    new_vertices.push((vid, *pos, gk));
-                    vid
+                None
+            })();
+            if let Some(existing) = stacked {
+                if attempt + 1 == total_attempts {
+                    let existing_core = inner
+                        .tetrahedrons
+                        .get(&existing)
+                        .map(|t| (t.core.x, t.core.y, t.core.z))
+                        .unwrap_or((0.0, 0.0, 0.0));
+                    return Err(format!(
+                        "stacking rejected: tetra {} already occupies vertices {:?} (existing core {:?}, new core {:?})",
+                        existing,
+                        vertex_ids,
+                        existing_core,
+                        (core.x, core.y, core.z)
+                    ));
                 }
-            };
-            vertex_ids[i] = vid;
+                tracing::info!(
+                    "[Space] destack: tetra {} displaced from ({:.2},{:.2},{:.2}) — stacked on tetra {}",
+                    id, core.x, core.y, core.z, existing
+                );
+                continue; // 让位重试(丢弃本次暂存的新顶点与 id 计数)
+            }
+
+            inner.next_vertex_id = next_vertex_id;
+            for (vid, pos, gk) in new_vertices {
+                inner.vertices.insert(vid, Vertex::new(vid, pos));
+                inner.vertex_grid.entry(gk).or_default().push(vid);
+            }
+
+            let merged_count = vertex_ids.iter().collect::<HashSet<_>>().len();
+            if merged_count < 4 {
+                tracing::info!(
+                    "[Space] tetra {} shares {} vertices with existing tetrahedra",
+                    id,
+                    4 - merged_count
+                );
+            }
+
+            let mut insert_tetra = tetra.clone();
+            insert_tetra.id = id;
+            insert_tetra.vertex_ids = vertex_ids;
+            insert_tetra.core = core;
+
+            for &vid in &vertex_ids {
+                inner.vertex_to_tetras.entry(vid).or_default().push(id);
+            }
+
+            for &(i, j) in Tetrahedron::edges() {
+                let key = ordered_pair(vertex_ids[i], vertex_ids[j]);
+                inner.edge_table.entry(key).or_default().shared_by.push(id);
+            }
+
+            for &face_indices in Tetrahedron::faces() {
+                let mut key = [
+                    vertex_ids[face_indices[0]],
+                    vertex_ids[face_indices[1]],
+                    vertex_ids[face_indices[2]],
+                ];
+                key.sort();
+                inner.face_table.entry(key).or_default().shared_by.push(id);
+            }
+
+            let core_for_grid = insert_tetra.core;
+            inner.tetrahedrons.insert(id, insert_tetra);
+            inner
+                .tetra_grid
+                .entry(grid_key(&core_for_grid))
+                .or_default()
+                .push(id);
+            return Ok(());
         }
-
-        inner.next_vertex_id = next_vertex_id;
-        for (vid, pos, gk) in new_vertices {
-            inner.vertices.insert(vid, Vertex::new(vid, pos));
-            inner.vertex_grid.entry(gk).or_default().push(vid);
-        }
-
-        let merged_count = vertex_ids.iter().collect::<HashSet<_>>().len();
-        if merged_count < 4 {
-            tracing::info!(
-                "[Space] tetra {} shares {} vertices with existing tetrahedra",
-                id,
-                4 - merged_count
-            );
-        }
-
-        let mut insert_tetra = tetra.clone();
-        insert_tetra.id = id;
-        insert_tetra.vertex_ids = vertex_ids;
-
-        for &vid in &vertex_ids {
-            inner.vertex_to_tetras.entry(vid).or_default().push(id);
-        }
-
-        for &(i, j) in Tetrahedron::edges() {
-            let key = ordered_pair(vertex_ids[i], vertex_ids[j]);
-            inner.edge_table.entry(key).or_default().shared_by.push(id);
-        }
-
-        for &face_indices in Tetrahedron::faces() {
-            let mut key = [
-                vertex_ids[face_indices[0]],
-                vertex_ids[face_indices[1]],
-                vertex_ids[face_indices[2]],
-            ];
-            key.sort();
-            inner.face_table.entry(key).or_default().shared_by.push(id);
-        }
-
-        let core_for_grid = insert_tetra.core;
-        inner.tetrahedrons.insert(id, insert_tetra);
-        inner
-            .tetra_grid
-            .entry(grid_key(&core_for_grid))
-            .or_default()
-            .push(id);
-        Ok(())
+        unreachable!("destack loop always returns within DESTACK_MAX+1 iterations")
     }
 
     fn next_free_vertex_id(
@@ -1454,7 +1538,13 @@ mod tests {
     }
 
     fn center_with_vertex_at(position: Point3) -> Point3 {
-        let offset = Tetrahedron::compute_vertices(Point3::zero())[0];
+        center_with_vertex_at_slot(position, 0)
+    }
+
+    /// 用不同槽位角向落点: 同样让一个顶点精确落在 position 上,
+    /// 但四面体整体朝向不同——可放置共享该顶点而不堆叠的 sibling。
+    fn center_with_vertex_at_slot(position: Point3, slot: usize) -> Point3 {
+        let offset = Tetrahedron::compute_vertices(Point3::zero())[slot];
         Point3::new(
             position.x - offset.x,
             position.y - offset.y,
@@ -1734,21 +1824,29 @@ mod tests {
 
     #[test]
     fn edge_share_count() {
+        // T1(共享基数二分法): 不同四面体的共享顶点只能是 0/1/4, 其中 4 仅指堆叠。
+        // 防堆叠在写锁内原子让位: 同核插入成功但被位移到自己的落点,
+        // 两个四面体各占各的顶点, 棱表 shared_by 恒为 1。
         let space = Space::new();
         let c = Point3::zero();
         let (t1, p1) = make_tetra(0, c);
         let (t2, p2) = make_tetra(0, c);
 
-        space.add_tetrahedron(&t1, &p1).unwrap();
-        space.add_tetrahedron(&t2, &p2).unwrap();
-
-        let v_ids = {
+        let first = space.add_tetrahedron(&t1, &p1).unwrap();
+        let displaced = space.add_tetrahedron(&t2, &p2).unwrap();
+        assert_ne!(first, displaced, "identical insertion must not stack");
+        let (a, b) = {
             let inner = space.inner.read();
-            let t = inner.tetrahedrons.values().next().unwrap();
-            t.vertex_ids
+            let ta = &inner.tetrahedrons[&first];
+            let tb = &inner.tetrahedrons[&displaced];
+            assert!(
+                ta.vertex_ids.iter().all(|v| !tb.vertex_ids.contains(v)),
+                "displaced tetra must not share all vertices"
+            );
+            (ta.vertex_ids[0], ta.vertex_ids[1])
         };
-        let count = space.edge_share_count(v_ids[0], v_ids[1]);
-        assert_eq!(count, 2);
+        let count = space.edge_share_count(a, b);
+        assert_eq!(count, 1);
     }
 
     #[test]
@@ -2010,7 +2108,9 @@ mod tests {
         let core = center_with_vertex_at(port_pos);
         let (tetra, positions) = make_tetra(0, core);
         let anchor = space.add_tetrahedron(&tetra, &positions).unwrap();
-        let sibling = space.add_tetrahedron(&tetra, &positions).unwrap();
+        // sibling 用槽位 1 落点: 与 anchor 精确共享 Port 顶点但不堆叠(防堆叠守卫)
+        let (sib_tetra, sib_positions) = make_tetra(0, center_with_vertex_at_slot(port_pos, 1));
+        let sibling = space.add_tetrahedron(&sib_tetra, &sib_positions).unwrap();
         assert!(space.assign_specific_port(port_vid, anchor));
 
         space.remove_tetrahedron(anchor).unwrap();
@@ -2051,7 +2151,9 @@ mod tests {
         let old_core = center_with_vertex_at(old_position);
         let (tetra, positions) = make_tetra(0, old_core);
         let anchor = space.add_tetrahedron(&tetra, &positions).unwrap();
-        let sibling = space.add_tetrahedron(&tetra, &positions).unwrap();
+        // sibling 用槽位 1 落点: 精确共享 old Port 顶点但不堆叠(防堆叠守卫)
+        let (sib_tetra, sib_positions) = make_tetra(0, center_with_vertex_at_slot(old_position, 1));
+        let sibling = space.add_tetrahedron(&sib_tetra, &sib_positions).unwrap();
         assert!(space.assign_specific_port(old_port, anchor));
 
         space

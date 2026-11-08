@@ -264,6 +264,35 @@ impl KnowledgeGraph {
             dedup.contains(&key_fwd) || (key_fwd != key_rev && dedup.contains(&key_rev))
         };
         if exists {
+            // 首写即定 → 强度升级: 已有边取 max(旧, 新), 调用方不再被静默丢弃。
+            // (七维研究-KG维度: 认知层 link 判决无声失效, LLM 无法学到"判决没生效";
+            //  pulse/PPR 重复建边也无法校正强度)
+            let adj = self.adj_index.read();
+            let idx_hit = adj
+                .get(&source)
+                .into_iter()
+                .flatten()
+                .chain(adj.get(&target).into_iter().flatten())
+                .copied()
+                .find(|&i| {
+                    let r = &relations[i];
+                    let rt_now = r.relation_type.discriminant();
+                    (r.source == source && r.target == target && rt_now == rt)
+                        || (key_fwd != key_rev
+                            && r.source == target
+                            && r.target == source
+                            && rt_now == rt)
+                });
+            drop(adj);
+            if let Some(i) = idx_hit {
+                if strength > relations[i].strength {
+                    relations[i].strength = strength;
+                    if !self.loading.load(std::sync::atomic::Ordering::Relaxed) {
+                        self.queue_relation_upsert(relations[i].clone());
+                    }
+                    self.mark_dirty(false);
+                }
+            }
             return;
         }
         {
@@ -1625,12 +1654,16 @@ mod tests {
         let space = Space::new();
         let kg = KnowledgeGraph::new();
 
-        for (text, labels) in [
+        for (i, (text, labels)) in [
             ("hello world", vec!["greeting".to_string()]),
             ("hello there", vec!["greeting".to_string()]),
             ("goodbye moon", vec!["farewell".to_string()]),
-        ] {
-            let core = Point3::zero();
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            // 防堆叠守卫: 每条记忆错开落点(同核插入会被拒绝)
+            let core = Point3::new(i as f64 * 3.0, 0.0, 0.0);
             let pos = Tetrahedron::compute_vertices(core);
             let t = Tetrahedron {
                 id: 0,

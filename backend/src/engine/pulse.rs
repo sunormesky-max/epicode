@@ -173,12 +173,25 @@ impl PulseEngine {
                 report.content_hashes.push(t.data.content_hash);
 
                 if *tid != origin {
-                    kg.add_relation(
-                        origin,
-                        *tid,
-                        crate::engine::knowledge::RelationType::Related,
-                        0.5,
-                    );
+                    // 噪声边治理: 与 send() 主路径(PR#322)对齐——port 脉冲也只在
+                    // 相似度达标时建边, 且强度用实测相似度而非硬编码 0.5 虚高初值。
+                    // 之前对全簇无条件建边, 把 50 边/节点配额灌满低质量 Related 边。
+                    if let (Some(o), Some(t)) = (snapshot.get(&origin), snapshot.get(tid)) {
+                        let sim = crate::engine::vector::VectorLayer::best_similarity(
+                            &o.data.embedding,
+                            &o.data.labels,
+                            &t.data.embedding,
+                            &t.data.labels,
+                        );
+                        if sim > 0.2 {
+                            kg.add_relation(
+                                origin,
+                                *tid,
+                                crate::engine::knowledge::RelationType::Related,
+                                sim,
+                            );
+                        }
+                    }
                 }
             }
         }

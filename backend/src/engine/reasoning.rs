@@ -149,8 +149,9 @@ mod tests {
             ("Python is slow", vec!["python".to_string()]),
             ("Python is readable", vec!["python".to_string()]),
         ];
-        for (text, labels) in &topics {
-            let core = Point3::zero();
+        for (i, (text, labels)) in topics.iter().enumerate() {
+            // 防堆叠守卫: 每条记忆错开落点(同核插入会被拒绝)
+            let core = Point3::new(i as f64 * 3.0, 0.0, 0.0);
             let pos = Tetrahedron::compute_vertices(core);
             let t = Tetrahedron {
                 id: 0,

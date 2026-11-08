@@ -474,7 +474,11 @@ mod tests {
     use crate::domain::vertex::Point3;
 
     fn make_tetra(space: &Space, content: &str, importance: f64, access_count: u32) {
-        let core = Point3::new(0.0, 0.0, 0.0);
+        // 防堆叠守卫后同核插入会被拒绝——用递增槽位错开各测试记忆的落点
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT_SLOT: AtomicUsize = AtomicUsize::new(0);
+        let slot = NEXT_SLOT.fetch_add(1, Ordering::Relaxed);
+        let core = Point3::new(slot as f64 * 3.0, 0.0, 0.0);
         let pos = Tetrahedron::compute_vertices(core);
         let data = MemoryPayload {
             content: content.to_string(),
@@ -499,7 +503,8 @@ mod tests {
             data,
             mass: 1.0,
         };
-        let _ = space.add_tetrahedron(&t, &pos);
+        // 旧版 `let _` 静默吞掉了同核堆叠失败——守卫上线后必须显式失败
+        space.add_tetrahedron(&t, &pos).unwrap();
     }
 
     #[test]

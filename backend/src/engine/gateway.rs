@@ -656,10 +656,44 @@ impl GatewayCenter {
         layer: crate::domain::cylinder::CylinderLayer,
     ) -> PlacementOutcome {
         let mk = |core: Point3, has_port: bool, is_seed: bool, is_orphan: bool| {
-            let verts = crate::domain::tetra::Tetrahedron::compute_vertices(core);
+            // 防堆叠终检: clamp_z 的层边界夹持(最多 ~0.7)可把候选核心平移到既有核心
+            // 之上, 造成 4 顶点全合并——insert_tetra 守卫会拒绝并使创建失败。
+            // 向日葵序让位(黄金角+√k 半径): 各方向准均匀铺开且无重复访问,
+            // 精确检测"4 顶点全合并", 让位到 ≤3 共享的落点(合法单点共享)。
+            let origin = core;
+            let mut placed = origin;
+            let mut resolved = false;
+            for k in 0..24u8 {
+                let probe = if k == 0 {
+                    origin
+                } else {
+                    let theta = k as f64 * 2.399_963; // 黄金角 ≈137.5°
+                    let r = 1.5 * (k as f64).sqrt();
+                    Point3::new(
+                        origin.x + r * theta.cos(),
+                        origin.y + r * theta.sin(),
+                        origin.z,
+                    )
+                };
+                let verts = crate::domain::tetra::Tetrahedron::compute_vertices(probe);
+                if self.space.count_vertex_merges(&verts) < 4 {
+                    placed = probe;
+                    resolved = true;
+                    break;
+                }
+            }
+            if !resolved {
+                tracing::warn!(
+                    "[Gateway] destack spiral exhausted near ({:.1},{:.1},{:.1})",
+                    origin.x,
+                    origin.y,
+                    origin.z
+                );
+            }
+            let verts = crate::domain::tetra::Tetrahedron::compute_vertices(placed);
             PlacementOutcome {
                 layer: layer.as_str(),
-                core: [core.x, core.y, core.z],
+                core: [placed.x, placed.y, placed.z],
                 has_port,
                 is_seed,
                 is_orphan,
@@ -810,7 +844,22 @@ impl GatewayCenter {
             }
         }
 
-        best_pos.unwrap_or(anchor)
+        best_pos.unwrap_or_else(|| {
+            // 饱和兜底: 全部 4 个槽位核心被占用时, 旧版返回 anchor 本身——
+            // 可能与既有四面体完全堆叠(现被 insert_tetra 防堆叠守卫拒绝, 创建失败)。
+            // 改为沿 +x 逐格退让, 找到与既有核心错开 ≥0.2 的第一个落点。
+            let mut probe = anchor;
+            for _ in 0..16 {
+                probe = Point3::new(probe.x + 2.0, probe.y, probe.z);
+                let occupied = tetras.iter().any(|t| {
+                    t.core.distance_to(&probe) < crate::domain::vertex::VERTEX_MERGE_EPSILON * 4.0
+                });
+                if !occupied {
+                    return probe;
+                }
+            }
+            anchor
+        })
     }
 
     pub fn search(
