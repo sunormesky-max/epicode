@@ -661,7 +661,7 @@ impl GatewayCenter {
             // 向日葵序让位(黄金角+√k 半径): 各方向准均匀铺开且无重复访问,
             // 精确检测"4 顶点全合并", 让位到 ≤3 共享的落点(合法单点共享)。
             let origin = core;
-            let mut core = origin;
+            let mut placed = origin;
             let mut resolved = false;
             for k in 0..24u8 {
                 let probe = if k == 0 {
@@ -677,7 +677,7 @@ impl GatewayCenter {
                 };
                 let verts = crate::domain::tetra::Tetrahedron::compute_vertices(probe);
                 if self.space.count_vertex_merges(&verts) < 4 {
-                    core = probe;
+                    placed = probe;
                     resolved = true;
                     break;
                 }
@@ -690,10 +690,10 @@ impl GatewayCenter {
                     origin.z
                 );
             }
-            let verts = crate::domain::tetra::Tetrahedron::compute_vertices(core);
+            let verts = crate::domain::tetra::Tetrahedron::compute_vertices(placed);
             PlacementOutcome {
                 layer: layer.as_str(),
-                core: [core.x, core.y, core.z],
+                core: [placed.x, placed.y, placed.z],
                 has_port,
                 is_seed,
                 is_orphan,
