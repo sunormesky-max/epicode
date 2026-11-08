@@ -1290,6 +1290,57 @@ pub fn search(
 
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
+    // ── Spatial cluster boost: 强匹配的同簇邻居获得加分 ──
+    // 四面体因标签相似被放置到同一簇（共享顶点），簇内记忆天然语义相关。
+    // 当某个记忆是强匹配 (score > 0.5) 时，其空间邻居应获得提升。
+    // 这是四面体几何第一次直接影响检索排序。
+    if scored.len() > 1 {
+        const SPATIAL_BOOST_THRESHOLD: f64 = 0.5;
+        const SPATIAL_BOOST_AMOUNT: f64 = 0.08;
+        const SPATIAL_BOOST_MAX_NEIGHBORS: usize = 20;
+        let strong_matches: Vec<TetraId> = scored
+            .iter()
+            .filter(|(_, s, _, _)| *s > SPATIAL_BOOST_THRESHOLD)
+            .map(|(id, _, _, _)| *id)
+            .take(3) // 最多从 top-3 强匹配扩展
+            .collect();
+
+        if !strong_matches.is_empty() {
+            let mut boost_map: HashMap<TetraId, f64> = HashMap::new();
+            for &sid in &strong_matches {
+                for nid in ctx.space.neighbors_of(sid) {
+                    if let Some(entry) = boost_map.get_mut(&nid) {
+                        *entry += SPATIAL_BOOST_AMOUNT;
+                    } else if boost_map.len() < SPATIAL_BOOST_MAX_NEIGHBORS {
+                        boost_map.insert(nid, SPATIAL_BOOST_AMOUNT);
+                    }
+                }
+            }
+
+            if !boost_map.is_empty() {
+                let boosted_count = scored
+                    .iter()
+                    .filter(|(id, _, _, _)| boost_map.contains_key(id))
+                    .count();
+                if boosted_count > 0 {
+                    tracing::debug!(
+                        "[Search] spatial cluster boost: {} strong matches, {} neighbors boosted (+{:.2} each)",
+                        strong_matches.len(),
+                        boosted_count,
+                        SPATIAL_BOOST_AMOUNT
+                    );
+                }
+                for item in scored.iter_mut() {
+                    if let Some(boost) = boost_map.get(&item.0) {
+                        item.1 = (item.1 + boost).min(1.0);
+                    }
+                }
+                // 重新排序（boost 可能改变排序）
+                scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            }
+        }
+    }
+
     let best_sim = scored.first().map(|s| s.1).unwrap_or(0.0);
     if gibberish_query && best_sim < 0.25 {
         tracing::info!(

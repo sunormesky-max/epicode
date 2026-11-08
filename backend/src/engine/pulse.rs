@@ -68,12 +68,16 @@ impl PulseEngine {
 
                 mass_updates.push((*tid, 0.02 * sim.max(0.1)));
 
-                kg.add_relation(
-                    origin,
-                    *tid,
-                    crate::engine::knowledge::RelationType::Related,
-                    sim.max(0.1),
-                );
+                // 噪声边治理: 只在相似度达标时建边 (sim > 0.2)
+                // 之前对所有 visited 无条件建边, 低相似度的 BFS 扫到项挤占 50 边/节点上限
+                if sim > 0.2 {
+                    kg.add_relation(
+                        origin,
+                        *tid,
+                        crate::engine::knowledge::RelationType::Related,
+                        sim,
+                    );
+                }
             }
         }
 
