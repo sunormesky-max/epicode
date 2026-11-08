@@ -810,7 +810,22 @@ impl GatewayCenter {
             }
         }
 
-        best_pos.unwrap_or(anchor)
+        best_pos.unwrap_or_else(|| {
+            // 饱和兜底: 全部 4 个槽位核心被占用时, 旧版返回 anchor 本身——
+            // 可能与既有四面体完全堆叠(现被 insert_tetra 防堆叠守卫拒绝, 创建失败)。
+            // 改为沿 +x 逐格退让, 找到与既有核心错开 ≥0.2 的第一个落点。
+            let mut probe = anchor;
+            for _ in 0..16 {
+                probe = Point3::new(probe.x + 2.0, probe.y, probe.z);
+                let occupied = tetras.iter().any(|t| {
+                    t.core.distance_to(&probe) < crate::domain::vertex::VERTEX_MERGE_EPSILON * 4.0
+                });
+                if !occupied {
+                    return probe;
+                }
+            }
+            anchor
+        })
     }
 
     pub fn search(

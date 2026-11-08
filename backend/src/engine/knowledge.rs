@@ -1657,12 +1657,16 @@ mod tests {
         let space = Space::new();
         let kg = KnowledgeGraph::new();
 
-        for (text, labels) in [
+        for (i, (text, labels)) in [
             ("hello world", vec!["greeting".to_string()]),
             ("hello there", vec!["greeting".to_string()]),
             ("goodbye moon", vec!["farewell".to_string()]),
-        ] {
-            let core = Point3::zero();
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            // 防堆叠守卫: 每条记忆错开落点(同核插入会被拒绝)
+            let core = Point3::new(i as f64 * 3.0, 0.0, 0.0);
             let pos = Tetrahedron::compute_vertices(core);
             let t = Tetrahedron {
                 id: 0,

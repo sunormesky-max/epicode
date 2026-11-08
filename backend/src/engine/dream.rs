@@ -815,7 +815,13 @@ mod idempotency_tests {
                 ordinary_after.data.importance,
                 ordinary_before.data.importance
             );
-            assert_eq!(ordinary_after.mass, ordinary_before.mass);
+            // 普通记忆的质量按 Phase0 衰减(×MASS_DECAY_PER_CYCLE), 保护(enforced)不衰减
+            assert!(
+                (ordinary_after.mass - ordinary_before.mass * MASS_DECAY_PER_CYCLE).abs() < 1e-9,
+                "ordinary mass should only change by decay: {} vs {}",
+                ordinary_after.mass,
+                ordinary_before.mass
+            );
         }
     }
 
@@ -859,7 +865,14 @@ mod idempotency_tests {
                     "{name}: memory {id} was superseded"
                 );
                 assert_eq!(after.data.valid_to, None, "{name}: memory {id}");
-                assert_eq!(after.mass, if id == id_a { 2.0 } else { 1.0 }, "{name}");
+                // Phase0 质量衰减: 落点 = 初始质量 × 衰减系数(无合并发生)
+                let expected_mass = if id == id_a { 2.0 } else { 1.0 } * MASS_DECAY_PER_CYCLE;
+                assert!(
+                    (after.mass - expected_mass).abs() < 1e-9,
+                    "{name}: memory {id} mass {} != decayed {}",
+                    after.mass,
+                    expected_mass
+                );
             }
         }
     }
@@ -1023,6 +1036,13 @@ mod idempotency_tests {
             "superseded pair re-merged: {:?}",
             r2.insights
         );
-        assert_eq!(space.get_tetrahedron(a).unwrap().mass, mass_after_first);
+        // 第二轮不再合并, 质量 仅按 Phase0 衰减变化
+        assert!(
+            (space.get_tetrahedron(a).unwrap().mass
+                - mass_after_first * MASS_DECAY_PER_CYCLE)
+                .abs()
+                < 1e-9,
+            "keeper mass should only change by decay"
+        );
     }
 }

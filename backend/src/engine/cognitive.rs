@@ -1893,7 +1893,9 @@ impl CognitiveEngine {
                 .collect();
             sections.push(format!(
                 "\n### Cluster {} ({} tetras, entropy={:.3})\nLabels: {}\nSamples: {}",
-                c.index, c.size, c.entropy,
+                c.index,
+                c.size,
+                c.entropy,
                 labels_str,
                 samples.join(" | ")
             ));
