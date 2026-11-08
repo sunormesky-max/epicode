@@ -160,9 +160,8 @@ impl DreamEngine {
         // 低质量判定实际全靠 junk 标签, 探索回路断开(见七维研究-调度器维度)。
         if !dry_run {
             for t in &tetras {
-                if crate::domain::ops::Lifecycle::of(&t.data) != crate::domain::ops::Lifecycle::Active
-                    || t.data.enforced
-                {
+                let lifecycle = crate::domain::ops::Lifecycle::of(&t.data);
+                if lifecycle != crate::domain::ops::Lifecycle::Active || t.data.enforced {
                     continue;
                 }
                 if t.mass > crate::domain::ops::MASS_MIN {

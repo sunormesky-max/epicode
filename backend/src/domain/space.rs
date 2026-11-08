@@ -1480,7 +1480,13 @@ mod tests {
     }
 
     fn center_with_vertex_at(position: Point3) -> Point3 {
-        let offset = Tetrahedron::compute_vertices(Point3::zero())[0];
+        center_with_vertex_at_slot(position, 0)
+    }
+
+    /// 用不同槽位角向落点: 同样让一个顶点精确落在 position 上,
+    /// 但四面体整体朝向不同——可放置共享该顶点而不堆叠的 sibling。
+    fn center_with_vertex_at_slot(position: Point3, slot: usize) -> Point3 {
+        let offset = Tetrahedron::compute_vertices(Point3::zero())[slot];
         Point3::new(
             position.x - offset.x,
             position.y - offset.y,
@@ -2042,7 +2048,9 @@ mod tests {
         let core = center_with_vertex_at(port_pos);
         let (tetra, positions) = make_tetra(0, core);
         let anchor = space.add_tetrahedron(&tetra, &positions).unwrap();
-        let sibling = space.add_tetrahedron(&tetra, &positions).unwrap();
+        // sibling 用槽位 1 落点: 与 anchor 精确共享 Port 顶点但不堆叠(防堆叠守卫)
+        let (sib_tetra, sib_positions) = make_tetra(0, center_with_vertex_at_slot(port_pos, 1));
+        let sibling = space.add_tetrahedron(&sib_tetra, &sib_positions).unwrap();
         assert!(space.assign_specific_port(port_vid, anchor));
 
         space.remove_tetrahedron(anchor).unwrap();
@@ -2083,7 +2091,10 @@ mod tests {
         let old_core = center_with_vertex_at(old_position);
         let (tetra, positions) = make_tetra(0, old_core);
         let anchor = space.add_tetrahedron(&tetra, &positions).unwrap();
-        let sibling = space.add_tetrahedron(&tetra, &positions).unwrap();
+        // sibling 用槽位 1 落点: 精确共享 old Port 顶点但不堆叠(防堆叠守卫)
+        let (sib_tetra, sib_positions) =
+            make_tetra(0, center_with_vertex_at_slot(old_position, 1));
+        let sibling = space.add_tetrahedron(&sib_tetra, &sib_positions).unwrap();
         assert!(space.assign_specific_port(old_port, anchor));
 
         space
