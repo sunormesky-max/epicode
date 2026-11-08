@@ -2092,8 +2092,7 @@ mod tests {
         let (tetra, positions) = make_tetra(0, old_core);
         let anchor = space.add_tetrahedron(&tetra, &positions).unwrap();
         // sibling 用槽位 1 落点: 精确共享 old Port 顶点但不堆叠(防堆叠守卫)
-        let (sib_tetra, sib_positions) =
-            make_tetra(0, center_with_vertex_at_slot(old_position, 1));
+        let (sib_tetra, sib_positions) = make_tetra(0, center_with_vertex_at_slot(old_position, 1));
         let sibling = space.add_tetrahedron(&sib_tetra, &sib_positions).unwrap();
         assert!(space.assign_specific_port(old_port, anchor));
 
