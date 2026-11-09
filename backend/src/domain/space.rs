@@ -1141,8 +1141,7 @@ impl Space {
             }
         }
         // 每簇收集 (port_vid, owner, is_geometric) — 单次遍历 Port 表
-        let mut owned_by_cluster: HashMap<usize, Vec<(VertexId, TetraId, bool)>> =
-            HashMap::new();
+        let mut owned_by_cluster: HashMap<usize, Vec<(VertexId, TetraId, bool)>> = HashMap::new();
         {
             let inner = self.inner.read();
             for port in inner.cylinder.all_ports() {
