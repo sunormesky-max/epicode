@@ -2085,7 +2085,7 @@ mod kg_research_tests {
         assert!(
             kg.query_relations(b)
                 .iter()
-                .any(|(id, rel, _)| id == a && *rel == RelationType::SimilarTo),
+                .any(|(id, rel, _)| *id == a && *rel == RelationType::SimilarTo),
             "向量候选应建 SimilarTo 边"
         );
     }
