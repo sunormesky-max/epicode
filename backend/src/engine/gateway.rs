@@ -451,15 +451,32 @@ impl GatewayCenter {
                     let t = self.space.get_tetrahedron(id);
                     if let Some(t) = &t {
                         if !t.data.embedding.is_empty() && t.data.embedding.len() == EMBEDDING_DIM {
-                            self.search
-                                .hnsw
-                                .write()
-                                .insert(id, t.data.embedding.clone());
+                            let mut hnsw = self.search.hnsw.write();
+                            hnsw.insert(id, t.data.embedding.clone());
                         }
                     }
                 }
-                self.knowledge
-                    .auto_link_one(id, &self.space, &self.index.label_index.lock());
+                // P1-6 多路召回: 向量近邻(HNSW top-20)并入 auto_link_one 候选——
+                // 此前候选只有标签命中, 语义相近但标签不同的记忆永远连不上边
+                let vector_candidates: Vec<TetraId> = {
+                    let t = self.space.get_tetrahedron(id);
+                    let emb = t.map(|t| t.data.embedding.clone()).unwrap_or_default();
+                    if emb.len() == EMBEDDING_DIM {
+                        let hnsw = self.search.hnsw.read();
+                        hnsw.search_knn(&emb, 20, 50)
+                            .into_iter()
+                            .map(|(nid, _)| nid)
+                            .collect()
+                    } else {
+                        Vec::new()
+                    }
+                };
+                self.knowledge.auto_link_one(
+                    id,
+                    &self.space,
+                    &self.index.label_index.lock(),
+                    &vector_candidates,
+                );
                 // O-B: flush 矛盾对 → Contradicts 边(矛盾感知器官的突触)
                 {
                     let pending: Vec<(TetraId, f32)> =

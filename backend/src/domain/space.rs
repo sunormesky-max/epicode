@@ -1127,6 +1127,61 @@ impl Space {
         self.inner.read().cylinder.free_port_count(layer)
     }
 
+    /// P1-5 Port 合并对账(七维研究 D10): 融合后的簇可能同时持有多个 Port——
+    /// 大簇的几何锚 + 小簇 reseed 遗留的逻辑锚。"一簇一 Port"只是放置期策略,
+    /// 此前无对账路径: 同簇多 Port 假性耗尽 Port 池, 触发不必要的加环/扩柱。
+    /// 对账规则: 每簇保留一个 Port(优先几何接触者——可被脉冲 BFS 真实触达),
+    /// 释放其余回本层空闲池。返回释放数。O(P + N)。
+    pub fn reconcile_cluster_ports(&self) -> usize {
+        let clusters = self.find_clusters();
+        let mut tetra_cluster: HashMap<TetraId, usize> = HashMap::with_capacity(clusters.len());
+        for (ci, cluster) in clusters.iter().enumerate() {
+            for &tid in &cluster.tetra_ids {
+                tetra_cluster.insert(tid, ci);
+            }
+        }
+        // 每簇收集 (port_vid, owner, is_geometric) — 单次遍历 Port 表
+        let mut owned_by_cluster: HashMap<usize, Vec<(VertexId, TetraId, bool)>> =
+            HashMap::new();
+        {
+            let inner = self.inner.read();
+            for port in inner.cylinder.all_ports() {
+                if let Some(owner) = port.connected_tetra {
+                    let Some(&ci) = tetra_cluster.get(&owner) else {
+                        continue;
+                    };
+                    let geometric = inner
+                        .tetrahedrons
+                        .get(&owner)
+                        .map(|t| t.vertex_ids.contains(&port.id))
+                        .unwrap_or(false);
+                    owned_by_cluster
+                        .entry(ci)
+                        .or_default()
+                        .push((port.id, owner, geometric));
+                }
+            }
+        }
+        let mut released = 0usize;
+        let mut inner = self.inner.write();
+        for (_, mut owned) in owned_by_cluster {
+            if owned.len() <= 1 {
+                continue;
+            }
+            owned.sort_by_key(|(_, _, geometric)| if *geometric { 0 } else { 1 });
+            for (vid, owner, _) in &owned[1..] {
+                if inner.cylinder.release_specific_port(*vid, *owner).is_ok() {
+                    tracing::info!(
+                        "[Port] reconcile: released logical port {} (cluster kept a geometric one)",
+                        vid
+                    );
+                    released += 1;
+                }
+            }
+        }
+        released
+    }
+
     pub fn is_identity_confirmed(&self) -> bool {
         self.inner.read().cylinder.is_identity_confirmed()
     }
@@ -2228,6 +2283,44 @@ mod tests {
             Some(port_vid)
         );
         assert_vertex_grid_consistent(&space);
+    }
+
+    #[test]
+    fn reconcile_cluster_ports_releases_extra_logical_port() {
+        // P1-5(D10): 同簇双 Port(几何锚+逻辑锚)只保留几何接触的那个
+        let space = Space::new();
+        let ports = space.cylinder_ports();
+        let (port_a, pos_a) = ports[0];
+        let (port_b, _pos_b) = ports[1];
+
+        let (tetra, positions) = make_tetra(0, center_with_vertex_at(pos_a));
+        let t1 = space.add_tetrahedron(&tetra, &positions).unwrap();
+        assert!(space.assign_specific_port(port_a, t1));
+        assert!(space.assign_specific_port(port_b, t1)); // 逻辑锚: 无几何接触
+
+        let released = space.reconcile_cluster_ports();
+        assert_eq!(released, 1, "同簇双 Port 应释放一个");
+        {
+            let inner = space.inner.read();
+            assert_eq!(
+                inner.cylinder.find_port_for_tetra(t1).map(|p| p.id),
+                Some(port_a),
+                "保留几何接触的 Port"
+            );
+            assert!(
+                inner
+                    .cylinder
+                    .all_ports()
+                    .iter()
+                    .find(|p| p.id == port_b)
+                    .unwrap()
+                    .is_free(),
+                "逻辑 Port 应回到空闲池"
+            );
+        }
+
+        // 单 Port 簇不受影响
+        assert_eq!(space.reconcile_cluster_ports(), 0);
     }
 
     #[test]
