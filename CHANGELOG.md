@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0](https://github.com/sunormesky-max/epicode/compare/v2.1.1...v2.2.0) (2026-11-09)
+
+
+### Features
+
+* **core:** close plasticity/exploration/constitution loops (P0 research fixes) ([#323](https://github.com/sunormesky-max/epicode/issues/323)) ([91cdbe0](https://github.com/sunormesky-max/epicode/commit/91cdbe0d1cacd9d509712d8fa82fffbc332a4a61))
+* **core:** port reconciliation + multi-path link candidates (P1 batch 2) ([#325](https://github.com/sunormesky-max/epicode/issues/325)) ([0c0237e](https://github.com/sunormesky-max/epicode/commit/0c0237e91a4a2fa7afe3e12a553bd67386a6ab02))
+* **core:** successor semantics + reversible fission (P1 batch 1) ([#324](https://github.com/sunormesky-max/epicode/issues/324)) ([968c250](https://github.com/sunormesky-max/epicode/commit/968c250973c3e6a9bd2593293424f096e33df651))
+* **search:** spatial cluster boost + pulse noise edge threshold ([#322](https://github.com/sunormesky-max/epicode/issues/322)) ([b46dc3c](https://github.com/sunormesky-max/epicode/commit/b46dc3c3ac29b06fe40feb7b0d09a7b48c23b766))
+
 ## [2.1.1](https://github.com/sunormesky-max/epicode/compare/v2.1.0...v2.1.1) (2026-11-07)
 
 
