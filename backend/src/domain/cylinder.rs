@@ -427,6 +427,11 @@ impl Cylinder {
         &self.zones[layer.index()]
     }
 
+    /// 按纵坐标定位所在层区(六层平板之一); 不在任何层区时返回 None。
+    pub fn zone_containing_z(&self, z: f64) -> Option<&LayerZone> {
+        self.zones.iter().find(|zone| zone.contains_z(z))
+    }
+
     pub fn find_free_port(&self, layer: CylinderLayer) -> Option<&Port> {
         self.ports.iter().find(|p| p.layer == layer && p.is_free())
     }

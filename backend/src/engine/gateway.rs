@@ -35,6 +35,11 @@ pub struct GatewayCenter {
     pipeline: LayerPipeline,
     /// O-B 矛盾感知: Mem0 UPDATE路径检测到的矛盾对(旧id, sim) — 新tetra插入后建Contradicts边
     pending_contradictions: parking_lot::Mutex<Vec<(TetraId, f32)>>,
+    /// P1-1 会话时序链: 每个来源代理最近一次创建的 (tetra id, 时间戳)。
+    /// 同源 10 分钟窗口内的连续创建串成 Precedes 链——与 auto_link_one 的
+    /// 相似度门槛互补, 不相似但同会话先后出现的记忆也获得时序关联,
+    /// 供 PPR 有向遍历的后继(Successor)语义使用。
+    session_chain: parking_lot::Mutex<HashMap<String, (TetraId, i64)>>,
 }
 
 impl GatewayCenter {
@@ -78,6 +83,7 @@ impl GatewayCenter {
             index: IndexManager::new(label_idx, chash_idx),
             pipeline: LayerPipeline::new(space),
             pending_contradictions: parking_lot::Mutex::new(Vec::new()),
+            session_chain: parking_lot::Mutex::new(HashMap::new()),
         }
     }
 
@@ -474,6 +480,30 @@ impl GatewayCenter {
                     .unwrap_or_default();
                 self.index.insert_labels(id, &created_labels);
                 self.index.insert_content_hash(content_hash, id);
+                // P1-1 会话时序链: 同一来源代理 10 分钟窗口内的连续创建串成
+                // Precedes 链。auto_link_one 只给相似记忆(>0.25)建时序边——
+                // 不相似但同会话先后出现的记忆(先问 A 后问 B)此前完全没有关联,
+                // 而 SR/PPR 的后继语义恰恰需要这种"接下来"的转移。
+                {
+                    const SESSION_CHAIN_WINDOW_SECS: i64 = 600;
+                    let chain_key = ctx
+                        .source_agent
+                        .clone()
+                        .unwrap_or_else(|| "default".to_string());
+                    let mut chain = self.session_chain.lock();
+                    if let Some(&(prev_id, prev_ts)) = chain.get(&chain_key) {
+                        let gap = (ts - prev_ts).abs();
+                        if prev_id != id && gap <= SESSION_CHAIN_WINDOW_SECS {
+                            self.knowledge.add_relation(
+                                prev_id,
+                                id,
+                                crate::engine::knowledge::RelationType::Precedes,
+                                0.5,
+                            );
+                        }
+                    }
+                    chain.insert(chain_key, (id, ts));
+                }
                 {
                     let classifier = self.classifier.clone();
                     let c = content.to_string();

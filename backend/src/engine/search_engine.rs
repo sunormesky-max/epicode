@@ -872,7 +872,7 @@ fn search_graph(
             }
             let edges: Vec<(u64, f64)> = ctx
                 .knowledge
-                .query_relations(*u)
+                .query_relations_directed(*u)
                 .into_iter()
                 .filter(|(v, _, _)| passes_filters_id(ctx, *v, filters))
                 .map(|(v, _, w)| (v, w.max(0.05)))
