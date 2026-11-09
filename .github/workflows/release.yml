@@ -130,7 +130,9 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: "1.88"
+          # 与 ci.yml 对齐用 stable: uuid 1.29+ 要求 rustc > 1.88(工具链升级待办),
+          # 1.88 钉死使 v2.2.0 二进制构建全目标失败。
+          toolchain: "stable"
           targets: ${{ matrix.target }}
 
       - name: Install cross-compilation dependencies (Linux aarch64)
