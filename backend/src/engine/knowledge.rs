@@ -68,6 +68,21 @@ impl RelationType {
             RelationType::SameEntity => 7,
         }
     }
+
+    /// 对称关系(双向可遍历) vs 方向语义关系(只沿正向行走)。
+    /// PPR 后继语义(SR)依赖: Precedes 只允许 时序质量向"接下来"流动。
+    pub fn is_symmetric(&self) -> bool {
+        match self {
+            RelationType::SimilarTo
+            | RelationType::Contradicts
+            | RelationType::Related
+            | RelationType::SameEntity => true,
+            RelationType::Precedes
+            | RelationType::Contains
+            | RelationType::BelongsTo
+            | RelationType::MergedInto => false,
+        }
+    }
 }
 
 impl std::fmt::Display for RelationType {
@@ -461,6 +476,31 @@ impl KnowledgeGraph {
         }
     }
 
+    /// 有向关系遍历(PPR/SR 用): 对称关系双向可见, 方向语义边
+    /// (Precedes/Contains/BelongsTo/MergedInto)只沿 source→target 正向行走。
+    /// 此前 query_relations 无向化处理使 Precedes 方向信息丢失——
+    /// 时序质量双向乱流, PPR 无法形成真正的后继(Successor)语义。
+    pub fn query_relations_directed(&self, id: TetraId) -> Vec<(TetraId, RelationType, f64)> {
+        let relations = self.relations.read();
+        let adj = self.adj_index.read();
+        match adj.get(&id) {
+            Some(indices) => indices
+                .iter()
+                .filter_map(|&i| relations.get(i))
+                .filter_map(|r| {
+                    if r.source == id {
+                        Some((r.target, r.relation_type.clone(), r.strength))
+                    } else if r.relation_type.is_symmetric() {
+                        Some((r.source, r.relation_type.clone(), r.strength))
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
     pub fn auto_link(&self, space: &Space, threshold: f64) {
         let tetras = space.all_tetrahedrons();
         for i in 0..tetras.len() {
@@ -776,6 +816,7 @@ impl KnowledgeGraph {
         let mut updated_relations = Vec::with_capacity(hits.len());
         {
             let mut relations = self.relations.write();
+            let adj = self.adj_index.read();
             for (i, (a, b)) in hits {
                 if let Some(r) = relations.get_mut(i) {
                     // P0-4: 索引漂移复验 — 槽位上的关系必须仍指向请求的端点对
@@ -790,6 +831,26 @@ impl KnowledgeGraph {
                     }
                     r.hits = r.hits.saturating_add(1);
                     updated_relations.push(r.clone());
+
+                    // 竞争性同胞衰减(Oja 式): 赢家从同端点的其余边抽走权重,
+                    // 转移分布变锐而不整体奔向 1.0——常用主干道抑制闲置邻边,
+                    // 缓解 hub 50 边配额被均匀高强度占满(七维研究-KG 维度)。
+                    let mut siblings: Vec<usize> = Vec::new();
+                    for &j in adj.get(&a).into_iter().flatten() {
+                        if j != i {
+                            if let Some(rj) = relations.get(j) {
+                                if rj.source == a || rj.target == a {
+                                    siblings.push(j);
+                                }
+                            }
+                        }
+                    }
+                    for j in siblings {
+                        if let Some(rj) = relations.get_mut(j) {
+                            rj.strength = (rj.strength * 0.99).max(0.05);
+                            updated_relations.push(rj.clone());
+                        }
+                    }
                 }
             }
         }
@@ -1963,6 +2024,60 @@ mod kg_research_tests {
         assert_eq!(h12, 2, "两次检索命中应记数");
         assert!(s12 > s34, "强化边({s12})应强于同起点未强化边({s34})");
         assert!(s34 > 0.3, "未强化边在500轮衰减后仍有0.39左右");
+    }
+
+    #[test]
+    fn directed_query_respects_precedes_direction() {
+        // P1-1: Precedes 只沿正向可见(SR 后继语义), 对称关系双向可见
+        let kg = KnowledgeGraph::new();
+        kg.add_relation(1, 2, RelationType::Precedes, 0.6);
+        kg.add_relation(2, 3, RelationType::SimilarTo, 0.7);
+
+        let from_1: Vec<_> = kg
+            .query_relations_directed(1)
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect();
+        assert_eq!(from_1, vec![2], "source 侧可沿 Precedes 正向走到 target");
+
+        let from_2: Vec<_> = kg
+            .query_relations_directed(2)
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect();
+        assert!(
+            from_2.contains(&3),
+            "对称关系(SimilarTo)从任一端可见: {from_2:?}"
+        );
+        assert!(
+            !from_2.contains(&1),
+            "Precedes 的 target 侧不可逆向走回 source: {from_2:?}"
+        );
+    }
+
+    #[test]
+    fn reinforcement_competitively_decays_sibling_edges() {
+        // P1-2: 赢家边强化时, 同端点的其余边被竞争性压低(权重重新分配)
+        let kg = KnowledgeGraph::new();
+        kg.add_relation(1, 2, RelationType::SimilarTo, 0.5);
+        kg.add_relation(1, 3, RelationType::SimilarTo, 0.5);
+        kg.add_relation(1, 4, RelationType::SimilarTo, 0.5);
+
+        kg.reinforce_edges(&[(1, 2)]);
+
+        let relations = kg.relations.read();
+        let s = |a: u64, b: u64| {
+            relations
+                .iter()
+                .find(|r| r.source == a && r.target == b)
+                .map(|r| r.strength)
+                .unwrap()
+        };
+        let (winner, sib3, sib4) = (s(1, 2), s(1, 3), s(1, 4));
+        drop(relations);
+        assert!(winner > 0.5, "赢家被强化: {winner}");
+        assert!(sib3 < 0.5, "同胞边被竞争性衰减: {sib3}");
+        assert!(sib4 < 0.5, "同胞边被竞争性衰减: {sib4}");
     }
 
     #[test]

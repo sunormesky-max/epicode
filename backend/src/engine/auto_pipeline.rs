@@ -566,8 +566,12 @@ pub fn fission_placement(
     let dy = smaller_centroid.y - larger_centroid.y;
     let dz = smaller_centroid.z - larger_centroid.z;
     let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-    let base_dist = EDGE_LENGTH * 10.0 * ((tetra_count as f64).sqrt().clamp(3.0, 20.0));
-    let push_dist = base_dist.min(EDGE_LENGTH * 50.0);
+    // 单向棘轮修复: 分裂推距 = min(10√N, 25)——保留 √N 的簇足迹缩放(小簇推得近),
+    // 但压到 auto_merge 捕获半径(MergeDistance 默认 5)的 5 倍以内——被推离的
+    // 少数派仍可经多轮 60% 步进合并回流, fission/merge 从单向棘轮变为可逆动力学。
+    // 旧值 clamp(10√N,30,50) 恒 ≥30 ≫ 5, 推出即永别。
+    let base_dist = EDGE_LENGTH * 10.0 * (tetra_count as f64).sqrt();
+    let push_dist = base_dist.min(EDGE_LENGTH * 25.0);
     if dist < 1e-10 {
         return Point3::new(original.x + push_dist, original.y, original.z);
     }
@@ -623,4 +627,34 @@ pub fn compute_cluster_label_similarity(ca: &Cluster, cb: &Cluster, space: &Spac
         return 0.0;
     }
     intersection as f64 / union as f64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::vertex::Point3;
+
+    #[test]
+    fn fission_push_stays_within_merge_capture_range() {
+        // 单向棘轮修复: 推距 = min(10√N, 25)——不超过 auto_merge 捕获半径(5)
+        // 的 5 倍, 且小簇保留 √N 缩放的较短推距
+        let larger = Point3::zero();
+        let smaller = Point3::new(3.0, 0.0, 0.0);
+        let original = Point3::new(1.0, 0.0, 0.0);
+        for count in [4usize, 6, 100, 10_000] {
+            let placed = fission_placement(&original, &larger, &smaller, count);
+            let dx = placed.x - original.x;
+            let dy = placed.y - original.y;
+            let dz = placed.z - original.z;
+            let push = (dx * dx + dy * dy + dz * dz).sqrt();
+            assert!(
+                push <= 25.0 + 1e-9,
+                "count={count} push={push} must not exceed 5x merge radius"
+            );
+            assert!(
+                push >= 10.0 - 1e-9,
+                "count={count} push={push} keeps sqrt scaling lower bound"
+            );
+        }
+    }
 }

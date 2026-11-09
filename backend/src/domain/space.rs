@@ -1317,6 +1317,18 @@ impl Space {
         if !inner.tetrahedrons.contains_key(&id) {
             return Err(format!("tetrahedron {} not found", id));
         }
+        // 层语义保持(D9): relocate 曾无层约束——fission 推距远超层高(2)时,
+        // 少数派被系统性推出本层, 跨层粘连固化为链。目标 z 钳制在原层区内,
+        // 分裂/合并动力学只在层内平面展开。
+        let mut new_core = new_core;
+        let old_z = inner
+            .tetrahedrons
+            .get(&id)
+            .map(|t| t.core.z)
+            .unwrap_or(new_core.z);
+        if let Some(zone) = inner.cylinder.zone_containing_z(old_z) {
+            new_core.z = new_core.z.max(zone.z_min + 0.1).min(zone.z_max - 0.1);
+        }
         let positions = Tetrahedron::compute_vertices(new_core);
         if !new_core.x.is_finite()
             || !new_core.y.is_finite()
@@ -2215,6 +2227,43 @@ mod tests {
                 .map(|p| p.id),
             Some(port_vid)
         );
+        assert_vertex_grid_consistent(&space);
+    }
+
+    #[test]
+    fn relocation_clamps_to_original_layer_zone() {
+        // D9 层语义保持: relocate 目标 z 钳制在原层区内——
+        // fission/merge 的搬动不再能把四面体推出本层形成跨层粘连链
+        let space = Space::new();
+        let (tetra, positions) = make_tetra(0, Point3::new(0.0, 0.0, 1.0));
+        let id = space.add_tetrahedron(&tetra, &positions).unwrap();
+        let original_zone = space
+            .inner
+            .read()
+            .cylinder
+            .zone_containing_z(1.0)
+            .expect("z=1.0 falls in the first zone")
+            .clone();
+
+        // 试图搬到 50 层高之外——必须被钳回原层
+        space
+            .relocate_tetrahedron(id, Point3::new(8.0, 0.0, 50.0))
+            .unwrap();
+        let relocated = space.get_tetrahedron(id).unwrap();
+        assert!(
+            original_zone.contains_z(relocated.core.z),
+            "relocated z={} must stay in original zone [{},{})",
+            relocated.core.z,
+            original_zone.z_min,
+            original_zone.z_max
+        );
+
+        // 层内平移不受影响
+        space
+            .relocate_tetrahedron(id, Point3::new(4.0, 4.0, 1.5))
+            .unwrap();
+        let relocated = space.get_tetrahedron(id).unwrap();
+        assert_eq!(relocated.core.z, 1.5);
         assert_vertex_grid_consistent(&space);
     }
 
