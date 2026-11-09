@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1](https://github.com/sunormesky-max/epicode/compare/v2.2.0...v2.2.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **kg:** session chain priority + candidate budget + flush cadence ([#327](https://github.com/sunormesky-max/epicode/issues/327)) ([8aa3019](https://github.com/sunormesky-max/epicode/commit/8aa3019e976281ceffe386611b0211aa7f12c054))
+
 ## [2.2.0](https://github.com/sunormesky-max/epicode/compare/v2.1.1...v2.2.0) (2026-11-09)
 
 
