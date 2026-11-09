@@ -552,9 +552,11 @@ impl KnowledgeGraph {
             .iter()
             .filter_map(|&id| space.get_tetrahedron(id))
             .collect();
-        // 确定性顺序: 同一候选集的建边结果可复现
+        // 确定性顺序 + 预算钳制: 候选 20 个(每候选最多建 similar+precedes 两类边,
+        // 峰值 ~40 < 50 上限)——生产实测 40 候选会把新节点瞬间灌满, 饿死会话链边
+        // 和后续更强的边(度上限无淘汰, 饱和即封死)。
         candidates.sort_by_key(|t| t.id);
-        candidates.truncate(40);
+        candidates.truncate(20);
         if candidates.len() < 5 {
             let all = space.all_tetrahedrons();
             for t in &all {
@@ -566,7 +568,7 @@ impl KnowledgeGraph {
                 }
             }
         } else {
-            candidates.truncate(40);
+            candidates.truncate(20);
         }
         // P3 Agentic GraphRAG: entity-level schema induction.
         let new_entities = extract_entities(&new_tetra.data.content);
