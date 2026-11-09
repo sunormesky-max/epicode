@@ -456,6 +456,31 @@ impl GatewayCenter {
                         }
                     }
                 }
+                // P1-1 会话时序链(必须在 auto_link_one 之前): 同源 10 分钟窗口内的
+                // 连续创建串成 Precedes 链——与相似度门槛互补, "先问 A 后问 B"这种
+                // 不相似但同会话的先后关系是 SR/PPR 后继语义的核心转移来源。
+                // 生产实测(v2.2.0): auto_link_one 用满 50 边上限后, 排在其后的
+                // 链边会被 add_relation 的饱和检查静默丢弃——链边必须最先落位。
+                {
+                    const SESSION_CHAIN_WINDOW_SECS: i64 = 600;
+                    let chain_key = ctx
+                        .source_agent
+                        .clone()
+                        .unwrap_or_else(|| "default".to_string());
+                    let mut chain = self.session_chain.lock();
+                    if let Some(&(prev_id, prev_ts)) = chain.get(&chain_key) {
+                        let gap = (ts - prev_ts).abs();
+                        if prev_id != id && gap <= SESSION_CHAIN_WINDOW_SECS {
+                            self.knowledge.add_relation(
+                                prev_id,
+                                id,
+                                crate::engine::knowledge::RelationType::Precedes,
+                                0.5,
+                            );
+                        }
+                    }
+                    chain.insert(chain_key, (id, ts));
+                }
                 // P1-6 多路召回: 向量近邻(HNSW top-20)并入 auto_link_one 候选——
                 // 此前候选只有标签命中, 语义相近但标签不同的记忆永远连不上边
                 let vector_candidates: Vec<TetraId> = {
@@ -497,30 +522,6 @@ impl GatewayCenter {
                     .unwrap_or_default();
                 self.index.insert_labels(id, &created_labels);
                 self.index.insert_content_hash(content_hash, id);
-                // P1-1 会话时序链: 同一来源代理 10 分钟窗口内的连续创建串成
-                // Precedes 链。auto_link_one 只给相似记忆(>0.25)建时序边——
-                // 不相似但同会话先后出现的记忆(先问 A 后问 B)此前完全没有关联,
-                // 而 SR/PPR 的后继语义恰恰需要这种"接下来"的转移。
-                {
-                    const SESSION_CHAIN_WINDOW_SECS: i64 = 600;
-                    let chain_key = ctx
-                        .source_agent
-                        .clone()
-                        .unwrap_or_else(|| "default".to_string());
-                    let mut chain = self.session_chain.lock();
-                    if let Some(&(prev_id, prev_ts)) = chain.get(&chain_key) {
-                        let gap = (ts - prev_ts).abs();
-                        if prev_id != id && gap <= SESSION_CHAIN_WINDOW_SECS {
-                            self.knowledge.add_relation(
-                                prev_id,
-                                id,
-                                crate::engine::knowledge::RelationType::Precedes,
-                                0.5,
-                            );
-                        }
-                    }
-                    chain.insert(chain_key, (id, ts));
-                }
                 {
                     let classifier = self.classifier.clone();
                     let c = content.to_string();

@@ -5738,7 +5738,9 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
             }
         }
 
-        if count.is_multiple_of(30) && count > 0 {
+        // 回写节奏: 每 10 tick(tick=120s 时约 20 分钟)——生产实测 30 tick(60 分钟)
+        // 使检索命中的 access_count/mass 滋养落盘过慢, 可塑性回路近乎不可观测。
+        if count.is_multiple_of(10) && count > 0 {
             self.flush_access_counts();
         }
 
