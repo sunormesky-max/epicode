@@ -270,10 +270,14 @@ pub fn auto_merge(
 
     if total_moved > 0 {
         ctx.gateway.rebuild_hnsw();
+        // P1-5 合并后对账: 被并入的簇可能遗留自己的逻辑 Port——同簇多 Port
+        // 假性耗尽 Port 池。保留几何锚, 释放多余。
+        let released = ctx.space.reconcile_cluster_ports();
         tracing::info!(
-            "[AutoMerge] {} pairs, moved {} tetras total",
+            "[AutoMerge] {} pairs, moved {} tetras total, reconciled {} ports",
             merged,
-            total_moved
+            total_moved,
+            released
         );
     }
 

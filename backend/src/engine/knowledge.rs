@@ -523,11 +523,15 @@ impl KnowledgeGraph {
         new_id: TetraId,
         space: &Space,
         label_index: &std::collections::HashMap<String, Vec<TetraId>>,
+        vector_candidates: &[TetraId],
     ) {
         let new_tetra = match space.get_tetrahedron(new_id) {
             Some(t) => t,
             None => return,
         };
+        // P1-6 多路召回: 候选 = 标签倒排 ∪ 向量近邻(HNSW)。
+        // 旧路径只有标签命中, 不足 5 个时用 all_tetrahedrons 的 HashMap 随机序
+        // 补齐——N=9166 时覆盖率 ~0.2%, 语义相近但标签不同的记忆永远连不上边。
         let mut candidate_ids: std::collections::HashSet<TetraId> =
             std::collections::HashSet::new();
         for label in &new_tetra.data.labels {
@@ -539,10 +543,18 @@ impl KnowledgeGraph {
                 }
             }
         }
+        for &id in vector_candidates {
+            if id != new_id {
+                candidate_ids.insert(id);
+            }
+        }
         let mut candidates: Vec<_> = candidate_ids
             .iter()
             .filter_map(|&id| space.get_tetrahedron(id))
             .collect();
+        // 确定性顺序: 同一候选集的建边结果可复现
+        candidates.sort_by_key(|t| t.id);
+        candidates.truncate(40);
         if candidates.len() < 5 {
             let all = space.all_tetrahedrons();
             for t in &all {
@@ -554,7 +566,7 @@ impl KnowledgeGraph {
                 }
             }
         } else {
-            candidates.truncate(20);
+            candidates.truncate(40);
         }
         // P3 Agentic GraphRAG: entity-level schema induction.
         let new_entities = extract_entities(&new_tetra.data.content);
@@ -2024,6 +2036,58 @@ mod kg_research_tests {
         assert_eq!(h12, 2, "两次检索命中应记数");
         assert!(s12 > s34, "强化边({s12})应强于同起点未强化边({s34})");
         assert!(s34 > 0.3, "未强化边在500轮衰减后仍有0.39左右");
+    }
+
+    #[test]
+    fn auto_link_one_links_via_vector_candidates_beyond_labels() {
+        // P1-6: 无共享标签但向量相近的记忆, 经 vector_candidates 通路建边——
+        // 旧路径只有标签命中, 语义相近但标签不同的记忆永远连不上
+        use crate::domain::tetra::{MemoryPayload, Tetrahedron};
+        use crate::domain::vertex::Point3;
+
+        let space = Space::new();
+        let kg = KnowledgeGraph::new();
+        let mk = |i: usize, content: &str, label: &str| {
+            let core = Point3::new(i as f64 * 3.0, 0.0, 0.0);
+            let mut emb = vec![0.0; crate::engine::vector::EMBEDDING_DIM];
+            emb[5] = 1.0;
+            let t = Tetrahedron {
+                id: 0,
+                vertex_ids: [0; 4],
+                core,
+                data: MemoryPayload {
+                    content: content.to_string(),
+                    content_hash: 0,
+                    labels: vec![label.to_string()],
+                    timestamp: 1_000_000,
+                    aliases: vec![],
+                    embedding: emb,
+                    importance: 1.0,
+                    enforced: false,
+                    rationale: None,
+                    access_count: 0,
+                    memory_type: None,
+                    identity_stamp: None,
+                    source_agent: None,
+                    ..Default::default()
+                },
+                mass: 1.0,
+            };
+            let pos = Tetrahedron::compute_vertices(core);
+            space.add_tetrahedron(&t, &pos).unwrap()
+        };
+        let a = mk(0, "rust borrow checker notes", "work");
+        let b = mk(1, "rust ownership rules", "hobby");
+
+        let empty_index = std::collections::HashMap::new();
+        kg.auto_link_one(b, &space, &empty_index, &[a]);
+
+        assert!(
+            kg.query_relations(b)
+                .iter()
+                .any(|(id, rel, _)| *id == a && *rel == RelationType::SimilarTo),
+            "向量候选应建 SimilarTo 边"
+        );
     }
 
     #[test]
