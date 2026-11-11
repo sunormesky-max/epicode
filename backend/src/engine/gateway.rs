@@ -757,8 +757,7 @@ impl GatewayCenter {
 
         // P2-5: 轻量层内元数据 (id, core, labels)——不再全库深拷贝四面体
         // (每只含 8KB 嵌入, N=10⁴ 时单次创建克隆 ~80MB)。
-        let in_layer: Vec<(TetraId, Point3, Vec<String>)> =
-            self.space.tetras_meta_in_zone(&zone);
+        let in_layer: Vec<(TetraId, Point3, Vec<String>)> = self.space.tetras_meta_in_zone(&zone);
 
         let clamp_z = |mut p: Point3| -> Point3 {
             p.z = p.z.max(zone.z_min + 0.1).min(zone.z_max - 0.1);
@@ -898,10 +897,10 @@ impl GatewayCenter {
             let mut probe = anchor;
             for _ in 0..16 {
                 probe = Point3::new(probe.x + 2.0, probe.y, probe.z);
-                if !self.space.core_exists_near(
-                    &probe,
-                    crate::domain::vertex::VERTEX_MERGE_EPSILON * 4.0,
-                ) {
+                if !self
+                    .space
+                    .core_exists_near(&probe, crate::domain::vertex::VERTEX_MERGE_EPSILON * 4.0)
+                {
                     return probe;
                 }
             }
