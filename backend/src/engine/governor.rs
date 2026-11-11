@@ -32,7 +32,6 @@ pub struct GovernorResult {
     pub should_archive: bool,
     pub should_merge: bool,
     pub contradictions: Vec<(u64, u64, f64)>,
-    pub decay_applied: usize,
 }
 
 pub struct MergeCandidate {
@@ -47,7 +46,7 @@ pub struct LifecycleGovernor;
 impl LifecycleGovernor {
     const RECURRENCE_THRESHOLD: u32 = 3;
     const ARCHIVE_AGE_DAYS: i64 = 30;
-    const IMPORTANCE_DECAY_RATE: f64 = 0.98;
+    // P1-3: 时间衰减常量迁至 domain::tetra::IMPORTANCE_DAILY_DECAY
     const MIN_IMPORTANCE: f64 = 0.3;
     /// D5: 热标签保护 — 被高频检索的标签类记忆衰减率打折(0.995 vs 0.98)
     /// 遗忘个体化: 不是所有记忆统一衰减, 被反复需要的知识遗忘更慢
@@ -79,7 +78,6 @@ impl LifecycleGovernor {
         let mut recurrent_ids = Vec::new();
         let mut should_archive = false;
         let mut has_duplicates = false;
-        let mut decay_applied = 0;
 
         for tetra in &tetras {
             if tetra.data.enforced {
@@ -165,19 +163,9 @@ impl LifecycleGovernor {
                 }
                 continue;
             }
-            if age_days > 14 && tetra.data.access_count == 0 {
-                if let Some(updated) = Self::apply_decay(space, tetra.id, &tetra.data, age_days) {
-                    // CAS:importance 在评估后被并发改过则跳过,只写 importance 一个字段
-                    let op = MemoryOp::CasImportance {
-                        expect: tetra.data.importance,
-                        set: updated.importance,
-                    };
-                    if let Ok(true) = space.apply_ops(tetra.id, &[op]) {
-                        mutated.push(tetra.id); // S3
-                        decay_applied += 1;
-                    }
-                }
-            }
+            // P1-3: 时间衰减不再写回 base——派生重要性在检索/生命周期读侧推导
+            // (MemoryPayload::derived_importance)。旧 apply_decay 把派生值物化进
+            // importance 字段, 下一周期对已衰减 base 再乘全期因子 = 复利化重复衰减。
         }
 
         // Duplicate detection — content hash based for top N
@@ -271,8 +259,8 @@ impl LifecycleGovernor {
         let should_consolidate = !recurrent_ids.is_empty();
 
         tracing::info!(
-            "[Governor] recurrent={}/{} should_consolidate={} should_archive={} should_merge={} decayed={}",
-            recurrent_ids.len(), tetras.len(), should_consolidate, should_archive, has_duplicates, decay_applied
+            "[Governor] recurrent={}/{} should_consolidate={} should_archive={} should_merge={}",
+            recurrent_ids.len(), tetras.len(), should_consolidate, should_archive, has_duplicates
         );
 
         GovernorResult {
@@ -282,7 +270,6 @@ impl LifecycleGovernor {
             should_archive,
             should_merge: has_duplicates,
             contradictions,
-            decay_applied,
         }
     }
 
@@ -302,47 +289,9 @@ impl LifecycleGovernor {
     }
 
     fn effective_importance(payload: &MemoryPayload, _age_days: i64) -> f64 {
-        // 注: age_days 已是死参 — 遗忘曲线重构后衰减从 last_reviewed_ts 推导(有意语义), 保留签名兼容调用方
-        let base = payload.importance;
-        let access_bonus = (payload.access_count as f64).ln().max(0.0) * 0.3;
-        // 突破3: 遗忘曲线 — 衰减从"最后复习时间"算，而非创建年龄。
-        // 被访问的记忆"复习"了，衰减节拍重置，寿命延长。
-        // last_reviewed_ts None 时 fallback 到 timestamp（旧记忆兼容）。
-        let review_days = {
-            let review_ts = payload.last_reviewed_ts.unwrap_or(payload.timestamp);
-            ((chrono::Utc::now().timestamp() - review_ts) / 86400).max(0)
-        };
-        let recency_factor = if review_days > 0 {
-            Self::IMPORTANCE_DECAY_RATE.powi(review_days as i32)
-        } else {
-            1.0
-        };
-        (base + access_bonus) * recency_factor
-    }
-
-    fn apply_decay(
-        _space: &Space,
-        id: u64,
-        data: &MemoryPayload,
-        age_days: i64,
-    ) -> Option<MemoryPayload> {
-        let decayed = Self::effective_importance(data, age_days);
-        // 突破修复：importance 下限从 0.1 提到 0.3——避免记忆被衰减到接近 0 后在搜索中永久消失
-        // 0.3 是搜索评分中 importance 因子仍能贡献正信号的最低值
-        if (data.importance - decayed).abs() > 0.05 && decayed < data.importance {
-            let mut updated = data.clone();
-            updated.importance = decayed.max(IMPORTANCE_FLOOR);
-            tracing::info!(
-                "[Governor] decayed #{}: importance {:.2} -> {:.2} (age={}d)",
-                id,
-                data.importance,
-                updated.importance,
-                age_days
-            );
-            Some(updated)
-        } else {
-            None
-        }
+        // P1-3: 派生重要性迁至 MemoryPayload::derived_importance(单一真相, 不落盘)。
+        // 注: age_days 是死参 — 衰减从 last_reviewed_ts 推导(有意语义), 保留签名兼容调用方。
+        payload.derived_importance()
     }
 
     fn fuzzy_content_match(a: &str, b: &str) -> bool {
@@ -607,6 +556,8 @@ mod tests {
 
     #[test]
     fn apply_decay_respects_importance_floor() {
+        // P1-3: governor 不再物化时间衰减(写回会复利化重复衰减)——本测试改为
+        // 验证 base 不被时间路径改写 + 派生值单调衰减且被检索侧地板钳制。
         let space = Space::new();
         // session class so governor does not skip as permanent; old + unaccessed → decay
         let core = Point3::new(0.0, 0.0, 0.0);
@@ -631,17 +582,27 @@ mod tests {
         let kg = KnowledgeGraph::new();
         let _ = LifecycleGovernor::evaluate(&space, &kg);
         let after = space.get_tetrahedron(id).unwrap();
-        // Either still decaying toward floor, or tombstoned via session TTL (>7d).
-        if after.data.valid_to.is_some() {
+        if after.data.valid_to.is_none() {
+            // 活记忆: base 保持创建定级(1.0), 衰减体现在派生值
             assert!(
-                (after.data.importance - FORGET_IMPORTANCE).abs() < 1e-9,
-                "session TTL tombstone must use FORGET_IMPORTANCE, got {}",
+                (after.data.importance - 1.0).abs() < 1e-9,
+                "governor must not materialize time decay into base importance, got {}",
                 after.data.importance
+            );
+            let derived = after.data.derived_importance();
+            assert!(
+                derived < 1.0,
+                "derived importance must decay after 40 unaccessed days, got {derived}"
+            );
+            // 检索侧地板钳制
+            assert!(
+                derived.max(IMPORTANCE_FLOOR) >= IMPORTANCE_FLOOR - 1e-9,
+                "retrieval-side clamp keeps live memory at/above floor"
             );
         } else {
             assert!(
-                after.data.importance + 1e-9 >= IMPORTANCE_FLOOR,
-                "live decay must not go below IMPORTANCE_FLOOR, got {}",
+                (after.data.importance - FORGET_IMPORTANCE).abs() < 1e-9,
+                "session TTL tombstone must use FORGET_IMPORTANCE, got {}",
                 after.data.importance
             );
         }

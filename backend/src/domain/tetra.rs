@@ -116,6 +116,38 @@ fn default_importance() -> f64 {
     1.0
 }
 
+/// 派生重要性的每日衰减率(时间项)——与历史 governor 标定 0.98 保持一致。
+pub const IMPORTANCE_DAILY_DECAY: f64 = 0.98;
+
+impl MemoryPayload {
+    /// P1-3 派生重要性(不落盘): R(t) = (base + ln(access)·0.3) · 0.98^review_days
+    ///
+    /// 单一真相的纯函数——时间与检索历史动力学全部在读侧推导:
+    /// - 复习(last_reviewed_ts, 由检索回写/冷复审 KEEP 更新)重置衰减节拍;
+    /// - 检索历史经 ln 放大稳定性(间隔重复效应: 常被用到的记忆衰减更慢);
+    /// - base(importance 字段)只被**语义事件**改写: 创建定级 / 冷复审 KEEP /
+    ///   supersede 降籍 / 隔离降籍——时间衰减不再写回。
+    ///
+    /// 为什么不落盘: 旧 governor apply_decay 把派生值写回 base, 下一周期又对
+    /// 已衰减的 base 再乘全期衰减因子——复利化重复衰减, 曲线越走越陡
+    /// (七维研究-生命周期维度: 三套写入器互相覆盖的根因)。
+    /// 检索读侧应 clamp 到活地板(IMPORTANCE_FLOOR); 生命周期判定(隔离/墓碑)
+    /// 允许低于地板——与宪法一致(可降籍, 不可被检索除名; 除名走 valid_to 例外)。
+    pub fn derived_importance(&self) -> f64 {
+        let stability_bonus = (self.access_count as f64).ln().max(0.0) * 0.3;
+        let review_days = {
+            let review_ts = self.last_reviewed_ts.unwrap_or(self.timestamp);
+            ((chrono::Utc::now().timestamp() - review_ts) / 86400).max(0)
+        };
+        let decay = if review_days > 0 {
+            IMPORTANCE_DAILY_DECAY.powi(review_days as i32)
+        } else {
+            1.0
+        };
+        (self.importance + stability_bonus) * decay
+    }
+}
+
 impl Default for MemoryPayload {
     fn default() -> Self {
         Self {
@@ -225,6 +257,38 @@ mod tests {
 
     fn positions(center: Point3) -> [Point3; 4] {
         Tetrahedron::compute_vertices(center)
+    }
+
+    #[test]
+    fn derived_importance_is_pure_and_decays_with_review_age() {
+        // P1-3: 纯函数——同状态两次求值相同(不落盘 ⇒ 无复利化重复衰减)
+        let now = chrono::Utc::now().timestamp();
+        let mut p = MemoryPayload {
+            importance: 2.0,
+            timestamp: now - 86400 * 100,
+            last_reviewed_ts: Some(now - 86400 * 100),
+            ..Default::default()
+        };
+        let d1 = p.derived_importance();
+        let d2 = p.derived_importance();
+        assert!((d1 - d2).abs() < 1e-12, "pure function: {d1} vs {d2}");
+        assert!(d1 < 2.0, "100 unaccessed days must decay: {d1}");
+
+        // 复习重置节拍: last_reviewed_ts 拉近 → 派生值回升
+        p.last_reviewed_ts = Some(now - 86400);
+        let reviewed = p.derived_importance();
+        assert!(
+            reviewed > d1,
+            "recent review resets decay cadence: {reviewed} vs {d1}"
+        );
+
+        // 检索历史放大稳定性(ln): 高访问记忆比零访问衰减少
+        let mut hot = p.clone();
+        hot.access_count = 50;
+        assert!(
+            hot.derived_importance() > p.derived_importance(),
+            "access history amplifies stability (spacing effect)"
+        );
     }
 
     #[test]
