@@ -13,8 +13,8 @@
       "package": "rsa",
       "version": "0.9.10",
       "owner": "security@epicode.cn",
-      "expiresOn": "2026-11-09",
-      "reason": "RustSec reports no patched release. The backend uses RSA for public-key encryption; the private-key decrypt helper has no HTTP or MCP call site and is exercised only by tests. Re-review when RustCrypto ships a constant-time fix."
+      "expiresOn": "2027-02-09",
+      "reason": "RustSec reports no patched release. The backend uses RSA for public-key encryption; the private-key decrypt helper has no HTTP or MCP call site and is exercised only by tests. Re-review when RustCrypto ships a constant-time fix. Renewed 2026-11-11 after confirming rsa 0.9.10 is still the latest 0.9.x and the call-site analysis is unchanged."
     }
   ]
 }

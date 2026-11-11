@@ -14,6 +14,10 @@ pub struct IndexManager {
     pub dirty_set: Mutex<HashSet<TetraId>>,
     pub placement_cache: Mutex<HashMap<Vec<String>, Point3>>,
     pub placement_cache_order: Mutex<std::collections::VecDeque<Vec<String>>>,
+    /// HNSW 上次全量重建时的 (structure_version, search_revision)——
+    /// 双重建去重: gateway.new 已建一次, start() 的 rebuild 现在会因版本未变而跳过
+    /// (七维研究: 启动时索引被建两次)。任何增删改都递增其一, 守卫不会漏更新。
+    hnsw_built_at: Mutex<(u64, u64)>,
 }
 
 impl IndexManager {
@@ -24,6 +28,7 @@ impl IndexManager {
             dirty_set: Mutex::new(HashSet::new()),
             placement_cache: Mutex::new(HashMap::new()),
             placement_cache_order: Mutex::new(std::collections::VecDeque::new()),
+            hnsw_built_at: Mutex::new((u64::MAX, u64::MAX)),
         }
     }
 
@@ -115,6 +120,12 @@ impl IndexManager {
     }
 
     pub fn rebuild_hnsw(&self, hnsw: &RwLock<HnswIndex>, space: &Space) {
+        // 双重建去重: 自上次全量重建以来空间未变(structure+search 版本都没动)
+        // 则直接跳过——gateway.new 已内联建过一次, start() 的重建由此变空操作。
+        let rev = (space.structure_version(), space.search_revision());
+        if *self.hnsw_built_at.lock() == rev {
+            return;
+        }
         let tetras = space.all_tetrahedrons();
         // M1修复:锁外构建完整新索引,再一次性 swap 进去。
         // 之前在 write lock 内逐个 insert,N=1200 时持锁数百毫秒到秒级,期间所有 search_knn 全阻塞。
@@ -126,5 +137,11 @@ impl IndexManager {
         }
         // 锁持有时间从"重建全程"降到"一次指针交换"
         *hnsw.write() = new_index;
+        *self.hnsw_built_at.lock() = rev;
+    }
+
+    /// 标记 HNSW 已按当前空间版本构建(gateway.new 内联构建后调用)。
+    pub fn mark_hnsw_built(&self, space: &Space) {
+        *self.hnsw_built_at.lock() = (space.structure_version(), space.search_revision());
     }
 }
