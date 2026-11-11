@@ -70,7 +70,7 @@ impl GatewayCenter {
                 chash_idx.entry(t.data.content_hash).or_insert(t.id);
             }
         }
-        Self {
+        let gateway = Self {
             space: space.clone(),
             energy,
             cognitive,
@@ -84,7 +84,11 @@ impl GatewayCenter {
             pipeline: LayerPipeline::new(space),
             pending_contradictions: parking_lot::Mutex::new(Vec::new()),
             session_chain: parking_lot::Mutex::new(HashMap::new()),
-        }
+        };
+        // P2-5 双重建去重: new() 已内联建好 HNSW, 标记当前版本——
+        // start() 的 rebuild_hnsw 将因版本未变而跳过(原启动建两次索引)。
+        gateway.index.mark_hnsw_built(&gateway.space);
+        gateway
     }
 
     pub fn mark_dirty(&self, id: TetraId) {
@@ -749,14 +753,12 @@ impl GatewayCenter {
                 port_vid: None,
             }
         };
-        let tetras = self.space.all_tetrahedrons();
         let zone = self.space.zone_for_layer(layer);
 
-        let in_layer: Vec<crate::domain::tetra::Tetrahedron> = tetras
-            .iter()
-            .filter(|t| zone.contains_z(t.core.z))
-            .cloned()
-            .collect();
+        // P2-5: 轻量层内元数据 (id, core, labels)——不再全库深拷贝四面体
+        // (每只含 8KB 嵌入, N=10⁴ 时单次创建克隆 ~80MB)。
+        let in_layer: Vec<(TetraId, Point3, Vec<String>)> =
+            self.space.tetras_meta_in_zone(&zone);
 
         let clamp_z = |mut p: Point3| -> Point3 {
             p.z = p.z.max(zone.z_min + 0.1).min(zone.z_max - 0.1);
@@ -768,7 +770,7 @@ impl GatewayCenter {
             let orphan_roll: f64 = rand::thread_rng().gen();
             let has_label_anchor = in_layer
                 .iter()
-                .any(|tetra| tetra.data.labels.iter().any(|label| labels.contains(label)));
+                .any(|(_, _, ls)| ls.iter().any(|label| labels.contains(label)));
             if !has_label_anchor && orphan_roll < 0.07 {
                 let z = zone.center_z();
                 use rand::Rng;
@@ -776,7 +778,7 @@ impl GatewayCenter {
                 let angle: f64 = rng.gen_range(0.0..std::f64::consts::TAU);
                 let dist: f64 = rng.gen_range(8.0..15.0);
                 let orphan_pos = Point3::new(angle.cos() * dist, angle.sin() * dist, z);
-                let result = clamp_z(self.find_adjacent_position(orphan_pos, &in_layer));
+                let result = clamp_z(self.find_adjacent_position(orphan_pos));
                 tracing::debug!(
                     "[Gateway] orphan placement at ({:.1},{:.1},{:.1})",
                     result.x,
@@ -798,7 +800,7 @@ impl GatewayCenter {
             } else {
                 Point3::new(0.0, 0.0, z)
             };
-            let result = clamp_z(self.find_adjacent_position(anchor, &in_layer));
+            let result = clamp_z(self.find_adjacent_position(anchor));
             let mut outcome = mk(result, port_opt.is_some(), true, false);
             outcome.port_vid = port_vid; // 精确 port vid（kimi2.7 #1）
             return outcome;
@@ -807,13 +809,13 @@ impl GatewayCenter {
         let anchor_center = self.find_anchor_by_labels(labels, &in_layer);
         let anchor_verts = crate::domain::tetra::Tetrahedron::compute_vertices(anchor_center);
 
-        let mut best_result = clamp_z(self.find_adjacent_position(anchor_verts[0], &in_layer));
+        let mut best_result = clamp_z(self.find_adjacent_position(anchor_verts[0]));
         let mut best_merges = {
             let v = crate::domain::tetra::Tetrahedron::compute_vertices(best_result);
             self.space.count_vertex_merges(&v)
         };
         for &av in &anchor_verts[1..] {
-            let candidate = clamp_z(self.find_adjacent_position(av, &in_layer));
+            let candidate = clamp_z(self.find_adjacent_position(av));
             let cv = crate::domain::tetra::Tetrahedron::compute_vertices(candidate);
             let merges = self.space.count_vertex_merges(&cv);
             if merges > best_merges {
@@ -832,7 +834,7 @@ impl GatewayCenter {
     fn find_anchor_by_labels(
         &self,
         labels: &[String],
-        tetras: &[crate::domain::tetra::Tetrahedron],
+        in_layer: &[(TetraId, Point3, Vec<String>)],
     ) -> Point3 {
         let label_idx = self.index.label_index.lock();
         let mut score_map: HashMap<TetraId, usize> = HashMap::new();
@@ -845,25 +847,21 @@ impl GatewayCenter {
         }
 
         if let Some((&best_id, _)) = score_map.iter().max_by_key(|(_, s)| *s) {
-            if let Some(t) = tetras.iter().find(|t| t.id == best_id) {
-                return t.core;
+            if let Some((_, core, _)) = in_layer.iter().find(|(id, _, _)| *id == best_id) {
+                return *core;
             }
         }
 
         if let Some(nearest) = self.space.nearest_tetrahedron_to(Point3::zero()) {
-            if let Some(t) = tetras.iter().find(|t| t.id == nearest.0) {
-                return t.core;
+            if let Some((_, core, _)) = in_layer.iter().find(|(id, _, _)| *id == nearest.0) {
+                return *core;
             }
         }
 
         Point3::zero()
     }
 
-    fn find_adjacent_position(
-        &self,
-        anchor: Point3,
-        tetras: &[crate::domain::tetra::Tetrahedron],
-    ) -> Point3 {
+    fn find_adjacent_position(&self, anchor: Point3) -> Point3 {
         let offsets = crate::domain::tetra::Tetrahedron::compute_vertices(Point3::zero());
 
         let mut best_pos = None;
@@ -877,9 +875,10 @@ impl GatewayCenter {
             );
             // Reusing an existing center would merge all four vertices and stack
             // a second tetrahedron on exactly the same geometry.
-            if tetras
-                .iter()
-                .any(|t| t.core.distance_to(&center) < crate::domain::vertex::VERTEX_MERGE_EPSILON)
+            // P2-5: tetra_grid 27 邻域查询 O(27k), 替代全层线性扫描。
+            if self
+                .space
+                .core_exists_near(&center, crate::domain::vertex::VERTEX_MERGE_EPSILON)
             {
                 continue;
             }
@@ -895,14 +894,14 @@ impl GatewayCenter {
         best_pos.unwrap_or_else(|| {
             // 饱和兜底: 全部 4 个槽位核心被占用时, 旧版返回 anchor 本身——
             // 可能与既有四面体完全堆叠(现被 insert_tetra 防堆叠守卫拒绝, 创建失败)。
-            // 改为沿 +x 逐格退让, 找到与既有核心错开 ≥0.2 的第一个落点。
+            // 改为沿 +x 逐格退让, 找到与既有核心错开 ≥0.2 的第一个落点(27 邻域查询)。
             let mut probe = anchor;
             for _ in 0..16 {
                 probe = Point3::new(probe.x + 2.0, probe.y, probe.z);
-                let occupied = tetras.iter().any(|t| {
-                    t.core.distance_to(&probe) < crate::domain::vertex::VERTEX_MERGE_EPSILON * 4.0
-                });
-                if !occupied {
+                if !self.space.core_exists_near(
+                    &probe,
+                    crate::domain::vertex::VERTEX_MERGE_EPSILON * 4.0,
+                ) {
                     return probe;
                 }
             }

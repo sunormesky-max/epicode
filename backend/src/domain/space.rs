@@ -821,6 +821,42 @@ impl Space {
             .collect()
     }
 
+    /// P2-5 放置路径专用轻量元数据: 层区内四面体的 (id, core, labels)。
+    /// 免除 all_tetrahedrons 的全库深拷贝(每四面体含 8KB 嵌入)——
+    /// N=10⁴ 时单次创建的克隆开销 ~80MB, 是写入路径最大的隐藏线性项
+    /// (七维研究-数学维度 C7: 真实复杂度 O(N+N_layer+27k), 目标 O(27k))。
+    pub fn tetras_meta_in_zone(
+        &self,
+        zone: &super::cylinder::LayerZone,
+    ) -> Vec<(TetraId, Point3, Vec<String>)> {
+        self.inner
+            .read()
+            .tetrahedrons
+            .values()
+            .filter(|t| zone.contains_z(t.core.z))
+            .map(|t| (t.id, t.core, t.data.labels.clone()))
+            .collect()
+    }
+
+    /// P2-5 核心邻域存在性: tetra_grid 27 邻域查询 O(27k)。
+    /// 替代放置路径对全层四面体的线性扫描; radius < GRID_CELL 时
+    /// 27 邻域完备(与顶点扫描同一论证: |Δ坐标| ≤ radius < 1 ⟹ 格索引差 ≤ 1)。
+    pub fn core_exists_near(&self, core: &Point3, radius: f64) -> bool {
+        let inner = self.inner.read();
+        for nk in nearby_keys(grid_key(core)) {
+            if let Some(ids) = inner.tetra_grid.get(&nk) {
+                for &id in ids {
+                    if let Some(t) = inner.tetrahedrons.get(&id) {
+                        if t.core.distance_to(core) < radius {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     pub fn edge_count(&self) -> usize {
         self.inner.read().edge_table.len()
     }
