@@ -43,10 +43,7 @@ pub fn compute_entropy_from_labels(
 
     // 先抽样再取标签: 巨簇只克隆 CAP 份标签, 免 O(K·L) 全量克隆
     let sampled = sampled_ids(ids);
-    let labels: Vec<&Vec<String>> = sampled
-        .iter()
-        .filter_map(|id| labels_map.get(id))
-        .collect();
+    let labels: Vec<&Vec<String>> = sampled.iter().filter_map(|id| labels_map.get(id)).collect();
 
     mean_pairwise_dissimilarity(&labels)
 }
