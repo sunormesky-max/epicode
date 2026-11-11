@@ -475,18 +475,14 @@ impl KnowledgeGraph {
             weakest
         };
         match weakest {
-            Some((ws, _, s, t, rt)) => {
-                if incoming_strength > ws {
-                    tracing::debug!(
-                        "[KG] degree-cap eviction: {rt:?} {s}->{t} (strength {ws:.2}) makes room for stronger edge ({incoming_strength:.2})"
-                    );
-                    self.remove_relation(s, t, rt);
-                    true
-                } else {
-                    false
-                }
+            Some((ws, _, s, t, rt)) if incoming_strength > ws => {
+                tracing::debug!(
+                    "[KG] degree-cap eviction: {rt:?} {s}->{t} (strength {ws:.2}) makes room for stronger edge ({incoming_strength:.2})"
+                );
+                self.remove_relation(s, t, rt);
+                true
             }
-            None => false, // 饱和但全部是结构边: 无可汰
+            _ => false, // 新边不比最弱者强 / 饱和但全部是结构边: 无可汰
         }
     }
 
