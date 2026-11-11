@@ -746,6 +746,8 @@ mod idempotency_tests {
         data.timestamp = old_ts;
         data.last_reviewed_ts = Some(old_ts);
         let stale = add(&space, 0.0, data, 1.0);
+        // cycle 对 <2 条记忆提前返回——放一条新鲜对照记忆
+        let _fresh = add(&space, 1.0, normal(1), 1.0);
 
         let result = DreamEngine::cycle(&space, &KnowledgeGraph::new(), 1.1, 0, false);
 

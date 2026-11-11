@@ -260,7 +260,11 @@ impl LifecycleGovernor {
 
         tracing::info!(
             "[Governor] recurrent={}/{} should_consolidate={} should_archive={} should_merge={}",
-            recurrent_ids.len(), tetras.len(), should_consolidate, should_archive, has_duplicates
+            recurrent_ids.len(),
+            tetras.len(),
+            should_consolidate,
+            should_archive,
+            has_duplicates
         );
 
         GovernorResult {
