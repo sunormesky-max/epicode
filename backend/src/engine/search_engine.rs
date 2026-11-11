@@ -1776,7 +1776,14 @@ fn score_tetra(
     // 加性模型：各信号独立贡献，不会互相压制
     let age_days = ((now_ts - t.data.timestamp as f64) / 86400.0).max(0.0);
     let recency = (-age_days * 0.001).exp();
-    let importance_norm = (t.data.importance / 3.5).min(1.0); // 归一化到 0-1
+    // P1-3: 检索读侧用派生重要性(时间衰减+复习稳定性, 读侧推导不落盘),
+    // 并 clamp 到活地板——宪法: 记忆可被降籍, 不可被检索除名。
+    let importance_norm = (t
+        .data
+        .derived_importance()
+        .max(super::governor::IMPORTANCE_FLOOR)
+        / 3.5)
+        .min(1.0);
     let access_count = *access_counts.get(&t.id).unwrap_or(&0) as f64;
     let access_bonus = (access_count / (access_count + 5.0)) * 0.1;
 

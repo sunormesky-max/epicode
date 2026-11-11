@@ -34,35 +34,26 @@ fn has_healthy_embedding(embedding: &[f64]) -> bool {
 }
 
 impl DreamEngine {
+    /// P1-3 收缩: 时间/访问量动力学已并入派生重要性(MemoryPayload::derived_importance,
+    /// 读侧推导不落盘)。本函数只保留**语义规则**:
+    /// - 架构/决策/关键类内容的地板保护(≥2.0);
+    /// - 短测试草稿的降籍(≤地板)。
+    ///
+    /// 旧版的 access>5 +0.1 无上限增长(每周期累加), 以及 age/access 减量
+    /// 与 governor 衰减互相覆盖——三写入器冲突的根因, 一并移除。
     pub fn recompute_importance(
         space: &Space,
-        access_counts: &std::collections::HashMap<u64, u32>,
+        _access_counts: &std::collections::HashMap<u64, u32>,
     ) -> usize {
         let tetras = space.all_tetrahedrons();
         let mut updated = 0;
-        let now_ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as f64;
 
         for t in &tetras {
             // Live-memory floor policy: do not rewrite enforced or already-tombstoned rows.
             if t.data.enforced || t.data.valid_to.is_some() {
                 continue;
             }
-            let access = *access_counts.get(&t.id).unwrap_or(&0) as f64;
-            let age_days = (now_ts - t.data.timestamp as f64) / 86400.0;
             let mut new_importance = t.data.importance;
-
-            if access > 5.0 {
-                new_importance += 0.1;
-            }
-            if age_days > 7.0 && access < 1.0 {
-                new_importance -= 0.05;
-            }
-            if age_days > 30.0 && access < 1.0 {
-                new_importance -= 0.1;
-            }
 
             let content_lower = t.data.content.to_lowercase();
             if content_lower.contains("架构")
@@ -187,7 +178,12 @@ impl DreamEngine {
             // 旧判据 <0.1 因 clamp 下限而成为死条件。
             let is_low_mass = t.mass <= crate::domain::ops::MASS_MIN + f64::EPSILON;
             let age_days = (now_ts - t.data.timestamp as f64) / 86400.0;
-            let is_old_low_importance = age_days > 30.0 && t.data.importance < 0.3;
+            // P1-3 地板死锁修复: 判定用**派生**重要性(不落盘、不钳地板)——老冷记忆
+            // 0.98^天数 自然跌破 0.3 即有资格被隔离。旧判据读 base 字段, 而 base 被
+            // IMPORTANCE_FLOOR=0.3 钳住永不 <0.3 → 时间衰减的垃圾永不能走 importance
+            // 通道被隔离(只剩 mass 通道)。宪法语义不变: 这是生命周期判定(允许低于
+            // 地板), 检索读侧另行 clamp。
+            let is_old_low_importance = age_days > 30.0 && t.data.derived_importance() < 0.3;
             if (is_junk || is_low_mass || is_old_low_importance) && !t.data.enforced {
                 // op-log: 字段级原子操作,守卫在锁内对当前状态求值;已隔离/enforced 为 no-op 不计数
                 let op = MemoryOp::Quarantine {
@@ -738,6 +734,33 @@ mod idempotency_tests {
             embedding: emb,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn stale_unaccessed_memory_quarantined_via_derived_importance() {
+        // P1-3 地板死锁回归: base=1.0(高于地板), 但 200 天无复习无访问 →
+        // 派生 0.98^200 ≈ 0.018 < 0.3 且 age>30 → 隔离资格。
+        // 旧判据读 base 字段(被地板钳住 ≥0.3)→ 该记忆永不能走 importance 通道。
+        let space = Space::new();
+        let old_ts = chrono::Utc::now().timestamp() - 86400 * 200;
+        let mut data = normal(9);
+        data.timestamp = old_ts;
+        data.last_reviewed_ts = Some(old_ts);
+        let stale = add(&space, 0.0, data, 1.0);
+        // cycle 对 <2 条记忆提前返回——放一条新鲜对照记忆
+        let _fresh = add(&space, 1.0, normal(1), 1.0);
+
+        let result = DreamEngine::cycle(&space, &KnowledgeGraph::new(), 1.1, 0, false);
+
+        assert!(
+            result.evicted_ids.contains(&stale),
+            "200-day cold memory must be quarantine-eligible via derived importance"
+        );
+        let after = space.get_tetrahedron(stale).unwrap();
+        assert!(
+            after.data.labels.iter().any(|l| l == "quarantine"),
+            "should carry the quarantine label"
+        );
     }
 
     #[test]

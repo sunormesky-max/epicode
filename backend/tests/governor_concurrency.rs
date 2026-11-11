@@ -159,7 +159,13 @@ fn round(n: usize, writers: usize) -> Out {
     }
     for &id in &k.decay {
         let t = g(id);
-        if !(t.data.importance < 0.99 && t.data.importance >= IMPORTANCE_FLOOR - 1e-9) {
+        // P1-3: 时间衰减不再物化进 base——base 保持创建定级(1.0),
+        // 衰减体现在派生值(读侧推导): 40 天无复习 → derived ∈ [FLOOR, 0.99)。
+        let d = t.data.derived_importance();
+        if !((t.data.importance - 1.0).abs() < 1e-9
+            && d < 0.99
+            && d.max(IMPORTANCE_FLOOR) >= IMPORTANCE_FLOOR - 1e-9)
+        {
             miss += 1;
             cat[2] += 1;
         }
