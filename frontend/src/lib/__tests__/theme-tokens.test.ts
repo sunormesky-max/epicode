@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
@@ -20,9 +21,10 @@ import {
 } from "../graphTheme";
 
 const css = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
-const html = readFileSync(
-  new URL("../../../index.html", import.meta.url),
-  "utf8"
+// 行尾归一: Windows 检出(core.autocrlf)的 CRLF 会使下方 "\n" 精确匹配失效
+const html = readFileSync(new URL("../../../index.html", import.meta.url), "utf8").replace(
+  /\r\n/g,
+  "\n"
 );
 
 /* ---------- 解析 index.css 的主题变量(:root = synapse) ---------- */
@@ -193,7 +195,9 @@ describe("theme tokens: semantic text colours", () => {
   }
 });
 
-const SRC = new URL("../../", import.meta.url).pathname;
+// vite 8 下 import.meta.url 直接是 file:// URL, .pathname 在 Windows 产生 "/D:/..." →
+// join 后成 "D:\D:\..."; fileURLToPath 是跨平台正确解法
+const SRC = fileURLToPath(new URL("../../", import.meta.url));
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(e =>
     e.isDirectory()
