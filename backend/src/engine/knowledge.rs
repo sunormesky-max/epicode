@@ -320,7 +320,26 @@ impl KnowledgeGraph {
             if !is_structural
                 && (src_count >= MAX_RELATIONS_PER_NODE || tgt_count >= MAX_RELATIONS_PER_NODE)
             {
-                return;
+                // P2-4 饱和 LRU 淘汰: 旧版静默丢弃新边, hub 饱和后任何更强的关联
+                // 永远进不来(度上限无淘汰, 七维研究-KG 维度)。现在允许"更强新边
+                // 替换饱和端点上的最弱旧边(强度×hits 择弱)"; 弱于全部旧边仍丢弃。
+                // 结构边(BelongsTo/MergedInto)不参与淘汰。
+                drop(adj);
+                drop(relations);
+                let src_ok = self.evict_weakest_if_saturated(source, strength);
+                let tgt_ok = self.evict_weakest_if_saturated(target, strength);
+                if !src_ok || !tgt_ok {
+                    return;
+                }
+                relations = self.relations.write();
+                // 淘汰后复查: 对端可能同轮被并发填充, 仍满则放弃(无重试风暴)
+                let adj2 = self.adj_index.read();
+                let src_now = adj2.get(&source).map(|v| v.len()).unwrap_or(0);
+                let tgt_now = adj2.get(&target).map(|v| v.len()).unwrap_or(0);
+                drop(adj2);
+                if src_now >= MAX_RELATIONS_PER_NODE || tgt_now >= MAX_RELATIONS_PER_NODE {
+                    return;
+                }
             }
         }
         let new_rel = Relation {
@@ -418,6 +437,56 @@ impl KnowledgeGraph {
                 self.queue_relation_delete(source, target, rel_type.clone());
             }
             self.mark_dirty(false);
+        }
+    }
+
+    /// P2-4 饱和端点的最弱边淘汰: 节点度达上限且 incoming_strength 严格强于
+    /// 其最弱非结构边(强度升序, 平手取 hits 低者)时, 删除该边腾出名额。
+    /// 返回 false = 未能腾位(未饱和 / 无非结构边可汰 / 新边不比最弱者强)。
+    /// 竞争性强化(P1-2)持续压低闲置边强度, 与本淘汰形成"使用保留、闲置让位"闭环。
+    fn evict_weakest_if_saturated(&self, node: TetraId, incoming_strength: f64) -> bool {
+        let weakest = {
+            // 锁序与全库一致(relations→adj), 防止与 add/remove 路径交叉死锁
+            let relations = self.relations.read();
+            let adj = self.adj_index.read();
+            let Some(indices) = adj.get(&node) else {
+                return true; // 未饱和
+            };
+            if indices.len() < MAX_RELATIONS_PER_NODE {
+                return true;
+            }
+            let mut weakest: Option<(f64, u16, TetraId, TetraId, RelationType)> = None;
+            for &i in indices {
+                let Some(r) = relations.get(i) else { continue };
+                if r.relation_type == RelationType::BelongsTo
+                    || r.relation_type == RelationType::MergedInto
+                {
+                    continue;
+                }
+                let better = match &weakest {
+                    None => true,
+                    Some((ws, wh, ..)) => (r.strength, r.hits) < (*ws, *wh),
+                };
+                if better {
+                    weakest =
+                        Some((r.strength, r.hits, r.source, r.target, r.relation_type.clone()));
+                }
+            }
+            weakest
+        };
+        match weakest {
+            Some((ws, _, s, t, rt)) => {
+                if incoming_strength > ws {
+                    tracing::debug!(
+                        "[KG] degree-cap eviction: {rt:?} {s}->{t} (strength {ws:.2}) makes room for stronger edge ({incoming_strength:.2})"
+                    );
+                    self.remove_relation(s, t, rt);
+                    true
+                } else {
+                    false
+                }
+            }
+            None => false, // 饱和但全部是结构边: 无可汰
         }
     }
 
@@ -1539,6 +1608,45 @@ impl KnowledgeGraph {
 /// - snake_case identifiers with underscores (e.g. search_engine, valid_to)
 ///
 /// Returns deduplicated lowercase entity strings.
+/// CJK 停用字: 仅收录几乎不出现在内容词内部的纯虚词/语气词。
+/// 注意刻意排除 在/有/会/到/说/比/对/一 等高频字——它们出现在 存在/拥有/机会/得到/小说/对比/对象/统一
+/// 等内容词中, 停用会误伤主题二元组。
+const CJK_STOPCHARS: &[char] = &[
+    '的', '了', '是', '不', '我', '你', '他', '她', '它', '这', '那', '也', '都', '和', '就', '很', '着',
+    '没', '过', '吗', '呢', '吧', '啊', '呀', '嘛', '哦', '嗯',
+];
+
+fn is_cjk_ideograph(c: char) -> bool {
+    matches!(c as u32, 0x3400..=0x4DBF | 0x4E00..=0x9FFF)
+}
+
+/// P2-2 CJK 主题二元组: 中文无大小写/下划线, 旧逻辑对中文抽取零实体——
+/// 生产语料几乎全中文, SameEntity 边与概念原型对中文完全失效(七维研究-KG 维度)。
+/// 免分词依赖的近似: 提取"停用字过滤的相邻汉字对", 按文中频次降序取前 24。
+/// 主题相近的中文记忆共享大量内容二元组(Jaccard 越过 0.15 门槛),
+/// 无关记忆的共享集中在虚词二元组上, 被停用字表滤除。
+fn push_cjk_bigrams(content: &str, entities: &mut std::collections::HashSet<String>) {
+    let chars: Vec<char> = content.chars().collect();
+    let mut counts: std::collections::HashMap<(char, char), usize> =
+        std::collections::HashMap::new();
+    for window in chars.windows(2) {
+        let (a, b) = (window[0], window[1]);
+        if is_cjk_ideograph(a)
+            && is_cjk_ideograph(b)
+            && !CJK_STOPCHARS.contains(&a)
+            && !CJK_STOPCHARS.contains(&b)
+        {
+            *counts.entry((a, b)).or_insert(0) += 1;
+        }
+    }
+    let mut bigrams: Vec<((char, char), usize)> = counts.into_iter().collect();
+    // 频次降序 + 字典序: 确定性输出, 高频主题词优先入选
+    bigrams.sort_by(|x, y| y.1.cmp(&x.1).then(x.0.cmp(&y.0)));
+    for ((a, b), _) in bigrams.into_iter().take(24) {
+        entities.insert(format!("{a}{b}"));
+    }
+}
+
 fn extract_entities(content: &str) -> Vec<String> {
     use std::collections::HashSet;
     let mut entities: HashSet<String> = HashSet::new();
@@ -1584,7 +1692,11 @@ fn extract_entities(content: &str) -> Vec<String> {
         }
     }
 
-    entities.into_iter().collect()
+    push_cjk_bigrams(content, &mut entities);
+
+    let mut out: Vec<String> = entities.into_iter().collect();
+    out.sort();
+    out
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 struct KgSnapshot {
@@ -1973,6 +2085,53 @@ mod tests {
             kg.add_relation(0, i, RelationType::SimilarTo, 0.5);
         }
         assert!(kg.relation_count() <= MAX_RELATIONS_PER_NODE);
+    }
+
+    #[test]
+    fn extract_entities_covers_cjk_content() {
+        // P2-2: 旧逻辑对中文抽取零实体(纯 ASCII 大小写/下划线规则)
+        let a = extract_entities("空间记忆算法的核心是四面体网格放置与聚类分裂");
+        let b = extract_entities("记忆巩固依赖四面体空间的放置算法与聚类分析");
+        assert!(!a.is_empty(), "CJK content must yield entities: {a:?}");
+        let shared = a.iter().filter(|e| b.contains(e)).count();
+        assert!(
+            shared >= 3,
+            "related Chinese docs should share content bigrams: {a:?} vs {b:?}"
+        );
+        // 无关内容共享应很少(虚词二元组被停用字表滤除)
+        let c = extract_entities("今天晚饭吃了一碗汤面味道还行");
+        let shared_ac = a.iter().filter(|e| c.contains(e)).count();
+        assert!(
+            shared_ac <= 1,
+            "unrelated Chinese docs share few bigrams: {a:?} vs {c:?}"
+        );
+    }
+
+    #[test]
+    fn saturated_node_evicts_weakest_for_stronger_newcomer() {
+        // P2-4: 强新边替换饱和端点最弱旧边; 弱新边仍被丢弃
+        let kg = KnowledgeGraph::new();
+        for i in 2..=51u64 {
+            kg.add_relation(1, i, RelationType::SimilarTo, 0.3);
+        }
+        assert_eq!(
+            kg.relation_count(),
+            MAX_RELATIONS_PER_NODE,
+            "node 1 saturated"
+        );
+        // 强新边(0.8 > 最弱 0.3): 应替换入图
+        kg.add_relation(1, 99, RelationType::SimilarTo, 0.8);
+        let has99 = kg.query_relations(1).iter().any(|(id, _, _)| *id == 99);
+        assert!(has99, "stronger newcomer should evict the weakest edge");
+        assert_eq!(
+            kg.relation_count(),
+            MAX_RELATIONS_PER_NODE,
+            "eviction keeps degree at cap, not above"
+        );
+        // 弱新边(0.1 < 全部 0.3): 仍被丢弃
+        kg.add_relation(1, 100, RelationType::SimilarTo, 0.1);
+        let has100 = kg.query_relations(1).iter().any(|(id, _, _)| *id == 100);
+        assert!(!has100, "weaker newcomer is still dropped");
     }
 
     #[test]
