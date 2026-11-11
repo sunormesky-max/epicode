@@ -468,8 +468,13 @@ impl KnowledgeGraph {
                     Some((ws, wh, ..)) => (r.strength, r.hits) < (*ws, *wh),
                 };
                 if better {
-                    weakest =
-                        Some((r.strength, r.hits, r.source, r.target, r.relation_type.clone()));
+                    weakest = Some((
+                        r.strength,
+                        r.hits,
+                        r.source,
+                        r.target,
+                        r.relation_type.clone(),
+                    ));
                 }
             }
             weakest
@@ -1608,8 +1613,8 @@ impl KnowledgeGraph {
 /// 注意刻意排除 在/有/会/到/说/比/对/一 等高频字——它们出现在 存在/拥有/机会/得到/小说/对比/对象/统一
 /// 等内容词中, 停用会误伤主题二元组。
 const CJK_STOPCHARS: &[char] = &[
-    '的', '了', '是', '不', '我', '你', '他', '她', '它', '这', '那', '也', '都', '和', '就', '很', '着',
-    '没', '过', '吗', '呢', '吧', '啊', '呀', '嘛', '哦', '嗯',
+    '的', '了', '是', '不', '我', '你', '他', '她', '它', '这', '那', '也', '都', '和', '就', '很',
+    '着', '没', '过', '吗', '呢', '吧', '啊', '呀', '嘛', '哦', '嗯',
 ];
 
 fn is_cjk_ideograph(c: char) -> bool {
