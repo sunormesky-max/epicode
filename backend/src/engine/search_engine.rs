@@ -1610,6 +1610,7 @@ fn compute_label_boost(query_tokens: &[String], labels: &[String]) -> f64 {
     let label_text = labels
         .iter()
         .filter(|l| !l.starts_with("entity:"))
+        .map(|l| l.as_str())
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase();
