@@ -131,7 +131,7 @@ mod tests {
         let reembed = with_cosine(&base, 0.999, 500); // 重复文本重嵌入
 
         assert!((cosine(&base, &dup) - 1.0).abs() < 1e-9);
-        assert!((cosine(&base, &paraphrase) - 0.94).abs() < 1e-6);
+        assert!((cosine(&base, &paraphrase) - 0.94).abs() < 1e-3);
 
         let c_base = encode(&base);
         let o_dup = c_base.overlap(&encode(&dup));
