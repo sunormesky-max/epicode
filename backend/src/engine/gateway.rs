@@ -316,8 +316,8 @@ impl GatewayCenter {
                         .map(|t| t.data.embedding)
                         .unwrap_or_default();
                     if old_emb.len() == EMBEDDING_DIM && embedding.len() == EMBEDDING_DIM {
-                        let overlap =
-                            super::sparse_code::encode(&embedding).overlap(&super::sparse_code::encode(&old_emb));
+                        let overlap = super::sparse_code::encode(&embedding)
+                            .overlap(&super::sparse_code::encode(&old_emb));
                         let ok = overlap >= DG_DUP_OVERLAP_GATE;
                         if !ok {
                             tracing::info!(

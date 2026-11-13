@@ -92,7 +92,9 @@ mod tests {
         let mut v = Vec::with_capacity(dim);
         let mut h = seed;
         for _ in 0..dim {
-            h = h.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            h = h
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             v.push(((h >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0);
         }
         v
