@@ -102,13 +102,15 @@ impl DreamEngine {
     ) -> DreamResult {
         // P3-3: 生产入口(cloud)注入的库层; 测试/quiet 模式无库则跳过皮层化
         let library = crate::engine::library::global_library();
+        let lib_ref: Option<&crate::engine::library::LibraryStore> =
+            library.map(|arc| arc.as_ref());
         Self::cycle_with_library(
             space,
             knowledge,
             replay_strength,
             consolidate_depth,
             dry_run,
-            library.as_deref(),
+            lib_ref,
         )
     }
 
@@ -497,7 +499,7 @@ impl DreamEngine {
                 // 收集成员元数据(标签频次 + 内容主题预览)
                 let mut label_count: std::collections::HashMap<&str, usize> =
                     std::collections::HashMap::new();
-                let mut previews: Vec<(TetraId, String)> = Vec::new();
+                let mut previews: Vec<(u64, String)> = Vec::new();
                 for &id in &member_ids {
                     if let Some(t) = space.get_tetrahedron(id) {
                         for l in &t.data.labels {
@@ -867,23 +869,17 @@ mod idempotency_tests {
         assert!(
             clusters.iter().any(|c| c.tetra_ids.len() >= 4),
             "fixture must form a ≥4 cluster, got {:?}",
-            clusters.iter().map(|c| c.tetra_ids.len()).collect::<Vec<_>>()
+            clusters
+                .iter()
+                .map(|c| c.tetra_ids.len())
+                .collect::<Vec<_>>()
         );
 
         // 无库: 不计入任何皮层化洞察
-        let r0 = DreamEngine::cycle_with_library(
-            &space,
-            &KnowledgeGraph::new(),
-            1.1,
-            0,
-            true,
-            None,
-        );
+        let r0 =
+            DreamEngine::cycle_with_library(&space, &KnowledgeGraph::new(), 1.1, 0, true, None);
         assert!(
-            !r0
-                .insights
-                .iter()
-                .any(|s| s.contains("corticalized")),
+            !r0.insights.iter().any(|s| s.contains("corticalized")),
             "no library → no corticalization insight"
         );
 
@@ -892,14 +888,8 @@ mod idempotency_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let lib = crate::engine::library::LibraryStore::open_in_data_dir(&dir, None).ok();
         let lib_ref = lib.as_ref();
-        let r1 = DreamEngine::cycle_with_library(
-            &space,
-            &KnowledgeGraph::new(),
-            1.1,
-            0,
-            true,
-            lib_ref,
-        );
+        let r1 =
+            DreamEngine::cycle_with_library(&space, &KnowledgeGraph::new(), 1.1, 0, true, lib_ref);
         assert!(
             r1.insights
                 .iter()
