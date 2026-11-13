@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.1](https://github.com/sunormesky-max/epicode/compare/v2.4.0...v2.4.1) (2026-11-13)
+
+
+### Performance Improvements
+
+* **search:** orthogonal signal diet — entity/label decollineared, recency removed (P2-1) ([#345](https://github.com/sunormesky-max/epicode/issues/345)) ([e8bb16f](https://github.com/sunormesky-max/epicode/commit/e8bb16fb8077dc4bce1d6152c312ea54d3ce4752))
+
 ## [2.4.0](https://github.com/sunormesky-max/epicode/compare/v2.3.0...v2.4.0) (2026-11-11)
 
 
