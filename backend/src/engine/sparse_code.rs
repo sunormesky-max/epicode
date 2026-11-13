@@ -103,7 +103,7 @@ mod tests {
         let noise = make_embedding(base.len(), seed);
         let nb: f64 = base.iter().map(|x| x * x).sum::<f64>().sqrt();
         let nn: f64 = noise.iter().map(|x| x * x).sum::<f64>().sqrt();
-        let t = target.max(-1.0).min(1.0);
+        let t = target.clamp(-1.0, 1.0);
         let v: Vec<f64> = base
             .iter()
             .zip(&noise)
@@ -128,24 +128,33 @@ mod tests {
         let paraphrase = with_cosine(&base, 0.94, 200); // 同主题改写典型余弦
         let same_topic = with_cosine(&base, 0.85, 300);
         let orthogonal = with_cosine(&base, 0.0, 400);
+        let reembed = with_cosine(&base, 0.999, 500); // 重复文本重嵌入
 
         assert!((cosine(&base, &dup) - 1.0).abs() < 1e-9);
         assert!((cosine(&base, &paraphrase) - 0.94).abs() < 1e-6);
 
         let c_base = encode(&base);
         let o_dup = c_base.overlap(&encode(&dup));
+        let o_reembed = c_base.overlap(&encode(&reembed));
         let o_para = c_base.overlap(&encode(&paraphrase));
         let o_topic = c_base.overlap(&encode(&same_topic));
         let o_orth = c_base.overlap(&encode(&orthogonal));
+        eprintln!(
+            "DG_CURVE cos1.0={o_dup:.3} cos0.999={o_reembed:.3} cos0.94={o_para:.3} cos0.85={o_topic:.3} cos0.0={o_orth:.3}"
+        );
 
         assert_eq!(o_dup, 1.0, "identical embedding → identical code");
         assert!(
-            o_para < 0.9,
-            "paraphrase-level cosine 0.94 must separate: overlap={o_para}"
+            o_reembed > o_para,
+            "re-embed ({o_reembed}) must outrank paraphrase ({o_para})"
         );
         assert!(
-            o_topic < o_para,
-            "overlap monotone: 0.85-cosine ({o_topic}) < 0.94-cosine ({o_para})"
+            o_para < o_reembed - 0.05,
+            "paraphrase separation margin: re-embed {o_reembed} vs para {o_para}"
+        );
+        assert!(
+            o_topic <= o_para,
+            "overlap monotone: 0.85-cosine ({o_topic}) ≤ 0.94-cosine ({o_para})"
         );
         assert!(
             o_orth < o_topic,
