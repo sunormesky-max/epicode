@@ -1605,7 +1605,17 @@ fn compute_label_boost(query_tokens: &[String], labels: &[String]) -> f64 {
     if query_tokens.is_empty() || labels.is_empty() {
         return 0.0;
     }
-    let label_text = labels.join(" ").to_lowercase();
+    // P2-1 正交化: 排除 entity: 前缀标签——它们由 entity_boost 独立通道计分。
+    // 旧版两通道都匹配同一 entity 标签文本(双计), 同一命中拿两份加分。
+    let label_text = labels
+        .iter()
+        .filter(|l| !l.starts_with("entity:"))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    if label_text.is_empty() {
+        return 0.0;
+    }
     let label_match = query_tokens
         .iter()
         .filter(|w| label_text.contains(w.as_str()))
@@ -1775,7 +1785,9 @@ fn score_tetra(
     // 乘性链问题：0.3 * 0.84 * 0.5 * 0.7 = 0.088——弱向量匹配被 importance/recency/auto_penalty 压到接近 0
     // 加性模型：各信号独立贡献，不会互相压制
     let age_days = ((now_ts - t.data.timestamp as f64) / 86400.0).max(0.0);
-    let recency = (-age_days * 0.001).exp();
+    // P2-1: recency 独立项删除——exp(-age×0.001) 半衰期 693 天(30 天记忆仅差 0.0005 分,
+    // 死信号), 且与 P1-3 派生 importance 的时间衰减语义重复(复习节拍才是正确的
+    // 时间信号)。其 0.04 权重并入 importance 通道。
     // P1-3: 检索读侧用派生重要性(时间衰减+复习稳定性, 读侧推导不落盘),
     // 并 clamp 到活地板——宪法: 记忆可被降籍, 不可被检索除名。
     let importance_norm = (t
@@ -1831,11 +1843,13 @@ fn score_tetra(
         0.50
     };
     let mut score = hybrid * hybrid_weight;
+    // P2-1 信号清单(8 个正交通道): hybrid(向量+BM25) / label(主题标签) /
+    // entity(抽取实体, 已与 label 正交) / alias / importance(派生, 含时间) /
+    // access / exact_substring / curiosity 探索分。
     score += label_boost * 0.10;
     score += entity_boost * 0.10;
     score += alias_boost * 0.08;
-    score += importance_norm * 0.08;
-    score += recency * 0.04;
+    score += importance_norm * 0.12;
     score += access_bonus;
     score += exact_substring_boost;
     // O-E 复习反马太: 终身零复习且>7天的记忆给微小探索分(curiosity采样) —
