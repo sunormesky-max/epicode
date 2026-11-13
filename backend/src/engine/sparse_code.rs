@@ -165,9 +165,8 @@ mod tests {
 
     #[test]
     fn gate_threshold_separates_duplicate_from_paraphrase() {
-        // 网关使用的判决门: 真重复通过, 同主题改写被拒
+        // 生产门校准: 真重复(重嵌入扰动)必须通过, 同主题改写(cos 0.94)必须被拒
         let base = make_embedding(1024, 99);
-        // 真重复 = 同一文本重新嵌入(嵌入扰动 ~0.999 余弦)
         let reembed = with_cosine(&base, 0.999, 500);
         let paraphrase = with_cosine(&base, 0.94, 600);
         let c = encode(&base);
@@ -176,6 +175,16 @@ mod tests {
         assert!(
             o_reembed > o_para,
             "re-embed ({o_reembed}) must outrank paraphrase ({o_para})"
+        );
+        // 网关生产门(与 gateway.rs DG_DUP_OVERLAP_GATE 同值)
+        const GATE: f64 = 0.5;
+        assert!(
+            o_reembed >= GATE,
+            "duplicate must pass the production gate: {o_reembed} < {GATE}"
+        );
+        assert!(
+            o_para < GATE,
+            "paraphrase must be blocked by the production gate: {o_para} >= {GATE}"
         );
     }
 }
