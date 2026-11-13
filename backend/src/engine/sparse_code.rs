@@ -30,7 +30,7 @@ fn proj_weight(i: usize, j: usize) -> f64 {
     h ^= h >> 30;
     h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
     h ^= h >> 27;
-    h = h.wrapping_mul(0x94D0_49BB_1331_11EB;
+    h = h.wrapping_mul(0x94D0_49BB_1331_11EB);
     ((h >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
 }
 
