@@ -511,7 +511,7 @@ impl DreamEngine {
                     }
                 }
                 let mut top_labels: Vec<(String, usize)> = label_count.into_iter().collect();
-                top_labels.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+                top_labels.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
                 let theme = top_labels
                     .first()
                     .map(|(l, _)| l.to_string())
