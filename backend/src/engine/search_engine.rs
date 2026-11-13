@@ -514,10 +514,8 @@ fn looks_like_keyboard_smash(word: &str) -> bool {
             consecutive_consonants = 0;
         }
     }
-    if max_consecutive >= 5 {
-        return true;
-    }
-    false
+    // rust-1.100 clippy::needless_bool: 直接返回比较表达式
+    max_consecutive >= 5
 }
 
 pub fn is_low_quality_query(query: &str) -> bool {
