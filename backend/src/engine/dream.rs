@@ -497,20 +497,20 @@ impl DreamEngine {
                 let client_ref = format!("dream-digest:{sig}");
 
                 // 收集成员元数据(标签频次 + 内容主题预览)
-                let mut label_count: std::collections::HashMap<&str, usize> =
+                let mut label_count: std::collections::HashMap<String, usize> =
                     std::collections::HashMap::new();
                 let mut previews: Vec<(u64, String)> = Vec::new();
                 for &id in &member_ids {
                     if let Some(t) = space.get_tetrahedron(id) {
                         for l in &t.data.labels {
                             if !l.starts_with("meta-") && !l.starts_with("entity:") {
-                                *label_count.entry(l.as_str()).or_insert(0) += 1;
+                                *label_count.entry(l.clone()).or_insert(0) += 1;
                             }
                         }
                         previews.push((id, t.data.content.chars().take(100).collect::<String>()));
                     }
                 }
-                let mut top_labels: Vec<(&str, usize)> = label_count.into_iter().collect();
+                let mut top_labels: Vec<(String, usize)> = label_count.into_iter().collect();
                 top_labels.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
                 let theme = top_labels
                     .first()
