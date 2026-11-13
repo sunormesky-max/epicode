@@ -100,6 +100,27 @@ impl DreamEngine {
         consolidate_depth: usize,
         dry_run: bool,
     ) -> DreamResult {
+        // P3-3: 生产入口(cloud)注入的库层; 测试/quiet 模式无库则跳过皮层化
+        let library = crate::engine::library::global_library();
+        Self::cycle_with_library(
+            space,
+            knowledge,
+            replay_strength,
+            consolidate_depth,
+            dry_run,
+            library.as_deref(),
+        )
+    }
+
+    /// P3-3 dream 皮层化(系统巩固): 簇摘要沉入库层(library)。
+    pub fn cycle_with_library(
+        space: &Space,
+        knowledge: &KnowledgeGraph,
+        replay_strength: f64,
+        consolidate_depth: usize,
+        dry_run: bool,
+        library: Option<&crate::engine::library::LibraryStore>,
+    ) -> DreamResult {
         let tetras =
             {
                 let all = space.all_tetrahedrons();
@@ -445,6 +466,104 @@ impl DreamEngine {
             }
         }
 
+        // Phase 4.5 皮层化(P3-3, 系统巩固): 大簇摘要沉入库层。
+        // 海马体(tetra 空间)在睡眠中重放→新皮层(library)固化的类比:
+        // 簇级主题摘要成为持久知识卡, 即使成员记忆日后被隔离/取代, 主题仍在
+        // 库层可检索(library_search 语义+FTS)。幂等: client_ref = 簇成员签名,
+        // 同一成员集合只沉一次; 成员变化→新签名→新摘要(旧摘要留档)。
+        if let Some(lib) = library {
+            const DIGEST_MIN_CLUSTER: usize = 4; // 有意义的最小主题组
+            const DIGEST_MAX_PER_CYCLE: usize = 2; // 每 cycle 最多沉 2 个, 温和节奏
+            let mut eligible: Vec<&crate::domain::space::Cluster> = clusters
+                .iter()
+                .filter(|c| c.tetra_ids.len() >= DIGEST_MIN_CLUSTER)
+                .collect();
+            eligible.sort_by_key(|c| std::cmp::Reverse(c.tetra_ids.len()));
+            let mut digests = 0usize;
+            for cluster in eligible.into_iter().take(DIGEST_MAX_PER_CYCLE) {
+                // 簇成员签名(排序后哈希) — find_clusters 的分量顺序可能随
+                // HashMap 迭代变化, 排序保证同一簇得到同一签名
+                let mut member_ids = cluster.tetra_ids.clone();
+                member_ids.sort_unstable();
+                let sig = crate::engine::search_engine::hash_content(
+                    &member_ids
+                        .iter()
+                        .map(|i| i.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+                let client_ref = format!("dream-digest:{sig}");
+
+                // 收集成员元数据(标签频次 + 内容主题预览)
+                let mut label_count: std::collections::HashMap<&str, usize> =
+                    std::collections::HashMap::new();
+                let mut previews: Vec<(TetraId, String)> = Vec::new();
+                for &id in &member_ids {
+                    if let Some(t) = space.get_tetrahedron(id) {
+                        for l in &t.data.labels {
+                            if !l.starts_with("meta-") && !l.starts_with("entity:") {
+                                *label_count.entry(l.as_str()).or_insert(0) += 1;
+                            }
+                        }
+                        previews.push((id, t.data.content.chars().take(100).collect::<String>()));
+                    }
+                }
+                let mut top_labels: Vec<(&str, usize)> = label_count.into_iter().collect();
+                top_labels.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+                let theme = top_labels
+                    .first()
+                    .map(|(l, _)| l.to_string())
+                    .unwrap_or_else(|| "mixed".to_string());
+                let label_line = top_labels
+                    .iter()
+                    .take(5)
+                    .map(|(l, c)| format!("{l}×{c}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                let title = format!("Dream digest: {theme} ({} memories)", member_ids.len());
+                let source_meta = serde_json::json!({
+                    "kind": "dream-digest",
+                    "cluster_signature": sig.to_string(),
+                    "members": member_ids,
+                })
+                .to_string();
+                let mut body = format!(
+                    "# 主题: {theme}\n# 规模: {} 条记忆\n# 标签分布: {label_line}\n\n## 成员主题\n",
+                    member_ids.len()
+                );
+                for (id, pv) in previews.iter().take(12) {
+                    body.push_str(&format!("- [#{id}] {pv}\n"));
+                }
+
+                if dry_run {
+                    digests += 1;
+                    continue;
+                }
+                let item = crate::engine::library::LibraryItemIn {
+                    client_ref: Some(client_ref),
+                    title,
+                    source_meta: Some(source_meta),
+                    chunks: vec![crate::engine::library::LibraryChunkIn {
+                        chunk_no: 0,
+                        content: body,
+                    }],
+                };
+                match lib.find_or_create_collection("dream", "dream-digests", "private") {
+                    Ok(col) => match lib.ingest("dream", col, std::slice::from_ref(&item)) {
+                        Ok(_) => digests += 1,
+                        Err(e) => tracing::debug!("[Dream] corticalize ingest failed: {}", e),
+                    },
+                    Err(e) => tracing::debug!("[Dream] digest collection failed: {}", e),
+                }
+            }
+            if digests > 0 {
+                insights.push(format!(
+                    "corticalized {digests} cluster digest(s) into the library"
+                ));
+            }
+        }
+
         if connections_formed > 0 {
             insights.push(format!(
                 "found {} similar pairs (>{:.1} threshold), largest cluster: {}",
@@ -734,6 +853,61 @@ mod idempotency_tests {
             embedding: emb,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn corticalization_counts_digests_in_dry_run_and_skips_without_library() {
+        // P3-3: ≥4 簇在 dry_run 中计入 digest 洞察; library=None 时整体跳过(不炸)
+        let space = Space::new();
+        // 5-链簇(共享顶点连通): 放置在 x=0..4, 相邻 1.0 间距共享顶点
+        for i in 0..5usize {
+            add(&space, i as f64, normal(i), 1.0);
+        }
+        let clusters = space.find_clusters();
+        assert!(
+            clusters.iter().any(|c| c.tetra_ids.len() >= 4),
+            "fixture must form a ≥4 cluster, got {:?}",
+            clusters.iter().map(|c| c.tetra_ids.len()).collect::<Vec<_>>()
+        );
+
+        // 无库: 不计入任何皮层化洞察
+        let r0 = DreamEngine::cycle_with_library(
+            &space,
+            &KnowledgeGraph::new(),
+            1.1,
+            0,
+            true,
+            None,
+        );
+        assert!(
+            !r0
+                .insights
+                .iter()
+                .any(|s| s.contains("corticalized")),
+            "no library → no corticalization insight"
+        );
+
+        // 有库(无向量层, temp dir): dry_run 只计数不落盘
+        let dir = std::env::temp_dir().join(format!("dream-cort-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let lib = crate::engine::library::LibraryStore::open_in_data_dir(&dir, None).ok();
+        let lib_ref = lib.as_ref();
+        let r1 = DreamEngine::cycle_with_library(
+            &space,
+            &KnowledgeGraph::new(),
+            1.1,
+            0,
+            true,
+            lib_ref,
+        );
+        assert!(
+            r1.insights
+                .iter()
+                .any(|s| s.contains("corticalized 1 cluster digest")),
+            "dry_run with library should count the digest: {:?}",
+            r1.insights
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

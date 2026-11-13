@@ -250,6 +250,27 @@ impl LibraryStore {
             .ok()
     }
 
+    /// P3-3 dream 皮层化辅助: 按 owner+name 查找既有 collection, 不存在则创建。
+    /// 系统内部通道(如 dream 摘要)的幂等入口。
+    pub fn find_or_create_collection(
+        &self,
+        owner: &str,
+        name: &str,
+        visibility: &str,
+    ) -> Result<i64, String> {
+        {
+            let conn = self.conn.lock();
+            if let Ok(id) = conn.query_row(
+                "SELECT id FROM library_collections WHERE owner=?1 AND name=?2",
+                params![owner, name],
+                |x| x.get::<_, i64>(0),
+            ) {
+                return Ok(id);
+            }
+        }
+        self.create_collection(owner, name, visibility, None)
+    }
+
     /// 批量灌装: owner-only; client_ref幂等(item级) + content_hash全局幂等(chunk级);
     /// 嵌入走 embed_batch 预热 + embed_passage 取向量(缓存命中) — 复用单条路径全部基建。
     pub fn ingest(
