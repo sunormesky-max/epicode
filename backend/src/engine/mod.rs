@@ -47,6 +47,7 @@ pub mod energy;
 pub mod knowledge;
 pub mod pulse;
 pub mod security;
+pub mod sparse_code;
 pub mod user_manager;
 
 // Auxiliary systems
