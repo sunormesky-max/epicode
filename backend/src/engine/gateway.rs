@@ -304,7 +304,35 @@ impl GatewayCenter {
                 } else {
                     super::adaptive::MEM0_SUPERSEDE_KNOWLEDGE
                 };
-                if sim > supersede_at {
+                // P3-1 DG 模式分离门: 原始余弦在 0.92-0.95 区间无法区分
+                // "同主题改写"与"真重复"。稀疏码(随机投影+WTA)放大改写差异:
+                // 真重复 overlap≈1.0(同一嵌入重编码), 改写显著分叉。
+                // 余弦过线但稀疏码分歧 → 降级 UPDATE(标签富集), 不做 supersede。
+                const DG_DUP_OVERLAP_GATE: f64 = 0.5;
+                let dg_allows_supersede = if sim > supersede_at {
+                    let old_emb = self
+                        .space
+                        .get_tetrahedron(*dup_id)
+                        .map(|t| t.data.embedding)
+                        .unwrap_or_default();
+                    if old_emb.len() == EMBEDDING_DIM && embedding.len() == EMBEDDING_DIM {
+                        let overlap =
+                            super::sparse_code::encode(&embedding).overlap(&super::sparse_code::encode(&old_emb));
+                        let ok = overlap >= DG_DUP_OVERLAP_GATE;
+                        if !ok {
+                            tracing::info!(
+                                "[Gateway] DG pattern-separation: cos={:.3} but sparse overlap={:.3} < {DG_DUP_OVERLAP_GATE} — paraphrase, not duplicate (tetra {})",
+                                sim, overlap, dup_id
+                            );
+                        }
+                        ok
+                    } else {
+                        true // 无嵌入可比: 维持原余弦判决
+                    }
+                } else {
+                    false
+                };
+                if dg_allows_supersede {
                     // DELETE 操作：高相似度 → supersede 旧记忆
                     tracing::info!(
                         "[Gateway] Mem0 DELETE: new {:.3} similar to tetra {}, superseding old",
