@@ -4291,6 +4291,11 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                 if s.contains("similar pairs") {
                     v += 1.0;
                 }
+                // P3-3: 皮层化洞察必须可见——0 分会被大量 "cluster of N" 洞察
+                // (各 1.5 分)在 truncate(20) 时挤掉, 报告里永远看不到 digest 数
+                if s.contains("corticalized") {
+                    v += 4.0;
+                }
                 v
             };
             score(b)
