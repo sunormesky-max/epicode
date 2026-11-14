@@ -109,10 +109,18 @@ impl Strategy {
         match self {
             Self::Strongest | Self::Novel => 1.0,
             Self::Temporal => {
-                if relation == "Precedes" { 2.5 } else { 0.5 }
+                if relation == "Precedes" {
+                    2.5
+                } else {
+                    0.5
+                }
             }
             Self::Contradict => {
-                if relation == "Contradicts" { 3.0 } else { 0.5 }
+                if relation == "Contradicts" {
+                    3.0
+                } else {
+                    0.5
+                }
             }
         }
     }
@@ -215,7 +223,10 @@ fn sample_index(scores: &[f64], temperature: f64, rng: &mut SmRng) -> usize {
     }
     // softmax(减最大值保数值稳定) → 累积分布采样
     let max = scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let exps: Vec<f64> = scores.iter().map(|&s| ((s - max) / temperature).exp()).collect();
+    let exps: Vec<f64> = scores
+        .iter()
+        .map(|&s| ((s - max) / temperature).exp())
+        .collect();
     let total: f64 = exps.iter().sum();
     if total <= 0.0 || !total.is_finite() {
         return 0;
@@ -318,7 +329,10 @@ where
             Strategy::Strongest => format!("strongest {} edge ({:.2})", rel, strength),
             Strategy::Novel => {
                 let acc = node(*next_id).map(|p| p.access_count).unwrap_or(0);
-                format!("novel memory (access={}) via {} ({:.2})", acc, rel, strength)
+                format!(
+                    "novel memory (access={}) via {} ({:.2})",
+                    acc, rel, strength
+                )
             }
             Strategy::Temporal => format!("timeline: {} ({:.2})", rel, strength),
             Strategy::Contradict => format!("tension: {} ({:.2})", rel, strength),
@@ -358,7 +372,10 @@ fn push_hop<N>(
         .as_ref()
         .map(|p| truncate_chars(&p.content, WANDER_PREVIEW_CHARS))
         .unwrap_or_else(|| "(记忆已不在空间中)".to_string());
-    let labels = payload.as_ref().map(|p| p.labels.clone()).unwrap_or_default();
+    let labels = payload
+        .as_ref()
+        .map(|p| p.labels.clone())
+        .unwrap_or_default();
     let importance = payload.as_ref().map(|p| p.importance).unwrap_or(0.0);
     result.chain.push(WanderHop {
         hop,
@@ -382,12 +399,19 @@ mod tests {
         }
     }
 
-    fn fixture() -> (HashMap<crate::domain::tetra::TetraId, Vec<(u64, String, f64)>>, HashMap<u64, MemoryPayload>) {
+    fn fixture() -> (
+        HashMap<crate::domain::tetra::TetraId, Vec<(u64, String, f64)>>,
+        HashMap<u64, MemoryPayload>,
+    ) {
         // 时间线: 0 -Precedes-> 1 -Precedes-> 2 -Precedes-> 3
         // 旁路: 0 -SimilarTo(0.3)-> 4 -Contradicts(0.9)-> 5 -SimilarTo(0.8)-> 3
         // 3 是死胡同的桥, 5 无出边(终)
         let mut adj: HashMap<u64, Vec<(u64, String, f64)>> = HashMap::new();
-        let add = |from: u64, to: u64, rel: &str, s: f64, adj: &mut HashMap<u64, Vec<(u64, String, f64)>>| {
+        let add = |from: u64,
+                   to: u64,
+                   rel: &str,
+                   s: f64,
+                   adj: &mut HashMap<u64, Vec<(u64, String, f64)>>| {
             adj.entry(from).or_default().push((to, rel.to_string(), s));
         };
         add(0, 1, "Precedes", 0.8, &mut adj);
@@ -433,9 +457,16 @@ mod tests {
     fn shallow_takes_strongest_path() {
         let (adj, nodes) = fixture();
         // τ=0(argmax): 0 的两条边里 Precedes(0.8) > SimilarTo(0.3)
-        let r = run(&adj, &nodes, params(0, DepthPreset::Shallow, Strategy::Strongest));
+        let r = run(
+            &adj,
+            &nodes,
+            params(0, DepthPreset::Shallow, Strategy::Strongest),
+        );
         assert_eq!(r.total_hops, WANDER_SHALLOW_HOPS);
-        assert_eq!(r.chain[1].id, 1, "第一跳应走 0.8 的 Precedes 而非 0.3 的 SimilarTo");
+        assert_eq!(
+            r.chain[1].id, 1,
+            "第一跳应走 0.8 的 Precedes 而非 0.3 的 SimilarTo"
+        );
         assert_eq!(r.chain[2].id, 2);
         assert_eq!(r.chain[3].id, 3);
         assert_eq!(r.stopped_reason, "max_steps");
@@ -446,7 +477,11 @@ mod tests {
     fn deep_reaches_contradiction_branch() {
         let (adj, nodes) = fixture();
         // 16 跳足够走完 0→1→2→3 (3 无出边 → dead_end)
-        let r = run(&adj, &nodes, params(0, DepthPreset::Deep, Strategy::Strongest));
+        let r = run(
+            &adj,
+            &nodes,
+            params(0, DepthPreset::Deep, Strategy::Strongest),
+        );
         assert_eq!(r.stopped_reason, "dead_end");
         assert!(r.chain.iter().any(|h| h.id == 3));
     }
@@ -455,7 +490,11 @@ mod tests {
     fn contradict_strategy_prefers_tension_edges() {
         let (adj, nodes) = fixture();
         // 从 4 出发只有 Contradicts(0.9) 一条边; 权重策略只改变打分
-        let r = run(&adj, &nodes, params(4, DepthPreset::Shallow, Strategy::Contradict));
+        let r = run(
+            &adj,
+            &nodes,
+            params(4, DepthPreset::Shallow, Strategy::Contradict),
+        );
         assert_eq!(r.chain[1].id, 5);
         assert!(r.chain[1].via.as_ref().unwrap().reason.contains("tension"));
         // 5→3 SimilarTo 在 contradict 策略下降权但仍是唯一未访边 → 继续走
@@ -465,7 +504,11 @@ mod tests {
     #[test]
     fn temporal_walks_timeline_forward_only() {
         let (adj, nodes) = fixture();
-        let r = run(&adj, &nodes, params(0, DepthPreset::Shallow, Strategy::Temporal));
+        let r = run(
+            &adj,
+            &nodes,
+            params(0, DepthPreset::Shallow, Strategy::Temporal),
+        );
         // Precedes ×2.5 压倒 SimilarTo ×0.5 → 沿时间线 0→1→2→3
         assert_eq!(r.chain[1].id, 1);
         assert_eq!(r.chain[2].id, 2);
@@ -522,7 +565,11 @@ mod tests {
     #[test]
     fn chain_explains_every_hop() {
         let (adj, nodes) = fixture();
-        let r = run(&adj, &nodes, params(0, DepthPreset::Shallow, Strategy::Strongest));
+        let r = run(
+            &adj,
+            &nodes,
+            params(0, DepthPreset::Shallow, Strategy::Strongest),
+        );
         assert!(r.chain[0].via.is_none(), "起点无进入边");
         for h in &r.chain[1..] {
             let via = h.via.as_ref().expect("非起点必有进入边");
