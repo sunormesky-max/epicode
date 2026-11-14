@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0](https://github.com/sunormesky-max/epicode/compare/v2.6.0...v2.7.0) (2026-11-14)
+
+
+### Features
+
+* **core:** SR spectral grid codes — multi-scale graph retrieval (P3-2) ([#353](https://github.com/sunormesky-max/epicode/issues/353)) ([c7a82e7](https://github.com/sunormesky-max/epicode/commit/c7a82e7697d475670f7ee7c5b40953fd66ee95cc))
+
 ## [2.6.0](https://github.com/sunormesky-max/epicode/compare/v2.5.1...v2.6.0) (2026-11-13)
 
 
