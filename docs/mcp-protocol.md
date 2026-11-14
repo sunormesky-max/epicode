@@ -50,6 +50,7 @@ Discover the current catalog with the MCP `tools/list` method.
 - `memory_create`
 - `memory_search`
 - `memory_recall`
+- `memory_wander`
 - `memory_ask`
 - `memory_get`
 - `memory_list`
@@ -94,6 +95,7 @@ Discover the current catalog with the MCP `tools/list` method.
 
 - Use `memory_search` when you need ranked, inspectable memories, tier labels, retrieval provenance, or exact/semantic/graph/fusion routing.
 - Use `memory_recall` when connected context from knowledge-graph associations and the recall tiers matter more than a concise answer.
+- Use `memory_wander` for **free association**: start from one clue (memory id, or the top hit for a query) and walk the knowledge graph step by step, following the most interesting edge each time. Unlike recall's query-driven fan-out, wander returns an explainable associative chain A→B→C→… where every hop records the edge taken and why. Four depth tiers: `shallow` (3 hops, τ0.1 — "what immediately comes to mind"), `medium` (8 hops), `deep` (16 hops, cross-domain), and `free` (the agent sets its own step count up to 64). Strategies reshape what counts as "interesting": `strongest` (default), `novel` (cold low-access memories — surprise), `temporal` (walk Precedes timelines), `contradict` (walk Contradicts tension). `temperature` (0–1) controls divergence: 0 always takes the best edge; higher values explore weaker edges.
 - Use `memory_ask` when you want the existing memory-grounded answer engine to synthesize an answer. Its SMRP `data` contains `answer`, structured source `memories` (`id`, `labels`, `content`, `relevance`), `memory_count`, and optional `knowledge_card_used`. A zero `memory_count` is returned with the explicit answer `"No relevant memories found."`.
 
 The engine does not currently return a calibrated confidence or uncertainty score for `memory_ask`; do not infer one from the answer text. Check `protocol.ok`, `memory_count`, and the returned source memories. Existing answer generation is unchanged by the MCP wrapper.

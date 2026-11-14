@@ -50,6 +50,7 @@ pub mod security;
 pub mod sparse_code;
 pub mod spectral;
 pub mod user_manager;
+pub mod wander;
 
 // Auxiliary systems
 pub mod adaptive;
