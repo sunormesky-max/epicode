@@ -47,9 +47,15 @@ fn build_transition(kg: &KnowledgeGraph) -> HashMap<u64, Vec<(u64, f64)>> {
     let mut adj: HashMap<u64, HashMap<u64, f64>> = HashMap::new();
     for r in &relations {
         let symmetric = r.relation_type.is_symmetric();
-        *adj.entry(r.source).or_default().entry(r.target).or_insert(0.0) += r.strength;
+        *adj.entry(r.source)
+            .or_default()
+            .entry(r.target)
+            .or_insert(0.0) += r.strength;
         if symmetric {
-            *adj.entry(r.target).or_default().entry(r.source).or_insert(0.0) += r.strength;
+            *adj.entry(r.target)
+                .or_default()
+                .entry(r.source)
+                .or_insert(0.0) += r.strength;
         }
     }
     // 行归一化: T[u][v] = w(u,v) / Σ w(u,·)
@@ -88,7 +94,11 @@ fn power_iterate(
         .map(|&n| {
             (
                 n,
-                if n == seed { 1.0 } else { 1.0 / (nodes.len() as f64).sqrt() },
+                if n == seed {
+                    1.0
+                } else {
+                    1.0 / (nodes.len() as f64).sqrt()
+                },
             )
         })
         .collect();
@@ -126,7 +136,8 @@ fn power_iterate(
             break;
         }
         for x in next.values_mut() {
-            *x /= norm;
+            let nx = *x;
+            *x = nx / norm;
         }
         v = next;
     }
@@ -143,7 +154,10 @@ fn power_iterate(
             }
         }
     }
-    let eigenvalue: f64 = v.iter().filter_map(|(&n, &x)| tv.get(&n).map(|&y| x * y)).sum();
+    let eigenvalue: f64 = v
+        .iter()
+        .filter_map(|(&n, &x)| tv.get(&n).map(|&y| x * y))
+        .sum();
 
     (v, eigenvalue)
 }
@@ -240,10 +254,7 @@ impl SpectralIndex {
         }
 
         let mut ranked: Vec<(u64, f64)> = scores.into_iter().collect();
-        ranked.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         ranked.truncate(top_k);
         // 归一化到 [0,1] 区间(与 PPR 输出对齐)
         if let Some((_, max)) = ranked.first() {
