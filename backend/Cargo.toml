@@ -63,3 +63,4 @@ path = "src/bin/migrate_embeddings.rs"
 [[bin]]
 name = "epicode-cloud"
 path = "src/bin/cloud.rs"
+# trigger full CI  
