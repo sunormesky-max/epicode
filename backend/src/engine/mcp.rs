@@ -4351,11 +4351,11 @@ impl McpHandler {
         }
         let depth = args["depth"]
             .as_str()
-            .and_then(super::wander::DepthPreset::from_str)
+            .and_then(super::wander::DepthPreset::parse)
             .unwrap_or(super::wander::DepthPreset::Medium);
         let strategy = args["strategy"]
             .as_str()
-            .and_then(super::wander::Strategy::from_str)
+            .and_then(super::wander::Strategy::parse)
             .unwrap_or(super::wander::Strategy::Strongest);
         // 深度联想同样是探索相证据
         if let Some(tid) = self

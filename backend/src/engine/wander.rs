@@ -49,7 +49,7 @@ pub enum DepthPreset {
 }
 
 impl DepthPreset {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
             "shallow" => Some(Self::Shallow),
             "medium" => Some(Self::Medium),
@@ -94,7 +94,7 @@ pub enum Strategy {
 }
 
 impl Strategy {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
             "strongest" => Some(Self::Strongest),
             "novel" => Some(Self::Novel),
@@ -399,19 +399,15 @@ mod tests {
         }
     }
 
-    fn fixture() -> (
-        HashMap<crate::domain::tetra::TetraId, Vec<(u64, String, f64)>>,
-        HashMap<u64, MemoryPayload>,
-    ) {
+    type Adj = HashMap<u64, Vec<(u64, String, f64)>>;
+    type Nodes = HashMap<u64, MemoryPayload>;
+
+    fn fixture() -> (Adj, Nodes) {
         // 时间线: 0 -Precedes-> 1 -Precedes-> 2 -Precedes-> 3
         // 旁路: 0 -SimilarTo(0.3)-> 4 -Contradicts(0.9)-> 5 -SimilarTo(0.8)-> 3
         // 3 是死胡同的桥, 5 无出边(终)
-        let mut adj: HashMap<u64, Vec<(u64, String, f64)>> = HashMap::new();
-        let add = |from: u64,
-                   to: u64,
-                   rel: &str,
-                   s: f64,
-                   adj: &mut HashMap<u64, Vec<(u64, String, f64)>>| {
+        let mut adj: Adj = HashMap::new();
+        let add = |from: u64, to: u64, rel: &str, s: f64, adj: &mut Adj| {
             adj.entry(from).or_default().push((to, rel.to_string(), s));
         };
         add(0, 1, "Precedes", 0.8, &mut adj);
@@ -430,11 +426,7 @@ mod tests {
         (adj, nodes)
     }
 
-    fn run(
-        adj: &HashMap<u64, Vec<(u64, String, f64)>>,
-        nodes: &HashMap<u64, MemoryPayload>,
-        params: WanderParams,
-    ) -> WanderResult {
+    fn run(adj: &Adj, nodes: &Nodes, params: WanderParams) -> WanderResult {
         wander(
             |id| adj.get(&id).cloned().unwrap_or_default(),
             |id| nodes.get(&id).cloned(),
