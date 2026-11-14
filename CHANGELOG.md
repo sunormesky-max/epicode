@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0](https://github.com/sunormesky-max/epicode/compare/v2.7.0...v2.8.0) (2026-11-14)
+
+
+### Features
+
+* **memory:** four-tier free-association wander (memory_wander) ([#358](https://github.com/sunormesky-max/epicode/issues/358)) ([e8f846c](https://github.com/sunormesky-max/epicode/commit/e8f846cd482ae3e3e7a917d634b61d1d83df4284))
+* **search:** wire SR spectral grid codes into graph-mode retrieval ([#355](https://github.com/sunormesky-max/epicode/issues/355)) ([22f1700](https://github.com/sunormesky-max/epicode/commit/22f17001ab37a1980f7a8a499128dc2c9c995e0f))
+
+
+### Documentation
+
+* Neural Architecture section + research roadmap ([#357](https://github.com/sunormesky-max/epicode/issues/357)) ([62792f6](https://github.com/sunormesky-max/epicode/commit/62792f63a885754461f9aa5194092ec8ed7bad3e))
+
 ## [2.7.0](https://github.com/sunormesky-max/epicode/compare/v2.6.0...v2.7.0) (2026-11-14)
 
 
