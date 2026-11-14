@@ -2,6 +2,17 @@
 
 This roadmap describes the direction of the Epicode project. Items closer to the top are more likely to land in the next few releases.
 
+## Spatial Memory Algorithm Research (completed November 2026)
+
+All items from the seven-dimension deep research roadmap have landed in production (v2.2.0 → v2.7.0, 34 PRs):
+
+- [x] **P0**: PPR plasticity writeback, pulse noise gate, trunk-road reinforcement, mass decay loop, constitutional floor, anti-stacking (3-layer defense), conclusions-not-coordinates, edge strength upgrade (#323)
+- [x] **P1**: Session-temporal Precedes chain + directed PPR (Successor Representation semantics), competitive reinforcement, reversible fission, layer clamping, Port reconciliation, multi-path link candidates, derived importance R(t)=(base+ln(access)·0.3)·0.98^review_days (#324, #325, #327, #342)
+- [x] **P2**: Placement O(27k) (1.8× write), entropy sampling cap, single HNSW build, CJK entity extraction, degree-cap LRU eviction, scoring signal diet (8 orthogonal channels) (#329, #339, #345)
+- [x] **P3-1 Dentate Gyrus**: Sparse-code pattern separation gates Mem0 supersede (#351)
+- [x] **P3-2 Entorhinal Cortex**: SR spectral grid codes — top-32 eigenvectors for graph-wide PPR retrieval without BFS (#353, #355)
+- [x] **P3-3 Neocortex**: Dream corticalization — cluster digests sedimented into the Library layer (#347)
+
 ## Near term (next 1–2 releases)
 
 - [x] Raise the default energy cap so continuous memory creation is not throttled so aggressively.
