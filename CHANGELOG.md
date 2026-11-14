@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.1](https://github.com/sunormesky-max/epicode/compare/v2.10.0...v2.10.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **dream:** associative replay insight must survive truncation ([#363](https://github.com/sunormesky-max/epicode/issues/363)) ([b1de53f](https://github.com/sunormesky-max/epicode/commit/b1de53f9bf2c05f83f98a0e4bcef8afc1a0318a9))
+
 ## [2.10.0](https://github.com/sunormesky-max/epicode/compare/v2.9.0...v2.10.0) (2026-11-14)
 
 
