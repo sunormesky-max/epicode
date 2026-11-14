@@ -2884,6 +2884,15 @@ impl SchedulerCenter {
         self.gateway.get_relations_directed(id)
     }
 
+    /// 谱远跳候选(wander 自由联想用)。
+    pub fn api_spectral_far_jump(
+        &self,
+        from: TetraId,
+        visited: &[TetraId],
+    ) -> Option<(TetraId, f64)> {
+        self.gateway.spectral_far_jump(from, visited)
+    }
+
     pub fn api_get_concepts(&self) -> Vec<(String, usize)> {
         self.gateway.get_concepts()
     }

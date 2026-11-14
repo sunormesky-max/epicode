@@ -16,6 +16,11 @@
 //! τ升高后 softmax 采样开始探索次强边——联想的发散度旋钮。
 //! 策略在边强度之外改变"什么算有意思": novel 偏好冷记忆(惊喜),
 //! temporal 沿 Precedes 走时间线, contradict 沿 Contradicts 走张力。
+//!
+//! 谱远跳(far jump): 局部联想枯竭(死胡同/闭环)时, 把当前节点投影到
+//! SR 网格码(spectral.rs 的全图近似 PPR), 传送到一个未访问的远处
+//! 区域继续走——大脑的"换话题"。预算制(浅 0/中 1/深 2/自由 2, 上限
+//! 4), 跳转在链上记为 FarJump 边类型。远跳耗尽后才真正停止。
 
 use crate::domain::tetra::MemoryPayload;
 use std::collections::{HashMap, HashSet};
@@ -34,6 +39,8 @@ pub const WANDER_FREE_MAX_HOPS: usize = 64;
 pub const WANDER_TEMP_ARGMAX: f64 = 0.05;
 /// 链上每跳内容预览长度(字符, CJK 安全截断)。
 pub const WANDER_PREVIEW_CHARS: usize = 120;
+/// 谱远跳次数硬上限。
+pub const WANDER_MAX_FAR_JUMPS: usize = 4;
 
 /// 联想深度档位 —— 四档联想模式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +83,15 @@ impl DepthPreset {
             Self::Medium => 0.4,
             Self::Deep => 0.7,
             Self::Free => 0.8,
+        }
+    }
+
+    /// 档位默认谱远跳预算: 浅度不离开邻域, 越深越敢传送。
+    pub fn default_far_jumps(self) -> usize {
+        match self {
+            Self::Shallow => 0,
+            Self::Medium => 1,
+            Self::Deep | Self::Free => 2,
         }
     }
 }
@@ -135,6 +151,8 @@ pub struct WanderParams {
     pub max_steps: Option<usize>,
     /// 温度覆盖(所有档生效, 0..=1)。
     pub temperature: Option<f64>,
+    /// 谱远跳次数预算覆盖(0..=WANDER_MAX_FAR_JUMPS)。
+    pub far_jumps: Option<usize>,
     /// RNG 种子(测试确定性用; 缺省取时间)。
     pub seed: Option<u64>,
 }
@@ -166,6 +184,8 @@ pub struct WanderResult {
     pub total_hops: usize,
     pub unique_memories: usize,
     pub relation_types_used: HashMap<String, usize>,
+    /// 实际发生的谱远跳次数。
+    pub far_jumps_used: usize,
     /// "max_steps" | "dead_end" | "loop_closed"
     pub stopped_reason: String,
 }
@@ -246,13 +266,20 @@ fn sample_index(scores: &[f64], temperature: f64, rng: &mut SmRng) -> usize {
 /// - `relations`: 有向邻接查询(对称关系双向, Precedes/Contains 只正向)——
 ///   生产侧接 `api_get_relations_directed`, 语义与 PPR/SR 遍历一致。
 /// - `node`: 记忆载荷查询(内容预览/labels/access_count)。
+/// - `far_jump`: 谱远跳查询——局部无路可走时, 把当前节点投影到
+///   SR 网格码, 从全图近似 PPR 中取一个未访问的远处节点传送过去。
+///   生产侧接 `api_spectral_far_jump`; 无谱索引时传 `|_, _| None`。
 ///
-/// 停止条件: 步数用尽(max_steps) / 死胡同(dead_end) /
+/// 停止条件: 步数用尽(max_steps) / 死胡同(dead_end, 远跳预算也耗尽) /
 /// 邻居全被走过(loop_closed, 联想闭环——人脑"绕回来了"的时刻)。
-pub fn wander<R, N>(relations: R, node: N, params: WanderParams) -> WanderResult
+pub fn wander<R, N, F>(relations: R, node: N, far_jump: F, params: WanderParams) -> WanderResult
 where
     R: Fn(crate::domain::tetra::TetraId) -> Vec<(crate::domain::tetra::TetraId, String, f64)>,
     N: Fn(crate::domain::tetra::TetraId) -> Option<MemoryPayload>,
+    F: Fn(
+        crate::domain::tetra::TetraId,
+        &[crate::domain::tetra::TetraId],
+    ) -> Option<(crate::domain::tetra::TetraId, f64)>,
 {
     let max_hops = match params.depth {
         DepthPreset::Free => params
@@ -265,6 +292,10 @@ where
         .temperature
         .unwrap_or_else(|| params.depth.default_temperature())
         .clamp(0.0, 1.0);
+    let mut far_budget = params
+        .far_jumps
+        .unwrap_or_else(|| params.depth.default_far_jumps())
+        .min(WANDER_MAX_FAR_JUMPS);
     let mut rng = SmRng::new(params.seed.unwrap_or_else(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -287,6 +318,31 @@ where
             .filter(|(id, _, _)| Some(*id) != prev && !visited.contains(id))
             .collect();
         if cands.is_empty() {
+            // 谱远跳: 局部联想枯竭时用 SR 网格码传送到远处区域
+            // (大脑的"换话题"——上一个念头走完, 意识跳到别的脉络)。
+            if far_budget > 0 {
+                let visited_list: Vec<crate::domain::tetra::TetraId> =
+                    visited.iter().copied().collect();
+                if let Some((target, score)) = far_jump(current, &visited_list) {
+                    far_budget -= 1;
+                    result.far_jumps_used += 1;
+                    let via = ViaEdge {
+                        from: current,
+                        relation: "FarJump".into(),
+                        strength: score,
+                        reason: format!("spectral far-jump to distant region ({:.2})", score),
+                    };
+                    *result
+                        .relation_types_used
+                        .entry("FarJump".into())
+                        .or_insert(0) += 1;
+                    prev = Some(current);
+                    current = target;
+                    visited.insert(current);
+                    push_hop(&mut result, &node, hop, current, Some(via));
+                    continue;
+                }
+            }
             if relations(current).is_empty() {
                 result.stopped_reason = "dead_end".into();
                 break;
@@ -430,6 +486,7 @@ mod tests {
         wander(
             |id| adj.get(&id).cloned().unwrap_or_default(),
             |id| nodes.get(&id).cloned(),
+            |_, _| None,
             params,
         )
     }
@@ -441,6 +498,7 @@ mod tests {
             strategy,
             max_steps: None,
             temperature: Some(0.0),
+            far_jumps: None,
             seed: Some(42),
         }
     }
@@ -578,16 +636,98 @@ mod tests {
         let r = wander(
             |_| vec![],
             |id| nodes.get(&id).cloned(),
+            |_, _| None,
             WanderParams {
                 start: 0,
                 depth: DepthPreset::Shallow,
                 strategy: Strategy::Strongest,
                 max_steps: None,
                 temperature: None,
+                far_jumps: None,
                 seed: Some(1),
             },
         );
         assert_eq!(r.chain[0].preview.chars().count(), WANDER_PREVIEW_CHARS + 1); // +1 = 省略号
         assert!(r.stopped_reason == "dead_end");
+    }
+
+    #[test]
+    fn far_jump_rescues_dead_end() {
+        let (adj, nodes) = fixture();
+        // 0→1→2→3 后 3 无出边: 无远跳则 dead_end(见 deep 测试)。
+        // 提供远跳: 3 → 4(远处节点, 4 虽在邻接表里有边但 0→4 方向未走过)。
+        let mut p = params(0, DepthPreset::Deep, Strategy::Strongest);
+        p.far_jumps = Some(1);
+        let r = wander(
+            |id| adj.get(&id).cloned().unwrap_or_default(),
+            |id| nodes.get(&id).cloned(),
+            |from: u64, visited: &[u64]| {
+                // 只有从 3 出发才提供远跳, 目标 4, 且要求未访问
+                if from == 3 && !visited.contains(&4) {
+                    Some((4u64, 0.42))
+                } else {
+                    None
+                }
+            },
+            p,
+        );
+        // 链应包含 FarJump: 0→1→2→3 --FarJump--> 4→5→3(已访)→ 远跳预算耗尽 → 停
+        let far = r
+            .chain
+            .iter()
+            .find(|h| h.via.as_ref().is_some_and(|v| v.relation == "FarJump"));
+        assert!(
+            far.is_some(),
+            "应有 FarJump 跳: {:?}",
+            r.chain.iter().map(|h| h.id).collect::<Vec<_>>()
+        );
+        assert_eq!(r.far_jumps_used, 1);
+        assert_eq!(far.unwrap().id, 4);
+        assert!(far
+            .unwrap()
+            .via
+            .as_ref()
+            .unwrap()
+            .reason
+            .contains("far-jump"));
+        // 远跳后游走继续(4 有 Contradicts 出边到 5)
+        assert!(r.chain.iter().any(|h| h.id == 5), "远跳后应继续走 4→5");
+    }
+
+    #[test]
+    fn far_jump_budget_exhaustion_stops() {
+        let (adj, nodes) = fixture();
+        // 从 3 出发(无出边): 远跳给 4, 之后 4→5→3 全走完再无路且预算 0 → 停
+        let r = wander(
+            |id| adj.get(&id).cloned().unwrap_or_default(),
+            |id| nodes.get(&id).cloned(),
+            |from: u64, visited: &[u64]| {
+                if from == 3 && !visited.contains(&4) {
+                    Some((4u64, 0.5))
+                } else {
+                    None
+                }
+            },
+            WanderParams {
+                start: 3,
+                depth: DepthPreset::Free,
+                strategy: Strategy::Strongest,
+                max_steps: Some(10),
+                temperature: Some(0.0),
+                far_jumps: Some(1),
+                seed: Some(7),
+            },
+        );
+        assert_eq!(r.far_jumps_used, 1);
+        // 3→4(远跳)→5→3(绕环) 后: 3 无出边且预算已尽 → dead_end
+        assert_eq!(r.stopped_reason, "dead_end");
+    }
+
+    #[test]
+    fn shallow_default_has_no_far_jumps() {
+        assert_eq!(DepthPreset::Shallow.default_far_jumps(), 0);
+        assert_eq!(DepthPreset::Medium.default_far_jumps(), 1);
+        assert_eq!(DepthPreset::Deep.default_far_jumps(), 2);
+        assert_eq!(DepthPreset::Free.default_far_jumps(), 2);
     }
 }
