@@ -36,7 +36,7 @@ from epicode.models import (
     TieredMemoryResult,
 )
 
-__version__ = "2.9.0"  # x-release-please-version
+__version__ = "2.10.0"  # x-release-please-version
 __all__ = [
     "EpicodeClient",
     "EpicodeAdmin",
