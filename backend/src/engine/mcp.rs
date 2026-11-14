@@ -659,6 +659,7 @@ impl McpHandler {
             | "memory_search"
             | "library_search"
             | "memory_recall"
+            | "memory_wander"
             | "memory_ask"
             | "memory_get"
             | "memory_list"
@@ -1053,6 +1054,23 @@ impl McpHandler {
                             "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "slim", "description": "'slim' (default) returns compact items[]+why+budget_spent. 'full' returns SMRP tiers with full content (no sections duplicate), capped by limit; items_total/items_truncated report what was cut." }
                         },
                         "required": ["query"]
+                    }
+                },
+                {
+                    "name": "memory_wander",
+                    "description": "Free-association wander: start from one clue (memory id or query) and walk the knowledge graph step by step, following the most interesting edge each time. Returns an explainable associative chain A→B→C→… where every hop carries the edge taken and why. Four depth tiers: shallow (3 hops, near-deterministic 'what immediately comes to mind'), medium (8 hops), deep (16 hops, cross-domain), free (agent sets its own step count up to 64). Strategies: strongest edge / novel cold memories / temporal timeline (Precedes) / contradiction tension. Use memory_recall for query-driven fan-out retrieval; use memory_wander when the goal is associative exploration, serendipity, or tracing how ideas connect.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "start_id": { "type": "integer", "description": "Memory ID to start wandering from (the clue). Either start_id or query is required." },
+                            "query": { "type": "string", "description": "If no start_id, the top search hit for this query becomes the starting clue." },
+                            "depth": { "type": "string", "enum": ["shallow", "medium", "deep", "free"], "default": "medium", "description": "Association tier: shallow=3 hops τ0.1 (convergent), medium=8 hops τ0.4, deep=16 hops τ0.7 (divergent), free=agent-chosen steps (default 24, max 64) τ0.8." },
+                            "strategy": { "type": "string", "enum": ["strongest", "novel", "temporal", "contradict"], "default": "strongest", "description": "What counts as 'interesting' next: strongest edge, novel cold memories (low access count = surprise), temporal timeline (Precedes), or contradiction tension (Contradicts)." },
+                            "max_steps": { "type": "integer", "minimum": 1, "maximum": 64, "description": "free tier only: agent-decided number of hops (default 24, hard cap 64)." },
+                            "temperature": { "type": "number", "minimum": 0, "maximum": 1, "description": "Divergence knob: 0 always takes the highest-scoring edge; higher values explore weaker/surprising edges. Overrides the tier default." },
+                            "seed": { "type": "integer", "description": "Optional RNG seed for reproducible walks (testing)." }
+                        },
+                        "required": []
                     }
                 },
                 {
@@ -1803,6 +1821,7 @@ impl McpHandler {
             // Pure reads
             "memory_search"
             | "memory_recall"
+            | "memory_wander"
             | "memory_ask"
             | "memory_get"
             | "memory_list"
@@ -1998,6 +2017,7 @@ impl McpHandler {
             "memory_search" => self.tool_memory_search(&args),
             "library_search" => self.tool_library_search(&args),
             "memory_recall" => self.tool_memory_recall(&args),
+            "memory_wander" => self.tool_memory_wander(&args),
             "memory_ask" => self.tool_memory_ask(&args),
             "memory_get" => self.tool_memory_get(&args),
             "memory_list" => self.tool_memory_list(&args),
@@ -4308,6 +4328,85 @@ impl McpHandler {
             }
             Err(e) => self.smrp_err("memory_recall", 500, &e),
         }
+    }
+
+    /// 四档联想模式(memory_wander): 线索驱动的自由联想游走。
+    /// 浅度(3 跳)/中度(8 跳)/深度(16 跳)/自由(智能体自定步数 ≤64)。
+    fn tool_memory_wander(&self, args: &serde_json::Value) -> serde_json::Value {
+        let start = match args["start_id"].as_u64() {
+            Some(id) => id,
+            None => {
+                let query = args["query"].as_str().unwrap_or("").trim();
+                if query.is_empty() {
+                    return self.smrp_err("memory_wander", 400, "start_id or query is required");
+                }
+                match self.engine.scheduler.api_search(query, 1) {
+                    Ok(mut hits) if !hits.is_empty() => hits.remove(0).0,
+                    _ => return self.smrp_err("memory_wander", 404, "no seed found for query"),
+                }
+            }
+        };
+        if self.engine.scheduler.api_get_node(start).is_none() {
+            return self.smrp_err("memory_wander", 404, &format!("memory {} not found", start));
+        }
+        let depth = args["depth"]
+            .as_str()
+            .and_then(super::wander::DepthPreset::parse)
+            .unwrap_or(super::wander::DepthPreset::Medium);
+        let strategy = args["strategy"]
+            .as_str()
+            .and_then(super::wander::Strategy::parse)
+            .unwrap_or(super::wander::Strategy::Strongest);
+        // 深度联想同样是探索相证据
+        if let Some(tid) = self
+            .engine
+            .storage
+            .get_active_task_for_user(&self.engine.user_id)
+        {
+            self.engine.storage.bump_task_counter(&tid, "memory_ops");
+        }
+        let result = super::wander::wander(
+            |id| self.engine.scheduler.api_get_relations_directed(id),
+            |id| self.engine.scheduler.api_get_node(id),
+            super::wander::WanderParams {
+                start,
+                depth,
+                strategy,
+                max_steps: args["max_steps"].as_u64().map(|n| n as usize),
+                temperature: args["temperature"].as_f64(),
+                seed: args["seed"].as_u64(),
+            },
+        );
+        let chain: Vec<serde_json::Value> = result
+            .chain
+            .iter()
+            .map(|h| {
+                serde_json::json!({
+                    "hop": h.hop,
+                    "id": h.id,
+                    "preview": h.preview,
+                    "labels": h.labels,
+                    "importance": (h.importance * 100.0).round() / 100.0,
+                    "via": h.via.as_ref().map(|v| serde_json::json!({
+                        "from": v.from,
+                        "relation": v.relation,
+                        "strength": (v.strength * 100.0).round() / 100.0,
+                        "reason": v.reason,
+                    })),
+                })
+            })
+            .collect();
+        let data = serde_json::json!({
+            "start_id": start,
+            "depth": format!("{:?}", depth).to_lowercase(),
+            "strategy": format!("{:?}", strategy).to_lowercase(),
+            "total_hops": result.total_hops,
+            "unique_memories": result.unique_memories,
+            "stopped_reason": result.stopped_reason,
+            "relation_types_used": result.relation_types_used,
+            "chain": chain,
+        });
+        self.smrp_ok("memory_wander", data)
     }
 
     fn tool_memory_ask(&self, args: &serde_json::Value) -> serde_json::Value {

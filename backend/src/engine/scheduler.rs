@@ -2879,6 +2879,11 @@ impl SchedulerCenter {
         self.gateway.get_relations(id)
     }
 
+    /// 有向关系(wander 自由联想游走用)。
+    pub fn api_get_relations_directed(&self, id: TetraId) -> Vec<(TetraId, String, f64)> {
+        self.gateway.get_relations_directed(id)
+    }
+
     pub fn api_get_concepts(&self) -> Vec<(String, usize)> {
         self.gateway.get_concepts()
     }

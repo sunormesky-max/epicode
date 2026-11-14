@@ -1152,6 +1152,15 @@ impl GatewayCenter {
             .collect()
     }
 
+    /// 有向关系(wander/自由联想用): 对称关系双向, 方向语义边只正向。
+    pub fn get_relations_directed(&self, id: TetraId) -> Vec<(TetraId, String, f64)> {
+        self.knowledge
+            .query_relations_directed(id)
+            .into_iter()
+            .map(|(tid, rt, s)| (tid, format!("{}", rt), s))
+            .collect()
+    }
+
     pub fn get_concepts(&self) -> Vec<(String, usize)> {
         self.knowledge
             .get_concepts()
