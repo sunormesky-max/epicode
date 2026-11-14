@@ -257,10 +257,11 @@ impl SpectralIndex {
         ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         ranked.truncate(top_k);
         // 归一化到 [0,1] 区间(与 PPR 输出对齐)
-        if let Some((_, max)) = ranked.first() {
-            let m = max.abs().max(1e-9);
+        if let Some((_, max_val)) = ranked.first() {
+            let m = max_val.abs().max(1e-9);
             for (_, s) in ranked.iter_mut() {
-                *s = (s / m).clamp(0.0, 1.0);
+                let raw = *s;
+                *s = (raw / m).clamp(0.0, 1.0);
             }
         }
         ranked
