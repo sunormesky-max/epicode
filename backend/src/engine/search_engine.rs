@@ -51,6 +51,9 @@ pub struct SearchEngineState {
     df_cache: Mutex<Option<DfCache>>,
     /// Document tokens are reused only within the searchable-memory revision.
     doc_token_cache: Mutex<DocTokenCache>,
+    /// P3-2 SR 谱网格码索引(与 HNSW 同步重建)。
+    /// PPR BFS 只覆盖 3 跳/2000 节点, 谱检索覆盖全图——补全远距离关联。
+    pub spectral: RwLock<Option<super::spectral::SpectralIndex>>,
 }
 
 struct DfCache {
@@ -86,6 +89,7 @@ impl SearchEngineState {
             access_counts: Mutex::new(HashMap::new()),
             df_cache: Mutex::new(None),
             doc_token_cache: Mutex::new(DocTokenCache::default()),
+            spectral: RwLock::new(None),
         }
     }
 
@@ -977,6 +981,41 @@ fn search_graph(
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     let mut out: Vec<ScoredWithMatch> = Vec::new();
+
+    // P3-2 SR 谱网格码补全: PPR BFS 只覆盖 3 跳/2000 节点——远端同主题记忆
+    // 无法到达。谱检索从预计算特征基重建全图 PPR 近似, 补入 PPR 错过的节点。
+    // 谱-only 命中给 0.35 权重(有图论证据的 PPR 命中保持 0.6+ 权重优势)。
+    {
+        let spectral_idx = ctx.state.spectral.read();
+        if let Some(ref idx) = *spectral_idx {
+            if idx.is_ready(ctx.knowledge) {
+                let code = idx.project(&seed_vec);
+                let spectral_results = idx.retrieve(&code, k);
+                let in_ppr: std::collections::HashSet<u64> =
+                    scored.iter().map(|(id, _, _)| *id).collect();
+                let mut additions: Vec<(u64, f64, bool)> = Vec::new();
+                for (id, spec_score) in spectral_results {
+                    if !in_ppr.contains(&id)
+                        && passes_filters_id(ctx, id, filters)
+                        && spec_score > 0.15
+                    {
+                        additions.push((id, spec_score * 0.35, false));
+                    }
+                }
+                if !additions.is_empty() {
+                    tracing::debug!(
+                        "[Search] spectral grid-code: +{} remote nodes beyond PPR frontier",
+                        additions.len()
+                    );
+                    scored.extend(additions);
+                    scored.sort_by(|a, b| {
+                        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                }
+            }
+        }
+    }
+
     for (id, score, is_seed) in scored.into_iter().take(k) {
         if let Some(t) = ctx.space.get_tetrahedron(id) {
             // 可塑性回写: PPR 命中与 base 检索命中同权进入 access_counts 缓存,

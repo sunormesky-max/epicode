@@ -105,6 +105,15 @@ impl GatewayCenter {
 
     pub fn rebuild_hnsw(&self) {
         self.index.rebuild_hnsw(&self.search.hnsw, &self.space);
+        // P3-2: 同步重建谱网格码(KG 关系变化时)——幂等守卫在 spectral 模块内
+        self.rebuild_spectral();
+    }
+
+    /// P3-2: 从 KG 计算谱网格码索引并swap到搜索引擎。
+    /// 调用时机: rebuild_hnsw(fission/merge/dream 后)或显式触发。
+    pub fn rebuild_spectral(&self) {
+        let idx = super::spectral::SpectralIndex::compute(&self.knowledge);
+        *self.search.spectral.write() = Some(idx);
     }
 
     pub fn vector_clone(&self) -> Option<Arc<VectorLayer>> {
