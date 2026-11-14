@@ -1008,9 +1008,8 @@ fn search_graph(
                         additions.len()
                     );
                     scored.extend(additions);
-                    scored.sort_by(|a, b| {
-                        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-                    });
+                    scored
+                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                 }
             }
         }
