@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0](https://github.com/sunormesky-max/epicode/compare/v2.5.1...v2.6.0) (2026-11-13)
+
+
+### Features
+
+* **core:** DG sparse-code pattern separation gates Mem0 supersede (P3-1) ([#351](https://github.com/sunormesky-max/epicode/issues/351)) ([2f67ac0](https://github.com/sunormesky-max/epicode/commit/2f67ac0bdcee06417faff9aeb314361319ab37b3))
+
 ## [2.5.1](https://github.com/sunormesky-max/epicode/compare/v2.5.0...v2.5.1) (2026-11-13)
 
 
