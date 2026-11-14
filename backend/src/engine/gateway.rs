@@ -1189,6 +1189,21 @@ impl GatewayCenter {
         self.knowledge.get_top_concepts(limit)
     }
 
+    /// 谱远跳(wander 自由联想用): 当前节点投影到 SR 网格码,
+    /// 从全图近似 PPR 中取一个未访问的远处节点。
+    pub fn spectral_far_jump(&self, from: TetraId, visited: &[TetraId]) -> Option<(TetraId, f64)> {
+        let idx = self.search.spectral.read();
+        let idx = idx.as_ref()?;
+        if !idx.is_ready(&self.knowledge) {
+            return None;
+        }
+        let code = idx.project(&[(from, 1.0)]);
+        let cands = idx.retrieve(&code, 32);
+        cands
+            .into_iter()
+            .find(|(id, score)| *id != from && !visited.contains(id) && *score > 0.15)
+    }
+
     pub fn get_node(&self, id: TetraId) -> Option<MemoryPayload> {
         self.space.get_tetrahedron(id).map(|t| t.data)
     }

@@ -1058,7 +1058,7 @@ impl McpHandler {
                 },
                 {
                     "name": "memory_wander",
-                    "description": "Free-association wander: start from one clue (memory id or query) and walk the knowledge graph step by step, following the most interesting edge each time. Returns an explainable associative chain A→B→C→… where every hop carries the edge taken and why. Four depth tiers: shallow (3 hops, near-deterministic 'what immediately comes to mind'), medium (8 hops), deep (16 hops, cross-domain), free (agent sets its own step count up to 64). Strategies: strongest edge / novel cold memories / temporal timeline (Precedes) / contradiction tension. Use memory_recall for query-driven fan-out retrieval; use memory_wander when the goal is associative exploration, serendipity, or tracing how ideas connect.",
+                    "description": "Free-association wander: start from one clue (memory id or query) and walk the knowledge graph step by step, following the most interesting edge each time. Returns an explainable associative chain A→B→C→… where every hop carries the edge taken and why. Four depth tiers: shallow (3 hops, near-deterministic 'what immediately comes to mind'), medium (8 hops), deep (16 hops, cross-domain), free (agent sets its own step count up to 64). Strategies: strongest edge / novel cold memories / temporal timeline (Precedes) / contradiction tension. When a region exhausts, spectral far-jumps teleport the chain to a distant region of the graph (budget: shallow 0 / medium 1 / deep 2 / free 2, overridable). Use memory_recall for query-driven fan-out retrieval; use memory_wander when the goal is associative exploration, serendipity, or tracing how ideas connect.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1068,6 +1068,7 @@ impl McpHandler {
                             "strategy": { "type": "string", "enum": ["strongest", "novel", "temporal", "contradict"], "default": "strongest", "description": "What counts as 'interesting' next: strongest edge, novel cold memories (low access count = surprise), temporal timeline (Precedes), or contradiction tension (Contradicts)." },
                             "max_steps": { "type": "integer", "minimum": 1, "maximum": 64, "description": "free tier only: agent-decided number of hops (default 24, hard cap 64)." },
                             "temperature": { "type": "number", "minimum": 0, "maximum": 1, "description": "Divergence knob: 0 always takes the highest-scoring edge; higher values explore weaker/surprising edges. Overrides the tier default." },
+                            "far_jumps": { "type": "integer", "minimum": 0, "maximum": 4, "description": "Spectral far-jump budget: when local edges exhaust, project the current node onto SR grid codes and teleport to a distant unvisited region (chain edge type 'FarJump'). Tier defaults: shallow 0 / medium 1 / deep 2 / free 2." },
                             "seed": { "type": "integer", "description": "Optional RNG seed for reproducible walks (testing)." }
                         },
                         "required": []
@@ -4368,12 +4369,14 @@ impl McpHandler {
         let result = super::wander::wander(
             |id| self.engine.scheduler.api_get_relations_directed(id),
             |id| self.engine.scheduler.api_get_node(id),
+            |from: u64, visited: &[u64]| self.engine.scheduler.api_spectral_far_jump(from, visited),
             super::wander::WanderParams {
                 start,
                 depth,
                 strategy,
                 max_steps: args["max_steps"].as_u64().map(|n| n as usize),
                 temperature: args["temperature"].as_f64(),
+                far_jumps: args["far_jumps"].as_u64().map(|n| (n as usize).min(4)),
                 seed: args["seed"].as_u64(),
             },
         );
@@ -4402,6 +4405,7 @@ impl McpHandler {
             "strategy": format!("{:?}", strategy).to_lowercase(),
             "total_hops": result.total_hops,
             "unique_memories": result.unique_memories,
+            "far_jumps_used": result.far_jumps_used,
             "stopped_reason": result.stopped_reason,
             "relation_types_used": result.relation_types_used,
             "chain": chain,

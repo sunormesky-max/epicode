@@ -26,7 +26,7 @@
 | 存 | `memory_create(content, labels)` | 一句话写完整（主体+动作+对象+上下文），3-5 个标签；先搜，避免重复 |
 | 精确查 | `memory_search(query, limit, mode, labels)` | 默认 `mode=hybrid`、`limit=10`；结果过大时调小 `limit`，或用 `verbosity="slim"` |
 | 关联查 | `memory_recall(query, depth, limit)` | **默认 `verbosity="slim"`**，最多 `limit` 条（默认 20）；需要分层结构时传 `verbosity="full"` |
-| 联想漫游 | `memory_wander(start_id \| query, depth, strategy, max_steps, temperature)` | 从一条线索沿知识图逐步游走，返回可解释的联想链 A→B→C（每跳带边和理由）。四档：`shallow` 3 跳 / `medium` 8 跳 / `deep` 16 跳 / `free` 自定步数(≤64)；策略 `strongest`/`novel`(冷记忆惊喜)/`temporal`(时间线)/`contradict`(矛盾张力)；`temperature` 0-1 控制发散度 |
+| 联想漫游 | `memory_wander(start_id \| query, depth, strategy, max_steps, temperature, far_jumps)` | 从一条线索沿知识图逐步游走，返回可解释的联想链 A→B→C（每跳带边和理由）。四档：`shallow` 3 跳 / `medium` 8 跳 / `deep` 16 跳 / `free` 自定步数(≤64)；策略 `strongest`/`novel`(冷记忆惊喜)/`temporal`(时间线)/`contradict`(矛盾张力)；`temperature` 0-1 控制发散度；局部走完时谱远跳 `far_jumps`(默认浅 0/中 1/深 2/自由 2)传送到远处区域 |
 | 问答 | `memory_ask(question)` | 返回答案和来源记忆 |
 | 读取 | `memory_get(id)` / `memory_list(labels, limit, offset)` | |
 | 改 | `memory_update(id, content, labels, aliases)` | 只改传入的字段（字段级合并，不会覆盖并发写入）；传入的 `labels` / `aliases` 会**整体替换**原有值；`enforced` 不能在这里改 |
