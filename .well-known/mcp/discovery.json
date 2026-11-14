@@ -494,6 +494,58 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
+      "description": "Free-association wander: start from one clue (memory id or query) and walk the knowledge graph step by step, following the most interesting edge each time. Returns an explainable associative chain A→B→C→… where every hop carries the edge taken and why. Four depth tiers: shallow (3 hops, near-deterministic 'what immediately comes to mind'), medium (8 hops), deep (16 hops, cross-domain), free (agent sets its own step count up to 64). Strategies: strongest edge / novel cold memories / temporal timeline (Precedes) / contradiction tension. Use memory_recall for query-driven fan-out retrieval; use memory_wander when the goal is associative exploration, serendipity, or tracing how ideas connect.",
+      "inputSchema": {
+        "properties": {
+          "depth": {
+            "default": "medium",
+            "description": "Association tier: shallow=3 hops τ0.1 (convergent), medium=8 hops τ0.4, deep=16 hops τ0.7 (divergent), free=agent-chosen steps (default 24, max 64) τ0.8.",
+            "enum": ["shallow", "medium", "deep", "free"],
+            "type": "string"
+          },
+          "max_steps": {
+            "description": "free tier only: agent-decided number of hops (default 24, hard cap 64).",
+            "maximum": 64,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "query": {
+            "description": "If no start_id, the top search hit for this query becomes the starting clue.",
+            "type": "string"
+          },
+          "seed": {
+            "description": "Optional RNG seed for reproducible walks (testing).",
+            "type": "integer"
+          },
+          "start_id": {
+            "description": "Memory ID to start wandering from (the clue). Either start_id or query is required.",
+            "type": "integer"
+          },
+          "strategy": {
+            "default": "strongest",
+            "description": "What counts as 'interesting' next: strongest edge, novel cold memories (low access count = surprise), temporal timeline (Precedes), or contradiction tension (Contradicts).",
+            "enum": ["strongest", "novel", "temporal", "contradict"],
+            "type": "string"
+          },
+          "temperature": {
+            "description": "Divergence knob: 0 always takes the highest-scoring edge; higher values explore weaker/surprising edges. Overrides the tier default.",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_wander"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "Answer a natural-language question using the existing memory-grounded ask engine. Returns the answer together with structured source memories and any knowledge card used. Use memory_search or memory_recall when you need to inspect retrieval evidence without synthesis; an empty memory_count means no memory evidence was found.",
       "inputSchema": {
         "properties": {
