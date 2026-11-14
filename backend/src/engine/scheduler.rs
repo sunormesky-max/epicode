@@ -4310,6 +4310,10 @@ Generate 5 questions the user will likely ask next. One per line, no numbering."
                 if s.contains("corticalized") {
                     v += 4.0;
                 }
+                // Phase 4.6: 联想重放同理——睡眠巩固证据必须可见
+                if s.contains("associative replay") {
+                    v += 4.0;
+                }
                 v
             };
             score(b)
