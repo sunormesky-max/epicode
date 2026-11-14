@@ -87,7 +87,59 @@ Activation signals (pulses) travel through the topology in a defined path:
 Instinct layer port → External polyhedron cluster → Same port returns
 ```
 
-This cyclic propagation ensures that activation spreads through related memories while maintaining a predictable flow pattern. Pulses strengthen connections along their path, implementing a form of Hebbian learning.
+This cyclic propagation ensures that activation spreads through related memories while maintaining a predictable flow pattern. Pulses strengthen connections along their path, implementing a form of Hebbian learning. Edges are only created when similarity exceeds 0.2, preventing BFS-scan artifacts from consuming the per-node edge budget.
+
+## Neural Architecture
+
+Epicode implements a complete neuroscience-inspired architecture mapping brain regions to computational modules. All mechanisms below are in production (v2.7.0, November 2026).
+
+### Hippocampus: Memory Core
+
+**CA3 Auto-associative Memory (PPR)** — The Personalized PageRank equation `rank = 0.15·seed + 0.85·M·rank` is mathematically identical to the Successor Representation (Stachenfeld et al. 2017), which describes how hippocampal place cells encode predictive relationships. Graph-mode search uses this for associative recall. Directed traversal respects relation type: symmetric relations (SimilarTo, Contradicts) flow both ways; directional relations (Precedes, Contains) only forward — giving temporal mass a "what comes next" successor semantics.
+
+**Dentate Gyrus (Pattern Separation)** — `engine/sparse_code.rs`: deterministic random projection (SplitMix64 weights, zero storage) to 256 dimensions, then Winner-Take-All top-16 bitmap (6.25% sparsity, matching biological DG). This separates paraphrases (cosine 0.94, rejected) from true duplicates (cosine 0.999, accepted) in the Mem0 dedup gate — preventing same-topic statements from being incorrectly superseded.
+
+**Entorhinal Cortex (Grid Codes)** — `engine/spectral.rs`: top-32 eigenvectors of the knowledge graph transition matrix, computed via power iteration with Gram-Schmidt deflation. Different eigenvalues correspond to different spatial resolution scales, directly analogous to grid cell firing at multiple scales. Spectral retrieval reconstructs approximate PPR for ANY seed without BFS — the entire graph is covered, not just the 3-hop neighborhood.
+
+**Subiculum (Systems Consolidation)** — Dream Phase 4.5 (`corticalization`): clusters ≥4 tetrahedra are summarized into knowledge cards and sedimented into the Library layer. This is the sleep consolidation analog: hippocampal memories replay during sleep and consolidate into neocortex. Theme knowledge survives even if individual member memories are later quarantined.
+
+### Synaptic Plasticity
+
+**Recall-Gated Strengthening** — Every retrieval hit feeds `access_count` and `last_reviewed_ts`, which in turn feed the derived importance curve. This matches selective consolidation theory (Lindsey & Litwin-Kumar 2024, eLife): memories that are recalled are strengthened; unused memories decay. The flush cycle (every 10 ticks) also feeds mass, giving retrieved memories physical weight that resists spatial eviction.
+
+**Competitive Reinforcement** — When an edge is reinforced, sibling edges sharing the same endpoint are competitively decayed (×0.99). Winning "trunk roads" steal weight from idle neighbors. Combined with uniform decay (×0.9995/cycle) and degree-cap LRU eviction (weakest edge replaced by stronger newcomer at 50 edges/node), the knowledge graph implements use-it-or-lose-it dynamics.
+
+### Forgetting Curve
+
+**Derived Importance** — Importance is never written back for time decay; it is derived at read time:
+
+```
+R(t) = (base + ln(access_count)·0.3) · 0.98^(days_since_last_review)
+```
+
+- `base` changes only on semantic events (creation grading, cold-review KEEP, supersede, quarantine)
+- Review (retrieval) resets the decay cadence — the spacing effect
+- Access history amplifies stability via logarithmic bonus
+- Floor deadlock fixed: quarantine eligibility checks the derived value (unclamped); retrieval scoring clamps to the constitutional floor (0.3) — "demote without retrieval-removal"
+
+### Constitutional Law
+
+**Importance Floor (0.3)** — All live-memory automatic demotion paths respect a floor of 0.3. "Memories can be demoted, but not removed from retrieval." Explicit forgetting (user action, TTL expiry) is the only path below the floor (to 0.01).
+
+**Memory Sanctity** — No hard deletion. Superseded memories are demoted and tombstoned; quarantined memories are labeled and demoted. The archive table (`tetrahedrons_archive`) preserves rows that leave the main table.
+
+### CJK Entity Extraction
+
+Chinese content produces zero entities with ASCII-only pattern matching (PascalCase, snake_case). Epicode extracts stopchar-filtered adjacent CJK-pair bigrams (frequency-ranked, capped at 24/memory) — enabling SameEntity edges and concept prototypes for the predominantly Chinese production corpus.
+
+### Performance Scaling
+
+| Optimization | Impact |
+|---|---|
+| Placement O(27k) | 1.8× write throughput (tetra_grid neighborhood query replaces full-layer scan; lightweight metadata replaces full clone) |
+| Entropy sampling cap | O(K²) → O(64²) per cluster; tick bomb defused |
+| Single HNSW build | Startup index build deduplicated via version guard |
+| Scoring signal diet | 8 orthogonal channels (was 20+ collinear); entity/label decollineared; recency removed (693-day half-life dead signal) |
 
 ## Concurrency Model
 
