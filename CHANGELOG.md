@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.0](https://github.com/sunormesky-max/epicode/compare/v2.9.0...v2.10.0) (2026-11-14)
+
+
+### Features
+
+* **dream:** Phase 4.6 associative replay — sleep Hebbian consolidation ([#361](https://github.com/sunormesky-max/epicode/issues/361)) ([376321d](https://github.com/sunormesky-max/epicode/commit/376321d645de4fc2529fe276d31c2a3e22961781))
+
 ## [2.9.0](https://github.com/sunormesky-max/epicode/compare/v2.8.0...v2.9.0) (2026-11-14)
 
 
