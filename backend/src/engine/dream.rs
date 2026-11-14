@@ -566,6 +566,69 @@ impl DreamEngine {
             }
         }
 
+        // Phase 4.6 联想重放(睡眠联想巩固): 窗口内高显著度记忆出发, 沿最强边
+        // 短程确定性游走并强化沿途边——海马睡眠重放的 Hebbian 语义: 白天走过的
+        // 联想通路在夜间被重放强化。与 Phase 2 的"相似对连接"互补: 那里发现新边,
+        // 这里巩固既有联想路径(reinforce_edges 自带竞争衰减, 主干路 steal 权重)。
+        // 温和节奏: 每 cycle ≤2 链 × 3 跳(shallow/strongest/τ0); 种子随小时窗口
+        // 轮转, 避免恒定强化同一路径。
+        {
+            const REPLAY_CHAINS: usize = 2;
+            let mut seeds: Vec<(f64, u64)> = tetras
+                .iter()
+                .filter(|t| {
+                    crate::domain::ops::Lifecycle::of(&t.data)
+                        == crate::domain::ops::Lifecycle::Active
+                        && !t.data.enforced
+                })
+                .filter(|t| knowledge.query_relations_directed(t.id).len() >= 2)
+                .map(|t| (t.data.derived_importance(), t.id))
+                .collect();
+            seeds.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+            let mut replayed = 0usize;
+            let mut reinforced_edges = 0usize;
+            for (_, seed) in seeds.into_iter().take(REPLAY_CHAINS) {
+                let result = super::wander::wander(
+                    |id| {
+                        knowledge
+                            .query_relations_directed(id)
+                            .into_iter()
+                            .map(|(tid, rt, s)| (tid, format!("{rt}"), s))
+                            .collect::<Vec<_>>()
+                    },
+                    |id| space.get_tetrahedron(id).map(|t| t.data.clone()),
+                    |_, _| None,
+                    super::wander::WanderParams {
+                        start: seed,
+                        depth: super::wander::DepthPreset::Shallow,
+                        strategy: super::wander::Strategy::Strongest,
+                        max_steps: None,
+                        temperature: Some(0.0),
+                        far_jumps: Some(0),
+                        seed: Some(seed),
+                    },
+                );
+                let pairs: Vec<(u64, u64)> = result
+                    .chain
+                    .iter()
+                    .filter_map(|h| h.via.as_ref().map(|v| (v.from, h.id)))
+                    .collect();
+                if pairs.is_empty() {
+                    continue;
+                }
+                replayed += 1;
+                reinforced_edges += pairs.len();
+                if !dry_run {
+                    knowledge.reinforce_edges(&pairs);
+                }
+            }
+            if replayed > 0 {
+                insights.push(format!(
+                    "associative replay: {replayed} chain(s), {reinforced_edges} edge(s) reinforced"
+                ));
+            }
+        }
+
         if connections_formed > 0 {
             insights.push(format!(
                 "found {} similar pairs (>{:.1} threshold), largest cluster: {}",
@@ -898,6 +961,49 @@ mod idempotency_tests {
             r1.insights
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn associative_replay_reinforces_strongest_path() {
+        // Phase 4.6: 高显著度种子沿最强边确定性游走, 沿途边被强化
+        use crate::engine::knowledge::RelationType;
+        let space = Space::new();
+        let ids: Vec<u64> = (0..6)
+            .map(|i| add(&space, i as f64, normal(i), 1.0))
+            .collect();
+        let kg = KnowledgeGraph::new();
+        // Precedes 方向边: ids[0] 唯一具备 ≥2 出边(0.9→1, 0.2→3) → 唯一种子;
+        // τ0 最强路 0→1→2, 2 无出边 dead_end 收尾, 全程确定性
+        kg.add_relation(ids[0], ids[1], RelationType::Precedes, 0.9);
+        kg.add_relation(ids[1], ids[2], RelationType::Precedes, 0.8);
+        kg.add_relation(ids[0], ids[3], RelationType::Precedes, 0.2);
+        let strength = |from: u64, to: u64| {
+            kg.query_relations_directed(from)
+                .into_iter()
+                .find(|(o, _, _)| *o == to)
+                .map(|(_, _, s)| s)
+                .unwrap_or(0.0)
+        };
+        let s01 = strength(ids[0], ids[1]);
+        let s12 = strength(ids[1], ids[2]);
+        let s03 = strength(ids[0], ids[3]);
+
+        let r = DreamEngine::cycle(&space, &kg, 1.1, 0, false);
+
+        assert!(
+            r.insights
+                .iter()
+                .any(|s| s.contains("associative replay: 1 chain")),
+            "one replay chain expected: {:?}",
+            r.insights
+        );
+        assert!(strength(ids[0], ids[1]) > s01, "trunk edge 0→1 reinforced");
+        assert!(strength(ids[1], ids[2]) > s12, "trunk edge 1→2 reinforced");
+        // 未走分支不被直接强化(竞争衰减另计, 但绝不增加)
+        assert!(
+            strength(ids[0], ids[3]) <= s03,
+            "branch 0→3 must not be reinforced"
+        );
     }
 
     #[test]
