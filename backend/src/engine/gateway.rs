@@ -1225,7 +1225,7 @@ impl GatewayCenter {
         let label_idx = self.index.label_index.lock();
         let mut best: Option<(TetraId, f64)> = None;
         for label in &from_labels {
-            let Some(ids) = label_idx.get(label) else {
+            let Some(ids) = label_idx.get(*label) else {
                 continue;
             };
             for &id in ids {
