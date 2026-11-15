@@ -33,7 +33,7 @@ macro_rules! require_memory_read {
 // 与 MCP attach_recall_log 同语义(append-only, 检索打分永不读取);
 // 明文查询仅在 EPICODE_QUERY_TEXT_LOG=1 时落库(锚词解析需要, 默认 hash-only)。
 fn log_rest_recall(
-    engine: &epicode::engine::runtime::Engine,
+    engine: &epicode::engine::Engine,
     tool: &str,
     query: &str,
     returned: &[u64],
@@ -771,10 +771,11 @@ pub async fn wander(
                         .collect()
                 })
                 .unwrap_or_default();
+            let start_id = data.get("start_id").and_then(|i| i.as_u64()).unwrap_or(0);
             let log_q = req_query_log
                 .trim()
                 .is_empty()
-                .then(|| format!("wander#{start}"))
+                .then(|| format!("wander#{start_id}"))
                 .unwrap_or_else(|| req_query_log.trim().to_string());
             log_rest_recall(&engine, "memory_wander", &log_q, &ids, &[]);
             (
