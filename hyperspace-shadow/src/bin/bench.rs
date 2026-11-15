@@ -53,7 +53,7 @@ fn run(args: &[String]) -> Result<(), Option<i32>> {
     let mut it = args[1..].iter().peekable();
     while let Some(a) = it.next() {
         let val = |it: &mut std::iter::Peekable<_>, name: &str| -> Result<String, Option<i32>> {
-            it.next().cloned().ok_or_else(|| {
+            it.next().map(String::clone).ok_or_else(|| {
                 eprintln!("{name} requires a value");
                 Some(2)
             })
