@@ -927,6 +927,51 @@ export function askQuestion(question: string): Promise<{
   });
 }
 
+// ── 自由联想游走(联想链) — POST /v1/wander ──
+export interface WanderVia {
+  from: number;
+  relation: string;
+  strength: number;
+  reason: string;
+}
+export interface WanderHop {
+  hop: number;
+  id: number;
+  preview: string;
+  labels: string[];
+  importance: number;
+  via: WanderVia | null;
+}
+export interface WanderResult {
+  start_id: number;
+  depth: string;
+  strategy: string;
+  total_hops: number;
+  unique_memories: number;
+  far_jumps_used: number;
+  stopped_reason: string;
+  relation_types_used: Record<string, number>;
+  chain: WanderHop[];
+}
+export interface WanderBody {
+  start_id?: number;
+  query?: string;
+  depth?: string;
+  strategy?: string;
+  max_steps?: number;
+  temperature?: number;
+  far_jumps?: number;
+  seed?: number;
+}
+export function wanderMemories(body: WanderBody, signal?: AbortSignal): Promise<WanderResult> {
+  return request('/v1/wander', {
+    method: 'POST',
+    body,
+    signal,
+    timeoutMs: 60000,
+  });
+}
+
 // L0 Drive Channel — poll personality's will signals
 export interface DriveSignal {
   id: number;

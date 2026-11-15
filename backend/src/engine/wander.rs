@@ -190,6 +190,47 @@ pub struct WanderResult {
     pub stopped_reason: String,
 }
 
+impl WanderResult {
+    /// 统一 JSON 输出(MCP memory_wander 与 REST /v1/wander 共用)。
+    pub fn to_json(
+        &self,
+        start: crate::domain::tetra::TetraId,
+        depth: &str,
+        strategy: &str,
+    ) -> serde_json::Value {
+        let chain: Vec<serde_json::Value> = self
+            .chain
+            .iter()
+            .map(|h| {
+                serde_json::json!({
+                    "hop": h.hop,
+                    "id": h.id,
+                    "preview": h.preview,
+                    "labels": h.labels,
+                    "importance": (h.importance * 100.0).round() / 100.0,
+                    "via": h.via.as_ref().map(|v| serde_json::json!({
+                        "from": v.from,
+                        "relation": v.relation,
+                        "strength": (v.strength * 100.0).round() / 100.0,
+                        "reason": v.reason,
+                    })),
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "start_id": start,
+            "depth": depth,
+            "strategy": strategy,
+            "total_hops": self.total_hops,
+            "unique_memories": self.unique_memories,
+            "far_jumps_used": self.far_jumps_used,
+            "stopped_reason": self.stopped_reason,
+            "relation_types_used": self.relation_types_used,
+            "chain": chain,
+        })
+    }
+}
+
 /// SplitMix64 —— 与 sparse_code.rs 同源的确定性 RNG(零依赖)。
 struct SmRng(u64);
 

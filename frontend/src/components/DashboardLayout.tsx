@@ -7,7 +7,7 @@ import CommandBar from '@/components/CommandBar';
 import ObservationStatus from '@/components/ObservationStatus';
 import {
   LayoutDashboard, Brain, GitBranch, Wrench, Users,
-  LogOut, Check, Menu, X, Zap, Archive, Activity, MessageSquare, Radio, BookOpen, Shield, Palette
+  LogOut, Check, Menu, X, Zap, Archive, Activity, MessageSquare, Radio, BookOpen, Shield, Palette, Compass
 } from 'lucide-react';
 
 const RAIL_W = 64;
@@ -75,6 +75,7 @@ export default function DashboardLayout({ children, viewport = false }: { childr
     { href: '#/dashboard/memories', label: t('nav.memories'), icon: Brain },
     { href: '#/dashboard/chat', label: t('nav.chat'), icon: MessageSquare },
     { href: '#/dashboard/graph', label: t('nav.graph'), icon: GitBranch },
+  { href: '#/dashboard/wander', label: t('nav.wander'), icon: Compass },
     { href: '#/dashboard/archive', label: t('nav.archive'), icon: Archive },
     { href: '#/dashboard/cognitive', label: t('nav.cognitive'), icon: Activity },
     { href: '#/dashboard/observe', label: t('nav.observe'), icon: Radio },

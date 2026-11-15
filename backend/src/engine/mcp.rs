@@ -4380,36 +4380,11 @@ impl McpHandler {
                 seed: args["seed"].as_u64(),
             },
         );
-        let chain: Vec<serde_json::Value> = result
-            .chain
-            .iter()
-            .map(|h| {
-                serde_json::json!({
-                    "hop": h.hop,
-                    "id": h.id,
-                    "preview": h.preview,
-                    "labels": h.labels,
-                    "importance": (h.importance * 100.0).round() / 100.0,
-                    "via": h.via.as_ref().map(|v| serde_json::json!({
-                        "from": v.from,
-                        "relation": v.relation,
-                        "strength": (v.strength * 100.0).round() / 100.0,
-                        "reason": v.reason,
-                    })),
-                })
-            })
-            .collect();
-        let data = serde_json::json!({
-            "start_id": start,
-            "depth": format!("{:?}", depth).to_lowercase(),
-            "strategy": format!("{:?}", strategy).to_lowercase(),
-            "total_hops": result.total_hops,
-            "unique_memories": result.unique_memories,
-            "far_jumps_used": result.far_jumps_used,
-            "stopped_reason": result.stopped_reason,
-            "relation_types_used": result.relation_types_used,
-            "chain": chain,
-        });
+        let data = result.to_json(
+            start,
+            &format!("{:?}", depth).to_lowercase(),
+            &format!("{:?}", strategy).to_lowercase(),
+        );
         self.smrp_ok("memory_wander", data)
     }
 

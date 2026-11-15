@@ -600,6 +600,107 @@ pub struct AskRequest {
     pub depth: Option<usize>,
 }
 
+#[derive(Deserialize)]
+pub struct WanderRequest {
+    pub start_id: Option<u64>,
+    pub query: Option<String>,
+    /// shallow | medium | deep | free
+    pub depth: Option<String>,
+    /// strongest | novel | temporal | contradict
+    pub strategy: Option<String>,
+    /// free 档步数(1..=64)
+    pub max_steps: Option<u64>,
+    /// 发散度 0..=1
+    pub temperature: Option<f64>,
+    /// 谱远跳预算 0..=4
+    pub far_jumps: Option<u64>,
+    /// RNG 种子(可复现游走)
+    pub seed: Option<u64>,
+}
+
+/// POST /v1/wander — 自由联想游走(联想链)。与 MCP `memory_wander` 同一引擎,
+/// 返回可解释联想链 A→B→C(每跳带边类型/强度/理由)。前端联想实验室消费此端点。
+pub async fn wander(
+    user: axum::extract::Extension<UserInfo>,
+    AuthedEngine(engine): AuthedEngine,
+    Json(req): Json<WanderRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    require_memory_read!(user);
+    let scheduler = engine.scheduler.clone();
+    let req_start = req.start_id;
+    let req_query = req.query.clone().unwrap_or_default();
+    let req_depth = req.depth.clone();
+    let req_strategy = req.strategy.clone();
+    let req_max = req.max_steps.map(|n| n as usize);
+    let req_temperature = req.temperature;
+    let req_far = req.far_jumps.map(|n| (n as usize).min(4));
+    let req_seed = req.seed;
+
+    let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
+        use epicode::engine::wander::{self as w, DepthPreset, Strategy, WanderParams};
+        let start = match req_start {
+            Some(id) => id,
+            None => {
+                if req_query.trim().is_empty() {
+                    return Err("start_id or query is required".to_string());
+                }
+                validate_query(&req_query)?;
+                match scheduler.api_search(&req_query, 1) {
+                    Ok(mut hits) if !hits.is_empty() => hits.remove(0).0,
+                    _ => return Err("no seed found for query".to_string()),
+                }
+            }
+        };
+        if scheduler.api_get_node(start).is_none() {
+            return Err(format!("memory {start} not found"));
+        }
+        let depth = req_depth
+            .as_deref()
+            .and_then(DepthPreset::parse)
+            .unwrap_or(DepthPreset::Medium);
+        let strategy = req_strategy
+            .as_deref()
+            .and_then(Strategy::parse)
+            .unwrap_or(Strategy::Strongest);
+        let r = w::wander(
+            |id| scheduler.api_get_relations_directed(id),
+            |id| scheduler.api_get_node(id),
+            |from, visited: &[u64]| scheduler.api_spectral_far_jump(from, visited),
+            WanderParams {
+                start,
+                depth,
+                strategy,
+                max_steps: req_max,
+                temperature: req_temperature,
+                far_jumps: req_far,
+                seed: req_seed,
+            },
+        );
+        Ok(r.to_json(
+            start,
+            &format!("{depth:?}").to_lowercase(),
+            &format!("{strategy:?}").to_lowercase(),
+        ))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(data)) => (
+            StatusCode::OK,
+            Json(epicode::engine::smrp::envelope_ok(
+                &engine,
+                "memory_wander",
+                data,
+            )),
+        ),
+        Ok(Err(e)) => error_response(StatusCode::BAD_REQUEST, &e),
+        Err(e) => {
+            tracing::error!("wander task error: {}", e);
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
+    }
+}
+
 pub async fn ask(
     user: axum::extract::Extension<UserInfo>,
     AuthedEngine(engine): AuthedEngine,

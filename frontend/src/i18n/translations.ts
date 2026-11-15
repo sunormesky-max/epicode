@@ -12,7 +12,7 @@ export type TranslationKey =
   | 'nav.home' | 'nav.quickStart' | 'nav.docs' | 'nav.community' | 'nav.benchmarks'
   | 'nav.console' | 'nav.getStarted' | 'nav.overview' | 'nav.memories' | 'nav.graph'
   | 'nav.skills' | 'nav.library' | 'nav.subAccounts' | 'nav.logout' | 'nav.archive'
-  | 'nav.ariaHome' | 'nav.chat' | 'nav.cognitive' | 'nav.observe'
+  | 'nav.ariaHome' | 'nav.chat' | 'nav.cognitive' | 'nav.observe' | 'nav.wander'
   // Footer
   | 'footer.brand' | 'footer.tagline' | 'footer.docs' | 'footer.quickStart' | 'footer.apiDocs'
   | 'footer.mcpProtocol' | 'footer.benchmarks' | 'footer.community' | 'footer.communitySkills'
@@ -135,6 +135,17 @@ export type TranslationKey =
   | 'dash.arc.charsSuffix' | 'dash.arc.addChildTitle' | 'dash.arc.addBtn'
   | 'dash.arc.editBtn' | 'dash.arc.noChildrenHint' | 'dash.arc.emptyDoc'
   | 'dash.arc.childrenSuffix' | 'dash.arc.loading' | 'dash.arc.noContentHint'
+  // Dashboard - Wander (联想实验室)
+  | 'dash.wander.title' | 'dash.wander.subtitle' | 'dash.wander.seedQuery'
+  | 'dash.wander.seedPlaceholder' | 'dash.wander.startId' | 'dash.wander.depth'
+  | 'dash.wander.depthShallow' | 'dash.wander.depthMedium' | 'dash.wander.depthDeep'
+  | 'dash.wander.depthFree' | 'dash.wander.strategy' | 'dash.wander.strStrongest'
+  | 'dash.wander.strNovel' | 'dash.wander.strTemporal' | 'dash.wander.strContradict'
+  | 'dash.wander.temperature' | 'dash.wander.maxSteps' | 'dash.wander.farJumps'
+  | 'dash.wander.go' | 'dash.wander.needSeed' | 'dash.wander.hops'
+  | 'dash.wander.unique' | 'dash.wander.farUsed' | 'dash.wander.stopped'
+  | 'dash.wander.stopMax' | 'dash.wander.stopDead' | 'dash.wander.stopLoop'
+  | 'dash.wander.chain' | 'dash.wander.empty'
   // Dashboard - Sub Accounts
   | 'dash.sub.title' | 'dash.sub.subtitle' | 'dash.sub.managementUnavailable'
   | 'dash.sub.subAccountNoManageDesc' | 'dash.sub.parentAccount' | 'dash.sub.mainAccountLabel'
@@ -413,6 +424,36 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'nav.overview': '总览',
     'nav.memories': '记忆',
     'nav.graph': '知识图谱',
+    'nav.wander': '联想',
+    'dash.wander.title': '联想实验室',
+    'dash.wander.subtitle': '一条线索进入无限联想 —— 沿知识图逐步游走，每一跳都可解释',
+    'dash.wander.seedQuery': '线索（查询）',
+    'dash.wander.seedPlaceholder': '例：四面体空间的物理直觉',
+    'dash.wander.startId': '或记忆 ID',
+    'dash.wander.depth': '联想档位',
+    'dash.wander.depthShallow': '浅度',
+    'dash.wander.depthMedium': '中度',
+    'dash.wander.depthDeep': '深度',
+    'dash.wander.depthFree': '自由',
+    'dash.wander.strategy': '联想策略',
+    'dash.wander.strStrongest': '最强边',
+    'dash.wander.strNovel': '冷记忆',
+    'dash.wander.strTemporal': '时间线',
+    'dash.wander.strContradict': '矛盾',
+    'dash.wander.temperature': '发散度',
+    'dash.wander.maxSteps': '步数（自由档）',
+    'dash.wander.farJumps': '谱远跳',
+    'dash.wander.go': '开始联想',
+    'dash.wander.needSeed': '请提供线索（查询）或记忆 ID',
+    'dash.wander.hops': '跳数',
+    'dash.wander.unique': '不重复记忆',
+    'dash.wander.farUsed': '远跳',
+    'dash.wander.stopped': '停止原因',
+    'dash.wander.stopMax': '步数用尽',
+    'dash.wander.stopDead': '死胡同',
+    'dash.wander.stopLoop': '联想闭环',
+    'dash.wander.chain': '联想链',
+    'dash.wander.empty': '输入一条线索，看看记忆会带你走到哪里',
     'nav.skills': '技能',
     'nav.library': '图书馆',
     'dash.library.title': '图书馆',
@@ -1358,6 +1399,36 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'nav.overview': 'Overview',
     'nav.memories': 'Memories',
     'nav.graph': 'Knowledge Graph',
+    'nav.wander': 'Wander',
+    'dash.wander.title': 'Association Lab',
+    'dash.wander.subtitle': 'One clue, infinite association — walk the knowledge graph step by step, every hop explainable',
+    'dash.wander.seedQuery': 'Clue (query)',
+    'dash.wander.seedPlaceholder': 'e.g. physical intuition of tetrahedron space',
+    'dash.wander.startId': 'or memory ID',
+    'dash.wander.depth': 'Depth tier',
+    'dash.wander.depthShallow': 'Shallow',
+    'dash.wander.depthMedium': 'Medium',
+    'dash.wander.depthDeep': 'Deep',
+    'dash.wander.depthFree': 'Free',
+    'dash.wander.strategy': 'Strategy',
+    'dash.wander.strStrongest': 'Strongest',
+    'dash.wander.strNovel': 'Novel',
+    'dash.wander.strTemporal': 'Timeline',
+    'dash.wander.strContradict': 'Tension',
+    'dash.wander.temperature': 'Divergence',
+    'dash.wander.maxSteps': 'Steps (free)',
+    'dash.wander.farJumps': 'Far jumps',
+    'dash.wander.go': 'Start wandering',
+    'dash.wander.needSeed': 'Provide a clue (query) or a memory ID',
+    'dash.wander.hops': 'hops',
+    'dash.wander.unique': 'unique',
+    'dash.wander.farUsed': 'far jumps',
+    'dash.wander.stopped': 'stopped',
+    'dash.wander.stopMax': 'max steps',
+    'dash.wander.stopDead': 'dead end',
+    'dash.wander.stopLoop': 'loop closed',
+    'dash.wander.chain': 'associative chain',
+    'dash.wander.empty': 'Enter a clue and see where your memories take you',
     'nav.skills': 'Skills',
     'nav.library': 'Library',
     'dash.library.title': 'Library',
