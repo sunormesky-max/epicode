@@ -64,3 +64,5 @@ path = "src/bin/migrate_embeddings.rs"
 name = "epicode-cloud"
 path = "src/bin/cloud.rs"
 # trigger full CI  
+
+# docs-trigger: wander api reference

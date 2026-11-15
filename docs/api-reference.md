@@ -21,6 +21,7 @@ Cloud subaccounts use their role template or an explicit custom permission list.
 | `POST` | `/remember` | Store a new memory. Accepts content, labels, and optional metadata. Computes embeddings and places the memory in 3D space. |
 | `POST` | `/search` | Search memories with BM25, HNSW, graph, or fusion routing. Supports filters and `offset`/`limit` pagination. |
 | `POST` | `/recall` | Deep recall operation. Combines semantic search with knowledge graph expansion to retrieve richly connected memories. |
+| `POST` | `/wander` | Free-association wander. Same engine as the MCP `memory_wander` tool: walk the knowledge graph from a clue (`start_id` or top `query` hit) and return an explainable associative chain A→B→C — every hop records edge type, strength, and reason. Four depth tiers (shallow/medium/deep/free), four strategies (strongest/novel/temporal/contradict), a divergence temperature, and a spectral far-jump budget. |
 | `POST` | `/ask` | Return an answer grounded in retrieved memories, plus structured source memories and any matched knowledge card. |
 | `GET` | `/stats` | Retrieve spatial statistics. Returns tetrahedron count, vertex count, cluster count, energy levels, and other system metrics. |
 | `GET` | `/graph/analysis` | Knowledge graph analysis. Returns node/edge counts, centrality metrics, and community structure of the relationship graph. |
