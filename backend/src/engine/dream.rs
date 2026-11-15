@@ -598,6 +598,7 @@ impl DreamEngine {
                     },
                     |id| space.get_tetrahedron(id).map(|t| t.data.clone()),
                     |_, _| None,
+                    |_, _| None,
                     super::wander::WanderParams {
                         start: seed,
                         depth: super::wander::DepthPreset::Shallow,
@@ -605,6 +606,8 @@ impl DreamEngine {
                         max_steps: None,
                         temperature: Some(0.0),
                         far_jumps: Some(0),
+                        era_jumps: Some(0),
+                        t0_unix: None,
                         seed: Some(seed),
                     },
                 );
