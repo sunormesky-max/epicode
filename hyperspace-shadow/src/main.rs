@@ -17,11 +17,7 @@
 //!     [--interval-secs 21600] [--kappa 1.0] [--once] [--keep 60] [--seed N]
 //! ```
 
-mod compare;
-mod crypto;
-mod engine;
-mod ingest;
-mod report;
+use hyperspace_shadow::{compare, crypto, engine, ingest, report};
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
