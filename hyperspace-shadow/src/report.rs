@@ -134,6 +134,15 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 
 // ------------------------------------------------------------- JSON output --
 
+/// labels 数组 → JSON 数组字符串（镜像导出与报告共用）。
+pub fn to_json_labels(labels: &[String]) -> String {
+    let items: Vec<String> = labels
+        .iter()
+        .map(|l| format!("\"{}\"", json_escape(l)))
+        .collect();
+    format!("[{}]", items.join(","))
+}
+
 fn json_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     for c in s.chars() {

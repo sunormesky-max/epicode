@@ -23,6 +23,10 @@ base64 = "0.23"
 name = "epicode-hyperspace"
 path = "src/main.rs"
 
+[[bin]]
+name = "hyperspace-bench"
+path = "src/bin/bench.rs"
+
 [profile.release]
 lto = true
 codegen-units = 1
