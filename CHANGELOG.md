@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.12.0](https://github.com/sunormesky-max/epicode/compare/v2.11.0...v2.12.0) (2026-11-15)
+
+
+### Features
+
+* **shadow:** decrypt per-user AES-GCM labels in memory (S1 blocker cleared) ([#371](https://github.com/sunormesky-max/epicode/issues/371)) ([4578e0e](https://github.com/sunormesky-max/epicode/commit/4578e0ef9363c4919b77110767ab0acb6a4fafae))
+* **shadow:** hyperspace-bench (protocol 6.2 geometry bridge) + mirror export ([#377](https://github.com/sunormesky-max/epicode/issues/377)) ([d5808a5](https://github.com/sunormesky-max/epicode/commit/d5808a5b5b8abe85840bcc2726a0e493b07840cd))
+* **shadow:** S1 hyperspace shadow integration binary (epicode-hyperspace) ([#370](https://github.com/sunormesky-max/epicode/issues/370)) ([096225a](https://github.com/sunormesky-max/epicode/commit/096225a437b713c38dca68a7016327ecc9ddb91d))
+* **wander:** era strategy + EraJump — walk the geological strata of a topic ([#378](https://github.com/sunormesky-max/epicode/issues/378)) ([fef8d76](https://github.com/sunormesky-max/epicode/commit/fef8d76147a20e694e22ed6b83056d7872cd1cfd))
+
+
+### Documentation
+
+* /v1/wander in API reference endpoint table ([#367](https://github.com/sunormesky-max/epicode/issues/367)) ([c2d4bc8](https://github.com/sunormesky-max/epicode/commit/c2d4bc807a3fae6e74934473bbc6767b5dfbe80c))
+
 ## [2.11.0](https://github.com/sunormesky-max/epicode/compare/v2.10.1...v2.11.0) (2026-11-15)
 
 
