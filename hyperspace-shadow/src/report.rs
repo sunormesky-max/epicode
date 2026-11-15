@@ -190,6 +190,10 @@ pub fn to_json(rep: &CycleReport) -> String {
         .iter()
         .map(|(k, v)| format!("{{\"k\": {k}, \"pairs\": {v}}}"))
         .collect();
+    let epurity = format!("{:.4}", m.era_purity);
+    let wspan = format!("{:.4}", m.mean_cluster_w_span);
+    let tmean = format!("{:.1}", rep.timing.mean_micros);
+    let tcps = format!("{:.1}", rep.timing.cells_per_sec);
     format!(
         concat!(
             "{{\n",
@@ -250,19 +254,19 @@ pub fn to_json(rep: &CycleReport) -> String {
         clusters = m.clusters,
         largest = m.largest_cluster,
         epure = m.era_pure_clusters,
-        epurity = format!("{:.4}", m.era_purity),
-        wspan = format!("{:.4}", m.mean_cluster_w_span),
+        epurity = epurity,
+        wspan = wspan,
         hist = hist_json(&m.shared_vertex_hist),
         sampled = m.pair_hist_sampled,
         t1 = m.t1_strict,
         offending = offending.join(", "),
         tn = rep.timing.samples,
         ttotal = rep.timing.total_micros,
-        tmean = format!("{:.1}", rep.timing.mean_micros),
+        tmean = tmean,
         t50 = rep.timing.p50_micros,
         t95 = rep.timing.p95_micros,
         tmax = rep.timing.max_micros,
-        tcps = format!("{:.1}", rep.timing.cells_per_sec),
+        tcps = tcps,
         outcomes = outcomes_json(&rep.retrieval_vs_production),
     )
 }
