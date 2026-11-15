@@ -294,6 +294,7 @@ async fn main() {
         .route("/v1/search", post(memory::search))
         .route("/v1/recall", post(memory::recall))
         .route("/v1/ask", post(memory::ask))
+        .route("/v1/wander", post(memory::wander))
         .route("/v1/nodes", post(memory::create_node))
         .route("/v1/nodes/:id", get(memory::get_node))
         .route("/v1/knowledge", post(memory::knowledge))

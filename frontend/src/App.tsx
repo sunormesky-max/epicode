@@ -14,6 +14,7 @@ const Register = lazy(() => import('@/pages/Register'));
 const DashboardOverview = lazy(() => import('@/pages/DashboardOverview'));
 const DashboardMemories = lazy(() => import('@/pages/DashboardMemories'));
 const DashboardGraph = lazy(() => import('@/pages/DashboardGraph'));
+const DashboardWander = lazy(() => import('@/pages/DashboardWander'));
 const DashboardSkills = lazy(() => import('@/pages/DashboardSkills'));
 const DashboardLibrary = lazy(() => import('@/pages/DashboardLibrary'));
 const DashboardArchive = lazy(() => import('@/pages/DashboardArchive'));
@@ -126,6 +127,7 @@ export default function App() {
             <Route path="/dashboard" element={<ProtectedRoute><DashboardOverview /></ProtectedRoute>} />
             <Route path="/dashboard/memories" element={<ProtectedRoute><DashboardMemories /></ProtectedRoute>} />
             <Route path="/dashboard/graph" element={<ProtectedRoute><DashboardGraph /></ProtectedRoute>} />
+          <Route path="/dashboard/wander" element={<ProtectedRoute><DashboardWander /></ProtectedRoute>} />
             <Route path="/dashboard/skills" element={<ProtectedRoute><DashboardSkills /></ProtectedRoute>} />
             <Route path="/dashboard/library" element={<ProtectedRoute><DashboardLibrary /></ProtectedRoute>} />
             <Route path="/dashboard/archive" element={<ProtectedRoute><DashboardArchive /></ProtectedRoute>} />

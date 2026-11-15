@@ -266,6 +266,68 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SmrpRecallEnvelope" }
 
+  /v1/wander:
+    post:
+      tags: [Memory]
+      summary: Free-association wander (associative chain)
+      description: >-
+        Clue-driven walk over the knowledge graph. Same engine as the MCP
+        memory_wander tool. Returns an SMRP envelope whose data carries an
+        explainable chain A→B→C — every hop records the edge type, strength,
+        and reason. Four depth tiers (shallow 3 hops τ0.1 / medium 8 τ0.4 /
+        deep 16 τ0.7 / free agent-chosen ≤64), four strategies (strongest /
+        novel / temporal / contradict), a divergence temperature, and a
+        spectral far-jump budget for teleporting to distant regions when
+        local edges exhaust.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                start_id:
+                  type: integer
+                  description: Memory ID to start from. Either start_id or query is required.
+                query:
+                  type: string
+                  maxLength: 2000
+                  description: If no start_id, the top search hit becomes the starting clue.
+                depth:
+                  type: string
+                  enum: [shallow, medium, deep, free]
+                  default: medium
+                strategy:
+                  type: string
+                  enum: [strongest, novel, temporal, contradict]
+                  default: strongest
+                max_steps:
+                  type: integer
+                  minimum: 1
+                  maximum: 64
+                  description: free tier only.
+                temperature:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                far_jumps:
+                  type: integer
+                  minimum: 0
+                  maximum: 4
+                  description: Spectral far-jump budget (tier defaults 0/1/2/2).
+                seed:
+                  type: integer
+                  description: Optional RNG seed for reproducible walks.
+      responses:
+        "200":
+          description: SMRP envelope containing the associative chain with per-hop provenance
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   /v1/drive/inbox:
     get:
       tags: [L0 Drive]
