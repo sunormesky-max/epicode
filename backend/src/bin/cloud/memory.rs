@@ -644,9 +644,7 @@ pub async fn wander(
                 if req_query.trim().is_empty() {
                     return Err("start_id or query is required".to_string());
                 }
-                if let Err(e) = validate_query(&req_query) {
-                    return Err(e);
-                }
+                validate_query(&req_query)?;
                 match scheduler.api_search(&req_query, 1) {
                     Ok(mut hits) if !hits.is_empty() => hits.remove(0).0,
                     _ => return Err("no seed found for query".to_string()),

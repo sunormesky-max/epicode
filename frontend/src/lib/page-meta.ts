@@ -69,6 +69,7 @@ export const ROUTE_META: Record<string, PageMeta> = {
   '/dashboard/memories': { app: true, zh: { title: '记忆 · 控制台' }, en: { title: 'Memories · Console' } },
   '/dashboard/chat': { app: true, zh: { title: '对话 · 控制台' }, en: { title: 'Chat · Console' } },
   '/dashboard/graph': { app: true, zh: { title: '知识图谱 · 控制台' }, en: { title: 'Graph · Console' } },
+  '/dashboard/wander': { app: true, zh: { title: '联想实验室 · 控制台' }, en: { title: 'Wander · Console' } },
   '/dashboard/archive': { app: true, zh: { title: '档案库 · 控制台' }, en: { title: 'Archive · Console' } },
   '/dashboard/cognitive': { app: true, zh: { title: '认知引擎 · 控制台' }, en: { title: 'Cognitive · Console' } },
   '/dashboard/observe': { app: true, zh: { title: '观测舱 · 控制台' }, en: { title: 'Observe · Console' } },
