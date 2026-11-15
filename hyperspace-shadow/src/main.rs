@@ -18,6 +18,7 @@
 //! ```
 
 mod compare;
+mod crypto;
 mod engine;
 mod ingest;
 mod report;
@@ -28,13 +29,15 @@ use std::time::{Duration, Instant};
 use engine::space4::{Rng, Space4};
 
 /// CLI configuration (hand-rolled parsing — no clap, dependency budget is
-/// rusqlite only).
+/// rusqlite + the crypto set).
 struct Config {
     /// Production per-user db file. Convention on a deployed backend:
     /// `<data_dir>/users/<user_id>/tetramem.db`.
     db: PathBuf,
     /// Report output directory (created on demand).
     out: PathBuf,
+    /// User id for per-user label decryption (derive key context).
+    user: String,
     interval_secs: u64,
     kappa: f64,
     /// Run a single cycle and exit (systemd timer mode). Default: loop.
@@ -48,11 +51,13 @@ struct Config {
 const USAGE: &str = "epicode-hyperspace — S1 shadow integration for the true-4D Space4 engine
 
 USAGE:
-    epicode-hyperspace --db <tetramem.db> [OPTIONS]
+    epicode-hyperspace --db <tetramem.db> --user <user_id> [OPTIONS]
 
 OPTIONS:
     --db <PATH>          production per-user SQLite db (read-only!)
                          deployed convention: <data_dir>/users/<user_id>/tetramem.db
+    --user <ID>          user id: derives the per-user AES-GCM key context
+                         (with TETRAMEM_MASTER_KEY env) to decrypt labels
     --out <DIR>          report directory [default: hyperspace-reports]
     --interval-secs N    seconds between cycles [default: 21600 (6h)]
     --kappa F            4D time-coupling coefficient, 0.0..=1.0 [default: 1.0]
@@ -60,11 +65,18 @@ OPTIONS:
     --keep N             report pairs kept in --out [default: 60]
     --seed N             deterministic placement RNG seed [default: 20261115]
     -h, --help           print this help
+
+ENV:
+    TETRAMEM_MASTER_KEY  base64 32-byte master key (same env the production
+                         cloud binary reads). When set, encrypted labels are
+                         decrypted in memory; when unset, only plaintext
+                         labels are ingested (encrypted rows are skipped).
 ";
 
 fn parse_args(args: impl Iterator<Item = String>) -> Result<Config, String> {
     let mut db: Option<PathBuf> = None;
     let mut out = PathBuf::from("hyperspace-reports");
+    let mut user = String::new();
     let mut interval_secs: u64 = 21_600;
     let mut kappa: f64 = 1.0;
     let mut once = false;
@@ -79,6 +91,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config, String> {
         };
         match arg.as_str() {
             "--db" => db = Some(PathBuf::from(value("--db")?)),
+            "--user" => user = value("--user")?,
             "--out" => out = PathBuf::from(value("--out")?),
             "--interval-secs" => {
                 interval_secs = value("--interval-secs")?
@@ -115,9 +128,13 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config, String> {
         }
     }
     let db = db.ok_or_else(|| "--db is required (see --help)".to_string())?;
+    if user.trim().is_empty() {
+        return Err("--user is required (label decryption context)".to_string());
+    }
     Ok(Config {
         db,
         out,
+        user,
         interval_secs,
         kappa,
         once,
@@ -162,11 +179,17 @@ impl Shadow {
 
     /// One sync cycle: (re)load or poll rows, feed the engine.
     /// Returns the per-cycle delta (rows fed this cycle).
-    fn sync(&mut self, conn: &rusqlite::Connection, kappa: f64) -> Result<usize, String> {
+    fn sync(
+        &mut self,
+        conn: &rusqlite::Connection,
+        kappa: f64,
+        dec: Option<&crypto::ShadowCrypto>,
+        user_id: &str,
+    ) -> Result<usize, String> {
         let batch = if self.initialized {
-            ingest::poll_since(conn, self.last_rowid)?
+            ingest::poll_since(conn, self.last_rowid, dec, user_id)?
         } else {
-            let batch = ingest::load_all(conn)?;
+            let batch = ingest::load_all(conn, dec, user_id)?;
             self.initialized = true;
             let t0 = ingest::space_birth(&batch.rows, now_unix());
             self.space = Some(Space4::new(kappa, t0));
@@ -195,6 +218,13 @@ impl Shadow {
 
 fn run(cfg: &Config) -> Result<(), String> {
     let conn = ingest::open_read_only(&cfg.db)?;
+    let dec = crypto::ShadowCrypto::from_env().map_err(|e| format!("crypto env: {e}"))?;
+    if dec.is_none() {
+        eprintln!(
+            "note: TETRAMEM_MASTER_KEY not set — encrypted labels will be skipped \
+             (plaintext rows still ingest)"
+        );
+    }
     std::fs::create_dir_all(&cfg.out).map_err(|e| format!("create {}: {e}", cfg.out.display()))?;
     let mut shadow = Shadow::new(cfg.seed);
     let mut cycle: u64 = 0;
@@ -202,7 +232,7 @@ fn run(cfg: &Config) -> Result<(), String> {
     loop {
         cycle += 1;
         let started = Instant::now();
-        let rows_this_cycle = shadow.sync(&conn, cfg.kappa)?;
+        let rows_this_cycle = shadow.sync(&conn, cfg.kappa, dec.as_ref(), &cfg.user)?;
         let space = shadow
             .space
             .as_ref()
@@ -294,8 +324,9 @@ mod tests {
 
     #[test]
     fn cli_defaults_and_overrides() {
-        let c = parse_args(args(&["--db", "/tmp/x/tetramem.db"])).unwrap();
+        let c = parse_args(args(&["--db", "/tmp/x/tetramem.db", "--user", "sunorme"])).unwrap();
         assert_eq!(c.db, PathBuf::from("/tmp/x/tetramem.db"));
+        assert_eq!(c.user, "sunorme");
         assert_eq!(c.out, PathBuf::from("hyperspace-reports"));
         assert_eq!(c.interval_secs, 21_600);
         assert_eq!(c.kappa, 1.0);
@@ -306,6 +337,8 @@ mod tests {
         let c = parse_args(args(&[
             "--db",
             "d.db",
+            "--user",
+            "u1",
             "--out",
             "/var/reports",
             "--interval-secs",
@@ -331,6 +364,7 @@ mod tests {
     fn cli_rejects_bad_input() {
         assert!(parse_args(args(&[])).is_err(), "--db required");
         assert!(parse_args(args(&["--db"])).is_err(), "value required");
+        assert!(parse_args(args(&["--db", "x"])).is_err(), "--user required");
         assert!(parse_args(args(&["--db", "x", "--kappa", "1.5"])).is_err());
         assert!(parse_args(args(&["--db", "x", "--kappa", "-0.1"])).is_err());
         assert!(parse_args(args(&["--db", "x", "--interval-secs", "zero"])).is_err());
@@ -376,6 +410,7 @@ mod tests {
         let cfg = Config {
             db: db.clone(),
             out: out.clone(),
+            user: "test-user".to_string(),
             interval_secs: 21_600,
             kappa: 1.0,
             once: true,

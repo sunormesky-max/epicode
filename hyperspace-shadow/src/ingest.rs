@@ -169,34 +169,48 @@ pub struct IngestBatch {
 }
 
 /// Initial snapshot: every row, in write-history order (timestamp, then id)
-/// so the shadow replays the production write order.
-pub fn load_all(conn: &Connection) -> Result<IngestBatch, String> {
+/// so the shadow replays the production write order. `crypto`+`user_id`
+/// (both optional) enable in-memory decryption of per-user AES-GCM labels.
+pub fn load_all(
+    conn: &Connection,
+    crypto: Option<&crate::crypto::ShadowCrypto>,
+    user_id: &str,
+) -> Result<IngestBatch, String> {
     let raw = query_raw(
         conn,
         &format!("{TETRA_SELECT} ORDER BY timestamp, rowid"),
         &[],
     )?;
-    Ok(finish_batch(raw))
+    Ok(finish_batch(raw, crypto, user_id))
 }
 
 /// Incremental poll: rows with rowid greater than `last_rowid`, in rowid
 /// order. `INSERT OR REPLACE` rewrites of an existing id keep their rowid and
 /// are therefore NOT re-synced (documented limitation — see README).
-pub fn poll_since(conn: &Connection, last_rowid: i64) -> Result<IngestBatch, String> {
+pub fn poll_since(
+    conn: &Connection,
+    last_rowid: i64,
+    crypto: Option<&crate::crypto::ShadowCrypto>,
+    user_id: &str,
+) -> Result<IngestBatch, String> {
     let raw = query_raw(
         conn,
         &format!("{TETRA_SELECT} WHERE rowid > ?1 ORDER BY rowid"),
         &[&last_rowid],
     )?;
-    Ok(finish_batch(raw))
+    Ok(finish_batch(raw, crypto, user_id))
 }
 
-fn finish_batch(raw: Vec<RawRow>) -> IngestBatch {
+fn finish_batch(
+    raw: Vec<RawRow>,
+    crypto: Option<&crate::crypto::ShadowCrypto>,
+    user_id: &str,
+) -> IngestBatch {
     // MAX over the batch, not `raw.last()`: `load_all` orders by timestamp
     // (write-history replay), so the last row is not necessarily the
     // largest rowid.
     let max_rowid_seen = raw.iter().map(|r| r.rowid).max().unwrap_or(0);
-    let (rows, skipped) = decode_rows(raw);
+    let (rows, skipped) = decode_rows(raw, crypto, user_id);
     IngestBatch {
         rows,
         skipped,
@@ -232,14 +246,25 @@ fn query_raw(
     Ok(out)
 }
 
-/// Decode label JSON; malformed rows (e.g. encrypted labels on a
-/// key-protected deployment, or corrupted text) are skipped and counted
-/// rather than aborting the shadow.
-fn decode_rows(raw: Vec<RawRow>) -> (Vec<TetraRow>, usize) {
+/// Decode label JSON; plaintext rows parse directly, encrypted rows are
+/// decrypted in memory when `crypto`+`user_id` are provided. Rows that are
+/// neither (no key deployed, foreign format, corrupted text) are skipped and
+/// counted rather than aborting the shadow.
+fn decode_rows(
+    raw: Vec<RawRow>,
+    crypto: Option<&crate::crypto::ShadowCrypto>,
+    user_id: &str,
+) -> (Vec<TetraRow>, usize) {
     let mut rows = Vec::with_capacity(raw.len());
     let mut skipped = 0usize;
     for r in raw {
-        match parse_labels_json(&r.labels_json) {
+        let labels = parse_labels_json(&r.labels_json).or_else(|| {
+            crypto.and_then(|c| {
+                c.decrypt_field(&r.labels_json, user_id)
+                    .and_then(|pt| parse_labels_json(&pt))
+            })
+        });
+        match labels {
             Some(labels) => rows.push(TetraRow {
                 rowid: r.rowid,
                 labels,
@@ -527,7 +552,7 @@ mod tests {
         insert_row(&db, "<<ciphertext-not-json>>", t0, 0); // skipped row
 
         let conn = open_read_only(&db).unwrap();
-        let batch = load_all(&conn).unwrap();
+        let batch = load_all(&conn, None, "sunorme").unwrap();
         let rows = &batch.rows;
         assert_eq!(rows.len(), 3);
         assert_eq!(batch.skipped, 1);
@@ -549,19 +574,49 @@ mod tests {
 
         // Incremental: nothing new — the malformed row must NOT reappear
         // (rowid cursor advanced past it during the initial load).
-        let empty = poll_since(&conn, batch.max_rowid_seen).unwrap();
+        let empty = poll_since(&conn, batch.max_rowid_seen, None, "sunorme").unwrap();
         assert!(empty.rows.is_empty());
         assert_eq!(empty.skipped, 0);
         assert_eq!(empty.max_rowid_seen, 0);
 
         // Incremental: one new row appears.
         let new_id = insert_row(&db, r#"["rust","new-era"]"#, t0 + 40 * 86_400, 0);
-        let fresh = poll_since(&conn, batch.max_rowid_seen).unwrap();
+        let fresh = poll_since(&conn, batch.max_rowid_seen, None, "sunorme").unwrap();
         assert_eq!(fresh.skipped, 0);
         assert_eq!(fresh.rows.len(), 1);
         assert_eq!(fresh.rows[0].rowid, new_id);
         assert_eq!(fresh.max_rowid_seen, new_id);
         // New era: 40 days after birth ≈ log2(41) ≈ 5.36 w — far from w=0.
         assert!(w_anchor(&fresh.rows[0], space_birth(rows, t0)) > 5.0);
+    }
+
+    #[test]
+    fn encrypted_labels_decrypt_in_memory_when_key_present() {
+        let dir = temp_dir("enc");
+        let db = fixture_db(&dir);
+        let t0 = 1_700_000_000i64;
+
+        let crypto = crate::crypto::ShadowCrypto::from_key((0u8..32).collect());
+        // 生产存储形态: labels = base64(nonce||AES-GCM(labels_json))
+        let ct = crypto.encrypt_field(r#"["空间记忆","rust"]"#, "sunorme");
+        insert_row(&db, &ct, t0, 0);
+        // 外用户密文(错键) + 垃圾文本: 均跳过
+        let foreign = crypto.encrypt_field(r#"["x"]"#, "someone-else");
+        insert_row(&db, &foreign, t0, 0);
+        insert_row(&db, "garbage-not-json", t0, 0);
+
+        let conn = open_read_only(&db).unwrap();
+        // 无键: 全部跳过
+        let plain = load_all(&conn, None, "sunorme").unwrap();
+        assert_eq!(plain.rows.len(), 0);
+        assert_eq!(plain.skipped, 3);
+        // 有键: 本用户密文解密成功, 外用户/垃圾仍跳过
+        let dec = load_all(&conn, Some(&crypto), "sunorme").unwrap();
+        assert_eq!(dec.rows.len(), 1);
+        assert_eq!(dec.skipped, 2);
+        assert_eq!(
+            dec.rows[0].labels,
+            vec!["空间记忆".to_string(), "rust".to_string()]
+        );
     }
 }
