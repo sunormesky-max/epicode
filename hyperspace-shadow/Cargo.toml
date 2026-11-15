@@ -10,14 +10,22 @@ description = "S1 shadow integration binary: mirrors production memory traffic i
 # S1 zero-hot-path rule: this crate is a SIBLING of backend/ and guard/ and is
 # deliberately NOT a workspace member of the main repository. It must never
 # appear in the root workspace, the root Cargo.lock, or any CI hot path.
-# The only dependency is rusqlite (same version/feature set as the main
-# backend: 0.41 bundled) so the shadow can read production SQLite files.
+# rusqlite reads production SQLite; the crypto set mirrors backend versions
+# to decrypt the per-user AES-GCM `labels` column in place (read-only).
 [dependencies]
 rusqlite = { version = "0.41", features = ["bundled"] }
+aes-gcm = "0.10"
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.23"
 
 [[bin]]
 name = "epicode-hyperspace"
 path = "src/main.rs"
+
+[[bin]]
+name = "hyperspace-bench"
+path = "src/bin/bench.rs"
 
 [profile.release]
 lto = true

@@ -218,3 +218,5 @@ hyperspace-shadow/
     ├── report.rs      # JSON+MD output, rolling retention (+ tests)
     └── engine/        # VENDORED from research/four-dim v0.2 — do not edit
 ```
+
+<!-- bench-trigger: real file change to fire paths-filtered CI -->
