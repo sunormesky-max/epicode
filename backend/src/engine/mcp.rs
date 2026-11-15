@@ -1058,16 +1058,17 @@ impl McpHandler {
                 },
                 {
                     "name": "memory_wander",
-                    "description": "Free-association wander: start from one clue (memory id or query) and walk the knowledge graph step by step, following the most interesting edge each time. Returns an explainable associative chain A→B→C→… where every hop carries the edge taken and why. Four depth tiers: shallow (3 hops, near-deterministic 'what immediately comes to mind'), medium (8 hops), deep (16 hops, cross-domain), free (agent sets its own step count up to 64). Strategies: strongest edge / novel cold memories / temporal timeline (Precedes) / contradiction tension. When a region exhausts, spectral far-jumps teleport the chain to a distant region of the graph (budget: shallow 0 / medium 1 / deep 2 / free 2, overridable). Use memory_recall for query-driven fan-out retrieval; use memory_wander when the goal is associative exploration, serendipity, or tracing how ideas connect.",
+                    "description": "Free-association wander: start from one clue (memory id or query) and walk the knowledge graph step by step, following the most interesting edge each time. Returns an explainable associative chain A→B→C→… where every hop carries the edge taken and why. Four depth tiers: shallow (3 hops, near-deterministic 'what immediately comes to mind'), medium (8 hops), deep (16 hops, cross-domain), free (agent sets its own step count up to 64). Strategies: strongest edge / novel cold memories / temporal timeline (Precedes) / contradiction tension / era-depth (adjacent log2 time bands, Δw≈±1). When a region exhausts, era-jumps (same-topic, one time band away, no edge required) and spectral far-jumps teleport the chain onward (budgets overridable). Use memory_recall for query-driven fan-out retrieval; use memory_wander when the goal is associative exploration, serendipity, or tracing how ideas connect.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "start_id": { "type": "integer", "description": "Memory ID to start wandering from (the clue). Either start_id or query is required." },
                             "query": { "type": "string", "description": "If no start_id, the top search hit for this query becomes the starting clue." },
                             "depth": { "type": "string", "enum": ["shallow", "medium", "deep", "free"], "default": "medium", "description": "Association tier: shallow=3 hops τ0.1 (convergent), medium=8 hops τ0.4, deep=16 hops τ0.7 (divergent), free=agent-chosen steps (default 24, max 64) τ0.8." },
-                            "strategy": { "type": "string", "enum": ["strongest", "novel", "temporal", "contradict"], "default": "strongest", "description": "What counts as 'interesting' next: strongest edge, novel cold memories (low access count = surprise), temporal timeline (Precedes), or contradiction tension (Contradicts)." },
+                            "strategy": { "type": "string", "enum": ["strongest", "novel", "temporal", "contradict", "era"], "default": "strongest", "description": "What counts as 'interesting' next: strongest edge, novel cold memories (low access count = surprise), temporal timeline (Precedes), contradiction tension (Contradicts), or era-depth (each hop prefers moving exactly one log2 time band, Δw≈±1 — walking the geological strata of a topic)." },
                             "max_steps": { "type": "integer", "minimum": 1, "maximum": 64, "description": "free tier only: agent-decided number of hops (default 24, hard cap 64)." },
                             "temperature": { "type": "number", "minimum": 0, "maximum": 1, "description": "Divergence knob: 0 always takes the highest-scoring edge; higher values explore weaker/surprising edges. Overrides the tier default." },
+                            "era_jumps": { "type": "integer", "minimum": 0, "maximum": 4, "description": "Era-jump budget: when local edges exhaust, jump directly to an unvisited same-topic memory exactly one time band away (Δw≈±1) — no graph edge required (edge type 'EraJump'). Tier default: 2 for era strategy, 0 otherwise." },
                             "far_jumps": { "type": "integer", "minimum": 0, "maximum": 4, "description": "Spectral far-jump budget: when local edges exhaust, project the current node onto SR grid codes and teleport to a distant unvisited region (chain edge type 'FarJump'). Tier defaults: shallow 0 / medium 1 / deep 2 / free 2." },
                             "seed": { "type": "integer", "description": "Optional RNG seed for reproducible walks (testing)." }
                         },
@@ -4370,6 +4371,7 @@ impl McpHandler {
             |id| self.engine.scheduler.api_get_relations_directed(id),
             |id| self.engine.scheduler.api_get_node(id),
             |from: u64, visited: &[u64]| self.engine.scheduler.api_spectral_far_jump(from, visited),
+            |from: u64, visited: &[u64]| self.engine.scheduler.api_era_jump(from, visited),
             super::wander::WanderParams {
                 start,
                 depth,
@@ -4377,6 +4379,8 @@ impl McpHandler {
                 max_steps: args["max_steps"].as_u64().map(|n| n as usize),
                 temperature: args["temperature"].as_f64(),
                 far_jumps: args["far_jumps"].as_u64().map(|n| (n as usize).min(4)),
+                era_jumps: args["era_jumps"].as_u64().map(|n| (n as usize).min(4)),
+                t0_unix: self.engine.scheduler.api_space_t0(),
                 seed: args["seed"].as_u64(),
             },
         );

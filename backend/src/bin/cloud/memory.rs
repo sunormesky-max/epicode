@@ -606,7 +606,7 @@ pub struct WanderRequest {
     pub query: Option<String>,
     /// shallow | medium | deep | free
     pub depth: Option<String>,
-    /// strongest | novel | temporal | contradict
+    /// strongest | novel | temporal | contradict | era
     pub strategy: Option<String>,
     /// free 档步数(1..=64)
     pub max_steps: Option<u64>,
@@ -614,6 +614,8 @@ pub struct WanderRequest {
     pub temperature: Option<f64>,
     /// 谱远跳预算 0..=4
     pub far_jumps: Option<u64>,
+    /// 时代跳预算 0..=4(era 策略默认 2)
+    pub era_jumps: Option<u64>,
     /// RNG 种子(可复现游走)
     pub seed: Option<u64>,
 }
@@ -634,6 +636,7 @@ pub async fn wander(
     let req_max = req.max_steps.map(|n| n as usize);
     let req_temperature = req.temperature;
     let req_far = req.far_jumps.map(|n| (n as usize).min(4));
+    let req_era = req.era_jumps.map(|n| (n as usize).min(4));
     let req_seed = req.seed;
 
     let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
@@ -666,6 +669,7 @@ pub async fn wander(
             |id| scheduler.api_get_relations_directed(id),
             |id| scheduler.api_get_node(id),
             |from, visited: &[u64]| scheduler.api_spectral_far_jump(from, visited),
+            |from, visited: &[u64]| scheduler.api_era_jump(from, visited),
             WanderParams {
                 start,
                 depth,
@@ -673,6 +677,8 @@ pub async fn wander(
                 max_steps: req_max,
                 temperature: req_temperature,
                 far_jumps: req_far,
+                era_jumps: req_era,
+                t0_unix: scheduler.api_space_t0(),
                 seed: req_seed,
             },
         );

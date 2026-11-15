@@ -494,7 +494,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Free-association wander: start from one clue (memory id or query) and walk the knowledge graph step by step, following the most interesting edge each time. Returns an explainable associative chain A→B→C→… where every hop carries the edge taken and why. Four depth tiers: shallow (3 hops, near-deterministic 'what immediately comes to mind'), medium (8 hops), deep (16 hops, cross-domain), free (agent sets its own step count up to 64). Strategies: strongest edge / novel cold memories / temporal timeline (Precedes) / contradiction tension. When a region exhausts, spectral far-jumps teleport the chain to a distant region of the graph (budget: shallow 0 / medium 1 / deep 2 / free 2, overridable). Use memory_recall for query-driven fan-out retrieval; use memory_wander when the goal is associative exploration, serendipity, or tracing how ideas connect.",
+      "description": "Free-association wander: start from one clue (memory id or query) and walk the knowledge graph step by step, following the most interesting edge each time. Returns an explainable associative chain A→B→C→… where every hop carries the edge taken and why. Four depth tiers: shallow (3 hops, near-deterministic 'what immediately comes to mind'), medium (8 hops), deep (16 hops, cross-domain), free (agent sets its own step count up to 64). Strategies: strongest edge / novel cold memories / temporal timeline (Precedes) / contradiction tension / era-depth (adjacent log2 time bands, Δw≈±1). When a region exhausts, era-jumps (same-topic, one time band away, no edge required) and spectral far-jumps teleport the chain onward (budgets overridable). Use memory_recall for query-driven fan-out retrieval; use memory_wander when the goal is associative exploration, serendipity, or tracing how ideas connect.",
       "inputSchema": {
         "properties": {
           "depth": {
@@ -505,6 +505,12 @@
           },
           "far_jumps": {
             "description": "Spectral far-jump budget: when local edges exhaust, project the current node onto SR grid codes and teleport to a distant unvisited region (chain edge type 'FarJump'). Tier defaults: shallow 0 / medium 1 / deep 2 / free 2.",
+            "maximum": 4,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "era_jumps": {
+            "description": "Era-jump budget: when local edges exhaust, jump directly to an unvisited same-topic memory exactly one time band away (Δw≈±1) — no graph edge required (edge type 'EraJump'). Tier default: 2 for era strategy, 0 otherwise.",
             "maximum": 4,
             "minimum": 0,
             "type": "integer"
@@ -529,8 +535,8 @@
           },
           "strategy": {
             "default": "strongest",
-            "description": "What counts as 'interesting' next: strongest edge, novel cold memories (low access count = surprise), temporal timeline (Precedes), or contradiction tension (Contradicts).",
-            "enum": ["strongest", "novel", "temporal", "contradict"],
+            "description": "What counts as 'interesting' next: strongest edge, novel cold memories (low access count = surprise), temporal timeline (Precedes), contradiction tension (Contradicts), or era-depth (each hop prefers moving exactly one log2 time band, Δw≈±1 — walking the geological strata of a topic).",
+            "enum": ["strongest", "novel", "temporal", "contradict", "era"],
             "type": "string"
           },
           "temperature": {
