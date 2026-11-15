@@ -53,7 +53,7 @@ fn run(args: &[String]) -> Result<(), Option<i32>> {
     let mut it = args[1..].iter().peekable();
     while let Some(a) = it.next() {
         let val = |it: &mut std::iter::Peekable<_>, name: &str| -> Result<String, Option<i32>> {
-            it.next().map(|s: &String| s.clone()).ok_or_else(|| {
+            it.next().cloned().ok_or_else(|| {
                 eprintln!("{name} requires a value");
                 Some(2)
             })
@@ -273,7 +273,7 @@ fn load_space(path: &std::path::Path) -> Result<Vec<TetraRow>, String> {
         }
         let id = json_number(t, "id").ok_or("row missing id")? as i64;
         let labels = json_array_span(t, "labels")
-            .and_then(|span| ingest::parse_labels_json(span))
+            .and_then(ingest::parse_labels_json)
             .unwrap_or_default();
         let timestamp = json_number(t, "timestamp").ok_or("row missing timestamp")? as i64;
         let importance = json_number(t, "importance").unwrap_or(1.0);
@@ -307,7 +307,7 @@ fn load_queries(path: &std::path::Path, default_k: usize) -> Result<Vec<BenchQue
         }
         let qid = json_string(t, "qid").ok_or("query missing qid")?;
         let labels = json_array_span(t, "labels")
-            .and_then(|span| ingest::parse_labels_json(span))
+            .and_then(ingest::parse_labels_json)
             .unwrap_or_default();
         let as_of = json_opt_int(t, "as_of").unwrap_or(now);
         let k = json_opt_int(t, "k")
