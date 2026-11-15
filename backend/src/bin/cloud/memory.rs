@@ -29,6 +29,53 @@ macro_rules! require_memory_read {
     };
 }
 
+// ── S1 基准埋点(#369): REST 检索端点也进 recall_log ──
+// 与 MCP attach_recall_log 同语义(append-only, 检索打分永不读取);
+// 明文查询仅在 EPICODE_QUERY_TEXT_LOG=1 时落库(锚词解析需要, 默认 hash-only)。
+fn log_rest_recall(
+    engine: &epicode::engine::runtime::Engine,
+    tool: &str,
+    query: &str,
+    returned: &[u64],
+    sources: &[Vec<String>],
+) {
+    if !epicode::engine::spike_flags::recall_outcome_log() {
+        return;
+    }
+    let query_text = if epicode::engine::spike_flags::env_flag("EPICODE_QUERY_TEXT_LOG") {
+        Some(query)
+    } else {
+        None
+    };
+    let rec = epicode::engine::storage::RecallLogRecord {
+        user_id: &engine.user_id,
+        task_id: None,
+        tool,
+        query_hash: &epicode::engine::mcp::sha256_query_hex(query),
+        query_text,
+        attempt: 0,
+        stage: None,
+        returned,
+        sources,
+        reserved: &[],
+    };
+    if let Err(e) = engine.storage.log_recall(&rec) {
+        tracing::warn!("[recall_log] REST log_recall failed: {}", e);
+    }
+}
+
+/// 从 REST results 数组提取 id 列表(埋点用, 不进打分)。
+fn result_ids(data: &serde_json::Value) -> Vec<u64> {
+    data.get("results")
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.get("id").and_then(|i| i.as_u64()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 // ---------- digest ----------
 
 #[derive(Deserialize)]
@@ -491,7 +538,12 @@ pub async fn search(
                 Json(epicode::engine::smrp::envelope_ok(
                     &engine_for_cb,
                     "memory_search",
-                    data,
+                    {
+                        // S1 埋点: P 基线主通道的查询与命中(append-only)
+                        let ids = result_ids(&data);
+                        log_rest_recall(&engine_for_cb, "memory_search", &req.query, &ids, &[]);
+                        data
+                    },
                 )),
             )
         }
@@ -573,7 +625,23 @@ pub async fn recall(
     match result {
         Ok(Ok(r)) => {
             // SMRP 信封 + relevance 分桶（与 MCP 端一致，传输正交 §1.3）
-            let data = epicode::engine::smrp::recall_data(&engine_for_cb, &r, &req.query, depth);
+            let mut data =
+                epicode::engine::smrp::recall_data(&engine_for_cb, &r, &req.query, depth);
+            // S1 埋点: recall 查询也留痕(sections 内 id 提取)
+            let ids: Vec<u64> = data
+                .get("sections")
+                .and_then(|s| s.as_object())
+                .map(|obj| {
+                    obj.values()
+                        .filter_map(|v| v.as_array())
+                        .flat_map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.get("id").and_then(|i| i.as_u64()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            log_rest_recall(&engine_for_cb, "memory_recall", &req.query, &ids, &[]);
             (
                 StatusCode::OK,
                 Json(epicode::engine::smrp::envelope_ok(
@@ -631,6 +699,7 @@ pub async fn wander(
     let scheduler = engine.scheduler.clone();
     let req_start = req.start_id;
     let req_query = req.query.clone().unwrap_or_default();
+    let req_query_log = req_query.clone();
     let req_depth = req.depth.clone();
     let req_strategy = req.strategy.clone();
     let req_max = req.max_steps.map(|n| n as usize);
@@ -691,14 +760,32 @@ pub async fn wander(
     .await;
 
     match result {
-        Ok(Ok(data)) => (
-            StatusCode::OK,
-            Json(epicode::engine::smrp::envelope_ok(
-                &engine,
-                "memory_wander",
-                data,
-            )),
-        ),
+        Ok(Ok(data)) => {
+            // S1 埋点: 联想查询进 recall_log(链上 id 提取)
+            let ids: Vec<u64> = data
+                .get("chain")
+                .and_then(|c| c.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| x.get("id").and_then(|i| i.as_u64()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let log_q = req_query_log
+                .trim()
+                .is_empty()
+                .then(|| format!("wander#{start}"))
+                .unwrap_or_else(|| req_query_log.trim().to_string());
+            log_rest_recall(&engine, "memory_wander", &log_q, &ids, &[]);
+            (
+                StatusCode::OK,
+                Json(epicode::engine::smrp::envelope_ok(
+                    &engine,
+                    "memory_wander",
+                    data,
+                )),
+            )
+        }
         Ok(Err(e)) => error_response(StatusCode::BAD_REQUEST, &e),
         Err(e) => {
             tracing::error!("wander task error: {}", e);

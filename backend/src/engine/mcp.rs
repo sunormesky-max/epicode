@@ -47,6 +47,14 @@ fn truncate_str(s: &str, max_bytes: usize) -> &str {
     &s[..end]
 }
 
+/// 查询哈希(REST 埋点与 MCP 共用, recall_log 隐私约定: 默认只存 hash)。
+pub fn sha256_query_hex(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(text.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct McpRequest {
     pub jsonrpc: String,
@@ -158,7 +166,6 @@ impl McpHandler {
         hasher.update(text.as_bytes());
         format!("{:x}", hasher.finalize())
     }
-
     /// Collect returned memory ids + per-item sources from recall/search/ask data.
     fn extract_returned_and_sources(data: &serde_json::Value) -> (Vec<u64>, Vec<Vec<String>>) {
         let mut items: Vec<&serde_json::Value> = Vec::new();
@@ -222,11 +229,18 @@ impl McpHandler {
             .engine
             .storage
             .get_active_task_for_user(&self.engine.user_id);
+        // S1 基准埋点(#369): 明文查询(锚词解析需要)仅在 env 显式开启时落库
+        let query_text = if super::spike_flags::env_flag("EPICODE_QUERY_TEXT_LOG") {
+            Some(query)
+        } else {
+            None
+        };
         let rec = super::storage::RecallLogRecord {
             user_id: &self.engine.user_id,
             task_id: task_id.as_deref(),
             tool,
             query_hash: &Self::sha256_hex(query),
+            query_text,
             attempt,
             stage,
             returned: &returned,
@@ -4389,6 +4403,13 @@ impl McpHandler {
             &format!("{:?}", depth).to_lowercase(),
             &format!("{:?}", strategy).to_lowercase(),
         );
+        // S1 基准埋点: wander 查询也进 recall_log(锚定联想查询是真值语料的一部分)
+        let log_query = args["query"]
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("wander#{start}"));
+        let mut data = data;
+        self.attach_recall_log("memory_wander", &log_query, &mut data, 0, None);
         self.smrp_ok("memory_wander", data)
     }
 
