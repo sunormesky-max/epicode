@@ -42,6 +42,8 @@ struct Config {
     keep: usize,
     /// Seed for the engine's deterministic placement RNG.
     seed: u64,
+    /// Export a benchmark-protocol §6.2 mirror corpus (space.jsonl) and exit.
+    export_space: Option<PathBuf>,
 }
 
 const USAGE: &str = "epicode-hyperspace — S1 shadow integration for the true-4D Space4 engine
@@ -60,6 +62,8 @@ OPTIONS:
     --once               run one cycle and exit (systemd timer mode)
     --keep N             report pairs kept in --out [default: 60]
     --seed N             deterministic placement RNG seed [default: 20261115]
+    --export-space FILE  export the benchmark mirror corpus (space.jsonl,
+                         protocol 6.2) and exit — no space built, no reports
     -h, --help           print this help
 
 ENV:
@@ -78,6 +82,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config, String> {
     let mut once = false;
     let mut keep: usize = report::DEFAULT_KEEP;
     let mut seed: u64 = 20_261_115;
+    let mut export_space: Option<PathBuf> = None;
 
     let mut it = args.peekable();
     while let Some(arg) = it.next() {
@@ -103,6 +108,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config, String> {
                 }
             }
             "--once" => once = true,
+            "--export-space" => export_space = Some(PathBuf::from(value("--export-space")?)),
             "--keep" => {
                 keep = value("--keep")?
                     .parse()
@@ -136,6 +142,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config, String> {
         once,
         keep,
         seed,
+        export_space,
     })
 }
 
@@ -221,6 +228,40 @@ fn run(cfg: &Config) -> Result<(), String> {
              (plaintext rows still ingest)"
         );
     }
+
+    // 导出模式: 只导出基准镜像语料(benchmark-protocol §6.2 space.jsonl),
+    // 不构建空间不产报告 — run_bench.py 的 --space 输入。
+    if let Some(export) = &cfg.export_space {
+        let batch = ingest::load_all(&conn, dec.as_ref(), &cfg.user)?;
+        use std::io::Write;
+        let f = std::fs::File::create(export)
+            .map_err(|e| format!("create {}: {e}", export.display()))?;
+        let mut w = std::io::BufWriter::new(f);
+        for r in &batch.rows {
+            let labels = report::to_json_labels(&r.labels);
+            writeln!(
+                w,
+                "{{\"op\": \"create\", \"id\": {}, \"labels\": {}, \"importance\": {:.4}, \
+                 \"timestamp\": {}, \"valid_until\": {}, \"expired_at\": {}}}",
+                r.rowid,
+                labels,
+                r.importance,
+                ingest::normalized_valid_from(r),
+                r.valid_to.unwrap_or(0),
+                r.expired_at.unwrap_or(0),
+            )
+            .map_err(|e| format!("write mirror: {e}"))?;
+        }
+        w.flush().map_err(|e| format!("flush mirror: {e}"))?;
+        eprintln!(
+            "exported {} rows -> {} (skipped {} undecryptable)",
+            batch.rows.len(),
+            export.display(),
+            batch.skipped
+        );
+        return Ok(());
+    }
+
     std::fs::create_dir_all(&cfg.out).map_err(|e| format!("create {}: {e}", cfg.out.display()))?;
     let mut shadow = Shadow::new(cfg.seed);
     let mut cycle: u64 = 0;
@@ -412,6 +453,7 @@ mod tests {
             once: true,
             keep: 60,
             seed: 1,
+            export_space: None,
         };
         run(&cfg).expect("one-shot run");
 
