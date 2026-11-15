@@ -1204,6 +1204,70 @@ impl GatewayCenter {
             .find(|(id, score)| *id != from && !visited.contains(id) && *score > 0.15)
     }
 
+    /// 时代跳(wander era 纵深联想用): 相邻时代带(Δw≈±1)的同话题记忆
+    /// 直达——不需要图上存在边。w = log₂(1+days since t₀), t₀ 取全库
+    /// 最早时间戳(每次调用现算, O(N) 在万级 <1ms; 最多 4 跳/次游走)。
+    /// WP4 extensions 建议 A 的零 4D 依赖移植。
+    pub fn era_jump(&self, from: TetraId, visited: &[TetraId]) -> Option<(TetraId, f64)> {
+        let from_t = self.space.get_tetrahedron(from)?;
+        let from_labels: std::collections::HashSet<&String> = from_t.data.labels.iter().collect();
+        if from_labels.is_empty() {
+            return None;
+        }
+        let t0 = self
+            .space
+            .all_tetrahedrons()
+            .iter()
+            .map(|t| t.data.timestamp)
+            .min()?;
+        let w_from = super::wander::w_of_unix_secs(from_t.data.timestamp, t0);
+
+        let label_idx = self.index.label_index.lock();
+        let mut best: Option<(TetraId, f64)> = None;
+        for label in from_labels {
+            let Some(ids) = label_idx.get(label) else {
+                continue;
+            };
+            for &id in ids {
+                if id == from || visited.contains(&id) {
+                    continue;
+                }
+                let Some(t) = self.space.get_tetrahedron(id) else {
+                    continue;
+                };
+                let dw = super::wander::w_of_unix_secs(t.data.timestamp, t0) - w_from;
+                // 同代(Δw<0.55 量子)不是时代跳; 亲和高斯窗以 ±1 为中心
+                if dw.abs() < 0.55 {
+                    continue;
+                }
+                let affinity = super::wander::era_affinity(dw);
+                let overlap = t
+                    .data
+                    .labels
+                    .iter()
+                    .filter(|l| from_labels.contains(*l))
+                    .count();
+                if overlap == 0 {
+                    continue;
+                }
+                let score = overlap as f64 * affinity;
+                if score > 0.05 && best.is_none_or(|(_, s)| score > s) {
+                    best = Some((id, score));
+                }
+            }
+        }
+        best
+    }
+
+    /// 全库最早时间戳(w 轴原点 t₀; era 策略评分用)。
+    pub fn space_t0(&self) -> Option<i64> {
+        self.space
+            .all_tetrahedrons()
+            .iter()
+            .map(|t| t.data.timestamp)
+            .min()
+    }
+
     pub fn get_node(&self, id: TetraId) -> Option<MemoryPayload> {
         self.space.get_tetrahedron(id).map(|t| t.data)
     }

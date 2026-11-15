@@ -141,6 +141,7 @@ export type TranslationKey =
   | 'dash.wander.depthShallow' | 'dash.wander.depthMedium' | 'dash.wander.depthDeep'
   | 'dash.wander.depthFree' | 'dash.wander.strategy' | 'dash.wander.strStrongest'
   | 'dash.wander.strNovel' | 'dash.wander.strTemporal' | 'dash.wander.strContradict'
+  | 'dash.wander.strEra'
   | 'dash.wander.temperature' | 'dash.wander.maxSteps' | 'dash.wander.farJumps'
   | 'dash.wander.go' | 'dash.wander.needSeed' | 'dash.wander.hops'
   | 'dash.wander.unique' | 'dash.wander.farUsed' | 'dash.wander.stopped'
@@ -440,6 +441,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.wander.strNovel': '冷记忆',
     'dash.wander.strTemporal': '时间线',
     'dash.wander.strContradict': '矛盾',
+    'dash.wander.strEra': '时代',
     'dash.wander.temperature': '发散度',
     'dash.wander.maxSteps': '步数（自由档）',
     'dash.wander.farJumps': '谱远跳',
@@ -1415,6 +1417,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     'dash.wander.strNovel': 'Novel',
     'dash.wander.strTemporal': 'Timeline',
     'dash.wander.strContradict': 'Tension',
+    'dash.wander.strEra': 'Era',
     'dash.wander.temperature': 'Divergence',
     'dash.wander.maxSteps': 'Steps (free)',
     'dash.wander.farJumps': 'Far jumps',

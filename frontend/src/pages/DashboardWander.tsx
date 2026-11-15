@@ -13,12 +13,13 @@ const DEPTHS: { key: string; labelKey: TranslationKey }[] = [
   { key: 'deep', labelKey: 'dash.wander.depthDeep' },
   { key: 'free', labelKey: 'dash.wander.depthFree' },
 ];
-// ── 四策略: 什么算"有意思" ──
+// ── 五策略: 什么算"有意思" ──
 const STRATEGIES: { key: string; labelKey: TranslationKey }[] = [
   { key: 'strongest', labelKey: 'dash.wander.strStrongest' },
   { key: 'novel', labelKey: 'dash.wander.strNovel' },
   { key: 'temporal', labelKey: 'dash.wander.strTemporal' },
   { key: 'contradict', labelKey: 'dash.wander.strContradict' },
+  { key: 'era', labelKey: 'dash.wander.strEra' },
 ];
 
 // 关系类型 → 颜色(FarJump 用跳色突出)
@@ -29,6 +30,7 @@ const REL_COLORS: Record<string, string> = {
   contradicts: '#e05858',
   contains: '#58b6e0',
   FarJump: '#e058c8',
+  EraJump: '#e8a838',
 };
 
 function relColor(rel: string): string {
@@ -131,7 +133,7 @@ export default function DashboardWander() {
             </div>
             <div>
               <span className="text-xs text-zinc-400">{t('dash.wander.strategy')}</span>
-              <div className="mt-1 grid grid-cols-4 gap-1" role="radiogroup" aria-label={t('dash.wander.strategy')}>
+              <div className="mt-1 grid grid-cols-5 gap-1" role="radiogroup" aria-label={t('dash.wander.strategy')}>
                 {STRATEGIES.map((s) => (
                   <button
                     key={s.key}

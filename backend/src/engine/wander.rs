@@ -107,6 +107,22 @@ pub enum Strategy {
     Temporal,
     /// 沿 Contradicts 边走张力("哪里有矛盾")
     Contradict,
+    /// 时代纵深: 每跳偏好恰好移动一个时代带(Δw≈±1)的同话题记忆——
+    /// 3D 生产空间的 EraJump 移植(WP4 extensions 建议 A, 零 4D 依赖):
+    /// w = log₂(1+days since t₀) 由 valid_from 压缩而来。
+    Era,
+}
+
+/// w 轴压缩(Weber-Fechner): 一次年龄倍增 = +1。t₀ 缺省取 epoch。
+pub fn w_of_unix_secs(ts: i64, t0: i64) -> f64 {
+    let days = (ts - t0).max(0) as f64 / 86_400.0;
+    (1.0 + days).log2()
+}
+
+/// 时代跳的相邻带亲和: Δw 距 ±1 越近越好(高斯窗)。
+pub fn era_affinity(dw: f64) -> f64 {
+    let d = (dw.abs() - 1.0).abs();
+    (-d * d * 4.0).exp()
 }
 
 impl Strategy {
@@ -116,6 +132,7 @@ impl Strategy {
             "novel" => Some(Self::Novel),
             "temporal" => Some(Self::Temporal),
             "contradict" => Some(Self::Contradict),
+            "era" => Some(Self::Era),
             _ => None,
         }
     }
@@ -124,7 +141,7 @@ impl Strategy {
     fn relation_weight(self, relation: &str) -> f64 {
         match self {
             Self::Strongest | Self::Novel => 1.0,
-            Self::Temporal => {
+            Self::Temporal | Self::Era => {
                 if relation == "Precedes" {
                     2.5
                 } else {
@@ -153,6 +170,10 @@ pub struct WanderParams {
     pub temperature: Option<f64>,
     /// 谱远跳次数预算覆盖(0..=WANDER_MAX_FAR_JUMPS)。
     pub far_jumps: Option<usize>,
+    /// 时代跳次数预算覆盖(0..=WANDER_MAX_FAR_JUMPS); era 策略默认 2。
+    pub era_jumps: Option<usize>,
+    /// w 轴原点(unix secs); era 策略/时代跳必需, None 则无时代语义。
+    pub t0_unix: Option<i64>,
     /// RNG 种子(测试确定性用; 缺省取时间)。
     pub seed: Option<u64>,
 }
@@ -186,6 +207,8 @@ pub struct WanderResult {
     pub relation_types_used: HashMap<String, usize>,
     /// 实际发生的谱远跳次数。
     pub far_jumps_used: usize,
+    /// 实际发生的时代跳次数。
+    pub era_jumps_used: usize,
     /// "max_steps" | "dead_end" | "loop_closed"
     pub stopped_reason: String,
 }
@@ -224,6 +247,7 @@ impl WanderResult {
             "total_hops": self.total_hops,
             "unique_memories": self.unique_memories,
             "far_jumps_used": self.far_jumps_used,
+            "era_jumps_used": self.era_jumps_used,
             "stopped_reason": self.stopped_reason,
             "relation_types_used": self.relation_types_used,
             "chain": chain,
@@ -310,14 +334,27 @@ fn sample_index(scores: &[f64], temperature: f64, rng: &mut SmRng) -> usize {
 /// - `far_jump`: 谱远跳查询——局部无路可走时, 把当前节点投影到
 ///   SR 网格码, 从全图近似 PPR 中取一个未访问的远处节点传送过去。
 ///   生产侧接 `api_spectral_far_jump`; 无谱索引时传 `|_, _| None`。
+/// - `era_jump`: 时代跳查询——相邻时代带(Δw≈±1)的同话题记忆直达,
+///   无需图上存在边(WP4 extensions: EraJump, 零 4D 依赖移植)。
+///   生产侧接 `api_era_jump`; 无 t₀/无标签索引时传 `|_, _| None`。
 ///
-/// 停止条件: 步数用尽(max_steps) / 死胡同(dead_end, 远跳预算也耗尽) /
+/// 停止条件: 步数用尽(max_steps) / 死胡同(dead_end, 远跳+时代跳预算也耗尽) /
 /// 邻居全被走过(loop_closed, 联想闭环——人脑"绕回来了"的时刻)。
-pub fn wander<R, N, F>(relations: R, node: N, far_jump: F, params: WanderParams) -> WanderResult
+pub fn wander<R, N, F, E>(
+    relations: R,
+    node: N,
+    far_jump: F,
+    era_jump: E,
+    params: WanderParams,
+) -> WanderResult
 where
     R: Fn(crate::domain::tetra::TetraId) -> Vec<(crate::domain::tetra::TetraId, String, f64)>,
     N: Fn(crate::domain::tetra::TetraId) -> Option<MemoryPayload>,
     F: Fn(
+        crate::domain::tetra::TetraId,
+        &[crate::domain::tetra::TetraId],
+    ) -> Option<(crate::domain::tetra::TetraId, f64)>,
+    E: Fn(
         crate::domain::tetra::TetraId,
         &[crate::domain::tetra::TetraId],
     ) -> Option<(crate::domain::tetra::TetraId, f64)>,
@@ -337,6 +374,18 @@ where
         .far_jumps
         .unwrap_or_else(|| params.depth.default_far_jumps())
         .min(WANDER_MAX_FAR_JUMPS);
+    let mut era_budget = params
+        .era_jumps
+        .unwrap_or(if params.strategy == Strategy::Era {
+            2
+        } else {
+            0
+        })
+        .min(WANDER_MAX_FAR_JUMPS);
+    // w 轴未锚定(t0=None)时时代跳无意义
+    if params.t0_unix.is_none() {
+        era_budget = 0;
+    }
     let mut rng = SmRng::new(params.seed.unwrap_or_else(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -359,6 +408,31 @@ where
             .filter(|(id, _, _)| Some(*id) != prev && !visited.contains(id))
             .collect();
         if cands.is_empty() {
+            // 时代跳: 相邻时代带的同话题直达(era 纵深联想的"跨地层"动作,
+            // 不需要图上存在边——主题相同、时代相邻即可)。
+            if era_budget > 0 {
+                let visited_list: Vec<crate::domain::tetra::TetraId> =
+                    visited.iter().copied().collect();
+                if let Some((target, score)) = era_jump(current, &visited_list) {
+                    era_budget -= 1;
+                    result.era_jumps_used += 1;
+                    let via = ViaEdge {
+                        from: current,
+                        relation: "EraJump".into(),
+                        strength: score,
+                        reason: format!("era jump to adjacent time band ({:.2})", score),
+                    };
+                    *result
+                        .relation_types_used
+                        .entry("EraJump".into())
+                        .or_insert(0) += 1;
+                    prev = Some(current);
+                    current = target;
+                    visited.insert(current);
+                    push_hop(&mut result, &node, hop, current, Some(via));
+                    continue;
+                }
+            }
             // 谱远跳: 局部联想枯竭时用 SR 网格码传送到远处区域
             // (大脑的"换话题"——上一个念头走完, 意识跳到别的脉络)。
             if far_budget > 0 {
@@ -405,7 +479,11 @@ where
             relapsed = true;
         }
 
-        // 打分: 边强度 × 策略关系权重 × (novel 策略的惊喜因子)
+        // 打分: 边强度 × 策略关系权重 × (策略特化因子)
+        let w_current = params
+            .t0_unix
+            .zip(node(current))
+            .map(|(t0, p)| w_of_unix_secs(p.timestamp, t0));
         let scores: Vec<f64> = cands
             .iter()
             .map(|(id, rel, strength)| {
@@ -414,6 +492,18 @@ where
                     Strategy::Novel => {
                         let n = node(*id).map(|p| novelty(&p)).unwrap_or(0.5);
                         base * (0.2 + n)
+                    }
+                    // 时代纵深: 偏好恰好移动一个时代带(Δw≈±1)的跳——
+                    // 同代(Δw≈0)被压到 0.25, 相邻带抬到 1.0, 跨多带渐衰。
+                    Strategy::Era => {
+                        let w_next = params
+                            .t0_unix
+                            .zip(node(*id))
+                            .map(|(t0, p)| w_of_unix_secs(p.timestamp, t0));
+                        match (w_current, w_next) {
+                            (Some(a), Some(b)) => base * (0.25 + 0.75 * era_affinity(b - a)),
+                            _ => base,
+                        }
                     }
                     _ => base,
                 }
@@ -433,6 +523,17 @@ where
             }
             Strategy::Temporal => format!("timeline: {} ({:.2})", rel, strength),
             Strategy::Contradict => format!("tension: {} ({:.2})", rel, strength),
+            Strategy::Era => {
+                let dw = params
+                    .t0_unix
+                    .zip(node(*next_id).map(|p| p.timestamp))
+                    .zip(w_current)
+                    .map(|((t0, ts), a)| w_of_unix_secs(ts, t0) - a);
+                match dw {
+                    Some(d) => format!("era-depth: {} ({:.2}) Δw={:+.2}", rel, strength, d),
+                    None => format!("era-depth: {} ({:.2})", rel, strength),
+                }
+            }
         };
         let via = ViaEdge {
             from: current,
@@ -528,6 +629,7 @@ mod tests {
             |id| adj.get(&id).cloned().unwrap_or_default(),
             |id| nodes.get(&id).cloned(),
             |_, _| None,
+            |_, _| None,
             params,
         )
     }
@@ -540,6 +642,8 @@ mod tests {
             max_steps: None,
             temperature: Some(0.0),
             far_jumps: None,
+            era_jumps: None,
+            t0_unix: None,
             seed: Some(42),
         }
     }
@@ -678,6 +782,7 @@ mod tests {
             |_| vec![],
             |id| nodes.get(&id).cloned(),
             |_, _| None,
+            |_, _| None,
             WanderParams {
                 start: 0,
                 depth: DepthPreset::Shallow,
@@ -685,6 +790,8 @@ mod tests {
                 max_steps: None,
                 temperature: None,
                 far_jumps: None,
+                era_jumps: None,
+                t0_unix: None,
                 seed: Some(1),
             },
         );
@@ -710,6 +817,7 @@ mod tests {
                     None
                 }
             },
+            |_, _| None,
             p,
         );
         // 链应包含 FarJump: 0→1→2→3 --FarJump--> 4→5→3(已访)→ 远跳预算耗尽 → 停
@@ -749,6 +857,7 @@ mod tests {
                     None
                 }
             },
+            |_, _| None,
             WanderParams {
                 start: 3,
                 depth: DepthPreset::Free,
@@ -756,6 +865,8 @@ mod tests {
                 max_steps: Some(10),
                 temperature: Some(0.0),
                 far_jumps: Some(1),
+                era_jumps: None,
+                t0_unix: None,
                 seed: Some(7),
             },
         );
@@ -770,5 +881,100 @@ mod tests {
         assert_eq!(DepthPreset::Medium.default_far_jumps(), 1);
         assert_eq!(DepthPreset::Deep.default_far_jumps(), 2);
         assert_eq!(DepthPreset::Free.default_far_jumps(), 2);
+    }
+
+    #[test]
+    fn era_strategy_walks_adjacent_bands() {
+        // 同话题三个时代: 0(当代) -0.9- 1(±1带) -0.8- 2(±2带), 另有同代强边 0-3。
+        // era 策略应偏好 Δw≈±1 的跳: 0→1 而非同代 0→3(即使 0→3 更强)。
+        let mut adj: Adj = HashMap::new();
+        let add = |from: u64, to: u64, rel: &str, s: f64, adj: &mut Adj| {
+            adj.entry(from).or_default().push((to, rel.to_string(), s));
+        };
+        add(0, 1, "SimilarTo", 0.6, &mut adj);
+        add(1, 2, "SimilarTo", 0.6, &mut adj);
+        add(0, 3, "SimilarTo", 0.95, &mut adj);
+        let mut nodes = HashMap::new();
+        let t0 = 1_700_000_000i64;
+        let d = |days: i64| t0 + days * 86_400;
+        // w=log2(1+days): 0天→0, 1天→1.0, 3天→2.0, 7天→3.0
+        for (id, days) in [(0u64, 0i64), (1u64, 1), (2u64, 3), (3u64, 0)] {
+            let mut p = payload(&format!("era-{id}"), 0);
+            p.timestamp = d(days);
+            nodes.insert(id, p);
+        }
+        let mut p = params(0, DepthPreset::Shallow, Strategy::Era);
+        p.t0_unix = Some(t0);
+        let r = run(&adj, &nodes, p);
+        // Δw: 0→1 = 1.0(亲和 1.0×0.6=0.6), 0→3 = 0(亲和 e^-4≈0.018 → 0.25+ε 权重 ×0.95≈0.24)
+        assert_eq!(r.chain[1].id, 1, "era 应跳相邻带而非更强的同代边");
+        assert!(r.chain[1]
+            .via
+            .as_ref()
+            .unwrap()
+            .reason
+            .contains("era-depth"));
+        // Δw(0→1) 应在理由里报告 ≈ +1.0
+        let reason = &r.chain[1].via.as_ref().unwrap().reason;
+        assert!(reason.contains("Δw=+1"), "reason: {reason}");
+        assert_eq!(r.chain[2].id, 2, "1→2 Δw=1.0 同样是相邻带跳");
+    }
+
+    #[test]
+    fn era_jump_rescues_stall_before_spectral() {
+        // 3 无出边: 时代跳先于谱远跳(目标不同可区分)。
+        let (adj, nodes) = fixture();
+        let mut p = params(3, DepthPreset::Free, Strategy::Strongest);
+        p.max_steps = Some(6);
+        p.era_jumps = Some(1);
+        p.t0_unix = Some(1_700_000_000);
+        p.far_jumps = Some(1);
+        let r = wander(
+            |id| adj.get(&id).cloned().unwrap_or_default(),
+            |id| nodes.get(&id).cloned(),
+            // 谱远跳给 5 —— 若时代跳失效才会出现 FarJump
+            |from: u64, visited: &[u64]| {
+                if from == 3 && !visited.contains(&5) {
+                    Some((5u64, 0.9))
+                } else {
+                    None
+                }
+            },
+            // 时代跳给 4
+            |from: u64, visited: &[u64]| {
+                if from == 3 && !visited.contains(&4) {
+                    Some((4u64, 0.6))
+                } else {
+                    None
+                }
+            },
+            p,
+        );
+        assert_eq!(r.era_jumps_used, 1);
+        assert_eq!(r.far_jumps_used, 0, "时代跳优先于谱远跳");
+        let era = r
+            .chain
+            .iter()
+            .find(|h| h.via.as_ref().is_some_and(|v| v.relation == "EraJump"));
+        assert!(era.is_some(), "应有 EraJump: {:?}", r.relation_types_used);
+        assert_eq!(era.unwrap().id, 4);
+    }
+
+    #[test]
+    fn era_jump_disabled_without_t0() {
+        // t0=None → era_budget 强制 0, 时代跳闭包永不调用
+        let (adj, nodes) = fixture();
+        let mut p = params(3, DepthPreset::Free, Strategy::Era);
+        p.max_steps = Some(4);
+        p.t0_unix = None;
+        let r = wander(
+            |id| adj.get(&id).cloned().unwrap_or_default(),
+            |id| nodes.get(&id).cloned(),
+            |_, _| None,
+            |_, _| Some((4u64, 0.6)), // 若被调用即测试失败
+            p,
+        );
+        assert_eq!(r.era_jumps_used, 0);
+        assert_eq!(r.stopped_reason, "dead_end");
     }
 }

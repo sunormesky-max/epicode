@@ -2893,6 +2893,16 @@ impl SchedulerCenter {
         self.gateway.spectral_far_jump(from, visited)
     }
 
+    /// 时代跳候选(wander era 纵深联想用)。
+    pub fn api_era_jump(&self, from: TetraId, visited: &[TetraId]) -> Option<(TetraId, f64)> {
+        self.gateway.era_jump(from, visited)
+    }
+
+    /// w 轴原点(全库最早时间戳; era 策略评分用)。
+    pub fn api_space_t0(&self) -> Option<i64> {
+        self.gateway.space_t0()
+    }
+
     pub fn api_get_concepts(&self) -> Vec<(String, usize)> {
         self.gateway.get_concepts()
     }
