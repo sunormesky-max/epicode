@@ -68,3 +68,5 @@ path = "src/bin/cloud.rs"
 # docs-trigger: wander api reference
 
 # bench-ci-trigger
+
+# v3-sync-trigger
