@@ -1,0 +1,25 @@
+[package]
+name = "hyperspace-shadow"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+repository = "https://github.com/sunormesky-max/epicode"
+description = "S1 shadow integration binary: mirrors production memory traffic into the true-4D Space4 engine and emits structural comparison reports (epicode issue #369)"
+
+# S1 zero-hot-path rule: this crate is a SIBLING of backend/ and guard/ and is
+# deliberately NOT a workspace member of the main repository. It must never
+# appear in the root workspace, the root Cargo.lock, or any CI hot path.
+# The only dependency is rusqlite (same version/feature set as the main
+# backend: 0.41 bundled) so the shadow can read production SQLite files.
+[dependencies]
+rusqlite = { version = "0.41", features = ["bundled"] }
+
+[[bin]]
+name = "epicode-hyperspace"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
