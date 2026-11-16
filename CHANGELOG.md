@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.0](https://github.com/sunormesky-max/epicode/compare/v2.12.0...v2.13.0) (2026-11-16)
+
+
+### Features
+
+* **logging:** S1 query instrumentation — REST + wander into recall_log, opt-in query_text ([#379](https://github.com/sunormesky-max/epicode/issues/379)) ([beb14c6](https://github.com/sunormesky-max/epicode/commit/beb14c698da4312fbdb4f99bc418f2432679eeed))
+
 ## [2.12.0](https://github.com/sunormesky-max/epicode/compare/v2.11.0...v2.12.0) (2026-11-15)
 
 
