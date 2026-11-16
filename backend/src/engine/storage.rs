@@ -110,6 +110,17 @@ fn ensure_concept_member_ids_column(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+/// S1 基准埋点(#369): recall_log 加 query_text 列(默认 NULL, EPICODE_QUERY_TEXT_LOG=1 时写入)。
+/// 旧库幂等 — ALTER 失败即已存在。
+fn ensure_recall_query_text_column(conn: &Connection) {
+    if let Err(e) = conn.execute_batch("ALTER TABLE recall_log ADD COLUMN query_text TEXT") {
+        tracing::debug!(
+            "[Storage] query_text migration skipped (likely applied): {}",
+            e
+        );
+    }
+}
+
 const MIGRATION_ADD_EMBEDDING: &str = "ALTER TABLE tetrahedrons ADD COLUMN embedding BLOB";
 const MIGRATION_ADD_IMPORTANCE: &str =
     "ALTER TABLE tetrahedrons ADD COLUMN importance REAL NOT NULL DEFAULT 1.0";
@@ -169,6 +180,7 @@ CREATE TABLE IF NOT EXISTS recall_log (
   task_id     TEXT,
   tool        TEXT NOT NULL,
   query_hash  TEXT NOT NULL,
+  query_text  TEXT,
   attempt     INTEGER DEFAULT 0,
   stage       TEXT,
   returned    TEXT NOT NULL,
@@ -234,11 +246,15 @@ pub fn heartbeat_gap_secs() -> i64 {
 
 /// Input for `StorageManager::log_recall`.
 /// `query_hash` must already be sha256 hex of plaintext (never pass query text).
+/// `query_text`: S1 benchmark opt-in (EPICODE_QUERY_TEXT_LOG=1) — plaintext is
+/// needed for time-anchor parsing (L2 truth, benchmark-protocol §3); default
+/// None keeps the hash-only privacy posture.
 pub struct RecallLogRecord<'a> {
     pub user_id: &'a str,
     pub task_id: Option<&'a str>,
     pub tool: &'a str,
     pub query_hash: &'a str,
+    pub query_text: Option<&'a str>,
     pub attempt: i64,
     pub stage: Option<&'a str>,
     pub returned: &'a [u64],
@@ -348,6 +364,8 @@ impl StorageManager {
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_RECALL_OUTCOME_LOG) {
             tracing::debug!("[Storage] recall_outcome_log migration skipped: {}", e);
         }
+        // S1 埋点列: 必须在 recall_log 表存在之后执行(上一步才建表)
+        ensure_recall_query_text_column(&conn);
 
         tracing::info!("SQLite database opened: {}", db_path.display());
 
@@ -2477,8 +2495,8 @@ impl StorageManager {
         let reserved = serde_json::to_string(rec.reserved).unwrap_or_else(|_| "[]".into());
         let conn = self.conn.lock();
         conn.execute(
-            "INSERT INTO recall_log (recall_id, ts, user_id, task_id, tool, query_hash, attempt, stage, returned, sources, reserved)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO recall_log (recall_id, ts, user_id, task_id, tool, query_hash, query_text, attempt, stage, returned, sources, reserved)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             rusqlite::params![
                 recall_id,
                 ts,
@@ -2486,6 +2504,7 @@ impl StorageManager {
                 rec.task_id,
                 rec.tool,
                 rec.query_hash,
+                rec.query_text,
                 rec.attempt,
                 rec.stage,
                 returned,
@@ -2636,7 +2655,7 @@ impl StorageManager {
     pub fn get_recall_log(&self, recall_id: &str) -> Option<serde_json::Value> {
         let conn = self.conn.lock();
         conn.query_row(
-            "SELECT recall_id, ts, user_id, task_id, tool, query_hash, attempt, stage, returned, sources, reserved
+            "SELECT recall_id, ts, user_id, task_id, tool, query_hash, query_text, attempt, stage, returned, sources, reserved
              FROM recall_log WHERE recall_id = ?1",
             rusqlite::params![recall_id],
             |r| {
@@ -2647,11 +2666,12 @@ impl StorageManager {
                     "task_id": r.get::<_, Option<String>>(3)?,
                     "tool": r.get::<_, String>(4)?,
                     "query_hash": r.get::<_, String>(5)?,
-                    "attempt": r.get::<_, i64>(6)?,
-                    "stage": r.get::<_, Option<String>>(7)?,
-                    "returned": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(8)?).unwrap_or(serde_json::json!([])),
-                    "sources": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(9)?).unwrap_or(serde_json::json!([])),
-                    "reserved": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(10).unwrap_or_else(|_| "[]".into())).unwrap_or(serde_json::json!([])),
+                    "query_text": r.get::<_, Option<String>>(6)?,
+                    "attempt": r.get::<_, i64>(7)?,
+                    "stage": r.get::<_, Option<String>>(8)?,
+                    "returned": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(9)?).unwrap_or(serde_json::json!([])),
+                    "sources": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(10)?).unwrap_or(serde_json::json!([])),
+                    "reserved": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(11).unwrap_or_else(|_| "[]".into())).unwrap_or(serde_json::json!([])),
                 }))
             },
         )
@@ -3170,6 +3190,7 @@ mod recall_outcome_log_tests {
                 task_id: Some("t1"),
                 tool: "memory_recall",
                 query_hash: "abc123deadbeef",
+                query_text: None,
                 attempt: 0,
                 stage: None,
                 returned: &[10, 20, 30],
@@ -3185,6 +3206,23 @@ mod recall_outcome_log_tests {
         // Privacy: no query plaintext column / value.
         let raw = serde_json::to_string(&row).unwrap();
         assert!(!raw.contains("secret query"));
+        // S1 opt-in: query_text roundtrips when provided (env 门控在调用侧)
+        let rid2 = s
+            .log_recall(&RecallLogRecord {
+                user_id: "u1",
+                task_id: None,
+                tool: "memory_search",
+                query_hash: "def456",
+                query_text: Some("最近30天的部署"),
+                attempt: 0,
+                stage: None,
+                returned: &[1],
+                sources: &[],
+                reserved: &[],
+            })
+            .unwrap();
+        let row2 = s.get_recall_log(&rid2).unwrap();
+        assert_eq!(row2["query_text"], "最近30天的部署");
         assert_eq!(s.recent_recall_ids("t1", 5), vec![rid.clone()]);
         s.log_outcome(
             "u1",
@@ -3211,6 +3249,7 @@ mod recall_outcome_log_tests {
                 task_id: None,
                 tool: "memory_search",
                 query_hash: "h",
+                query_text: None,
                 attempt: 0,
                 stage: None,
                 returned: &[],
