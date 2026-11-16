@@ -2496,7 +2496,7 @@ impl StorageManager {
         let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO recall_log (recall_id, ts, user_id, task_id, tool, query_hash, query_text, attempt, stage, returned, sources, reserved)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             rusqlite::params![
                 recall_id,
                 ts,
