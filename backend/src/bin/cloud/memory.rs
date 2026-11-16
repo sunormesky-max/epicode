@@ -625,8 +625,7 @@ pub async fn recall(
     match result {
         Ok(Ok(r)) => {
             // SMRP 信封 + relevance 分桶（与 MCP 端一致，传输正交 §1.3）
-            let mut data =
-                epicode::engine::smrp::recall_data(&engine_for_cb, &r, &req.query, depth);
+            let data = epicode::engine::smrp::recall_data(&engine_for_cb, &r, &req.query, depth);
             // S1 埋点: recall 查询也留痕(sections 内 id 提取)
             let ids: Vec<u64> = data
                 .get("sections")
@@ -772,11 +771,12 @@ pub async fn wander(
                 })
                 .unwrap_or_default();
             let start_id = data.get("start_id").and_then(|i| i.as_u64()).unwrap_or(0);
-            let log_q = req_query_log
-                .trim()
-                .is_empty()
-                .then(|| format!("wander#{start_id}"))
-                .unwrap_or_else(|| req_query_log.trim().to_string());
+            let trimmed = req_query_log.trim();
+            let log_q = if trimmed.is_empty() {
+                format!("wander#{start_id}")
+            } else {
+                trimmed.to_string()
+            };
             log_rest_recall(&engine, "memory_wander", &log_q, &ids, &[]);
             (
                 StatusCode::OK,
