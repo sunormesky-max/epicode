@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS recall_log (
   task_id     TEXT,
   tool        TEXT NOT NULL,
   query_hash  TEXT NOT NULL,
+  query_text  TEXT,
   attempt     INTEGER DEFAULT 0,
   stage       TEXT,
   returned    TEXT NOT NULL,
@@ -294,7 +295,6 @@ impl StorageManager {
                 e
             );
         }
-        ensure_recall_query_text_column(&conn);
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_IMPORTANCE) {
             tracing::debug!(
                 "[Storage] importance migration skipped (likely already applied): {}",
@@ -364,6 +364,8 @@ impl StorageManager {
         if let Err(e) = conn.execute_batch(MIGRATION_ADD_RECALL_OUTCOME_LOG) {
             tracing::debug!("[Storage] recall_outcome_log migration skipped: {}", e);
         }
+        // S1 埋点列: 必须在 recall_log 表存在之后执行(上一步才建表)
+        ensure_recall_query_text_column(&conn);
 
         tracing::info!("SQLite database opened: {}", db_path.display());
 
