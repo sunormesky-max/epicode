@@ -10,7 +10,7 @@ cat > my-values.yaml <<EOF
 env:
   EPICODE_ADMIN_KEY: "$(openssl rand -base64 32)"
   EPICODE_MASTER_KEY: "$(openssl rand -base64 32)"
-  DEEPSEEK_API_KEY: "your-deepseek-key"
+  LLM_API_KEY: "your-llm-key"
 ingress:
   hosts:
     - host: epicode.example.com
@@ -47,7 +47,7 @@ curl https://epicode.example.com/health
 | `image.frontend.tag` | Frontend tag | `1.0.1` |
 | `env.EPICODE_ADMIN_KEY` | **Required** Admin API key | `""` |
 | `env.EPICODE_MASTER_KEY` | **Required** 32-byte base64 encryption key | `""` |
-| `env.DEEPSEEK_API_KEY` | DeepSeek LLM key (optional) | `""` |
+| `env.LLM_API_KEY` | LLM provider key (required for LLM features) | `""` |
 | `env.REDIS_URL` | Redis URL (optional) | `""` |
 | `persistence.enabled` | Enable PVC for backend data | `true` |
 | `persistence.size` | PVC size | `10Gi` |

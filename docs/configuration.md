@@ -9,7 +9,10 @@ These keys control access to the Epicode API and administrative functions.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `EPICODE_API_KEY` | Yes | Primary API key for authenticating all memory operations (remember, search, recall). Every request must include this key in the `X-API-Key` header. |
-| `DEEPSEEK_API_KEY` | Yes | API key for DeepSeek LLM services. Used for cognitive functions including content classification, reasoning, and alias generation. |
+| `LLM_API_KEY` | Yes | API key for your LLM provider. Used for cognitive functions including content classification, reasoning, and alias generation. Supports any OpenAI-compatible endpoint via `LLM_API_BASE` and `LLM_MODEL`. |
+| `LLM_API_BASE` | No | OpenAI-compatible API base URL for the LLM provider. Defaults to DeepSeek. |
+| `LLM_MODEL` | No | Model name for the LLM provider. Defaults to `deepseek-chat`. |
+| `DEEPSEEK_API_KEY` | Legacy | Fallback if `LLM_API_KEY` is not set (deprecated — prefer `LLM_API_KEY`). |
 | `EPICODE_MASTER_KEY` | Cloud only | Master account key for cloud deployments. Grants access to account management, sub-account creation, and billing operations. |
 | `EPICODE_ADMIN_KEY` | Cloud only | Administrator key for cloud deployments. Grants access to system-level operations such as user management, quota overrides, and maintenance tasks. |
 
@@ -26,19 +29,19 @@ These variables configure the underlying infrastructure connections.
 
 ### Local Development
 
-For local development, only `EPICODE_API_KEY` and `DEEPSEEK_API_KEY` are strictly required. Set them in a `.env` file or export them in your shell:
+For local development, only `EPICODE_API_KEY` and `LLM_API_KEY` are strictly required. Set them in a `.env` file or export them in your shell:
 
 ```bash
 export EPICODE_API_KEY=your-local-api-key
-export DEEPSEEK_API_KEY=your-deepseek-key
+export LLM_API_KEY=your-llm-provider-key
 ```
 
 ### Cloud Deployment
 
-For cloud deployments, all four authentication keys should be configured. The `EPICODE_MASTER_KEY` and `EPICODE_ADMIN_KEY` should be strong, randomly generated secrets stored in a secure vault. Example `.env` file:
+For cloud deployments, all authentication keys should be configured. The `EPICODE_MASTER_KEY` and `EPICODE_ADMIN_KEY` should be strong, randomly generated secrets stored in a secure vault. Example `.env` file:
 
 ```bash
-DEEPSEEK_API_KEY=replace-me
+LLM_API_KEY=replace-me
 EPICODE_ADMIN_KEY=replace-me
 EPICODE_MASTER_KEY=replace-me
 REDIS_URL=redis://redis:6379
@@ -49,7 +52,7 @@ EPICODE_HOST=0.0.0.0
 
 - Rotate `EPICODE_API_KEY` regularly if exposed to client-side applications.
 - `EPICODE_MASTER_KEY` and `EPICODE_ADMIN_KEY` should be rotated immediately if compromised.
-- `DEEPSEEK_API_KEY` rotation depends on your DeepSeek account policy.
+- `LLM_API_KEY` rotation depends on your LLM provider's account policy.
 
 ## Related Documentation
 

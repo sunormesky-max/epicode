@@ -37,7 +37,7 @@ After startup:
 
 | Variable | Purpose |
 | --- | --- |
-| `DEEPSEEK_API_KEY` | LLM-backed ask/recall flows |
+| `LLM_API_KEY` | LLM-backed ask/recall flows (`DEEPSEEK_API_KEY` is the legacy fallback) |
 | `EPICODE_ADMIN_KEY` | Cloud admin surface |
 | `EPICODE_MASTER_KEY` | Optional master encryption key |
 | `REDIS_URL` | Optional L2 cache backend |
