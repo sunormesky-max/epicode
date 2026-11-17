@@ -41,7 +41,7 @@ Required environment variables:
 | `EPICODE_ADMIN_KEY` | yes | — | Admin token for management APIs |
 | `EPICODE_API_KEY` | yes (prod) | — | API key clients must send via `X-API-Key` |
 | `EPICODE_MASTER_KEY` | yes (prod) | — | 32-byte base64 key for at-rest encryption |
-| `DEEPSEEK_API_KEY` | optional | — | For LLM classification features |
+| `LLM_API_KEY` | optional | — | For LLM classification features (`DEEPSEEK_API_KEY` legacy fallback) |
 | `REDIS_URL` | optional | — | Redis for cloud mode rate limiting |
 | `EPICODE_LISTEN_ADDR` | optional | `0.0.0.0:9111` | Bind address |
 | `TETRAMEM_*` | legacy | — | Old env prefix, still accepted as fallback |

@@ -33,7 +33,7 @@ Make sure your reverse proxy or ingress sends:
 
 Check these first:
 
-1. `DEEPSEEK_API_KEY` is set
+1. `LLM_API_KEY` (or legacy `DEEPSEEK_API_KEY`) is set
 2. ONNX model files are present for the backend image or local runtime
 3. the backend can write to its data directory
 

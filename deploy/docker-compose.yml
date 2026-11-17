@@ -8,7 +8,10 @@ services:
       EPICODE_LISTEN_ADDR: 0.0.0.0:9111
       EPICODE_ADMIN_KEY: ${EPICODE_ADMIN_KEY}
       EPICODE_MASTER_KEY: ${EPICODE_MASTER_KEY:-}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_API_BASE: ${LLM_API_BASE:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       REDIS_URL: ${REDIS_URL:-}
     volumes:
       - backend-data:/app/data

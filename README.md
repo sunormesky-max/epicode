@@ -35,7 +35,7 @@ The fastest way to run Epicode locally is with Docker Compose:
 git clone https://github.com/sunormesky-max/epicode.git
 cd epicode/deploy
 cp .env.example .env
-# Edit .env and add your DEEPSEEK_API_KEY and keys
+# Edit .env and add your LLM_API_KEY and keys
 docker compose up --build -d
 ```
 
@@ -122,7 +122,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development setup.
 ```bash
 cd deploy
 cp .env.example .env
-# fill in DEEPSEEK_API_KEY, EPICODE_ADMIN_KEY, EPICODE_MASTER_KEY
+# fill in LLM_API_KEY, EPICODE_ADMIN_KEY, EPICODE_MASTER_KEY
 docker compose up --build -d
 ```
 

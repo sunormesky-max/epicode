@@ -29,7 +29,9 @@ externalSecret:
 env:
   EPICODE_ADMIN_KEY: ""        # REQUIRED
   EPICODE_MASTER_KEY: ""       # REQUIRED (32-byte base64)
-  DEEPSEEK_API_KEY: ""         # optional
+  LLM_API_KEY: ""              # REQUIRED for LLM features (primary)
+  LLM_API_BASE: ""            # optional, OpenAI-compatible endpoint
+  LLM_MODEL: ""               # optional, model name
   REDIS_URL: ""                # optional, enables distributed rate limiting
   RUST_LOG: "info"
   EPICODE_LISTEN_ADDR: "0.0.0.0:9111"
