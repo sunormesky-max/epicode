@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.1](https://github.com/sunormesky-max/epicode/compare/v2.13.0...v2.13.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* **security:** bump minimatch to ^11.0.1 via overrides (dependabot [#88](https://github.com/sunormesky-max/epicode/issues/88)) ([#381](https://github.com/sunormesky-max/epicode/issues/381)) ([e7c47c8](https://github.com/sunormesky-max/epicode/commit/e7c47c89b189c92646d40a3b8c5af1c170eeefa5))
+
 ## [2.13.0](https://github.com/sunormesky-max/epicode/compare/v2.12.0...v2.13.0) (2026-11-16)
 
 
