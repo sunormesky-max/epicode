@@ -15,16 +15,6 @@
       "owner": "security@epicode.cn",
       "expiresOn": "2027-02-09",
       "reason": "RustSec reports no patched release. The backend uses RSA for public-key encryption; the private-key decrypt helper has no HTTP or MCP call site and is exercised only by tests. Re-review when RustCrypto ships a constant-time fix. Renewed 2026-11-11 after confirming rsa 0.9.10 is still the latest 0.9.x and the call-site analysis is unchanged."
-    },
-    {
-      "ecosystem": "npm",
-      "scope": "frontend/package-lock.json",
-      "id": "GHSA-fc5q-39xc-vjpf",
-      "package": "picomatch",
-      "version": "*",
-      "owner": "security@epicode.cn",
-      "expiresOn": "2027-02-17",
-      "reason": "ReDoS in build-time-only toolchain (vitest/vite/eslint-plugin/tailwindcss transitive dep). No runtime exposure — picomatch is only invoked by dev tooling during CI builds, never shipped in the production bundle. No fixed picomatch release exists as of 2026-11-18; the npm audit fix --force path (vitest 5.x→3.x downgrade) would break the test matrix. Re-review when picomatch ships a patch or vitest updates its dependency tree."
     }
   ]
 }
