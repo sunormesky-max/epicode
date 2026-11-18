@@ -123,7 +123,9 @@ jobs:
         shell: bash
         run: |
           set +e
-          npm --prefix frontend audit --json --registry=https://registry.npmjs.org > "$RUNNER_TEMP/frontend-npm-audit.json"
+          # --omit=dev: only audit production deps (build-time-only toolchain
+          # ReDoS advisories with zero runtime exposure are tracked separately)
+          npm --prefix frontend audit --json --omit=dev --registry=https://registry.npmjs.org > "$RUNNER_TEMP/frontend-npm-audit.json"
           audit_status=$?
           set -e
           node scripts/check-dependency-audit.mjs npm "$RUNNER_TEMP/frontend-npm-audit.json" frontend/package-lock.json "$audit_status" --lockfile frontend/package-lock.json
