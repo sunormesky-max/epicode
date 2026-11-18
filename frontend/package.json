@@ -16,7 +16,7 @@
     "postbuild": "node scripts/check-entry-chunks.mjs"
   },
   "dependencies": {
-    "cookie": "^1.1.1",
+    "cookie": "^2.0.2",
     "dotenv": "^18.0.9",
     "framer-motion": "^14.10.1",
     "jose": "^6.2.12",
