@@ -50,6 +50,7 @@
   },
   "overrides": {
     "lodash": "^4.17.24",
-    "minimatch": "^11.0.1"
+    "minimatch": "^11.0.1",
+    "picomatch": "^4.0.2"
   }
 }
