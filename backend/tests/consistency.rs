@@ -108,7 +108,9 @@ fn frontend_api_calls_have_backend_routes() {
 
 #[test]
 fn mcp_tools_list_matches_dispatch() {
-    let src = read("backend/src/engine/mcp.rs");
+    // Refactor(modularize-engine): dispatch arms live in mcp/dispatch.rs, the
+    // advertised catalog in mcp/catalog.rs — same contract, two files now.
+    let src = read("backend/src/engine/mcp/dispatch.rs");
     // dispatch分支: 行首 "name" => self.tool_xxx( — 仅工具方法(排除RPC方法)
     let dispatch: BTreeSet<String> = src
         .lines()
@@ -123,16 +125,19 @@ fn mcp_tools_list_matches_dispatch() {
                 .map(String::from)
         })
         .collect();
-    // tools_list声明体: fn tools_list 到下一个fn(非60K窗口)
-    let tl_start = src.find("fn tools_list").expect("tools_list not found");
-    let tl_end = src[tl_start..]
+    // 声明体: tool_catalog() 单一事实源(拆分后独占 mcp/catalog.rs)
+    let catalog = read("backend/src/engine/mcp/catalog.rs");
+    let tl_start = catalog
+        .find("fn tool_catalog")
+        .expect("tool_catalog not found");
+    let tl_end = catalog[tl_start..]
         .find(
             "
     fn ",
         )
         .map(|e| tl_start + e)
-        .unwrap_or(src.len());
-    let tl_body = &src[tl_start..tl_end];
+        .unwrap_or(catalog.len());
+    let tl_body = &catalog[tl_start..tl_end];
     let mut declared = BTreeSet::new();
     let mut rest = tl_body;
     while let Some(pos) = rest.find("\"name\": \"") {
@@ -305,15 +310,23 @@ fn rest_and_mcp_delete_share_purge_semantics() {
     fn fn_body<'a>(src: &'a str, sig: &str) -> &'a str {
         let s = src.find(sig).unwrap_or_else(|| panic!("{sig} not found"));
         let rest = &src[s + sig.len()..];
-        let e = ["\npub async fn ", "\npub fn ", "\n    fn ", "\n    pub fn "]
-            .iter()
-            .filter_map(|n| rest.find(n))
-            .min()
-            .unwrap_or(rest.len());
+        let e = [
+            "\npub async fn ",
+            "\npub fn ",
+            "\n    fn ",
+            "\n    pub fn ",
+            // modularize-engine: split-out methods carry restricted visibility
+            "\n    pub(in crate::engine::mcp) fn ",
+            "\n    pub(in crate::engine::scheduler) fn ",
+        ]
+        .iter()
+        .filter_map(|n| rest.find(n))
+        .min()
+        .unwrap_or(rest.len());
         &rest[..e]
     }
     let rest_src = read("backend/src/bin/cloud/memory.rs");
-    let mcp_src = read("backend/src/engine/mcp.rs");
+    let mcp_src = read("backend/src/engine/mcp/handlers/memory.rs");
     for (name, body) in [
         (
             "REST delete_memory",
