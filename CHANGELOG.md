@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.2](https://github.com/sunormesky-max/epicode/compare/v2.13.1...v2.13.2) (2026-11-18)
+
+
+### Bug Fixes
+
+* **deps+docs:** LLM_API_KEY as primary env var, drop dashmap dependency ([#383](https://github.com/sunormesky-max/epicode/issues/383)) ([6db454a](https://github.com/sunormesky-max/epicode/commit/6db454a1dfa34b663695074e456236d81eb5b988))
+* **security:** picomatch audit exception (build-time-only ReDoS) ([#395](https://github.com/sunormesky-max/epicode/issues/395)) ([d1ef969](https://github.com/sunormesky-max/epicode/commit/d1ef969cf3a1b75d854247ecbb0a4fbcd834c868))
+
 ## [2.13.1](https://github.com/sunormesky-max/epicode/compare/v2.13.0...v2.13.1) (2026-11-17)
 
 
