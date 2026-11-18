@@ -455,8 +455,8 @@ impl McpHandler {
     /// "epicode-system" and skills_sync). Compiled in from the repo so every
     /// deployment serves exactly the reviewed text; the constitution is appended.
     pub fn system_manual() -> String {
-        const MANUAL: &str = include_str!("../../system_skills/epicode_system_manual.md");
-        const CONSTITUTION: &str = include_str!("../../system_skills/00_epicode_system.md");
+        const MANUAL: &str = include_str!("../../../../system_skills/epicode_system_manual.md");
+        const CONSTITUTION: &str = include_str!("../../../../system_skills/00_epicode_system.md");
         let constitution = CONSTITUTION
             .lines()
             .map(|l| {
