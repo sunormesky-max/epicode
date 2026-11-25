@@ -69,14 +69,6 @@ impl Vec4 {
         }
     }
 
-    pub fn add(self, o: Vec4) -> Vec4 {
-        Vec4::new(self.x + o.x, self.y + o.y, self.z + o.z, self.w + o.w)
-    }
-
-    pub fn sub(self, o: Vec4) -> Vec4 {
-        Vec4::new(self.x - o.x, self.y - o.y, self.z - o.z, self.w - o.w)
-    }
-
     pub fn scale(self, s: f64) -> Vec4 {
         Vec4::new(self.x * s, self.y * s, self.z * s, self.w * s)
     }
@@ -94,16 +86,16 @@ impl Vec4 {
     }
 
     pub fn distance(a: Vec4, b: Vec4) -> f64 {
-        a.sub(b).length()
+        (a - b).length()
     }
 
     pub fn distance_sq(a: Vec4, b: Vec4) -> f64 {
-        a.sub(b).length_sq()
+        (a - b).length_sq()
     }
 
     /// Linear interpolation, `t = 0` → self, `t = 1` → `o`.
     pub fn lerp(self, o: Vec4, t: f64) -> Vec4 {
-        self.add(o.sub(self).scale(t))
+        self + (o - self).scale(t)
     }
 
     /// The midpoint between two points.
@@ -119,7 +111,7 @@ impl Vec4 {
     /// `κ = 1` is the fully coupled 4D metric; intermediate κ is the
     /// time-coupling dial of the S4 rollout.
     pub fn aniso_distance_sq(a: Vec4, b: Vec4, kappa: f64) -> f64 {
-        let d = a.sub(b);
+        let d = a - b;
         d.x * d.x + d.y * d.y + d.z * d.z + kappa * kappa * d.w * d.w
     }
 
@@ -130,6 +122,20 @@ impl Vec4 {
     /// Euclidean projection onto the xyz subspace (drop w).
     pub fn xyz(self) -> (f64, f64, f64) {
         (self.x, self.y, self.z)
+    }
+}
+
+impl std::ops::Add for Vec4 {
+    type Output = Vec4;
+    fn add(self, o: Vec4) -> Vec4 {
+        Vec4::new(self.x + o.x, self.y + o.y, self.z + o.z, self.w + o.w)
+    }
+}
+
+impl std::ops::Sub for Vec4 {
+    type Output = Vec4;
+    fn sub(self, o: Vec4) -> Vec4 {
+        Vec4::new(self.x - o.x, self.y - o.y, self.z - o.z, self.w - o.w)
     }
 }
 
@@ -185,7 +191,7 @@ pub fn days_spanned_by(dw: f64) -> f64 {
 /// Is a cell with window `[w_from, w_to)` valid *at* compressed time `w_as_of`?
 /// Same half-open semantics as the bitemporal `as_of` filter.
 pub fn valid_at(w_from: f64, w_to: Option<f64>, w_as_of: f64) -> bool {
-    w_as_of >= w_from && w_to.map_or(true, |hi| w_as_of < hi)
+    w_as_of >= w_from && w_to.is_none_or(|hi| w_as_of < hi)
 }
 
 // ---------------------------------------------------------------------------
@@ -236,25 +242,19 @@ pub fn canonical_offsets() -> [Vec4; 5] {
     }
 
     // Step 2: Gram–Schmidt over p5[0..4] (p5[4] is linearly dependent on them).
-    let dot5 = |a: &[f64; 5], b: &[f64; 5]| {
-        let mut s = 0.0;
-        for k in 0..5 {
-            s += a[k] * b[k];
-        }
-        s
-    };
+    let dot5 = |a: &[f64; 5], b: &[f64; 5]| a.iter().zip(b.iter()).map(|(x, y)| x * y).sum::<f64>();
     let mut basis: Vec<[f64; 5]> = Vec::with_capacity(4);
-    for i in 0..4 {
-        let mut v = p5[i];
+    for p in p5.iter().take(4) {
+        let mut v = *p;
         for u in &basis {
             let proj = dot5(&v, u);
-            for k in 0..5 {
-                v[k] -= proj * u[k];
+            for (vk, uk) in v.iter_mut().zip(u.iter()) {
+                *vk -= proj * uk;
             }
         }
         let norm = dot5(&v, &v).sqrt();
-        for k in 0..5 {
-            v[k] /= norm;
+        for vk in v.iter_mut() {
+            *vk /= norm;
         }
         basis.push(v);
     }
@@ -262,12 +262,12 @@ pub fn canonical_offsets() -> [Vec4; 5] {
     // Step 3: coordinates in ℝ⁴ + rescale edge √2 → 1.
     let s = std::f64::consts::FRAC_1_SQRT_2;
     let mut offsets = [Vec4::zero(); 5];
-    for i in 0..5 {
-        offsets[i] = Vec4::new(
-            dot5(&p5[i], &basis[0]) * s,
-            dot5(&p5[i], &basis[1]) * s,
-            dot5(&p5[i], &basis[2]) * s,
-            dot5(&p5[i], &basis[3]) * s,
+    for (offset, p) in offsets.iter_mut().zip(p5.iter()) {
+        *offset = Vec4::new(
+            dot5(p, &basis[0]) * s,
+            dot5(p, &basis[1]) * s,
+            dot5(p, &basis[2]) * s,
+            dot5(p, &basis[3]) * s,
         );
     }
     offsets
@@ -541,10 +541,11 @@ mod tests {
                         let t = Vec4::new(dx as f64, dy as f64, dz as f64, dw as f64);
                         let shared = {
                             let a = compute_vertices(base);
-                            let b = compute_vertices(base.add(t));
+                            let b = compute_vertices(base + t);
                             a.iter()
                                 .filter(|va| {
-                                    b.iter().any(|vb| Vec4::aniso_distance(*va, *vb, 1.0) < eps)
+                                    b.iter()
+                                        .any(|vb| Vec4::aniso_distance(**va, *vb, 1.0) < eps)
                                 })
                                 .count()
                         };
