@@ -3552,12 +3552,11 @@ mod s4_core_w_tests {
                  (2, 1.0, 0.0, 0.0, 'legacy2', 2, '[]', 1.0, ?, '[]', '[0,0,0,0]');",
             )
             .unwrap();
-            conn.query_row(
+            conn.execute(
                 "INSERT INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, \
                  labels, mass, timestamp, aliases, vertex_ids, valid_from) VALUES \
                  (3, 2.0, 0.0, 0.0, 'bitemporal', 3, '[]', 1.0, ?, '[]', '[0,0,0,0]', ?)",
                 params![birth + 30 * day, birth + 2 * day],
-                |_| Ok(()),
             )
             .unwrap();
         }
