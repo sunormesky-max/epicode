@@ -278,11 +278,11 @@ pub fn canonical_offsets() -> [Vec4; 5] {
 pub fn compute_vertices(core: Vec4) -> [Vec4; 5] {
     let o = canonical_offsets();
     [
-        core.add(o[0]),
-        core.add(o[1]),
-        core.add(o[2]),
-        core.add(o[3]),
-        core.add(o[4]),
+        core + o[0],
+        core + o[1],
+        core + o[2],
+        core + o[3],
+        core + o[4],
     ]
 }
 
@@ -484,7 +484,7 @@ mod tests {
         // Centroid at origin.
         let mut sum = Vec4::zero();
         for v in &o {
-            sum = sum.add(*v);
+            sum = sum + *v;
         }
         assert!(close(sum.length(), 0.0, 1e-12));
         // All vertices on the circumsphere.
@@ -513,7 +513,7 @@ mod tests {
             let vs = compute_vertices(core);
             assert!(validate_shape(&vs));
             for (v, o) in vs.iter().zip(canonical_offsets()) {
-                assert!(Vec4::distance(*v, core.add(o)) < 1e-12);
+                assert!(Vec4::distance(*v, core + o) < 1e-12);
             }
         }
     }
@@ -523,7 +523,7 @@ mod tests {
         let core = Vec4::new(3.0, -1.0, 2.0, 1.5);
         let vs = compute_vertices(core);
         assert!(contains(&vs, core));
-        assert!(!contains(&vs, core.add(Vec4::new(10.0, 10.0, 10.0, 10.0))));
+        assert!(!contains(&vs, core + Vec4::new(10.0, 10.0, 10.0, 10.0)));
     }
 
     #[test]
