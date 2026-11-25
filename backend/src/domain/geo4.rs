@@ -421,10 +421,10 @@ mod tests {
         let t0 = 1_767_225_600_i64; // 2026-01-01T00:00:00Z
         assert_eq!(w_of_unix_secs(t0, t0), 0.0);
         assert!(w_of_unix_secs(t0 + 86_400, t0) > 0.0);
-        // One doubling of elapsed days = exactly Δw = 1.
+        // One doubling of (elapsed days + 1) = exactly Δw = 1: day 1 → day 3.
         let d1 = w_of_unix_secs(t0 + 86_400, t0);
-        let d2 = w_of_unix_secs(t0 + 2 * 86_400, t0);
-        assert!(close(d2 - d1, 1.0, 1e-12));
+        let d3 = w_of_unix_secs(t0 + 3 * 86_400, t0);
+        assert!(close(d3 - d1, 1.0, 1e-12));
         // Clamped below birth.
         assert_eq!(w_of_unix_secs(t0 - 10_000, t0), 0.0);
     }
@@ -435,7 +435,12 @@ mod tests {
         for &days in &[0_i64, 1, 7, 30, 200, 3650] {
             let t = t0 + days * 86_400;
             let w = w_of_unix_secs(t, t0);
-            assert_eq!(unix_secs_of_w(w, t0), t, "roundtrip failed for {days}d");
+            // `as i64` truncation of the float reconstruction costs ≤ 1s.
+            let back = unix_secs_of_w(w, t0);
+            assert!(
+                (back - t).abs() <= 1,
+                "roundtrip off by more than 1s for {days}d: {back} vs {t}"
+            );
         }
     }
 
@@ -469,11 +474,8 @@ mod tests {
     fn kappa_one_is_full_4d_distance() {
         let a = Vec4::new(0.0, 0.0, 0.0, 0.0);
         let b = Vec4::new(1.0, 1.0, 1.0, 1.0);
-        assert!(close(
-            Vec4::aniso_distance(a, b, 1.0),
-            2.0_f64.sqrt(),
-            1e-12
-        ));
+        // |Δ|² = 1+1+1+1 = 4 → distance 2.0 in the fully coupled metric.
+        assert!(close(Vec4::aniso_distance(a, b, 1.0), 2.0, 1e-12));
     }
 
     // ---- 5-cell geometry ----------------------------------------------------
