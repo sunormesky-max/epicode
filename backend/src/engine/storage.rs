@@ -141,7 +141,7 @@ fn ensure_space_t0_hinted(conn: &Connection, hint: Option<i64>) -> Result<Option
         [],
         |r| r.get::<_, String>(0),
     ) {
-        if let Some(t) = v.parse().ok() {
+        if let Ok(t) = v.parse() {
             return Ok(Some(t));
         }
     }
