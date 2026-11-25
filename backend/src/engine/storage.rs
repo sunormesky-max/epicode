@@ -3510,12 +3510,20 @@ mod s4_core_w_tests {
             space.add_tetrahedron(&t, &pos).unwrap();
             storage.save_all(&space, &kg).unwrap();
             let conn = storage.conn.lock();
+            let saved: i64 = conn
+                .query_row("SELECT COUNT(*) FROM tetrahedrons", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(saved, 1, "row must exist right after save_all");
             conn.execute("UPDATE tetrahedrons SET core_w = 99.0 WHERE id = 7", [])
                 .unwrap();
         }
         // 重开：自愈 backfill 必须把被污染的缓存列修回期望值
         let storage = StorageManager::new(&dir).unwrap();
         let conn = storage.conn.lock();
+        let reopened: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tetrahedrons", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(reopened, 1, "row must survive reopen");
         let w: f64 = conn
             .query_row("SELECT core_w FROM tetrahedrons WHERE id = 7", [], |r| {
                 r.get(0)
@@ -3545,11 +3553,21 @@ mod s4_core_w_tests {
                  timestamp INTEGER NOT NULL DEFAULT 0, aliases TEXT NOT NULL DEFAULT '[]', \
                  vertex_ids TEXT NOT NULL DEFAULT '[0,0,0,0]', embedding BLOB, \
                  valid_from INTEGER NOT NULL DEFAULT 0, valid_to INTEGER DEFAULT NULL); \
-                 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); \
-                 INSERT INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, \
+                 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, \
                  labels, mass, timestamp, aliases, vertex_ids) VALUES \
-                 (1, 0.0, 0.0, 0.0, 'legacy', 1, '[]', 1.0, ?, '[]', '[0,0,0,0]'), \
-                 (2, 1.0, 0.0, 0.0, 'legacy2', 2, '[]', 1.0, ?, '[]', '[0,0,0,0]');",
+                 (1, 0.0, 0.0, 0.0, 'legacy', 1, '[]', 1.0, ?, '[]', '[0,0,0,0]')",
+                params![birth],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, \
+                 labels, mass, timestamp, aliases, vertex_ids) VALUES \
+                 (2, 1.0, 0.0, 0.0, 'legacy2', 2, '[]', 1.0, ?, '[]', '[0,0,0,0]')",
+                params![birth + day],
             )
             .unwrap();
             conn.execute(
