@@ -3463,11 +3463,13 @@ mod s4_core_w_tests {
 
         let space = Space::new();
         let kg = KnowledgeGraph::new();
-        // make_tetra: timestamp = 1000 + id, valid_from = 0 → normalized = timestamp
+        // make_tetra: timestamp = 1000 + id, valid_from = 0 → normalized = timestamp.
+        // add_tetrahedron assigns its own sequential ids (0..3 here); capture them.
+        let mut ids = Vec::new();
         for i in 0..4u64 {
             let t = make_tetra(i, &format!("mem_{}", i), 1.0);
             let pos = Tetrahedron::compute_vertices(t.core);
-            space.add_tetrahedron(&t, &pos).unwrap();
+            ids.push((space.add_tetrahedron(&t, &pos).unwrap(), i));
         }
         storage.save_all(&space, &kg).unwrap();
 
@@ -3482,18 +3484,18 @@ mod s4_core_w_tests {
             read_meta_raw(&conn, "space4_enabled").as_deref(),
             Some("off")
         );
-        for i in 0..4u64 {
+        for (row_id, i) in ids {
             let w: f64 = conn
                 .query_row(
                     "SELECT core_w FROM tetrahedrons WHERE id = ?1",
-                    params![i as i64],
+                    params![row_id as i64],
                     |r| r.get(0),
                 )
                 .unwrap();
             let expect = crate::domain::geo4::w_of_unix_secs(1000 + i as i64, t0);
             assert!(
                 (w - expect).abs() < 1e-12,
-                "core_w mismatch for id {i}: {w} vs {expect}"
+                "core_w mismatch for id {row_id}: {w} vs {expect}"
             );
         }
     }
@@ -3501,21 +3503,26 @@ mod s4_core_w_tests {
     #[test]
     fn core_w_self_heals_on_reopen() {
         let dir = tmp_dir("core_w_heal");
+        // add_tetrahedron assigns its own sequential id — use the returned one.
+        let mut saved_id = 0_u64;
         {
             let storage = StorageManager::new(&dir).unwrap();
             let space = Space::new();
             let kg = KnowledgeGraph::new();
             let t = make_tetra(7, "mem_7", 1.0);
             let pos = Tetrahedron::compute_vertices(t.core);
-            space.add_tetrahedron(&t, &pos).unwrap();
+            saved_id = space.add_tetrahedron(&t, &pos).unwrap();
             storage.save_all(&space, &kg).unwrap();
             let conn = storage.conn.lock();
             let saved: i64 = conn
                 .query_row("SELECT COUNT(*) FROM tetrahedrons", [], |r| r.get(0))
                 .unwrap();
             assert_eq!(saved, 1, "row must exist right after save_all");
-            conn.execute("UPDATE tetrahedrons SET core_w = 99.0 WHERE id = 7", [])
-                .unwrap();
+            conn.execute(
+                "UPDATE tetrahedrons SET core_w = 99.0 WHERE id = ?1",
+                params![saved_id as i64],
+            )
+            .unwrap();
         }
         // 重开：自愈 backfill 必须把被污染的缓存列修回期望值
         let storage = StorageManager::new(&dir).unwrap();
@@ -3525,9 +3532,11 @@ mod s4_core_w_tests {
             .unwrap();
         assert_eq!(reopened, 1, "row must survive reopen");
         let w: f64 = conn
-            .query_row("SELECT core_w FROM tetrahedrons WHERE id = 7", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT core_w FROM tetrahedrons WHERE id = ?1",
+                params![saved_id as i64],
+                |r| r.get(0),
+            )
             .unwrap();
         let t0: i64 = read_meta_raw(&conn, "space_t0_secs")
             .unwrap()
