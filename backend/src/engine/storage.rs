@@ -2894,14 +2894,14 @@ pub struct BackupInfo {
 mod tests {
     use super::*;
 
-    fn tmp_dir(name: &str) -> PathBuf {
+    pub(super) fn tmp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("epicode_test_{}", name));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
     }
 
-    fn make_tetra(id: u64, content: &str, mass: f64) -> Tetrahedron {
+    pub(super) fn make_tetra(id: u64, content: &str, mass: f64) -> Tetrahedron {
         let core = Point3::new(id as f64, 0.0, 0.0);
         Tetrahedron {
             id,
@@ -3439,6 +3439,11 @@ mod recall_outcome_log_tests {
         assert_eq!(n, 1);
         assert_eq!(s.count_recall_logs(), 0);
     }
+}
+
+#[cfg(test)]
+mod s4_core_w_tests {
+    use super::*;
 
     // ---- S4 (#398 M3): core_w 物化缓存 + 空间灰度 meta -------------------
 
@@ -3448,6 +3453,8 @@ mod recall_outcome_log_tests {
         })
         .ok()
     }
+
+    use super::tests::{make_tetra, tmp_dir};
 
     #[test]
     fn core_w_written_and_meta_initialized() {
