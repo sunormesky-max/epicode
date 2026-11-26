@@ -1342,7 +1342,6 @@ mod tests {
     #[test]
     fn anchor_prefers_same_era_and_labels() {
         let s = Space4::new(1.0, T0);
-        let mut rng = Rng::new(7);
         // Two eras of the same topic; the query era is day 40's.
         let w10 = w_of_unix_secs(T0 + 10 * DAY, T0);
         let w40 = w_of_unix_secs(T0 + 40 * DAY, T0);
