@@ -178,13 +178,16 @@ struct SpaceInner {
     next_penta: PentaId,
 }
 
+/// Weighted vertex-sharing adjacency: cell → (neighbour, shared-vertex count).
+pub type Adjacency = HashMap<PentaId, Vec<(PentaId, f64)>>;
+
 /// The 4D space. `w_coupling` (κ) and `t0_secs` come from the storage meta
 /// dials installed by S4 M3 (`space4_kappa`, `space_t0_secs`).
 pub struct Space4 {
     inner: RwLock<SpaceInner>,
     /// PPR adjacency cache, invalidated by `structure_version`
     /// (the 4D twin of `Space`'s `search_revision` BM25 cache).
-    adj_cache: Mutex<Option<(u64, Arc<HashMap<PentaId, Vec<(PentaId, f64)>>>)>>,
+    adj_cache: Mutex<Option<(u64, Arc<Adjacency>)>>,
     /// Time-coupling coefficient κ ∈ [0, 1].
     pub w_coupling: f64,
     /// Birth of the memory space — the w = 0 anchor.
@@ -445,9 +448,7 @@ impl Space4 {
     pub fn relocate_penta(&self, pid: PentaId, new_core: Vec4) -> Option<(PentaId, usize)> {
         let mut inner = self.inner.write().unwrap();
         let (payload, access, old_core) = {
-            let Some(p) = inner.pentas.get(&pid) else {
-                return None;
-            };
+            let p = inner.pentas.get(&pid)?;
             (
                 CellPayload {
                     labels: p.labels.clone(),
@@ -818,12 +819,12 @@ impl Space4 {
 
     /// Vertex-sharing adjacency with weights = shared vertex count
     /// (the diffusion graph for Space-PPR).
-    pub fn sharing_adjacency(&self) -> HashMap<PentaId, Vec<(PentaId, f64)>> {
+    pub fn sharing_adjacency(&self) -> Adjacency {
         let inner = self.inner.read().unwrap();
         Self::sharing_adjacency_locked(&inner)
     }
 
-    fn sharing_adjacency_locked(inner: &SpaceInner) -> HashMap<PentaId, Vec<(PentaId, f64)>> {
+    fn sharing_adjacency_locked(inner: &SpaceInner) -> Adjacency {
         let mut adj: HashMap<PentaId, HashMap<PentaId, f64>> = HashMap::new();
         for v in inner.vertices.values() {
             for (i, &a) in v.penta_ids.iter().enumerate() {
@@ -843,7 +844,7 @@ impl Space4 {
     }
 
     /// Cached [`Self::sharing_adjacency`], invalidated by structure_version.
-    pub fn sharing_adjacency_cached(&self) -> Arc<HashMap<PentaId, Vec<(PentaId, f64)>>> {
+    pub fn sharing_adjacency_cached(&self) -> Arc<Adjacency> {
         let version = {
             let inner = self.inner.read().unwrap();
             inner.structure_version
