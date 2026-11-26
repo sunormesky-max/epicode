@@ -193,18 +193,23 @@ impl PortLattice {
     }
 
     /// Reserve a free port at (layer, band) for `cell` (the plain assign).
+    /// Spawns the canonical port on first use of the address; on a saturated
+    /// address returns `None` — derivation is reserved for the explicit
+    /// borrow protocol (`ensure_port4_for`), mirroring the production
+    /// `assign_port`/`ensure_free_port` split.
     pub fn assign_port4(
         &mut self,
         layer: CylinderLayer,
         band: i64,
         cell: PentaId,
     ) -> Option<VertexId> {
-        let vid = self.ensure_port4(layer, band);
-        let port = self.find_mut(vid)?;
-        if !port.is_free() {
-            return None;
-        }
-        port.assign(cell);
+        let key = (layer.index() as u8, band);
+        let vid = match self.free_at(key) {
+            Some(vid) => vid,
+            None if !self.ports.contains_key(&key) => self.spawn(layer, band, 0).vid,
+            None => return None,
+        };
+        self.reserve(vid, cell);
         Some(vid)
     }
 
