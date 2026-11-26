@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::engine::space4::{CellPayload, Space4};
+use crate::engine::space4::Space4;
 
 // ------------------------------------------------------------ timing stats --
 
@@ -166,7 +166,7 @@ pub fn vs_production(_space: &Space4, _queries: &[BenchmarkQuery]) -> Vec<QueryO
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::space4::Rng;
+    use crate::engine::space4::{CellPayload, Rng};
     use crate::engine::time_axis::unix_secs_of_w;
 
     #[test]
