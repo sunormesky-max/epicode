@@ -3504,14 +3504,13 @@ mod s4_core_w_tests {
     fn core_w_self_heals_on_reopen() {
         let dir = tmp_dir("core_w_heal");
         // add_tetrahedron assigns its own sequential id — use the returned one.
-        let mut saved_id = 0_u64;
-        {
+        let saved_id = {
             let storage = StorageManager::new(&dir).unwrap();
             let space = Space::new();
             let kg = KnowledgeGraph::new();
             let t = make_tetra(7, "mem_7", 1.0);
             let pos = Tetrahedron::compute_vertices(t.core);
-            saved_id = space.add_tetrahedron(&t, &pos).unwrap();
+            let id = space.add_tetrahedron(&t, &pos).unwrap();
             storage.save_all(&space, &kg).unwrap();
             let conn = storage.conn.lock();
             let saved: i64 = conn
@@ -3520,10 +3519,11 @@ mod s4_core_w_tests {
             assert_eq!(saved, 1, "row must exist right after save_all");
             conn.execute(
                 "UPDATE tetrahedrons SET core_w = 99.0 WHERE id = ?1",
-                params![saved_id as i64],
+                params![id as i64],
             )
             .unwrap();
-        }
+            id
+        };
         // 重开：自愈 backfill 必须把被污染的缓存列修回期望值
         let storage = StorageManager::new(&dir).unwrap();
         let conn = storage.conn.lock();
