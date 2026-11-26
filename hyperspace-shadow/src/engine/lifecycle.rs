@@ -86,7 +86,7 @@ pub fn scavenge_zombies(space: &Space4, now_secs: i64) -> usize {
 fn centroid(space: &Space4, ids: &[PentaId]) -> Vec4 {
     let mut c = Vec4::zero();
     for &id in ids {
-        c = c.add(space.get(id).unwrap().core);
+        c = c + space.get(id).unwrap().core;
     }
     c.scale(1.0 / ids.len().max(1) as f64)
 }

@@ -18,6 +18,10 @@ aes-gcm = "0.10"
 hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.23"
+# S4 M4 (#398): the shadow now runs the MAIN-REPO Space4 engine — every 6h
+# cycle feeds production traffic through the very code that M5 will switch
+# the backend onto, turning the shadow into a live A/B verification channel.
+epicode = { path = "../backend" }
 
 [[bin]]
 name = "epicode-hyperspace"

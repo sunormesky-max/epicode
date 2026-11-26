@@ -148,6 +148,17 @@ pub struct ClusterInfo {
     pub w_span: f64,
 }
 
+/// v0.3 era-band compaction report: cells moved by whole-quantum shifts,
+/// plus the merged (kept, absorbed) band pairs.
+#[derive(Clone, Debug, Default)]
+pub struct BandCompaction {
+    /// Cells moved into their kept band.
+    pub moved: usize,
+    /// Merged band pairs (kept, absorbed): every cell of the absorbed band
+    /// shifts by (kept − absorbed) 1.0 w-quanta; xyz unchanged.
+    pub merged_pairs: Vec<(i64, i64)>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SpaceStats {
     pub pentas: usize,
@@ -1097,6 +1108,103 @@ impl Space4 {
         let adj = Arc::new(self.sharing_adjacency());
         *self.adj_cache.lock().unwrap() = Some((version, Arc::clone(&adj)));
         adj
+    }
+
+    /// v0.3 era-band compaction: population sequence of non-empty bands,
+    /// ascending (empty bands absent — "adjacent" means population-adjacent
+    /// and may cross empty gaps).
+    pub fn band_populations(&self) -> Vec<(i64, usize)> {
+        let inner = self.inner.read().unwrap();
+        let mut pops: std::collections::BTreeMap<i64, usize> = std::collections::BTreeMap::new();
+        for p in inner.pentas.values() {
+            *pops.entry(era_band(p.core.w)).or_insert(0) += 1;
+        }
+        pops.into_iter().collect()
+    }
+
+    /// Merge plan over the population sequence: two adjacent bands whose
+    /// combined population < `threshold` merge into one; the denser band
+    /// keeps its address (ties → the lower band: history compacts toward the
+    /// past); the shift is (kept − absorbed) whole 1.0 w-quanta. Each band
+    /// participates in at most one merge per pass, preventing chain
+    /// collapses of the whole w axis into a single band.
+    pub fn band_merge_plan(pops: &[(i64, usize)], threshold: usize) -> Vec<(i64, i64)> {
+        let mut plan = Vec::new();
+        let mut consumed = std::collections::HashSet::new();
+        let mut i = 0usize;
+        while i + 1 < pops.len() {
+            let (b0, p0) = pops[i];
+            if consumed.contains(&b0) {
+                i += 1;
+                continue;
+            }
+            let (b1, p1) = pops[i + 1];
+            if consumed.contains(&b1) {
+                i += 1;
+                continue;
+            }
+            if p0 + p1 < threshold {
+                let (kept, absorbed) = if p1 > p0 { (b1, b0) } else { (b0, b1) };
+                plan.push((kept, absorbed));
+                consumed.insert(b0);
+                consumed.insert(b1);
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+        plan
+    }
+
+    /// Execute the era-band compaction: each absorbed band's cells move via
+    /// [`Self::relocate_penta`] (single-lock atomic), preserving labels,
+    /// bitemporal windows and access counts — compaction never deletes
+    /// cells.
+    pub fn compact_bands(&self, threshold: usize) -> BandCompaction {
+        let plan: Vec<(i64, i64)> = {
+            let inner = self.inner.read().unwrap();
+            let cells: Vec<Pentachoron> = inner.pentas.values().cloned().collect();
+            let pops: Vec<(i64, usize)> = {
+                let mut m: std::collections::BTreeMap<i64, usize> =
+                    std::collections::BTreeMap::new();
+                for p in &cells {
+                    *m.entry(era_band(p.core.w)).or_insert(0) += 1;
+                }
+                m.into_iter().collect()
+            };
+            Self::band_merge_plan(&pops, threshold)
+        };
+        let mut rep = BandCompaction::default();
+        for (kept, absorbed) in plan {
+            // Integer quantum shift: kept − absorbed ∈ ℤ \ {0} (±1 across a
+            // population-adjacent pair, more when crossing empty bands).
+            let shift = (kept - absorbed) as f64;
+            let ids: Vec<PentaId> = {
+                let inner = self.inner.read().unwrap();
+                inner
+                    .pentas
+                    .values()
+                    .filter(|p| era_band(p.core.w) == absorbed)
+                    .map(|p| p.id)
+                    .collect()
+            };
+            for id in ids {
+                let core = {
+                    let inner = self.inner.read().unwrap();
+                    inner.pentas.get(&id).map(|p| p.core)
+                };
+                if let Some(c) = core {
+                    if self
+                        .relocate_penta(id, Vec4::new(c.x, c.y, c.z, c.w + shift))
+                        .is_some()
+                    {
+                        rep.moved += 1;
+                    }
+                }
+            }
+            rep.merged_pairs.push((kept, absorbed));
+        }
+        rep
     }
 
     /// Current structure version (cache-coherence diagnostics).

@@ -166,7 +166,7 @@ pub fn vs_production(_space: &Space4, _queries: &[BenchmarkQuery]) -> Vec<QueryO
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::space4::Rng;
+    use crate::engine::space4::{CellPayload, Rng};
     use crate::engine::time_axis::unix_secs_of_w;
 
     #[test]
@@ -212,16 +212,13 @@ mod tests {
         let mut rng = Rng::new(42);
         let day = |w: f64| unix_secs_of_w(w, t0);
         for i in 0..6 {
-            let pid = space
-                .create(
-                    &["rust".to_string(), format!("topic-{i}")],
-                    1.0,
-                    day(2.0),
-                    None,
-                    day(2.0),
-                    &mut rng,
-                )
-                .expect("create");
+            let payload = CellPayload::new(
+                &["rust".to_string(), format!("topic-{i}")],
+                1.0,
+                day(2.0),
+                None,
+            );
+            let pid = space.create_full(payload, &mut rng).expect("create");
             assert!(pid > 0);
         }
         let m = structure_metrics(&space);
