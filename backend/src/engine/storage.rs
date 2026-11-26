@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS tetrahedrons (
     core_x      REAL NOT NULL,
     core_y      REAL NOT NULL,
     core_z      REAL NOT NULL,
+    core_w      REAL NOT NULL DEFAULT 0.0,
     content     TEXT NOT NULL,
     content_hash INTEGER NOT NULL,
     labels      TEXT NOT NULL,
@@ -121,6 +122,111 @@ fn ensure_recall_query_text_column(conn: &Connection) {
     }
 }
 
+/// S4 (#398 M3): w 锚点归一化 — 与 S1 影子语义一致（hyperspace ingest.rs
+/// `normalized_valid_from`）：`valid_from > 0` 用 valid_from，脏行回退 timestamp。
+pub fn normalized_valid_from(timestamp: i64, valid_from: i64) -> i64 {
+    if valid_from > 0 {
+        valid_from
+    } else {
+        timestamp
+    }
+}
+
+/// S4 (#398 M3): 空间出生锚点 t0，首次计算后固化进 meta。
+/// MIN over rows of min(timestamp, valid_when_positive)，再与写入侧提示
+/// （本批将写入的最早归一化时间）取小——首写即固化正确出生点，无需等重开自愈。
+fn ensure_space_t0_hinted(conn: &Connection, hint: Option<i64>) -> Result<Option<i64>, String> {
+    if let Ok(v) = conn.query_row(
+        "SELECT value FROM meta WHERE key = 'space_t0_secs'",
+        [],
+        |r| r.get::<_, String>(0),
+    ) {
+        if let Ok(t) = v.parse() {
+            return Ok(Some(t));
+        }
+    }
+    let db_min: Option<i64> = conn
+        .query_row(
+            "SELECT MIN(CASE WHEN valid_from > 0 AND valid_from < timestamp \
+             THEN valid_from ELSE timestamp END) FROM tetrahedrons",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let t0 = match (db_min, hint) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    };
+    if let Some(t) = t0 {
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('space_t0_secs', ?1)",
+            params![t.to_string()],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(t0)
+}
+
+fn ensure_space_t0(conn: &Connection) -> Result<Option<i64>, String> {
+    ensure_space_t0_hinted(conn, None)
+}
+
+/// S4 (#398 M3): core_w 迁移 + 灰度旋钮 meta 初始化 + backfill。
+/// 幂等且自愈：每次启动重算 core_w 与期望不符的行（纯缓存列，整数秒字段是真相）。
+fn ensure_space4_core_w(conn: &Connection) -> Result<(), String> {
+    if let Err(e) = conn.execute_batch(MIGRATION_ADD_CORE_W) {
+        tracing::debug!("[Storage] core_w migration skipped (likely applied): {}", e);
+    }
+    conn.execute_batch(
+        "INSERT OR IGNORE INTO meta (key, value) VALUES ('space4_kappa', '0.0'); \
+         INSERT OR IGNORE INTO meta (key, value) VALUES ('space4_enabled', 'off');",
+    )
+    .map_err(|e| format!("space4 meta init failed: {}", e))?;
+
+    let t0 = match ensure_space_t0(conn)? {
+        Some(t) => t,
+        None => return Ok(()), // empty space: t0 anchors lazily on first write
+    };
+    let rows: Vec<(i64, i64, i64, f64)> = {
+        let mut stmt = conn
+            .prepare("SELECT id, timestamp, valid_from, core_w FROM tetrahedrons")
+            .map_err(|e| e.to_string())?;
+        let iter = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, f64>(3)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        iter.filter_map(|r| r.ok()).collect()
+    };
+    let mut stale = 0usize;
+    for (id, ts, vf, current_w) in rows {
+        let want = crate::domain::geo4::w_of_unix_secs(normalized_valid_from(ts, vf), t0);
+        if (want - current_w).abs() > 1e-9 {
+            conn.execute(
+                "UPDATE tetrahedrons SET core_w = ?1 WHERE id = ?2",
+                params![want, id],
+            )
+            .map_err(|e| e.to_string())?;
+            stale += 1;
+        }
+    }
+    if stale > 0 {
+        tracing::info!(
+            "[Storage] S4 backfill: refreshed core_w on {} rows (t0={})",
+            stale,
+            t0
+        );
+    }
+    Ok(())
+}
+
 const MIGRATION_ADD_EMBEDDING: &str = "ALTER TABLE tetrahedrons ADD COLUMN embedding BLOB";
 const MIGRATION_ADD_IMPORTANCE: &str =
     "ALTER TABLE tetrahedrons ADD COLUMN importance REAL NOT NULL DEFAULT 1.0";
@@ -148,6 +254,10 @@ const MIGRATION_ADD_INVALIDATED_AT: &str =
     "ALTER TABLE tetrahedrons ADD COLUMN invalidated_at INTEGER DEFAULT NULL";
 const MIGRATION_ADD_MEMORY_CLASS: &str =
     "ALTER TABLE tetrahedrons ADD COLUMN memory_class TEXT DEFAULT NULL";
+/// S4 (#398 M3): w 轴物化缓存列。core_w ≡ w_of_unix_secs(normalized_valid_from, t0)
+/// —— 永远可由整数秒字段重建（回滚无害）；κ=0 时几何不读它。
+const MIGRATION_ADD_CORE_W: &str =
+    "ALTER TABLE tetrahedrons ADD COLUMN core_w REAL NOT NULL DEFAULT 0.0";
 const MIGRATION_ADD_HEALTH_SNAPSHOTS: &str = "CREATE TABLE IF NOT EXISTS health_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp INTEGER NOT NULL,
@@ -204,15 +314,16 @@ CREATE INDEX IF NOT EXISTS idx_outcome_task ON outcome_event(task_id, ts);
 CREATE INDEX IF NOT EXISTS idx_outcome_user_ts ON outcome_event(user_id, ts);
 ";
 
-/// 四面体 UPSERT SQL(24 列)。upsert_tetra / batch_upsert / save_tetrahedrons_tx 三处共用,
+/// 四面体 UPSERT SQL(26 列)。upsert_tetra / batch_upsert / save_tetrahedrons_tx 三处共用,
 /// 避免列数不一致导致的静默数据丢失(曾发生 batch_upsert 列数 bug,见 SESSION_LOG §3.1)。
+/// core_w (S4 #398 M3) 挂尾列：写侧内部从 (timestamp, valid_from, t0) 派生，调用方零改动。
 const UPSERT_TETRA_SQL: &str = "INSERT OR REPLACE INTO tetrahedrons \
     (id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, \
      aliases, vertex_ids, embedding, importance, enforced, rationale, access_count, \
      memory_type, valid_from, valid_to, identity_stamp, source_agent, last_reviewed_ts, \
-     expired_at, invalidated_at, memory_class) \
+     expired_at, invalidated_at, memory_class, core_w) \
     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-            ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)";
+            ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)";
 
 /// 档案库节点行（从 archive_nodes 表读取）
 #[derive(Debug, Clone)]
@@ -366,6 +477,9 @@ impl StorageManager {
         }
         // S1 埋点列: 必须在 recall_log 表存在之后执行(上一步才建表)
         ensure_recall_query_text_column(&conn);
+        // S4 (#398 M3): core_w 物化缓存列 + 灰度旋钮 meta + 自愈 backfill。
+        // 失败是硬错误——后续写路径假定列存在。
+        ensure_space4_core_w(&conn)?;
 
         tracing::info!("SQLite database opened: {}", db_path.display());
 
@@ -1443,9 +1557,13 @@ impl StorageManager {
         let cutoff = chrono::Utc::now().timestamp() - days * 86400;
         let conn = self.conn.lock();
         conn.execute("CREATE TABLE IF NOT EXISTS tetrahedrons_archive AS SELECT * FROM tetrahedrons WHERE 1=0", []).map_err(|e| e.to_string())?;
+        // S4 (#398 M3): 老库的 archive 表先补 core_w 列(幂等)
+        let _ = conn.execute_batch(
+            "ALTER TABLE tetrahedrons_archive ADD COLUMN core_w REAL NOT NULL DEFAULT 0.0",
+        );
         // 移动90天+superseded到archive(去掉embedding大blob)
         let moved = conn.execute(
-            "INSERT INTO tetrahedrons_archive SELECT id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, NULL as embedding, importance, enforced, rationale, access_count, memory_type, valid_from, valid_to, identity_stamp, source_agent, last_reviewed_ts, expired_at, invalidated_at, memory_class FROM tetrahedrons WHERE valid_to IS NOT NULL AND valid_to < ?1 AND id NOT IN (SELECT id FROM tetrahedrons_archive)",
+            "INSERT INTO tetrahedrons_archive SELECT id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, NULL as embedding, importance, enforced, rationale, access_count, memory_type, valid_from, valid_to, identity_stamp, source_agent, last_reviewed_ts, expired_at, invalidated_at, memory_class, core_w FROM tetrahedrons WHERE valid_to IS NOT NULL AND valid_to < ?1 AND id NOT IN (SELECT id FROM tetrahedrons_archive)",
             params![cutoff]
         ).map_err(|e| e.to_string())?;
         if moved > 0 {
@@ -1485,6 +1603,16 @@ impl StorageManager {
         }
         Ok(signals)
     }
+    /// S4 (#398 M3): 写路径的 t0 解析——meta 命中即返回；空表/未固化时用
+    /// 本行归一化时间提示（首条记忆即空间出生，w=0，当场固化进 meta）。
+    fn space_t0_for_write(conn: &Connection, timestamp: i64, valid_from: i64) -> i64 {
+        let normalized = normalized_valid_from(timestamp, valid_from);
+        ensure_space_t0_hinted(conn, Some(normalized))
+            .ok()
+            .flatten()
+            .unwrap_or(normalized)
+    }
+
     pub fn upsert_tetra(&self, tetra: &Tetrahedron) -> Result<(), String> {
         let conn = self.conn.lock();
         let labels_json = self.encrypt_field(
@@ -1502,6 +1630,10 @@ impl StorageManager {
         };
         let content_hash = tetra.data.content_hash as i64;
         let encrypted_content = self.encrypt_field(&tetra.data.content)?;
+        let core_w = crate::domain::geo4::w_of_unix_secs(
+            normalized_valid_from(tetra.data.timestamp, tetra.data.valid_from),
+            Self::space_t0_for_write(&conn, tetra.data.timestamp, tetra.data.valid_from),
+        );
 
         conn.execute(
             UPSERT_TETRA_SQL,
@@ -1531,6 +1663,7 @@ impl StorageManager {
                 tetra.data.expired_at,
                 tetra.data.invalidated_at,
                 tetra.data.memory_class.clone(),
+                core_w,
             ],
         )
         .map_err(|e| format!("upsert tetra {}: {}", tetra.id, e))?;
@@ -1817,6 +1950,19 @@ impl StorageManager {
         let mut count = 0usize;
         let conn = self.conn.lock();
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let t0 = {
+            let mut hint: Option<i64> = None;
+            for &id in ids {
+                if let Some(tetra) = space.get_tetrahedron(id) {
+                    let n = normalized_valid_from(tetra.data.timestamp, tetra.data.valid_from);
+                    hint = Some(match hint {
+                        Some(h) if h <= n => h,
+                        _ => n,
+                    });
+                }
+            }
+            ensure_space_t0_hinted(&conn, hint).ok().flatten()
+        };
         for &id in ids {
             if let Some(tetra) = space.get_tetrahedron(id) {
                 let labels_json = self.encrypt_field(
@@ -1834,6 +1980,12 @@ impl StorageManager {
                 };
                 let content_hash = tetra.data.content_hash as i64;
                 let encrypted_content = self.encrypt_field(&tetra.data.content)?;
+                let core_w = crate::domain::geo4::w_of_unix_secs(
+                    normalized_valid_from(tetra.data.timestamp, tetra.data.valid_from),
+                    t0.unwrap_or_else(|| {
+                        normalized_valid_from(tetra.data.timestamp, tetra.data.valid_from)
+                    }),
+                );
                 tx.execute(
                     UPSERT_TETRA_SQL,
                     params![
@@ -1862,6 +2014,7 @@ impl StorageManager {
                         tetra.data.expired_at,
                         tetra.data.invalidated_at,
                         tetra.data.memory_class.clone(),
+                        core_w,
                     ],
                 )
                 .map_err(|e| format!("batch upsert {}: {}", id, e))?;
@@ -2296,8 +2449,12 @@ impl StorageManager {
                 [],
             )
             .map_err(|e| e.to_string())?;
+            // S4 (#398 M3): 老库的 archive 表先补 core_w 列(幂等)
+            let _ = tx.execute_batch(
+                "ALTER TABLE tetrahedrons_archive ADD COLUMN core_w REAL NOT NULL DEFAULT 0.0",
+            );
             tx.execute(
-                "INSERT INTO tetrahedrons_archive SELECT id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, NULL as embedding, importance, enforced, rationale, access_count, memory_type, valid_from, valid_to, identity_stamp, source_agent, last_reviewed_ts, expired_at, invalidated_at, memory_class FROM tetrahedrons WHERE id = ?1 AND id NOT IN (SELECT id FROM tetrahedrons_archive)",
+                "INSERT INTO tetrahedrons_archive SELECT id, core_x, core_y, core_z, content, content_hash, labels, mass, timestamp, aliases, vertex_ids, NULL as embedding, importance, enforced, rationale, access_count, memory_type, valid_from, valid_to, identity_stamp, source_agent, last_reviewed_ts, expired_at, invalidated_at, memory_class, core_w FROM tetrahedrons WHERE id = ?1 AND id NOT IN (SELECT id FROM tetrahedrons_archive)",
                 params![*id as i64],
             )
             .map_err(|e| format!("archive stale tetra {}: {}", id, e))?;
@@ -2314,6 +2471,13 @@ impl StorageManager {
             );
         }
 
+        let t0 = {
+            let hint = tetras
+                .iter()
+                .map(|t| normalized_valid_from(t.data.timestamp, t.data.valid_from))
+                .min();
+            ensure_space_t0_hinted(tx, hint).ok().flatten()
+        };
         for t in &tetras {
             let labels_json = self.encrypt_field(
                 &serde_json::to_string(&t.data.labels).unwrap_or_else(|_| "[]".into()),
@@ -2330,6 +2494,10 @@ impl StorageManager {
             };
             let content_hash = t.data.content_hash as i64;
             let encrypted_content = self.encrypt_field(&t.data.content)?;
+            let core_w = crate::domain::geo4::w_of_unix_secs(
+                normalized_valid_from(t.data.timestamp, t.data.valid_from),
+                t0.unwrap_or_else(|| normalized_valid_from(t.data.timestamp, t.data.valid_from)),
+            );
 
             tx.execute(
                 UPSERT_TETRA_SQL,
@@ -2359,6 +2527,7 @@ impl StorageManager {
                     t.data.expired_at,
                     t.data.invalidated_at,
                     t.data.memory_class.clone(),
+                    core_w,
                 ],
             )
             .map_err(|e| format!("upsert tetra {}: {}", t.id, e))?;
@@ -2725,14 +2894,14 @@ pub struct BackupInfo {
 mod tests {
     use super::*;
 
-    fn tmp_dir(name: &str) -> PathBuf {
+    pub(super) fn tmp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("epicode_test_{}", name));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
     }
 
-    fn make_tetra(id: u64, content: &str, mass: f64) -> Tetrahedron {
+    pub(super) fn make_tetra(id: u64, content: &str, mass: f64) -> Tetrahedron {
         let core = Point3::new(id as f64, 0.0, 0.0);
         Tetrahedron {
             id,
@@ -3269,5 +3438,187 @@ mod recall_outcome_log_tests {
         let (n, _) = s.prune_recall_outcome_logs(90).unwrap();
         assert_eq!(n, 1);
         assert_eq!(s.count_recall_logs(), 0);
+    }
+}
+
+#[cfg(test)]
+mod s4_core_w_tests {
+    use super::*;
+
+    // ---- S4 (#398 M3): core_w 物化缓存 + 空间灰度 meta -------------------
+
+    fn read_meta_raw(conn: &Connection, key: &str) -> Option<String> {
+        conn.query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| {
+            r.get::<_, String>(0)
+        })
+        .ok()
+    }
+
+    use super::tests::{make_tetra, tmp_dir};
+
+    #[test]
+    fn core_w_written_and_meta_initialized() {
+        let dir = tmp_dir("core_w_write");
+        let storage = StorageManager::new(&dir).unwrap();
+
+        let space = Space::new();
+        let kg = KnowledgeGraph::new();
+        // make_tetra: timestamp = 1000 + id, valid_from = 0 → normalized = timestamp.
+        // add_tetrahedron assigns its own sequential ids (0..3 here); capture them.
+        let mut ids = Vec::new();
+        for i in 0..4u64 {
+            let t = make_tetra(i, &format!("mem_{}", i), 1.0);
+            let pos = Tetrahedron::compute_vertices(t.core);
+            ids.push((space.add_tetrahedron(&t, &pos).unwrap(), i));
+        }
+        storage.save_all(&space, &kg).unwrap();
+
+        let conn = storage.conn.lock();
+        let t0: i64 = read_meta_raw(&conn, "space_t0_secs")
+            .expect("space_t0_secs meta")
+            .parse()
+            .unwrap();
+        assert_eq!(t0, 1000); // MIN normalized over rows
+        assert_eq!(read_meta_raw(&conn, "space4_kappa").as_deref(), Some("0.0"));
+        assert_eq!(
+            read_meta_raw(&conn, "space4_enabled").as_deref(),
+            Some("off")
+        );
+        for (row_id, i) in ids {
+            let w: f64 = conn
+                .query_row(
+                    "SELECT core_w FROM tetrahedrons WHERE id = ?1",
+                    params![row_id as i64],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let expect = crate::domain::geo4::w_of_unix_secs(1000 + i as i64, t0);
+            assert!(
+                (w - expect).abs() < 1e-12,
+                "core_w mismatch for id {row_id}: {w} vs {expect}"
+            );
+        }
+    }
+
+    #[test]
+    fn core_w_self_heals_on_reopen() {
+        let dir = tmp_dir("core_w_heal");
+        // add_tetrahedron assigns its own sequential id — use the returned one.
+        let saved_id = {
+            let storage = StorageManager::new(&dir).unwrap();
+            let space = Space::new();
+            let kg = KnowledgeGraph::new();
+            let t = make_tetra(7, "mem_7", 1.0);
+            let pos = Tetrahedron::compute_vertices(t.core);
+            let id = space.add_tetrahedron(&t, &pos).unwrap();
+            storage.save_all(&space, &kg).unwrap();
+            let conn = storage.conn.lock();
+            let saved: i64 = conn
+                .query_row("SELECT COUNT(*) FROM tetrahedrons", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(saved, 1, "row must exist right after save_all");
+            conn.execute(
+                "UPDATE tetrahedrons SET core_w = 99.0 WHERE id = ?1",
+                params![id as i64],
+            )
+            .unwrap();
+            id
+        };
+        // 重开：自愈 backfill 必须把被污染的缓存列修回期望值
+        let storage = StorageManager::new(&dir).unwrap();
+        let conn = storage.conn.lock();
+        let reopened: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tetrahedrons", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(reopened, 1, "row must survive reopen");
+        let w: f64 = conn
+            .query_row(
+                "SELECT core_w FROM tetrahedrons WHERE id = ?1",
+                params![saved_id as i64],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let t0: i64 = read_meta_raw(&conn, "space_t0_secs")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let expect = crate::domain::geo4::w_of_unix_secs(1007, t0);
+        assert!((w - expect).abs() < 1e-12, "healed {w} vs {expect}");
+    }
+
+    #[test]
+    fn core_w_migrates_legacy_database() {
+        let dir = tmp_dir("core_w_legacy");
+        fs::create_dir_all(&dir).unwrap();
+        let day = 86_400_i64;
+        let birth = 1_767_225_600_i64;
+        {
+            // 老库形状：core_w 列不存在（S4 之前的 schema）
+            let conn = Connection::open(dir.join("tetramem.db")).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE tetrahedrons (id INTEGER PRIMARY KEY, core_x REAL NOT NULL, \
+                 core_y REAL NOT NULL, core_z REAL NOT NULL, content TEXT NOT NULL, \
+                 content_hash INTEGER NOT NULL, labels TEXT NOT NULL, mass REAL NOT NULL DEFAULT 1.0, \
+                 timestamp INTEGER NOT NULL DEFAULT 0, aliases TEXT NOT NULL DEFAULT '[]', \
+                 vertex_ids TEXT NOT NULL DEFAULT '[0,0,0,0]', embedding BLOB, \
+                 valid_from INTEGER NOT NULL DEFAULT 0, valid_to INTEGER DEFAULT NULL); \
+                 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, \
+                 labels, mass, timestamp, aliases, vertex_ids) VALUES \
+                 (1, 0.0, 0.0, 0.0, 'legacy', 1, '[]', 1.0, ?, '[]', '[0,0,0,0]')",
+                params![birth],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, \
+                 labels, mass, timestamp, aliases, vertex_ids) VALUES \
+                 (2, 1.0, 0.0, 0.0, 'legacy2', 2, '[]', 1.0, ?, '[]', '[0,0,0,0]')",
+                params![birth + day],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO tetrahedrons (id, core_x, core_y, core_z, content, content_hash, \
+                 labels, mass, timestamp, aliases, vertex_ids, valid_from) VALUES \
+                 (3, 2.0, 0.0, 0.0, 'bitemporal', 3, '[]', 1.0, ?, '[]', '[0,0,0,0]', ?)",
+                params![birth + 30 * day, birth + 2 * day],
+            )
+            .unwrap();
+        }
+
+        let storage = StorageManager::new(&dir).unwrap();
+        let conn = storage.conn.lock();
+        let t0: i64 = read_meta_raw(&conn, "space_t0_secs")
+            .expect("t0 fixed from legacy rows")
+            .parse()
+            .unwrap();
+        assert_eq!(t0, birth);
+        // 行1: timestamp = birth → w = 0；行2: +1 天；行3: valid_from=+2 天 优先于 timestamp
+        for (id, expect_w) in [
+            (1_i64, crate::domain::geo4::w_of_unix_secs(birth, birth)),
+            (2, crate::domain::geo4::w_of_unix_secs(birth + day, birth)),
+            (
+                3,
+                crate::domain::geo4::w_of_unix_secs(birth + 2 * day, birth),
+            ),
+        ] {
+            let w: f64 = conn
+                .query_row(
+                    "SELECT core_w FROM tetrahedrons WHERE id = ?1",
+                    params![id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!((w - expect_w).abs() < 1e-12, "row {id}: {w} vs {expect_w}");
+        }
+    }
+
+    #[test]
+    fn normalized_valid_from_prefers_bitemporal_start() {
+        assert_eq!(normalized_valid_from(500, 900), 900);
+        assert_eq!(normalized_valid_from(500, 0), 500);
+        assert_eq!(normalized_valid_from(500, -3), 500);
     }
 }
