@@ -130,7 +130,7 @@ pub fn feed_rows(
             layer: None,
         };
         let started = Instant::now();
-        let pid = space.create_full(payload, r.timestamp, rng);
+        let pid = space.create_full(payload, rng);
         durations.push(started.elapsed().as_micros() as u64);
         if pid.is_some() {
             out.inserted += 1;

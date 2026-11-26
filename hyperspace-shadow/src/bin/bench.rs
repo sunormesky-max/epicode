@@ -98,7 +98,7 @@ fn run(args: &[String]) -> Result<(), Option<i32>> {
             expired_at: r.expired_at,
             layer: None,
         };
-        if let Some(pid) = space.create_full(payload, r.timestamp, &mut rng) {
+        if let Some(pid) = space.create_full(payload, &mut rng) {
             pid_map.insert(pid, (r.rowid as u64, r.timestamp));
         }
     }
