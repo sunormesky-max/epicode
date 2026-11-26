@@ -691,7 +691,7 @@ impl Space4 {
             .filter(|v| v.penta_ids.len() >= 2)
             .count();
 
-        let ids = self.sorted_ids(&inner);
+        let ids = Self::sorted_ids(&inner);
         let (pair_sharing_hist, pair_hist_sampled) = if pentas <= PAIR_HIST_CENSUS_LIMIT {
             let mut hist: HashMap<usize, usize> = HashMap::new();
             for (i, &a) in ids.iter().enumerate() {
@@ -1021,7 +1021,7 @@ mod tests {
         assert_eq!(moved.labels, vec!["identity".to_string()]);
         assert_eq!(moved.access_count, 2, "access survives relocation");
         assert!((moved.core.x - 20.0).abs() < 1e-9);
-        assert_eq!(s.get(ida), None, "old id vacated");
+        assert!(s.get(ida).is_none(), "old id vacated");
 
         // Relocate onto a stacked target: fallback lattice must still land.
         let (idc, _) = s
