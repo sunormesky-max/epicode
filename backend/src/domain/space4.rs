@@ -23,7 +23,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
 use super::cylinder::CylinderLayer;
-use super::geo4::{compute_vertices, w_of_unix_secs, w_range, Vec4};
+use super::geo4::{
+    canonical_offsets, compute_vertices, era_band, port_core, w_of_unix_secs, w_range, Vec4,
+};
 use super::vertex::VERTEX_MERGE_EPSILON;
 
 /// Spatial hash cell size (same constant as `space.rs::GRID_CELL`).
@@ -176,6 +178,59 @@ struct SpaceInner {
     structure_version: u64,
     next_vertex: VertexId,
     next_penta: PentaId,
+}
+
+/// Era-affinity weight of anchor scoring (w units are ~era doublings).
+const ANCHOR_ERA_WEIGHT: f64 = 2.0;
+
+/// Direct-scan cap: same-label anchor candidates at or below this count are
+/// all scored exactly.
+const ANCHOR_SCAN_CAP: usize = 600;
+/// Two-level anchor scan — level 1 (coarse): deterministic stride sample.
+const ANCHOR_COARSE_CAP: usize = 64;
+/// Two-level anchor scan — level 2 (fine): Chebyshev radius in core-grid
+/// cells around the coarse winner (r = 2 → 5⁴ = 625 grid keys).
+const ANCHOR_FINE_RADIUS: i64 = 2;
+/// Two-level anchor scan — level 2 (fine): cap on same-label candidates in
+/// the coarse winner's neighbourhood (2400 ≫ 600: the old stride-cap ceiling
+/// is broken, yet the scan cost stays bounded).
+const ANCHOR_FINE_CAP: usize = 2400;
+
+/// Default orphan-seed probability (the production diversity seed).
+pub const ORPHAN_PROB: f64 = 0.07;
+
+/// Deterministic PRNG (xorshift64*) so placement runs are reproducible.
+pub struct Rng(u64);
+
+impl Rng {
+    pub fn new(seed: u64) -> Self {
+        Rng(seed.max(1))
+    }
+
+    pub fn next_u64(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.0 = x;
+        x.wrapping_mul(0x2545F4914F6CDD1D)
+    }
+
+    pub fn next_f64(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// Uniform point in the xyz ball of radius r, w fixed.
+    pub fn in_ball(&mut self, r: f64, w: f64) -> Vec4 {
+        loop {
+            let x = (self.next_f64() * 2.0 - 1.0) * r;
+            let y = (self.next_f64() * 2.0 - 1.0) * r;
+            let z = (self.next_f64() * 2.0 - 1.0) * r;
+            if x * x + y * y + z * z <= r * r {
+                return Vec4::new(x, y, z, w);
+            }
+        }
+    }
 }
 
 /// Weighted vertex-sharing adjacency: cell → (neighbour, shared-vertex count).
@@ -523,6 +578,188 @@ impl Space4 {
         out.sort_unstable();
         out.dedup();
         out
+    }
+
+    // ---- placement (engine core of M5; the gateway trait lands there) ----
+
+    /// Two-level anchor scan: candidates ≤ ANCHOR_SCAN_CAP are all scored
+    /// exactly; beyond that, a deterministic coarse stride sample locates
+    /// the winning region and the fine pass sweeps all same-label candidates
+    /// in its core-grid Chebyshev neighbourhood. Score, tie-break (lower id)
+    /// and anti-stacking are unchanged from the shadow's v0.3.
+    fn anchor_best(
+        inner: &SpaceInner,
+        labels: &[String],
+        w_at: f64,
+        kappa: f64,
+    ) -> Option<(f64, PentaId, Vec4)> {
+        let mut cands: Vec<PentaId> = Vec::new();
+        for l in labels {
+            if let Some(v) = inner.label_index.get(l) {
+                cands.extend_from_slice(v);
+            }
+        }
+        cands.sort_unstable();
+        cands.dedup();
+        if cands.is_empty() {
+            return None;
+        }
+        let layer = CylinderLayer::from_labels(labels);
+        let port = port_core(layer, era_band(w_at));
+        let mut best: Option<(f64, PentaId, Vec4)> = None;
+        let consider = |best: &mut Option<(f64, PentaId, Vec4)>, pid: PentaId| {
+            let p = &inner.pentas[&pid];
+            let d_port =
+                Vec4::new(p.core.x - port.x, p.core.y - port.y, p.core.z - port.z, 0.0).length();
+            let score = kappa * ANCHOR_ERA_WEIGHT * (p.core.w - w_at).abs() + 0.1 * d_port;
+            if best.is_none_or(|(bs, bid, _)| score < bs || (score == bs && pid < bid)) {
+                *best = Some((score, pid, p.core));
+            }
+        };
+        if cands.len() <= ANCHOR_SCAN_CAP {
+            for &pid in &cands {
+                consider(&mut best, pid);
+            }
+            return best;
+        }
+        // ① coarse: deterministic stride sample locates the candidate region
+        let stride = cands.len() / ANCHOR_COARSE_CAP + 1;
+        for &pid in cands.iter().step_by(stride) {
+            consider(&mut best, pid);
+        }
+        let (_, _, coarse_core) = best?;
+        // ② fine: all same-label candidates near the coarse winner
+        let mut scanned = 0usize;
+        'fine: for key in Self::keys_within(Self::grid_key(coarse_core), ANCHOR_FINE_RADIUS) {
+            if let Some(ids) = inner.core_grid.get(&key) {
+                for &pid in ids {
+                    if scanned >= ANCHOR_FINE_CAP {
+                        break 'fine;
+                    }
+                    scanned += 1;
+                    let p = &inner.pentas[&pid];
+                    if !p.labels.iter().any(|l| labels.contains(l)) {
+                        continue;
+                    }
+                    consider(&mut best, pid);
+                }
+            }
+        }
+        best
+    }
+
+    /// Diagnostic twin of the placement anchor scan: the two-level winner
+    /// as `(id, score)`. Read-only.
+    pub fn best_anchor(&self, labels: &[String], w_at: f64) -> Option<(PentaId, f64)> {
+        let inner = self.inner.read().unwrap();
+        Self::anchor_best(&inner, labels, w_at, self.w_coupling).map(|(s, id, _)| (id, s))
+    }
+
+    /// TRUE-4D placement, the engine mirror of `gateway::find_best_placement`:
+    ///
+    /// 1. **anchor** = same-label cell minimizing
+    ///    `κ·ERA_WEIGHT·|w_a − w_at| + 0.1·d_xyz(a, port(layer, band))` —
+    ///    era affinity participates: same-era anchors preferred, cross-era
+    ///    docking allowed when a topic's era is empty (this is what bridges
+    ///    era bands into one connected topic structure);
+    /// 2. candidates = anchor.xyz + (oᵢ − oⱼ).xyz over all 25 offset pairs,
+    ///    core.w pinned to the memory's own era `w_at`;
+    /// 3. O(1) anti-stack via the core grid; keep the max-merge candidate;
+    /// 4. no anchor → **port seeding** near the (layer, band) port core;
+    /// 5. `orphan_prob` diversity seed at radius 8–15.
+    pub fn find_best_placement(
+        &self,
+        labels: &[String],
+        w_at: f64,
+        rng: &mut Rng,
+        orphan_prob: f64,
+    ) -> Vec4 {
+        let inner = self.inner.read().unwrap();
+        Self::find_best_placement_locked(&inner, labels, w_at, self.w_coupling, rng, orphan_prob)
+    }
+
+    /// Locked core of [`Self::find_best_placement`] — takes the read guard as
+    /// a parameter so future lifecycle ops can re-place inside their atomic
+    /// write-lock section (a write guard also satisfies a read borrow).
+    fn find_best_placement_locked(
+        inner: &SpaceInner,
+        labels: &[String],
+        w_at: f64,
+        kappa: f64,
+        rng: &mut Rng,
+        orphan_prob: f64,
+    ) -> Vec4 {
+        let layer = CylinderLayer::from_labels(labels);
+        let band = era_band(w_at);
+        let port = port_core(layer, band);
+
+        let anchor = Self::anchor_best(inner, labels, w_at, kappa).map(|(_, _, c)| c);
+
+        let Some(anchor) = anchor else {
+            // Port seeding: home address (layer, band) + jitter.
+            let mut p = rng.in_ball(0.8, w_at);
+            p.x += port.x;
+            p.y += port.y;
+            p.z += port.z;
+            p.w = w_at;
+            return p;
+        };
+
+        if rng.next_f64() < orphan_prob {
+            // Diversity seed, radius 8–15 (the production orphan branch).
+            let r = 8.0 + 7.0 * rng.next_f64();
+            let mut p = rng.in_ball(r, w_at);
+            p.w = w_at;
+            return p;
+        }
+
+        let offsets = canonical_offsets();
+        let mut best: Option<(usize, Vec4)> = None;
+        for oi in &offsets {
+            for oj in &offsets {
+                let cand = Vec4::new(
+                    anchor.x + oi.x - oj.x,
+                    anchor.y + oi.y - oj.y,
+                    anchor.z + oi.z - oj.z,
+                    w_at,
+                );
+                if Self::core_stacks(inner, cand, kappa) {
+                    continue;
+                }
+                let merges = compute_vertices(cand)
+                    .iter()
+                    .filter(|v| Self::find_merge_target(inner, **v, kappa).is_some())
+                    .count();
+                if best.is_none_or(|(bm, _)| merges > bm) {
+                    best = Some((merges, cand));
+                }
+            }
+        }
+        match best {
+            Some((_, c)) => c,
+            None => {
+                let mut p = rng.in_ball(8.0, w_at);
+                p.w = w_at;
+                p
+            }
+        }
+    }
+
+    /// Full create path: placement + insert (the engine mirror of
+    /// `create_memory_with_time`; the gateway wrapper lands in M5). The new
+    /// cell's stratum is `w(valid_from)` — the era the memory is about.
+    pub fn create_full(&self, payload: CellPayload, rng: &mut Rng) -> Option<PentaId> {
+        let w_at = w_of_unix_secs(payload.valid_from, self.t0_secs);
+        for _ in 0..8 {
+            let core = self.find_best_placement(&payload.labels, w_at, rng, ORPHAN_PROB);
+            if let Some((pid, _)) = self.insert_penta(core, payload.clone()) {
+                return Some(pid);
+            }
+            // stacked despite the placement pre-filter (dense zone) — re-place
+        }
+        // last resort: diversity seed far out
+        let core = rng.in_ball(14.0, w_at);
+        self.insert_penta(core, payload).map(|(pid, _)| pid)
     }
 
     // ---- clusters / queries -------------------------------------------
@@ -1100,5 +1337,72 @@ mod tests {
         // Sanity for the band bookkeeping used by stats/reporting.
         let w = w_of_unix_secs(T0 + 3 * DAY, T0);
         assert_eq!(crate::domain::geo4::era_band(w), w.floor() as i64);
+    }
+
+    #[test]
+    fn anchor_prefers_same_era_and_labels() {
+        let s = Space4::new(1.0, T0);
+        let mut rng = Rng::new(7);
+        // Two eras of the same topic; the query era is day 40's.
+        let w10 = w_of_unix_secs(T0 + 10 * DAY, T0);
+        let w40 = w_of_unix_secs(T0 + 40 * DAY, T0);
+        s.insert_penta(Vec4::new(100.0, 0.0, 0.0, w10), payload(&["kg"], 10))
+            .unwrap();
+        let near_id = s
+            .insert_penta(Vec4::new(5.0, 5.0, 0.0, w40), payload(&["kg"], 40))
+            .unwrap()
+            .0;
+        let (winner, _) = s
+            .best_anchor(&["kg".to_string()], w40)
+            .expect("anchor exists");
+        assert_eq!(winner, near_id, "era affinity beats the older, closer cell");
+    }
+
+    #[test]
+    fn placement_seeds_at_port_without_anchor() {
+        let s = Space4::new(1.0, T0);
+        let mut rng = Rng::new(11);
+        let w_at = w_of_unix_secs(T0 + 5 * DAY, T0);
+        let core = s.find_best_placement(&["ai".to_string()], w_at, &mut rng, 0.0);
+        let port = crate::domain::geo4::port_core(
+            CylinderLayer::from_labels(&["ai".to_string()]),
+            era_band(w_at),
+        );
+        // Zero-κ? No: κ=1 here — seeding jitter is 0.8, port within reach.
+        assert!(
+            Vec4::aniso_distance(core, port, 1.0) < 1.5,
+            "empty-topic placement seeds near the (layer, band) port, got {core:?} vs {port:?}"
+        );
+        assert!(
+            (core.w - w_at).abs() < 1e-12,
+            "w pinned to the memory's era"
+        );
+    }
+
+    #[test]
+    fn placement_docks_on_anchor_and_create_roundtrips() {
+        let s = Space4::new(1.0, T0);
+        let mut rng = Rng::new(3);
+        let first = s
+            .create_full(payload(&["kg", "ai"], 10), &mut rng)
+            .expect("first create lands");
+        // With orphan_prob = 0 the next same-topic cell must dock on the
+        // first (share ≥ 1 vertex) at its own era.
+        let second = s
+            .create_full(payload(&["kg"], 10), &mut rng)
+            .expect("second create lands");
+        assert_ne!(first, second);
+        assert!(
+            s.shared_vertex_count(first, second) >= 1,
+            "anchored placement docks the new cell onto the topic"
+        );
+        // A different topic in a far era coexists.
+        let third = s
+            .create_full(payload(&["identity"], 200), &mut rng)
+            .expect("far-era create lands");
+        assert!(
+            s.shared_vertex_count(first, third) == 0,
+            "different topics stay disjoint"
+        );
     }
 }
