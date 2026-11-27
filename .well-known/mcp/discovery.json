@@ -396,14 +396,15 @@
           },
           "mode": {
             "default": "hybrid",
-            "description": "Search mode: hybrid (vector+BM25 blend), exact (pure BM25 for identifiers and known phrases), semantic (vector similarity), graph (hybrid-search seeds expanded/reranked with knowledge-graph PPR), auto (routes temporal/aggregation queries to graph and other queries to semantic), fusion (reciprocal-rank fusion of semantic and graph results).",
+            "description": "Search mode: hybrid (vector+BM25 blend), exact (pure BM25 for identifiers and known phrases), semantic (vector similarity), graph (hybrid-search seeds expanded/reranked with knowledge-graph PPR), auto (routes temporal/aggregation queries to graph and other queries to semantic), fusion (reciprocal-rank fusion of semantic and graph results), space4 (4D geometric retrieval: text→label bridge, era-proximal seeds, spatial PPR over the vertex-sharing graph; requires the space4 grey dial, falls back to hybrid when off).",
             "enum": [
               "hybrid",
               "exact",
               "semantic",
               "graph",
               "auto",
-              "fusion"
+              "fusion",
+              "space4"
             ],
             "type": "string"
           },

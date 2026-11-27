@@ -24,7 +24,7 @@
 | 目的 | 调用 | 要点 |
 |---|---|---|
 | 存 | `memory_create(content, labels)` | 一句话写完整（主体+动作+对象+上下文），3-5 个标签；先搜，避免重复 |
-| 精确查 | `memory_search(query, limit, mode, labels)` | 默认 `mode=hybrid`、`limit=10`；结果过大时调小 `limit`，或用 `verbosity="slim"` |
+| 精确查 | `memory_search(query, limit, mode, labels)` | 默认 `mode=hybrid`、`limit=10`；结果过大时调小 `limit`，或用 `verbosity="slim"`；`mode=space4` 走四维几何检索（标签桥+时代邻近+空间 PPR，需服务端灰度档开启，未开启时自动退回 hybrid） |
 | 关联查 | `memory_recall(query, depth, limit)` | **默认 `verbosity="slim"`**，最多 `limit` 条（默认 20）；需要分层结构时传 `verbosity="full"` |
 | 联想漫游 | `memory_wander(start_id \| query, depth, strategy, max_steps, temperature, far_jumps, era_jumps)` | 从一条线索沿知识图逐步游走，返回可解释的联想链 A→B→C（每跳带边和理由）。四档：`shallow` 3 跳 / `medium` 8 跳 / `deep` 16 跳 / `free` 自定步数(≤64)；策略 `strongest`/`novel`(冷记忆惊喜)/`temporal`(时间线)/`contradict`(矛盾张力)/`era`(时代纵深——每跳恰好移动一个 log₂ 时间带 Δw≈±1)；`temperature` 0-1 控制发散度；局部走完时时代跳 `era_jumps`(相邻带同话题直达, era 策略默认 2)与谱远跳 `far_jumps`(默认浅 0/中 1/深 2/自由 2)接力传送 |
 | 问答 | `memory_ask(question)` | 返回答案和来源记忆 |

@@ -126,7 +126,7 @@ impl McpHandler {
                     },
                     {
                         "name": "memory_search",
-                    "description": "Search personal memories and inspect ranked evidence with tier and retrieval provenance. Use memory_recall for associative context or memory_ask for a synthesized answer. Supports pagination and exact, semantic, graph, auto, and fusion modes.",
+                    "description": "Search personal memories and inspect ranked evidence with tier and retrieval provenance. Use memory_recall for associative context or memory_ask for a synthesized answer. Supports pagination and exact, semantic, graph, auto, fusion, and space4 modes.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -138,7 +138,7 @@ impl McpHandler {
                             "project": { "type": "string", "description": "Filter: project name" },
                             "since_days": { "type": "integer", "description": "Filter: only memories from the last N days" },
                             "as_of": { "type": "integer", "description": "Temporal query (unix seconds): return only memories valid at that moment (valid_from <= as_of < valid_to). Ask historical questions like 'where did they live last month' without current facts overriding." },
-                            "mode": { "type": "string", "enum": ["hybrid", "exact", "semantic", "graph", "auto", "fusion"], "default": "hybrid", "description": "Search mode: hybrid (vector+BM25 blend), exact (pure BM25 for identifiers and known phrases), semantic (vector similarity), graph (hybrid-search seeds expanded/reranked with knowledge-graph PPR), auto (routes temporal/aggregation queries to graph and other queries to semantic), fusion (reciprocal-rank fusion of semantic and graph results)." },
+                            "mode": { "type": "string", "enum": ["hybrid", "exact", "semantic", "graph", "auto", "fusion", "space4"], "default": "hybrid", "description": "Search mode: hybrid (vector+BM25 blend), exact (pure BM25 for identifiers and known phrases), semantic (vector similarity), graph (hybrid-search seeds expanded/reranked with knowledge-graph PPR), auto (routes temporal/aggregation queries to graph and other queries to semantic), fusion (reciprocal-rank fusion of semantic and graph results), space4 (4D geometric retrieval: text→label bridge, era-proximal seeds, spatial PPR over the vertex-sharing graph; requires the space4 grey dial, falls back to hybrid when off)." },
                             "strict_filter": { "type": "boolean", "default": false, "description": "Phase 1: strict filter mode — no semantic backfill, only return exact filter matches. Combine with mode=exact for database-like lookups." },
                             "verbosity": { "type": "string", "enum": ["full", "slim"], "default": "full", "description": "Spike S1: 'slim' returns compact items[]+why+budget_spent (no tiers/sections/results duplicates); retains valid + timestamp fields when present. Also enabled by EPICODE_SLIM_ENVELOPE=1." }
                         },
