@@ -40,6 +40,9 @@ pub struct GatewayCenter {
     /// 相似度门槛互补, 不相似但同会话先后出现的记忆也获得时序关联,
     /// 供 PPR 有向遍历的后继(Successor)语义使用。
     session_chain: parking_lot::Mutex<HashMap<String, (TetraId, i64)>>,
+    /// S4 M5a (#398): 进程内 Space4 镜像（灰度旋钮 space4_enabled="mirror"）。
+    /// 3D 空间仍是系统记录源——镜像只做投影，供 M6 检索通道与结构统计。
+    space4_mirror: parking_lot::RwLock<Option<Arc<crate::engine::space4_mirror::Space4Mirror>>>,
 }
 
 impl GatewayCenter {
@@ -84,6 +87,7 @@ impl GatewayCenter {
             pipeline: LayerPipeline::new(space),
             pending_contradictions: parking_lot::Mutex::new(Vec::new()),
             session_chain: parking_lot::Mutex::new(HashMap::new()),
+            space4_mirror: parking_lot::RwLock::new(None),
         };
         // P2-5 双重建去重: new() 已内联建好 HNSW, 标记当前版本——
         // start() 的 rebuild_hnsw 将因版本未变而跳过(原启动建两次索引)。
@@ -93,6 +97,17 @@ impl GatewayCenter {
 
     pub fn mark_dirty(&self, id: TetraId) {
         self.index.mark_dirty(id);
+    }
+
+    /// S4 M5a: attach the in-process Space4 mirror (grey dial). After this,
+    /// every successful create is projected into the 4D space.
+    pub fn attach_space4_mirror(&self, mirror: Arc<crate::engine::space4_mirror::Space4Mirror>) {
+        *self.space4_mirror.write() = Some(mirror);
+    }
+
+    /// S4 M5a: structural stats of the mirror, if the dial is on.
+    pub fn space4_mirror_stats(&self) -> Option<crate::domain::space4::SpaceStats> {
+        self.space4_mirror.read().as_ref().map(|m| m.stats())
     }
 
     pub fn invalidate_placement_cache(&self) {
@@ -494,6 +509,16 @@ impl GatewayCenter {
                         if !t.data.embedding.is_empty() && t.data.embedding.len() == EMBEDDING_DIM {
                             let mut hnsw = self.search.hnsw.write();
                             hnsw.insert(id, t.data.embedding.clone());
+                        }
+                    }
+                }
+                // S4 M5a (#398): grey-dial mirror — project the successful
+                // create into the in-process Space4 (3D stays the record).
+                if let Some(mirror) = self.space4_mirror.read().as_ref() {
+                    let t = self.space.get_tetrahedron(id);
+                    if let Some(t) = &t {
+                        if mirror.mirror_create(t).is_none() {
+                            tracing::debug!("[S4-mirror] create {} rejected by the 4D guards", id);
                         }
                     }
                 }
