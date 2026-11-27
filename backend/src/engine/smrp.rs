@@ -131,6 +131,7 @@ pub fn search_sources(mode: SearchMode, matched_by: Option<&[String]>) -> Vec<&'
         SearchMode::Exact => vec!["bm25"],
         SearchMode::Hybrid => vec!["hybrid"],
         SearchMode::Semantic => vec!["vector"],
+        SearchMode::Space4 => vec!["space4"],
         SearchMode::Graph | SearchMode::Auto | SearchMode::Fusion => Vec::new(),
     }
 }
@@ -143,6 +144,7 @@ pub fn search_score_base(mode: SearchMode) -> &'static str {
         SearchMode::Graph => "graph_mode (hybrid seeds + available knowledge_graph_ppr)",
         SearchMode::Auto => "auto_routed_semantic_or_graph_mode",
         SearchMode::Fusion => "reciprocal_rank_fusion_semantic_and_graph_ppr",
+        SearchMode::Space4 => "space4 (label bridge + era-proximal seeds + spatial PPR)",
     }
 }
 
