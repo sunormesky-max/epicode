@@ -47,6 +47,7 @@ pub mod energy;
 pub mod knowledge;
 pub mod pulse;
 pub mod security;
+pub mod space4_mirror;
 pub mod sparse_code;
 pub mod spectral;
 pub mod user_manager;
@@ -105,6 +106,8 @@ pub struct Engine {
     /// Spike S2: MemCard store (persona/user/project/working). Always constructed;
     /// MemCard store (blocks_get/blocks_set). EPICODE_MEMCARD only adds card meta to SMRP status.
     pub memcards: self::memcard::SharedMemCards,
+    /// S4 M5a (#398): 进程内 Space4 镜像（灰度旋钮 space4_enabled="mirror" 时存在）。
+    space4_mirror: Option<Arc<self::space4_mirror::Space4Mirror>>,
 }
 
 impl Default for Engine {
@@ -284,6 +287,10 @@ impl Engine {
         if report.space_ok {
             space.reseed_ports();
         }
+
+        // S4 M5a (#398): grey dial — in-process Space4 mirror (None unless
+        // space4_enabled == "mirror"). Built by replaying the loaded space.
+        let space4_mirror = self::space4_mirror::Space4Mirror::from_storage_dials(&storage, &space);
         if report.tetras_loaded > 0 {
             // S1破案: 构造调用栈 (临时诊断, 定位幽灵加载触发者)
             tracing::info!(
@@ -398,6 +405,9 @@ impl Engine {
             embedding.clone(),
             vector,
         ));
+        if let Some(m) = &space4_mirror {
+            gateway.attach_space4_mirror(Arc::clone(m));
+        }
 
         let scheduler = Arc::new(SchedulerCenter::with_security(
             space.clone(),
@@ -463,11 +473,17 @@ impl Engine {
             data_path: data_path.clone(),
             current_project: parking_lot::RwLock::new(restored_project),
             memcards,
+            space4_mirror,
         }
     }
 
     pub fn space(&self) -> &Space {
         &self.space
+    }
+
+    /// S4 M5a: structural stats of the in-process Space4 mirror (grey dial).
+    pub fn space4_stats(&self) -> Option<crate::domain::space4::SpaceStats> {
+        self.space4_mirror.as_ref().map(|m| m.stats())
     }
 
     /// 智能化突破：认知状态快照（emotion/drive/cognitive_status/latest_thought）
