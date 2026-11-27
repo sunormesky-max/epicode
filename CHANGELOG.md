@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.14.0](https://github.com/sunormesky-max/epicode/compare/v2.13.1...v2.14.0) (2026-11-27)
+
+
+### Features
+
+* **search:** S4 M6 — Space4 retrieval channel + text→label bridge ([#407](https://github.com/sunormesky-max/epicode/issues/407)) ([6071ceb](https://github.com/sunormesky-max/epicode/commit/6071cebdbdb32e99c0ebd67a2bf39b8b1c7fcc80))
+* **shadow:** S4 M4 — shadow runs the main-repo Space4 engine ([#405](https://github.com/sunormesky-max/epicode/issues/405)) ([376a0d9](https://github.com/sunormesky-max/epicode/commit/376a0d95b70587e1302ff37054b2a09e5917eb87))
+* **space:** domain::geo4 4D geometry foundation (S4 M1) ([#399](https://github.com/sunormesky-max/epicode/issues/399)) ([58c380b](https://github.com/sunormesky-max/epicode/commit/58c380b81e91d5bd9808bacda53b5d14a52f1581))
+* **space:** domain::port4 — port lattice + occupancy state machine (S4 M2b) ([#403](https://github.com/sunormesky-max/epicode/issues/403)) ([faf1f69](https://github.com/sunormesky-max/epicode/commit/faf1f69bec9c6cbafa0379e49c8eb321ca74e456))
+* **space:** domain::space4 — 4D space engine core (S4 M2a) ([#402](https://github.com/sunormesky-max/epicode/issues/402)) ([721b72e](https://github.com/sunormesky-max/epicode/commit/721b72ee7f8eb61f941a55544fb13a15b8c4c652))
+* **space:** S4 M5a — in-process Space4 mirror behind the grey dial ([#406](https://github.com/sunormesky-max/epicode/issues/406)) ([97004bf](https://github.com/sunormesky-max/epicode/commit/97004bffd0fe939142a7198f008c460d2c57f253))
+* **space:** space4 placement family — anchor scan, port seeding, create path ([#404](https://github.com/sunormesky-max/epicode/issues/404)) ([de58af9](https://github.com/sunormesky-max/epicode/commit/de58af9b73e81af47a96840b865422f5cfafcdef))
+* **storage:** S4 M3 — core_w column + space4 grey dials + self-healing backfill ([#400](https://github.com/sunormesky-max/epicode/issues/400)) ([16ce709](https://github.com/sunormesky-max/epicode/commit/16ce7095c3dcc0ad43cfe2a60fc5f1519f936340))
+
+
+### Bug Fixes
+
+* **deps+docs:** LLM_API_KEY as primary env var, drop dashmap dependency ([#383](https://github.com/sunormesky-max/epicode/issues/383)) ([6db454a](https://github.com/sunormesky-max/epicode/commit/6db454a1dfa34b663695074e456236d81eb5b988))
+* **deps:** bump url 2.5.9 (RUSTSEC-2026-0592) — unblocks all PRs ([#401](https://github.com/sunormesky-max/epicode/issues/401)) ([5807170](https://github.com/sunormesky-max/epicode/commit/5807170f7cc18933ecddc4e0be525b1e61181670))
+* **security:** picomatch audit exception (build-time-only ReDoS) ([#395](https://github.com/sunormesky-max/epicode/issues/395)) ([d1ef969](https://github.com/sunormesky-max/epicode/commit/d1ef969cf3a1b75d854247ecbb0a4fbcd834c868))
+
+
+### Documentation
+
+* **mcp:** S4 M9 — register the space4 search mode in the API contracts ([#408](https://github.com/sunormesky-max/epicode/issues/408)) ([ffcaecd](https://github.com/sunormesky-max/epicode/commit/ffcaecd515d63413a6b85a4a11ab5679352b306d))
+
 ## [2.13.1](https://github.com/sunormesky-max/epicode/compare/v2.13.0...v2.13.1) (2026-11-17)
 
 
