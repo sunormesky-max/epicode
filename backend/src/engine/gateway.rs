@@ -995,6 +995,7 @@ impl GatewayCenter {
             return Err(decision.reason);
         }
 
+        let mirror_guard = self.space4_mirror.read();
         let ctx_s = SearchCtx {
             state: &self.search,
             space: &self.space,
@@ -1002,7 +1003,7 @@ impl GatewayCenter {
             cognitive: &self.cognitive,
             embedding: &self.embedding,
             label_index: &self.index.label_index,
-            space4_mirror: self.space4_mirror.read().as_deref(),
+            space4_mirror: mirror_guard.as_deref(),
         };
         super::search_engine::search(&ctx_s, query, k, self.vector.as_deref(), filters)
     }
@@ -1060,6 +1061,7 @@ impl GatewayCenter {
             return Err(decision.reason);
         }
 
+        let mirror_guard = self.space4_mirror.read();
         let ctx_s = SearchCtx {
             state: &self.search,
             space: &self.space,
@@ -1067,7 +1069,7 @@ impl GatewayCenter {
             cognitive: &self.cognitive,
             embedding: &self.embedding,
             label_index: &self.index.label_index,
-            space4_mirror: self.space4_mirror.read().as_deref(),
+            space4_mirror: mirror_guard.as_deref(),
         };
         let mode = filters.map(|f| f.mode).unwrap_or_default();
         super::search_engine::search_with_mode(

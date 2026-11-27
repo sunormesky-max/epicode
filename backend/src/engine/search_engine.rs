@@ -285,7 +285,8 @@ pub fn bridge_query_labels(
     label_index: &Mutex<HashMap<String, Vec<TetraId>>>,
 ) -> Vec<String> {
     const MAX_LABELS: usize = 6;
-    let mut vocab: Vec<&String> = label_index.lock().keys().collect();
+    let guard = label_index.lock();
+    let mut vocab: Vec<&String> = guard.keys().collect();
     vocab.sort_by_key(|l| std::cmp::Reverse(l.len()));
     let low = query.to_lowercase();
     let mut found: Vec<String> = Vec::new();
