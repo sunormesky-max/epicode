@@ -372,7 +372,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Search personal memories and inspect ranked evidence with tier and retrieval provenance. Use memory_recall for associative context or memory_ask for a synthesized answer. Supports pagination and exact, semantic, graph, auto, and fusion modes.",
+      "description": "Search personal memories and inspect ranked evidence with tier and retrieval provenance. Use memory_recall for associative context or memory_ask for a synthesized answer. Supports pagination and exact, semantic, graph, auto, fusion, and space4 modes.",
       "inputSchema": {
         "properties": {
           "as_of": {
