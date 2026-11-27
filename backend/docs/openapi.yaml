@@ -184,8 +184,11 @@ paths:
         Returns an SMRP 1.0 envelope. Search modes: hybrid (default vector+BM25 with
         the scheduler's reranking/boost pipeline), exact (BM25), semantic (vector
         similarity), graph (hybrid-search seeds with KG-PPR when relations are available),
-        auto (routes temporal/aggregation queries to graph, others to semantic), and
-        fusion (reciprocal-rank fusion of semantic and graph results). Results can be
+        auto (routes temporal/aggregation queries to graph, others to semantic),
+        fusion (reciprocal-rank fusion of semantic and graph results), and
+        space4 (4D geometric retrieval: text→label bridge, era-proximal seeds,
+        spatial PPR over the vertex-sharing graph; requires the space4 grey dial,
+        falls back to hybrid when off). Results can be
         paginated with offset and limit; the public REST default limit remains 20.
       requestBody:
         required: true
@@ -212,7 +215,7 @@ paths:
                   description: Number of ranked results to skip before returning this page
                 mode:
                   type: string
-                  enum: [hybrid, exact, semantic, graph, auto, fusion]
+                  enum: [hybrid, exact, semantic, graph, auto, fusion, space4]
                   default: hybrid
                 labels:
                   type: array
