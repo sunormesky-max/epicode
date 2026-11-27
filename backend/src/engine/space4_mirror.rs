@@ -118,6 +118,129 @@ impl Space4Mirror {
         self.ids.lock().get(&tetra_id).copied()
     }
 
+    /// S4 M6: the 4D retrieval channel. Slice → era-proximal label seeds →
+    /// Space-PPR over the vertex-sharing graph → 0.6·seed + 0.4·ppr fusion.
+    /// Constants aligned with the KG graph mode (0.15 / 15 iter / 800
+    /// frontier). Touches returned cells (recall feeds retention stretch).
+    /// Returns (tetra_id, fused_score) — callers resolve payloads from the
+    /// 3D space (the system of record).
+    pub fn search_labels(
+        &self,
+        q_labels: &[String],
+        as_of_secs: i64,
+        k: usize,
+    ) -> Vec<(TetraId, f64)> {
+        const PPR_SEED: f64 = 0.15;
+        const PPR_ITER: usize = 15;
+        const PPR_FRONTIER: usize = 800;
+        const FUSION_SEED: f64 = 0.6;
+        const ERA_BETA: f64 = 2.0;
+        const STALE_SEED_FACTOR: f64 = 0.5;
+
+        let w_q = crate::domain::geo4::w_of_unix_secs(as_of_secs, self.space.t0_secs);
+
+        // 1) one-lock snapshot slice → seeds (label overlap × era proximity)
+        let snap = self.space.snapshot_valid(q_labels, as_of_secs);
+        let mut seeds: HashMap<PentaId, f64> = HashMap::new();
+        for s in &snap {
+            if s.label_overlap == 0 || q_labels.is_empty() {
+                continue;
+            }
+            let overlap = s.label_overlap as f64 / q_labels.len().max(s.labels_len) as f64;
+            let era = (-(s.core_w - w_q).abs() * ERA_BETA).exp();
+            let mut score = overlap * era;
+            if s.validity == crate::domain::space4::Validity::BelievedStale {
+                score *= STALE_SEED_FACTOR;
+            }
+            if score > 0.0 {
+                seeds.insert(s.id, score);
+            }
+        }
+        if seeds.is_empty() {
+            return Vec::new();
+        }
+
+        // 2) bounded BFS over the sharing graph from the seeds
+        let adj_all = self.space.sharing_adjacency_cached();
+        let mut seen_set: HashMap<PentaId, bool> = seeds.keys().map(|&s| (s, true)).collect();
+        let mut seen: Vec<PentaId> = seeds.keys().copied().collect();
+        seen.sort_unstable();
+        let mut queue: Vec<PentaId> = seen.clone();
+        while let Some(cur) = queue.pop() {
+            if seen.len() >= PPR_FRONTIER {
+                break;
+            }
+            if let Some(nbrs) = adj_all.get(&cur) {
+                for (n, _) in nbrs {
+                    if !seen_set.get(n).copied().unwrap_or(false) {
+                        seen_set.insert(*n, true);
+                        seen.push(*n);
+                        queue.push(*n);
+                    }
+                }
+            }
+        }
+
+        // 3) power iteration: rank = 0.15·seed + 0.85·Mᵀ·rank
+        let mut rank: HashMap<PentaId, f64> = HashMap::new();
+        for &id in &seen {
+            rank.insert(id, *seeds.get(&id).unwrap_or(&0.0));
+        }
+        for _ in 0..PPR_ITER {
+            let mut next: HashMap<PentaId, f64> = HashMap::new();
+            for (&id, &s) in &seeds {
+                *next.entry(id).or_insert(0.0) += PPR_SEED * s;
+            }
+            for &src in &seen {
+                let Some(nbrs) = adj_all.get(&src) else {
+                    continue;
+                };
+                let filt: Vec<&(PentaId, f64)> = nbrs
+                    .iter()
+                    .filter(|(b, _)| seen_set.get(b).copied().unwrap_or(false))
+                    .collect();
+                if filt.is_empty() {
+                    continue;
+                }
+                let r = *rank.get(&src).unwrap_or(&0.0);
+                if r <= 0.0 {
+                    continue;
+                }
+                let wsum: f64 = filt.iter().map(|(_, w)| *w).sum();
+                for (dst, w) in filt {
+                    *next.entry(*dst).or_insert(0.0) += (1.0 - PPR_SEED) * r * (w / wsum);
+                }
+            }
+            rank = next;
+        }
+
+        // 4) fusion + top-k, mapped back to 3D tetra ids
+        let ppr_max = rank.values().cloned().fold(0.0_f64, f64::max).max(1e-12);
+        let seed_max = seeds.values().cloned().fold(0.0_f64, f64::max).max(1e-12);
+        let reverse: HashMap<PentaId, TetraId> =
+            self.ids.lock().iter().map(|(&t, &p)| (p, t)).collect();
+        let mut hits: Vec<(TetraId, f64)> = rank
+            .into_iter()
+            .filter_map(|(pid, ppr)| {
+                let tetra = reverse.get(&pid).copied()?;
+                let s = *seeds.get(&pid).unwrap_or(&0.0);
+                let fused = FUSION_SEED * (s / seed_max) + (1.0 - FUSION_SEED) * (ppr / ppr_max);
+                Some((tetra, fused))
+            })
+            .collect();
+        hits.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.0.cmp(&b.0))
+        });
+        hits.truncate(k);
+        // Recall registration feeds retention stretch (lifecycle hook).
+        for (tetra, _) in &hits {
+            self.touch(*tetra);
+        }
+        hits
+    }
+
     /// Structural stats (T1′ census, era purity — the S2 readout basis).
     pub fn stats(&self) -> SpaceStats {
         self.space.stats()
@@ -251,5 +374,64 @@ mod tests {
             .space()
             .snapshot_valid(&["kg".to_string()], T0 + 11 * 86_400);
         assert_eq!(snap.len(), 6, "all cells valid at day 11 (no expiry set)");
+    }
+
+    #[test]
+    fn m6_search_labels_ranks_topic_and_maps_back() {
+        // A space with two topics in two eras; query the old era of "kg".
+        let space = Space::new();
+        for i in 0..3u64 {
+            let t = tetra(i, &["kg", &format!("k-{i}")], 10);
+            let pos = Tetrahedron::compute_vertices(t.core);
+            space.add_tetrahedron(&t, &pos).unwrap();
+        }
+        for i in 10..12u64 {
+            let t = tetra(i, &["ai", &format!("a-{i}")], 200);
+            let pos = Tetrahedron::compute_vertices(t.core);
+            space.add_tetrahedron(&t, &pos).unwrap();
+        }
+        let mirror = Space4Mirror::build(&space, 1.0, T0);
+
+        // as_of near day 10: kg-topic cells must outrank the far-era ai ones.
+        let hits = mirror.search_labels(&["kg".to_string()], T0 + 12 * 86_400, 5);
+        assert!(!hits.is_empty(), "bridged labels must retrieve");
+        assert!(
+            hits.iter().all(|(id, _)| *id < 3),
+            "era proximity must rank the kg era on top: {hits:?}"
+        );
+        // Recall registration fires (access counts grow).
+        assert!(
+            mirror
+                .space()
+                .get(mirror.penta_of(hits[0].0).unwrap())
+                .map(|p| p.access_count >= 1)
+                .unwrap_or(false),
+            "search touches its hits"
+        );
+    }
+
+    #[test]
+    fn m6_bridge_extracts_labels_from_free_text() {
+        use std::collections::HashMap;
+        let mut idx: HashMap<String, Vec<TetraId>> = HashMap::new();
+        for lab in ["kg", "ai", "deploy", "identity-boundary", "数据库"] {
+            idx.insert(lab.to_string(), vec![1]);
+        }
+        let q1 = crate::engine::search_engine::bridge_query_labels(
+            "how did the kg deploy go",
+            &Mutex::new(idx.clone()),
+        );
+        assert!(q1.contains(&"kg".to_string()) && q1.contains(&"deploy".to_string()));
+        let q2 =
+            crate::engine::search_engine::bridge_query_labels("数据库迁移方案", &Mutex::new(idx));
+        assert!(
+            q2.contains(&"数据库".to_string()),
+            "CJK substring match works"
+        );
+        let q3 = crate::engine::search_engine::bridge_query_labels(
+            "nothing matches here",
+            &Mutex::new(HashMap::new()),
+        );
+        assert!(q3.is_empty(), "empty vocabulary bridges to nothing");
     }
 }

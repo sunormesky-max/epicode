@@ -233,6 +233,9 @@ pub struct SearchCtx<'a> {
     pub cognitive: &'a CognitiveEngine,
     pub embedding: &'a EmbeddingService,
     pub label_index: &'a Mutex<HashMap<String, Vec<TetraId>>>,
+    /// S4 M6 (#398): in-process Space4 mirror (grey dial "mirror").
+    /// None → SearchMode::Space4 falls back to Hybrid.
+    pub space4_mirror: Option<&'a crate::engine::space4_mirror::Space4Mirror>,
 }
 
 /// Phase 1 检索可信度重建:搜索模式控制评分通道
@@ -253,6 +256,10 @@ pub enum SearchMode {
     /// D2.2b RRF融合: semantic+graph双跑, 排序倒数融合(Reciprocal Rank Fusion, k=60)
     /// 规则路由失败(55.0%)后的正确答案——不预测类型, 直接取两模式之长
     Fusion,
+    /// S4 M6 (#398): 4D 几何检索——文本→标签桥 → as_of 切片 → era 邻近种子
+    /// → 空间 PPR(顶点共享图) → 融合。需要 space4_enabled="mirror" 灰度档;
+    /// 未开启时退回 Hybrid。S1 判决: n=1000 多种子 5/5 显著优于生产 (#369)。
+    Space4,
 }
 
 impl SearchMode {
@@ -264,9 +271,39 @@ impl SearchMode {
             "graph" => SearchMode::Graph,
             "auto" => SearchMode::Auto,
             "fusion" => SearchMode::Fusion,
+            "space4" => SearchMode::Space4,
             _ => SearchMode::Hybrid,
         }
     }
+}
+
+/// S4 M6: 文本→标签桥 — 自由文本查询对空间标签词表做最长优先子串匹配
+/// (S1 判决验证的方案: 429 词表、109/130 真实查询可桥接, L1 三盲显著)。
+/// 返回按长度降序的命中标签(最多 6 个)。
+pub fn bridge_query_labels(
+    query: &str,
+    label_index: &Mutex<HashMap<String, Vec<TetraId>>>,
+) -> Vec<String> {
+    const MAX_LABELS: usize = 6;
+    let mut vocab: Vec<&String> = label_index.lock().keys().collect();
+    vocab.sort_by_key(|l| std::cmp::Reverse(l.len()));
+    let low = query.to_lowercase();
+    let mut found: Vec<String> = Vec::new();
+    for lab in vocab {
+        if found.len() >= MAX_LABELS {
+            break;
+        }
+        let llab = lab.to_lowercase();
+        let hit = query.contains(lab.as_str()) || (lab.is_ascii() && low.contains(&llab));
+        if hit
+            && !found
+                .iter()
+                .any(|f: &String| f.contains(lab.as_str()) || lab.contains(f.as_str()))
+        {
+            found.push(lab.clone());
+        }
+    }
+    found
 }
 
 /// D2.2: 查询是否需要图扩散(时序推理/跨会话聚合特征)
@@ -796,7 +833,49 @@ pub fn search_with_mode(
                 .map(|(id, s, m, p)| (id, s, m, p, Vec::new()))
                 .collect())
         }
+        SearchMode::Space4 => search_space4(ctx, query, k, filters),
     }
+}
+
+/// S4 M6: the 4D geometric retrieval channel. Text→label bridge → mirror
+/// slice/seed/PPR/fusion → payloads resolved from the 3D system of record.
+/// Falls back to Hybrid when the grey dial is off (no mirror attached).
+fn search_space4(
+    ctx: &SearchCtx,
+    query: &str,
+    k: usize,
+    filters: Option<&SearchFilters>,
+) -> Result<Vec<ScoredWithMatch>, String> {
+    let Some(mirror) = ctx.space4_mirror else {
+        tracing::debug!("[Search] space4 mode requested but mirror is off — Hybrid fallback");
+        let results = search(ctx, query, k, None, filters)?;
+        return Ok(results
+            .into_iter()
+            .map(|(id, s, m, p)| (id, s, m, p, Vec::new()))
+            .collect());
+    };
+    let q_labels = bridge_query_labels(query, ctx.label_index);
+    if q_labels.is_empty() {
+        tracing::debug!("[Search] space4: query bridged to no labels — empty result");
+        return Ok(Vec::new());
+    }
+    let now = chrono::Utc::now().timestamp();
+    let hits = mirror.search_labels(&q_labels, now, k);
+    let now_filter = now;
+    let mut out: Vec<ScoredWithMatch> = Vec::with_capacity(hits.len());
+    for (id, score) in hits {
+        // The 3D space stays the system of record: apply the same
+        // bitemporal/superseded filters the other channels honor.
+        if let Some(t) = ctx.space.get_tetrahedron(id) {
+            let expired = t.data.valid_to.is_some_and(|v| v <= now_filter);
+            let superseded = t.data.labels.iter().any(|l| l == "superseded");
+            if expired || superseded {
+                continue;
+            }
+            out.push((id, score, t.mass, t.data, vec!["space4"]));
+        }
+    }
+    Ok(out)
 }
 
 fn search_semantic(
