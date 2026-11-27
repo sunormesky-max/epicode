@@ -15,6 +15,7 @@
 //! experiments, documented deviation).
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use parking_lot::Mutex;
 
@@ -68,7 +69,9 @@ impl Space4Mirror {
                 mirror.ids.lock().insert(t.id, pid);
             }
         }
-        let skipped = tetras.len() - mirror.ids.lock().len();
+        drop(rng);
+        let mirrored = mirror.ids.lock().len();
+        let skipped = tetras.len() - mirrored;
         if skipped > 0 {
             tracing::warn!(
                 "[S4-mirror] replay: {} of {} cells rejected by the 4D guards",
@@ -78,7 +81,7 @@ impl Space4Mirror {
         }
         tracing::info!(
             "[S4-mirror] replayed {} cells (κ={}, t0={})",
-            mirror.ids.lock().len(),
+            mirrored,
             kappa,
             t0_secs
         );
@@ -89,6 +92,7 @@ impl Space4Mirror {
     pub fn mirror_create(&self, t: &Tetrahedron) -> Option<PentaId> {
         let mut rng = self.rng.lock();
         let pid = self.space.create_full(project(t), &mut rng)?;
+        drop(rng);
         self.ids.lock().insert(t.id, pid);
         Some(pid)
     }
@@ -96,8 +100,10 @@ impl Space4Mirror {
     /// Mirror a removal (forget/tombstone sweep). Unknown ids are ignored —
     /// replay-born mappings are not tracked cell-by-cell.
     pub fn mirror_remove(&self, tetra_id: TetraId) -> bool {
-        let pid = self.ids.lock().remove(&tetra_id)?;
-        self.space.remove_penta(pid)
+        match self.ids.lock().remove(&tetra_id) {
+            Some(pid) => self.space.remove_penta(pid),
+            None => false,
+        }
     }
 
     /// Register a recall for retention stretching (M6 ranking hook).
